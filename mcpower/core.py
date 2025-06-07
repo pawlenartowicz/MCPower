@@ -829,15 +829,3 @@ class MCPower:
     
     def __repr__(self):
         return f'equation: {self.equation}' + '\n' + f'effects: {self.effects}'
-
-
-
-model = MCPower("y = x1 + x2*x3")
-model.set_sample_size(100)
-model.set_variable_type(x2=("binary", 0.3), x3="normal")
-model.set_effects("x2:x3=0.5")
-data = model.generate_dataset()
-# results = model.run_regression(data, debug=True)
-
-
-model.get_sample_size('x1, y, x2:x3', from_size=150, to_size=200, by=10)
