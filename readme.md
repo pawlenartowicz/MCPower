@@ -17,7 +17,7 @@ MCPower provides flexible, simulation-based power analysis for linear models usi
 ### Installation
 ```bash
 # Install from GitHub
-pip install git+https://github.com/yourusername/mcpower.git
+pip install git+https://github.com/pawlenartowicz/MCPower
 ```
 
 ### Basic Usage
