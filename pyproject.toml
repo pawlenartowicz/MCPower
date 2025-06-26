@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "MCPower"
+version = "0.2.0"
+description = "Monte Carlo Power Analysis for Statistical Models"
+readme = "README.md"
+authors = [{name = "Paweł Lenartowicz", email = "pawellenartowicz@europe.com"}]
+license = {text = "GPL-3.0-or-later"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["power analysis", "statistics", "monte carlo", "linear regression"]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.26.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.8.0",
+    "scipy>=1.11.0",
+    "numba>=0.58.0",
+]
+
+[project.optional-dependencies]
+parallel = ["joblib>=1.3.0"]
+dev = ["pytest>=7.0.0", "pytest-cov>=4.0.0"]
+all = ["joblib>=1.3.0", "pytest>=7.0.0", "pytest-cov>=4.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/pawlenartowicz/MCPower"
+Repository = "https://github.com/pawlenartowicz/MCPower"
+Issues = "https://github.com/pawlenartowicz/MCPower/issues"

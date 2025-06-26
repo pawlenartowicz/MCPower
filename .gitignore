@@ -1,0 +1,9 @@
+*.pyc
+*.nbc
+*.nbi
+*.pkl
+mcpower/_dev_test.py
+
+# development phase
+mcpower/cpp/* 
+

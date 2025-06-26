@@ -1,122 +1,343 @@
 # MCPower
 
-**Monte Carlo Power Analysis for Complex Linear Models**
+**Monte Carlo power analysis made simple.** Find the sample size you need or check if your study has enough power - even with complex models that traditional power analysis can't handle.
 
-MCPower provides flexible, simulation-based power analysis for linear models using R-style formula syntax. Perfect for researchers who need to analyze power for complex designs with interactions, multiple predictors, and non-normal distributions.
+## Why MCPower?
 
-## ✨ Key Features
+**Traditional power analysis breaks down** with interactions, correlated predictors, or non-normal data. MCPower uses simulation instead of formulas - it generates thousands of datasets exactly like yours, then sees how often your analysis finds real effects.
 
-- **R-style formulas**: `"y = x1 + x2 + x3*m"` syntax for intuitive model specification
-- **Flexible distributions**: Normal, skewed, high-kurtosis, binary, and uniform variables
-- **Monte Carlo simulation**: Robust power estimates for complex models
-- **Multiple testing**: Analyze power for individual effects and overall model
-- **Sample size planning**: Automatic sample size determination with power curves
+✅ **Works with complexity**: Interactions, correlations, any distribution  
+✅ **R-style formulas**: `outcome = treatment + covariate + treatment*covariate`  
+✅ **Two simple commands**: Find sample size or check power  
+✅ **Scenario analysis**: Test robustness under realistic conditions  
+✅ **No math required**: Just specify your model and effects
 
-## 🚀 Quick Start
+## Get Started in 2 Minutes
 
-### Installation
+### Install
 ```bash
-# Install from GitHub
 pip install git+https://github.com/pawlenartowicz/MCPower
 ```
 
-### Basic Usage
+### Your First Power Analysis
 ```python
-from mcpower import MCPower
 
-# 1. Define your model with R-style formula
-model = MCPower("y = x1 + x2 + x3*moderator")
+# 0. First initialization could take a few seconds, due to compilation (package is not distributed yet with compiled files)
+import mcpower
 
-# 2. Set up the analysis
-model.set_sample_size(100)
-model.set_effects("x1=0.5, x2=0.3, x3=0.2, x3:moderator=0.4")
-model.set_variable_type(moderator=("binary", 0.3))  # 30% probability
+# 1. Define your model (just like R)
+model = mcpower.LinearRegression("satisfaction = treatment + motivation")
 
-# 3. Run power analysis
-power_results = model.find_power("all")  # Test all effects
+# 2. Set effect sizes (how big you expect effects to be)
+model.set_effects("treatment=0.5, motivation=0.3")
+
+# 3. Find the sample size you need
+model.find_sample_size(target_test="treatment", from_size=50, to_size=200)
 ```
+**Output**: "You need N=156 for 80% power to detect the treatment effect"
 
-## 📊 Examples
+That's it! 🎉
 
-### Power Analysis for Interaction Effects
+## 🎯 Scenario Analysis: Test Your Assumptions
+
+**Real studies rarely match perfect assumptions.** MCPower's scenario analysis tests how robust your power calculations are under realistic conditions.
+
 ```python
-# Model with moderation
-model = MCPower("satisfaction = treatment + motivation + treatment*motivation")
-model.set_sample_size(150)
-model.set_effects("treatment=0.6, motivation=0.4, treatment:motivation=0.5")
-model.set_variable_type(treatment=("binary", 0.5))
-
-# Test specific interaction
-power_result = model.find_power("treatment:motivation")
-```
-
-### Sample Size Planning
-```python
-# Find required sample sizes
-model.set_effects("treatment=0.3, treatment:motivation=0.2")
-sample_results = model.get_sample_size(
-    target_test="treatment:motivation",
-    from_size=50, 
-    to_size=300, 
-    by=10
+# Test robustness with scenario analysis
+model.find_sample_size(
+    target_test="treatment", 
+    from_size=50, to_size=300,
+    scenarios=True  # 🔥 The magic happens here
 )
-# Automatically plots power curves and identifies minimum N
 ```
 
-### Multiple Variable Types
+**Output:**
+```
+SCENARIO SUMMARY
+================================================================================
+Test                                     Optimistic   Realistic    Doomer      
+--------------------------------------------------------------------------------
+treatment                                N=156        N=189        N=234       
+================================================================================
+```
+
+**What each scenario means:**
+- **Optimistic**: Your ideal conditions (original settings)
+- **Realistic**: Moderate real-world complications (small effect variations, mild assumption violations)
+- **Doomer**: Conservative estimate (larger effect variations, stronger assumption violations)
+
+**💡 Pro tip**: Use the **Realistic** scenario for planning. If **Doomer** is acceptable, you're really safe!
+
+## Understanding Effect Sizes
+
+**Effect sizes tell you how much the outcome changes when predictors change.**
+
+- **Effect size = 0.5** means the outcome increases by **0.5 standard deviations** when:
+  - **Continuous variables**: Predictor increases by 1 standard deviation  
+  - **Binary variables**: Predictor changes from 0 to 1 (e.g., control → treatment)
+
+**Practical examples:**
 ```python
-model = MCPower("outcome = age + gender + treatment + age*treatment")
-model.set_variable_type(
-    age="normal",                    # Continuous normal
-    gender=("binary", 0.6),         # 60% female
-    treatment=("binary", 0.5)       # 50% treatment group
+model.set_effects("treatment=0.5, age=0.3, income=0.2")
+```
+
+- **`treatment=0.5`**: Treatment increases outcome by 0.5 SD (medium-large effect)
+- **`age=0.3`**: Each 1 SD increase in age → 0.3 SD increase in outcome  
+- **`income=0.2`**: Each 1 SD increase in income → 0.2 SD increase in outcome
+
+**Effect size guidelines:**
+- **0.2** = Small effect (detectable but modest)
+- **0.5** = Medium effect (clearly noticeable) 
+- **0.8** = Large effect (substantial impact)
+
+**Your uploaded data is automatically standardized** (mean=0, SD=1) so effect sizes work the same way whether you use synthetic or real data.
+
+## Copy-Paste Examples for Common Studies
+
+### Randomized Controlled Trial
+```python
+import mcpower
+
+# RCT with treatment + control variables
+model = mcpower.LinearRegression("outcome = treatment + age + baseline_score")
+model.set_effects("treatment=0.6, age=0.2, baseline_score=0.8")
+model.set_variable_type("treatment=binary")  # 0/1 treatment
+
+# Find sample size for treatment effect with scenario analysis
+model.find_sample_size(target_test="treatment", from_size=100, to_size=500, 
+                      by=50, scenarios=True)
+```
+
+### A/B Test with Interaction
+```python
+import mcpower
+
+# Test if treatment effect depends on user type
+model = mcpower.LinearRegression("conversion = treatment + user_type + treatment*user_type")
+model.set_effects("treatment=0.4, user_type=0.3, treatment:user_type=0.5")
+model.set_variable_type("treatment=binary, user_type=binary")
+
+# Check power robustness for the interaction
+model.find_power(sample_size=400, target_test="treatment:user_type", scenarios=True)
+```
+
+### Survey with Correlated Predictors
+```python
+import mcpower
+
+# Predictors are often correlated in real data
+model = mcpower.LinearRegression("wellbeing = income + education + social_support")
+model.set_effects("income=0.4, education=0.3, social_support=0.6")
+model.set_correlations("corr(income, education)=0.5, corr(income, social_support)=0.3")
+
+# Find sample size for any effect
+model.find_sample_size(target_test="all", from_size=200, to_size=800, 
+                      by=100, scenarios=True)
+```
+
+## Customize for Your Study
+
+### Different Variable Types
+```python
+# Binary (0/1), skewed, or other distributions
+model.set_variable_type("treatment=binary, income=right_skewed, age=normal")
+
+# Binary with custom proportions (30% get treatment)
+model.set_variable_type("treatment=(binary,0.3)")
+```
+
+### Your Own Data (be careful, not yet well tested)
+```python
+import pandas as pd
+
+# Use your pilot data for realistic simulations
+df = pd.read_csv('pilot_data.csv')
+model.upload_own_data(df)  # Automatically preserves correlations
+```
+
+### Multiple Testing
+```python
+# Testing multiple effects? Control false positives
+model.find_power(
+    sample_size=200, 
+    target_test="treatment,covariate,treatment:covariate",
+    correction="Benjamini-Hochberg",
+    scenarios=True  # Test robustness too!
 )
-model.set_effects("age=0.3, gender=0.4, treatment=0.5, age:treatment=0.2")
 ```
 
-## 🎯 Core Methods
-
-| Method | Purpose | Example |
-|--------|---------|---------|
-| `set_sample_size(n)` | Set sample size | `model.set_sample_size(100)` |
-| `set_effects("x1=0.5, x2=0.3")` | Define effect sizes | `model.set_effects("treatment=0.6")` |
-| `set_variable_type()` | Variable distributions | `model.set_variable_type(x1="binary")` |
-| `find_power("x1, x2")` | Power analysis | `model.find_power("all")` |
-| `get_sample_size()` | Sample size planning | `model.get_sample_size("treatment")` |
-
-## 📈 Distribution Types
-
-- **`"normal"`** - Standard normal (default)
-- **`"right_skewed"`** - Right-skewed distribution
-- **`"left_skewed"`** - Left-skewed distribution  
-- **`"high_kurtosis"`** - High-kurtosis distribution
-- **`"uniform"`** - Uniform distribution
-- **`"binary"`** - Binary (0/1) with custom proportion
-
-
-## 🛠️ Google Colab Ready
-
+### Test the single violation of assumptions.
 ```python
-# Install and run in one cell
-!pip install git+https://github.com/yourusername/mcpower.git
+# Customize how much "messiness" to add in scenarios
+model.set_heterogeneity(0.2)        # Effect sizes vary between people
+model.set_heteroskedasticity(0.15)  # Violation of equal variance assumption
 
-from mcpower import MCPower
-model = MCPower("y = treatment + baseline + treatment*baseline")
-# ... analysis code ...
+# Then run scenario analysis
+model.find_sample_size(target_test="treatment", scenarios=False)
 ```
 
-## 📚 Advanced Features
+### More precision
+```python
+# To make a more precise estimation, consider increasing the number of simulations.
+model.set_simulations(10000)
 
-- **Custom test formulas**: Generate data with one model, test with another
-- **Seed control**: Reproducible simulations
-- **Progress tracking**: Monitor long-running sample size analyses
+# MCPower is already heavily optimized, but there is old code that allows for parallelization. Use it to speed up your largest simulations.
+model.set_parallel(True)
 
-## 🤝 Contributing
+```
 
-MCPower is under active development. Feature requests and contributions welcome!
+## Quick Reference
 
-## 📄 License
+| **Want to...** | **Use this** |
+|-----------------|--------------|
+| Find required sample size | `model.find_sample_size(target_test="effect_name")` |
+| Check power for specific N | `model.find_power(sample_size=150, target_test="effect_name")` |
+| **Test robustness** | **Add `scenarios=True` to either method** |
+| Test overall model | `target_test="overall"` |
+| Test multiple effects | `target_test="effect1, effect2"` or `"all"` |
+| Binary variables | `model.set_variable_type("var=binary")` |
+| Correlated predictors | `model.set_correlations("corr(var1, var2)=0.4")` |
+| Multiple testing correction | Add `correction="FDR", or "Holm" pr "Bonferroni"`|
 
-Not yet licensed
+## When to Use MCPower
+
+**✅ Use MCPower when you have:**
+- Interaction terms (`treatment*covariate`)
+- Binary or non-normal variables
+- Correlated predictors
+- Multiple effects to test
+- **Need to test assumption robustness**
+- Complex models where traditional power analysis fails
+
+**✅ Use Scenario Analysis when:**
+- Planning important studies (grants, dissertations)
+- Working with messy real-world data
+- Effect sizes are uncertain
+- Want conservative sample size estimates
+- Stakeholders need confidence in your numbers
+
+**❌ Use traditional power analysis for:**
+- For models that are not yet implemented
+- When all assumptions are clearly met
+
+## What Makes Scenarios Different? (Be careful, unvalidated, preliminary scenarios)
+
+**Traditional power analysis assumes perfect conditions.** MCPower's scenarios add realistic "messiness":
+
+| **Scenario** | **What's Different** | **When to Use** |
+|-------------|---------------------|------------------|
+| **Optimistic** | Your exact settings | Best-case planning |
+| **Realistic** | Mild effect variations, small assumption violations | **Recommended for most studies** |
+| **Doomer** | Larger effect variations, stronger assumption violations | Conservative/worst-case planning |
+
+**Behind the scenes**, scenarios randomly vary:
+- Effect sizes between participants
+- Correlation strengths  
+- Variable distributions
+- Assumption violations
+
+This gives you a **range of realistic outcomes** instead of a single optimistic estimate.
+
+<details>
+<summary><strong>📚 Advanced Features (Click to expand)</strong></summary>
+
+## Advanced Options
+
+### All Variable Types
+```python
+model.set_variable_type("""
+    treatment=binary,           # 0/1 with 50% split
+    ses=(binary,0.3),          # 0/1 with 30% split  
+    age=normal,                # Standard normal (default)
+    income=right_skewed,       # Positively skewed
+    depression=left_skewed,    # Negatively skewed
+    response_time=high_kurtosis, # Heavy-tailed
+    rating=uniform             # Uniform distribution
+""")
+```
+
+### Complex Correlation Structures
+```python
+import numpy as np
+
+# Full correlation matrix for 3 variables
+corr_matrix = np.array([
+    [1.0, 0.4, 0.6],    # Variable 1 with others
+    [0.4, 1.0, 0.2],    # Variable 2 with others
+    [0.6, 0.2, 1.0]     # Variable 3 with others
+])
+model.set_correlations(corr_matrix)
+```
+
+### Performance Tuning
+```python
+# Adjust for your needs
+model.set_power(90)           # Target 90% power instead of 80%
+model.set_alpha(0.01)         # Stricter significance (p < 0.01)
+model.set_simulations(10000)  # High precision (slower)
+```
+
+### Formula Syntax
+```python
+# These are equivalent:
+"y = x1 + x2 + x1*x2"        # Assignment style
+"y ~ x1 + x2 + x1*x2"        # R-style formula  
+"x1 + x2 + x1*x2"            # Predictors only
+
+# Interactions:
+"x1*x2"         # Main effects + interaction (x1 + x2 + x1:x2)
+"x1:x2"         # Interaction only
+"x1*x2*x3"      # All main effects + all interactions
+```
+
+### Correlation Syntax
+```python
+# String format (recommended)
+model.set_correlations("corr(x1, x2)=0.3, corr(x1, x3)=-0.2")
+
+# Shorthand format  
+model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
+
+# Old format (still works)
+model.set_correlations("x1_x2=0.3, x1_x3=-0.2")
+```
+
+</details>
+
+## Requirements
+
+- Python ≥ 3.7
+- NumPy, SciPy, scikit-learn, matplotlib
+- joblib (optional, for parallel processing)
+
+## Need Help?
+
+- **Issues**: [GitHub Issues](https://github.com/pawlenartowicz/MCPower/issues)
+- **Questions**: pawellenartowicz@europe.com
+
+## Aim for future (waiting for suggestions)
+- ✅ Linear Regression
+- 🚧 Logistic Regression (coming soon)
+- 🚧 Tweaking sceniarios (coming soon)
+- 🚧 Guide about methods, corrections
+- 📋 ANOVA
+- 📋 Mixed Effects Models
+- 📋 2 groups comparision with alternative tests
+- 📋 Robust regression methods
+
+## License & Citation
+
+GPL v3. If you use MCPower in research, please cite:
+
+```bibtex
+@software{mcpower2025,
+  author = {Pawel Lenartowicz},
+  title = {MCPower: Monte Carlo Power Analysis for Statistical Models},
+  year = {2025},
+  url = {https://github.com/pawlenartowicz/MCPower}
+}
+```
 
 ---
+
+**🚀 Ready to start?** Copy one of the examples above and adapt it to your study!
