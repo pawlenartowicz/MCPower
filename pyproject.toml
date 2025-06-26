@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "MCPower"
-version = "0.2.0"
+version = "0.2.1"
 description = "Monte Carlo Power Analysis for Statistical Models"
 readme = "README.md"
 authors = [{name = "Paweł Lenartowicz", email = "pawellenartowicz@europe.com"}]

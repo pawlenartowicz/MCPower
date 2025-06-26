@@ -1,7 +1,7 @@
 import numpy as np
 from typing import List, Dict, Optional, Tuple
-from base import MCPowerBase
-from utils.ols import _ols_analysis, _generate_y
+from .base import MCPowerBase
+from .utils.ols import _ols_analysis, _generate_y
 
 class LinearRegression(MCPowerBase):
     """
