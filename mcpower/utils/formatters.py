@@ -10,6 +10,10 @@ from typing import Dict, List, Any, Optional, Tuple
 
 __all__ = []
 
+MEDIUM_VULNERABILITY_TRESHOLD = 10  # drop in p.p.
+HIGH_VULNERABILITY_TRESHOLD = 20    # drop in p.p.
+INFLATED_ERROR_TRESHOLD = -2
+
 class _TableFormatter:
     """Generic table formatting utilities."""
     
@@ -17,6 +21,7 @@ class _TableFormatter:
     def _create_table(headers: List[str], rows: List[List[Any]], 
                      col_widths: Optional[List[int]] = None) -> str:
         """Create formatted table with headers and rows."""
+        
         if not col_widths:
             col_widths = [max(len(str(h)), max(len(str(row[i]))+2 for row in rows))
                          for i, h in enumerate(headers)]
@@ -38,6 +43,7 @@ class _TableFormatter:
     @staticmethod
     def _format_value(value: Any, format_spec: str = "") -> str:
         """Format value with appropriate precision."""
+        
         if isinstance(value, float):
             if format_spec:
                 return f"{value:{format_spec}}"
@@ -55,6 +61,7 @@ class _ResultFormatter:
     
     def format(self, result_type: str, data: Dict, summary_type: str = 'short') -> str:
         """Main formatting dispatcher."""
+        
         formatters = {
             'power': self._format_power,
             'sample_size': self._format_sample_size,
@@ -70,6 +77,7 @@ class _ResultFormatter:
     
     def _format_power(self, data: Dict, summary_type: str) -> str:
         """Format power analysis results."""
+        
         if summary_type == 'short':
             return self._format_short_power(data)
         else:
@@ -77,6 +85,7 @@ class _ResultFormatter:
     
     def _format_short_power(self, data: Dict) -> str:
         """Short power summary."""
+        
         # Check if this is scenario data
         if 'scenarios' in data and 'model' not in data:
             return self._format_scenario_power(data, 'short')
@@ -118,6 +127,7 @@ class _ResultFormatter:
     
     def _format_long_power(self, data: Dict) -> str:
         """Detailed power summary."""
+        
         lines = []
         model = data['model']
         results = data['results']
@@ -164,6 +174,7 @@ class _ResultFormatter:
     
     def _format_short_sample_size(self, data: Dict) -> str:
         """Short sample size summary."""
+        
         model = data['model']
         results = data['results']
         correction = model.get('correction')
@@ -223,6 +234,7 @@ class _ResultFormatter:
     
     def _format_long_sample_size(self, data: Dict) -> str:
         """Detailed sample size analysis with power probability table."""
+        
         lines = []
         lines.append(self._format_short_sample_size(data))
         
@@ -259,6 +271,7 @@ class _ResultFormatter:
     
     def _format_scenario_power(self, data: Dict, summary_type: str) -> str:
         """Format scenario power analysis."""
+        
         scenarios = data.get('scenarios', {})
         
         # Get target tests and correction info from first scenario
@@ -280,53 +293,60 @@ class _ResultFormatter:
     
     def _format_scenario_power_short(self, scenarios: Dict, target_tests: List[str], 
                                         correction: Optional[str]) -> str:
-            """Short scenario power summary - comparison table only."""
-            lines = [
-                f"\n{'='*80}",
-                "SCENARIO SUMMARY",
-                f"{'='*80}"
-            ]
-            
-            # Uncorrected table
-            headers = ['Test', 'Optimistic', 'Realistic', 'Doomer']
-            rows = []
-            
+        """Short scenario power summary - comparison table only."""
+
+        lines = [
+            f"\n{'='*80}",
+            "SCENARIO SUMMARY",
+            f"{'='*80}"
+        ]
+        
+        # Uncorrected table
+        headers = ['Test', 'Optimistic', 'Realistic', 'Doomer']
+        rows = []
+        
+        for test in target_tests:
+            row = [test]
+            for scenario in ['optimistic', 'realistic', 'doomer']:
+                if scenario in scenarios and 'results' in scenarios[scenario]:
+                    power = scenarios[scenario]['results']['individual_powers'][test]
+                    row.append(f"{power:.1f}")
+                else:
+                    row.append("N/A")
+            rows.append(row)
+        
+        lines.append("\nUncorrected Power:")
+        lines.append(self._table._create_table(headers, rows, [40, 12, 12, 12]))
+        
+        # Corrected table if applicable
+        if correction:
+            rows_corr = []
             for test in target_tests:
                 row = [test]
                 for scenario in ['optimistic', 'realistic', 'doomer']:
                     if scenario in scenarios and 'results' in scenarios[scenario]:
-                        power = scenarios[scenario]['results']['individual_powers'][test]
-                        row.append(f"{power:.1f}")
+                        power_corr = scenarios[scenario]['results']['individual_powers_corrected'][test]
+                        row.append(f"{power_corr:.1f}")
                     else:
                         row.append("N/A")
-                rows.append(row)
+                rows_corr.append(row)
             
-            lines.append("\nUncorrected Power:")
-            lines.append(self._table._create_table(headers, rows, [40, 12, 12, 12]))
-            
-            # Corrected table if applicable
-            if correction:
-                rows_corr = []
-                for test in target_tests:
-                    row = [test]
-                    for scenario in ['optimistic', 'realistic', 'doomer']:
-                        if scenario in scenarios and 'results' in scenarios[scenario]:
-                            power_corr = scenarios[scenario]['results']['individual_powers_corrected'][test]
-                            row.append(f"{power_corr:.1f}")
-                        else:
-                            row.append("N/A")
-                    rows_corr.append(row)
-                
-                lines.append(f"\nCorrected Power ({correction}):")
-                lines.append(self._table._create_table(headers, rows_corr, [40, 12, 12, 12]))
-            
-            lines.append(f"{'='*80}")
-            
-            return '\n'.join(lines)
+            lines.append(f"\nCorrected Power ({correction}):")
+            lines.append(self._table._create_table(headers, rows_corr, [40, 12, 12, 12]))
+        
+        lines.append(f"{'='*80}")
+        
+        return '\n'.join(lines)
     
     def _format_scenario_power_long(self, data: Dict, scenarios: Dict, 
-                                   target_tests: List[str], correction: Optional[str]) -> str:
+                                target_tests: List[str], correction: Optional[str]) -> str:
         """Long scenario power summary - detailed results for each scenario."""
+        
+        # Define thresholds
+        HIGH_VULNERABILITY_THRESHOLD = 30
+        MEDIUM_VULNERABILITY_THRESHOLD = 15
+        INFLATED_ERROR_THRESHOLD = -10
+        
         lines = []
         
         # 1. Overall summary (same as short)
@@ -354,11 +374,13 @@ class _ResultFormatter:
         lines.append(f"\n{'='*80}")
         lines.append("ROBUSTNESS ANALYSIS")
         lines.append(f"{'='*80}")
-        
+
         # Power reduction table
         headers = ['Test', 'Opt→Real Drop', 'Opt→Doom Drop', 'Vulnerability']
         rows = []
-        
+        vulnerable_tests = []
+        inflated_tests = []
+
         for test in target_tests:
             opt_power = scenarios['optimistic']['results']['individual_powers'][test]
             real_power = scenarios.get('realistic', {}).get('results', {}).get('individual_powers', {}).get(test, opt_power)
@@ -367,47 +389,46 @@ class _ResultFormatter:
             real_drop = opt_power - real_power
             doom_drop = opt_power - doom_power
             
-            # Vulnerability assessment
-            if doom_drop > 30:
+            # Format drops with proper signs
+            real_drop_str = f"+{abs(real_drop):.1f}%" if real_drop < 0 else f"-{real_drop:.1f}%"
+            doom_drop_str = f"+{abs(doom_drop):.1f}%" if doom_drop < 0 else f"-{doom_drop:.1f}%"
+            
+            # Vulnerability assessment and categorization
+            if doom_drop > HIGH_VULNERABILITY_THRESHOLD:
                 vulnerability = "HIGH"
-            elif doom_drop > 15:
+                vulnerable_tests.append(test)
+            elif doom_drop > MEDIUM_VULNERABILITY_THRESHOLD:
                 vulnerability = "MEDIUM"
+            elif doom_drop < INFLATED_ERROR_THRESHOLD:
+                vulnerability = "INFLATED FALSE POSITIVES"
+                inflated_tests.append(test)
             else:
                 vulnerability = "LOW"
             
-            rows.append([
-                test,
-                f"-{real_drop:.1f}%",
-                f"-{doom_drop:.1f}%",
-                vulnerability
-            ])
-        
+            rows.append([test, real_drop_str, doom_drop_str, vulnerability])
+
         lines.append(self._table._create_table(headers, rows))
-        
+
         # 4. Recommendations
         lines.append(f"\n{'='*80}")
         lines.append("RECOMMENDATIONS")
         lines.append(f"{'='*80}")
-        
-        # Find most vulnerable tests
-        vulnerable_tests = []
-        for test in target_tests:
-            opt_power = scenarios['optimistic']['results']['individual_powers'][test]
-            doom_power = scenarios.get('doomer', {}).get('results', {}).get('individual_powers', {}).get(test, opt_power)
-            if opt_power - doom_power > 20:
-                vulnerable_tests.append(test)
-        
+
         if vulnerable_tests:
             lines.append(f"• High vulnerability tests: {', '.join(vulnerable_tests)}")
-            lines.append("• Consider increasing sample size by 20-30% to maintain power under adverse conditions")
-        else:
+            lines.append("• Consider increasing sample size to maintain power under adverse conditions")
+
+        if inflated_tests:
+            lines.append(f"• Inflated false positive risk: {', '.join(inflated_tests)}")
+            lines.append("• Be careful about interpretation")
+
+        if not vulnerable_tests and not inflated_tests:
             lines.append("• Power analysis appears robust to assumption violations")
             lines.append("• Original sample size should be sufficient")
-        
-        return '\n'.join(lines)
-    
+
     def _format_scenario_sample_size(self, data: Dict, summary_type: str) -> str:
         """Format scenario sample size analysis."""
+        
         scenarios = data.get('scenarios', {})
         
         # Get target tests and correction info
@@ -429,65 +450,67 @@ class _ResultFormatter:
     
     def _format_scenario_sample_size_short(self, scenarios: Dict, target_tests: List[str],
                                             correction: Optional[str]) -> str:
-            """Short scenario sample size summary."""
-            lines = [
-                f"\n{'='*80}",
-                "SCENARIO SUMMARY", 
-                f"{'='*80}"
-            ]
+        """Short scenario sample size summary."""
+        
+        lines = [
+            f"\n{'='*80}",
+            "SCENARIO SUMMARY", 
+            f"{'='*80}"
+        ]
+        
+        if correction:
+            # Combined table with uncorrected and corrected
+            lines.append("\nSample Size Requirements:")
+            headers = ['Test', 'Opt(U)', 'Opt(C)', 'Real(U)', 'Real(C)', 'Doom(U)', 'Doom(C)']
             
-            if correction:
-                # Combined table with uncorrected and corrected
-                lines.append("\nSample Size Requirements:")
-                headers = ['Test', 'Opt(U)', 'Opt(C)', 'Real(U)', 'Real(C)', 'Doom(U)', 'Doom(C)']
+            rows = []
+            for test in target_tests:
+                row = [test[:40]]  # Truncate to 40 chars
                 
-                rows = []
-                for test in target_tests:
-                    row = [test[:40]]  # Truncate to 40 chars
-                    
-                    for scenario in ['optimistic', 'realistic', 'doomer']:
-                        if scenario in scenarios and 'results' in scenarios[scenario]:
-                            n_uncorr = scenarios[scenario]['results']['first_achieved'][test]
-                            n_corr = scenarios[scenario]['results']['first_achieved_corrected'][test]
+                for scenario in ['optimistic', 'realistic', 'doomer']:
+                    if scenario in scenarios and 'results' in scenarios[scenario]:
+                        n_uncorr = scenarios[scenario]['results']['first_achieved'][test]
+                        n_corr = scenarios[scenario]['results']['first_achieved_corrected'][test]
+                        max_tested = scenarios[scenario]['model']['sample_size_range']['to_size']
+                        
+                        uncorr_str = str(n_uncorr) if n_uncorr > 0 else f">{max_tested}"
+                        corr_str = str(n_corr) if n_corr > 0 else f">{max_tested}"
+                        row.extend([uncorr_str, corr_str])
+                    else:
+                        row.extend(["N/A", "N/A"])
+                rows.append(row)
+            
+            lines.append(self._table._create_table(headers, rows, [40, 8, 8, 8, 8, 8, 8]))
+            lines.append("Note: (U) = Uncorrected, (C) = Corrected")
+        else:
+            # Uncorrected only
+            headers = ['Test', 'Optimistic', 'Realistic', 'Doomer']
+            
+            rows = []
+            for test in target_tests:
+                row = [test[:40]]  # Truncate to 40 chars
+                for scenario in ['optimistic', 'realistic', 'doomer']:
+                    if scenario in scenarios and 'results' in scenarios[scenario]:
+                        n_required = scenarios[scenario]['results']['first_achieved'][test]
+                        if n_required > 0:
+                            row.append(str(n_required))
+                        else:
                             max_tested = scenarios[scenario]['model']['sample_size_range']['to_size']
-                            
-                            uncorr_str = str(n_uncorr) if n_uncorr > 0 else f">{max_tested}"
-                            corr_str = str(n_corr) if n_corr > 0 else f">{max_tested}"
-                            row.extend([uncorr_str, corr_str])
-                        else:
-                            row.extend(["N/A", "N/A"])
-                    rows.append(row)
-                
-                lines.append(self._table._create_table(headers, rows, [40, 8, 8, 8, 8, 8, 8]))
-                lines.append("Note: (U) = Uncorrected, (C) = Corrected")
-            else:
-                # Uncorrected only
-                headers = ['Test', 'Optimistic', 'Realistic', 'Doomer']
-                
-                rows = []
-                for test in target_tests:
-                    row = [test[:40]]  # Truncate to 40 chars
-                    for scenario in ['optimistic', 'realistic', 'doomer']:
-                        if scenario in scenarios and 'results' in scenarios[scenario]:
-                            n_required = scenarios[scenario]['results']['first_achieved'][test]
-                            if n_required > 0:
-                                row.append(str(n_required))
-                            else:
-                                max_tested = scenarios[scenario]['model']['sample_size_range']['to_size']
-                                row.append(f">{max_tested}")
-                        else:
-                            row.append("N/A")
-                    rows.append(row)
-                
-                lines.append("\nUncorrected Sample Sizes:")
-                lines.append(self._table._create_table(headers, rows, [40, 12, 12, 12]))
+                            row.append(f">{max_tested}")
+                    else:
+                        row.append("N/A")
+                rows.append(row)
             
-            lines.append(f"{'='*80}")
-            
-            return '\n'.join(lines)
+            lines.append("\nUncorrected Sample Sizes:")
+            lines.append(self._table._create_table(headers, rows, [40, 12, 12, 12]))
+        
+        lines.append(f"{'='*80}")
+        
+        return '\n'.join(lines)
 
     def _format_scenario_sample_size_long(self, data: Dict, scenarios: Dict, target_tests: List[str], correction: Optional[str]) -> str:
         """Long scenario sample size summary."""
+        
         lines = []
 
         # 1. Overall summary
@@ -534,6 +557,7 @@ class _ResultFormatter:
     
     def _format_regression(self, data: Dict, summary_type: str) -> str:
         """Format regression results."""
+        
         results = data['results']
         effect_names = data['effect_names']
         dep_var = data.get('dep_var', 'y')
@@ -605,6 +629,7 @@ class _ResultFormatter:
     def _add_cumulative_sample_size_table(self, lines: List[str], sample_sizes: List[int], 
                                          target_tests: List[str], powers_by_test: Dict[str, List[float]]):
         """Add cumulative probability table with sample sizes as rows."""
+        
         n_tests = len(target_tests)
         
         # Create headers: Sample Size | ≥1 | ≥2 | ≥3 | ... | All
@@ -655,6 +680,7 @@ class _ResultFormatter:
 
     def _add_cumulative_table(self, lines: List[str], results: Dict, correction: bool):
         """Add cumulative probability table to output."""
+        
         cumulative = results['cumulative_probabilities']
         
         if correction and results.get('cumulative_probabilities_corrected'):
@@ -681,6 +707,7 @@ class _ResultFormatter:
 
     def _format_cumulative_recommendations(self, results: Dict, is_scenario: bool = False) -> List[str]:
         """Format cumulative probability recommendations."""
+        
         lines = []
         
         if is_scenario:
@@ -752,6 +779,7 @@ class _ResultFormatter:
 
 def _get_significance_code(p_value: float) -> str:
     """Get significance stars based on p-value."""
+    
     if p_value < 0.001:
         return "***"
     elif p_value < 0.01:
@@ -773,6 +801,7 @@ def _format_results(result_type: str, data: Dict, summary_type: str = 'short') -
     Returns:
         Formatted string output
     """
+
     return _formatter.format(result_type, data, summary_type)
 
 _formatter = _ResultFormatter()

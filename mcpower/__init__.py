@@ -26,7 +26,6 @@ Example Usage:
     >>> mc.find_sample_size(target_test='x1', from_size=50, to_size=200)
 """
 
-from .base import MCPowerBase
 from .linear_regression import LinearRegression
 
 from importlib.metadata import version
@@ -38,9 +37,6 @@ __email__ = 'pawellenartowicz@europe.com'
 
 # Public API
 __all__ = [
-    # Base class
-    'MCPowerBase',
-    
     # Model classes
     'LinearRegression'
 ]

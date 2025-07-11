@@ -9,12 +9,13 @@ from .utils.validators import (
     _validate_power, _validate_alpha, _validate_simulations,
     _validate_parallel_settings, _validate_correlation_matrix,
     _validate_sample_size_range, _validate_correction_method, 
-    _validate_model_ready,
+    _validate_model_ready, _validate_test_formula
 )
 from .utils.formatters import _format_results
 from .utils.visualization import _create_power_plot
 from .utils.data_generation import _generate_X
 
+DUMMY_MATRIX = np.zeros((2, 2), dtype=np.float64)
 
 class MCPowerBase(ABC):
     """
@@ -40,6 +41,7 @@ class MCPowerBase(ABC):
         """
         
         # Model specification
+        self.seed = 2137
         self.power = 80.0
         self.alpha = 0.05
         self.n_simulations = 1600
@@ -62,8 +64,27 @@ class MCPowerBase(ABC):
 
         # State flags
         self.variable_types_initiated = False
-        self.correlations_initiated = False
         self.data_uploaded = False
+
+        # Scenario configurations
+        self.default_scenario_config = {
+        'realistic': {
+            'heterogeneity': 0.2,
+            'heteroskedasticity': 0.1, 
+            'correlation_noise_sd': 0.2,
+            'distribution_change_prob': 0.3,
+            'new_distributions': ['right_skewed', 'left_skewed', 'uniform']
+        },
+        'doomer': {
+            'heterogeneity': 0.4,
+            'heteroskedasticity': 0.2,
+            'correlation_noise_sd': 0.4, 
+            'distribution_change_prob': 0.6,
+            'new_distributions': ['right_skewed', 'left_skewed', 'uniform']
+        }
+        }
+        self.custom_scenario_configs = None
+
 
         # Uploaded data
         self.uploaded_data = {}
@@ -135,6 +156,37 @@ class MCPowerBase(ABC):
         else:
             self.parallel, self.n_cores = False, 1
             return self
+
+    def set_seed(self, seed=None):
+        """
+        Set default random seed for reproducible results.
+        
+        Args:
+            seed: Random seed (integer) or None for random behavior
+            
+        Returns:
+            self: For method chaining
+            
+        Raises:
+            TypeError: If seed is not integer or None
+            ValueError: If seed is negative
+        """
+        if seed is not None:
+            if not isinstance(seed, int):
+                raise TypeError("seed must be an integer or None")
+            if seed < 0:
+                raise ValueError("seed must be non-negative")
+            if seed > 3000000000:
+                raise ValueError("seed must be lower than 3 000 000 000, do not worry, there's plenty of room at the bottom")
+        
+        self.seed = seed
+        
+        if seed is not None:
+            print(f"Seed set to: {seed}")
+        else:
+            print("Random seeding enabled")
+        
+        return self
 
     def set_power(self, power: float):
         """
@@ -325,7 +377,7 @@ class MCPowerBase(ABC):
     
     def set_correlations(self, correlations_input):
         """
-        Set correlations between predictor variables.
+        Set correlations between predictor variables. They'll act like rank correlations for different distributions.
         
         Args:
             correlations_input: Either correlation string or numpy correlation matrix
@@ -382,9 +434,7 @@ class MCPowerBase(ABC):
                 if not result.is_valid:
                     raise ValueError("Invalid correlation matrix:\n" + 
                                    "\n".join(f"• {err}" for err in result.errors))
-                
-                self.correlations_initiated = True
-                
+                                
                 if correlations:
                     correlation_strs = [f"{var1}_{var2}={corr}" for (var1, var2), corr in correlations.items()]
                     print(f"Set correlations: {', '.join(correlation_strs)}")
@@ -399,9 +449,7 @@ class MCPowerBase(ABC):
                     raise ValueError("Invalid correlation matrix:\n" + 
                                    "\n".join(f"• {err}" for err in result.errors))
                 
-                self.correlation_matrix = correlations_input.copy()
-                self.correlations_initiated = True
-                
+                self.correlation_matrix = correlations_input.copy()                
                 print(f"Set correlation matrix")
             
         except Exception as e:
@@ -467,11 +515,47 @@ class MCPowerBase(ABC):
         
         self.heteroskedasticity = float(heteroskedasticity_correlation)
         
-        if abs(heteroskedasticity_correlation) > 1e-10:
+        if abs(heteroskedasticity_correlation) > 1e-8: # tolerance for floating point noise
             print(f"heteroskedasticity enabled: error-predictor correlation = {heteroskedasticity_correlation}")
         else:
             print("Homoscedasticity: no correlation between errors and predictors")
         
+        return self
+
+    def set_scenario_configs(self, configs_dict):
+        """
+        Set custom scenario configurations.
+        
+        Args:
+            configs_dict: Dict with 'realistic' and/or 'doomer' keys containing config dicts
+        
+        Returns:
+            self: For method chaining
+            
+        Raises:
+            TypeError: If configs_dict is not a dictionary
+            ValueError: If configs contain invalid parameter names or values
+        
+        Example:
+            >>> model.set_scenario_configs({
+            ...     'realistic': {'heterogeneity': 0.3, 'heteroskedasticity': 0.15},
+            ...     'doomer': {'heterogeneity': 0.5, 'correlation_noise_sd': 0.5}
+            ... })
+        """
+        if not isinstance(configs_dict, dict):
+            raise TypeError("configs_dict must be a dictionary")
+        
+        
+        # Merge custom configs with defaults
+        merged = self.default_scenario_config.copy()
+        for scenario, config in configs_dict.items():
+            if scenario in merged:
+                merged[scenario].update(config)
+            else:
+                merged[scenario] = config
+        
+        self.custom_scenario_configs = merged
+        print(f"Custom scenario configs set for: {', '.join(configs_dict.keys())}")
         return self
 
     def upload_own_data(self, dataframe, preserve_correlation=True):
@@ -493,12 +577,12 @@ class MCPowerBase(ABC):
             Dataset should be complete, with no missing values
             Values shuld be numeric
             Variables in dataframe are automatically standardized (mean=0, SD=1).
-            Missing variables are generated synthetically.
+            Not uploaded variables are generated synthetically.
         """
 
         # Lazy load for rarely used method
         import pandas as pd
-        from utils.data_generation import create_uploaded_lookup_tables
+        from .utils.data_generation import create_uploaded_lookup_tables
         
         if not isinstance(dataframe, pd.DataFrame):
             raise TypeError("dataframe must be pandas DataFrame")
@@ -540,13 +624,13 @@ class MCPowerBase(ABC):
                 print(f"Created lookup tables for {len(data_matrix_list)} uploaded variables")
             else:
                 # No uploaded predictors, keep dummy matrices
-                self.upload_normal_values = np.zeros((2, 2), dtype=np.float64)
-                self.upload_data_values = np.zeros((2, 2), dtype=np.float64)
+                self.upload_normal_values = DUMMY_MATRIX
+                self.upload_data_values = DUMMY_MATRIX
         else:
             # No uploaded predictors, keep dummy matrices  
-            self.upload_normal_values = np.zeros((2, 2), dtype=np.float64)
-            self.upload_data_values = np.zeros((2, 2), dtype=np.float64)
-        
+            self.upload_normal_values = DUMMY_MATRIX
+            self.upload_data_values = DUMMY_MATRIX
+            
         # Set variable types - mark uploaded variables as uploaded_data
         for _, var_info in self.variables.items():
             if var_info['name'] in matched_vars:
@@ -579,7 +663,6 @@ class MCPowerBase(ABC):
                         if i < j:
                             correlations_found += 1
             
-            self.correlations_initiated = True
             print(f"Updated correlation matrix with {correlations_found} correlations")
         
         self.data_uploaded = True
@@ -587,11 +670,14 @@ class MCPowerBase(ABC):
         
         return self
 
+    def __repr__(self):
+        return f'{self.__class__.__name__}(equation: {self.equation})'
+  
     # =====================================
     # Main analysis methods
     # =====================================
 
-    def find_power(self, sample_size, target_test='overall', seed=2137, 
+    def find_power(self, sample_size, target_test='overall', 
                 correction=None, print_results=True, scenarios=False, summary='short', 
                 return_results=False, test_formula=None):
         """
@@ -600,7 +686,6 @@ class MCPowerBase(ABC):
         Args:
             sample_size: Sample size to test
             target_test: Which effect(s) to test ('overall', effect name, or 'all')
-            seed: Random seed for reproducibility (default: 2137)
             correction: Multiple comparison correction ('Bonferroni', 'BH', 'Holm', or None)
             print_results: Whether to print formatted results (default: True)
             scenarios: Whether to run robustness analysis across assumption violations (default: False)
@@ -634,9 +719,9 @@ class MCPowerBase(ABC):
         if scenarios:
             result = self._run_scenario_analysis('power', sample_size=sample_size, 
                                             target_tests=target_tests, formula_to_test=formula_to_test,
-                                            seed=seed, correction=correction, summary=summary, print_results=print_results)
+                                            correction=correction, summary=summary, print_results=print_results)
         else:  
-            result = self._run_find_power(sample_size, target_tests, formula_to_test, seed, correction)
+            result = self._run_find_power(sample_size, target_tests, formula_to_test, correction)
         
         if print_results and not scenarios:
             print(f"\n{'='*80}")
@@ -651,7 +736,7 @@ class MCPowerBase(ABC):
         return result if return_results else None
 
     def find_sample_size(self, target_test='overall', from_size=30, to_size=200, by=5, 
-                        seed=2137, correction=None, 
+                        correction=None, 
                         print_results=True, scenarios=False, summary='short',
                         return_results=False, test_formula=None):
         """
@@ -662,7 +747,6 @@ class MCPowerBase(ABC):
             from_size: Minimum sample size to test (default: 30)
             to_size: Maximum sample size to test (default: 200)  
             by: Step size between sample sizes (default: 5)
-            seed: Random seed for reproducibility (default: 2137)
             correction: Multiple comparison correction ('Bonferroni', 'BH', 'Holm', or None)
             print_results: Whether to print formatted results (default: True)
             scenarios: Whether to run robustness analysis across assumption violations (default: False)
@@ -703,11 +787,11 @@ class MCPowerBase(ABC):
         if scenarios:
             result = self._run_scenario_analysis('sample_size', target_tests=target_tests,
                                             formula_to_test=formula_to_test, sample_sizes=sample_sizes,
-                                            seed=seed, correction=correction, summary=summary, print_results=print_results)
+                                            correction=correction, summary=summary, print_results=print_results)
         else:
             # Run analysis with test_formula
             result = self._run_sample_size_analysis(
-                sample_sizes, target_tests, formula_to_test, seed, correction)
+                sample_sizes, target_tests, formula_to_test, correction)
         
             if print_results:
                 print(f"\n{'='*80}")
@@ -744,13 +828,15 @@ class MCPowerBase(ABC):
     @abstractmethod
     def _generate_dependent_variable(self, X_expanded: np.ndarray, effect_sizes_expanded: np.ndarray,
                                      heterogeneity: float = 0.0, heteroskedasticity: float = 0.0,
-                                     seed: Optional[int] = None) -> np.ndarray:
+                                     sim_seed: Optional[int] = None) -> np.ndarray:
         pass
 
     # =====================================
     # Helpers
     # =====================================
     
+    # --- Parsing and preparing  --- 
+
     def _validate_analysis_inputs(self, correction):
         """Validate inputs before analysis."""
         
@@ -793,9 +879,6 @@ class MCPowerBase(ABC):
         
         if test_formula is None:
             return None
-            
-        from utils.validators import _validate_test_formula
-        from utils.parsers import _parse_independent_variables
         
         # Simple validation first
         available_vars = self.predictor_vars_order
@@ -930,26 +1013,23 @@ class MCPowerBase(ABC):
                 effect_sizes_expanded,
                 correction_method,
                 effects_to_use)
-
-    def __repr__(self):
-        return f'{self.__class__.__name__}(equation: {self.equation})'
-    
-    # Main process
+  
+    # --- Main process  --- 
     
     def _run_find_power(self, sample_size, target_tests=None, formula_to_test=None, 
-                        seed=2137, correction=None, scenario_config=None):
+                        correction=None, scenario_config=None):
         """Execute power analysis with scenario support."""
         
         if scenario_config is None:
             # call find_power with parsed values
             power_results = self._run_power_simulations_fixed(
-                sample_size, formula_to_test, target_tests, seed, correction
+                sample_size, formula_to_test, target_tests, correction
                 )
         else:
             # Scenario behavior - run simulations directly with scenario parameters
             # Run simulations with scenario config
             power_results = self._run_power_simulations_scenario(
-                sample_size, formula_to_test, target_tests, seed, correction, 
+                sample_size, formula_to_test, target_tests, correction, 
                 scenario_config=scenario_config)
             
         return {
@@ -968,8 +1048,7 @@ class MCPowerBase(ABC):
             'results': power_results
         }
 
-    def _run_power_simulations_fixed(self, sample_size, formula_to_test, target_tests, 
-                                    seed, correction):
+    def _run_power_simulations_fixed(self, sample_size, formula_to_test, target_tests, correction):
         """Run simulations with constant parameters."""
 
         # Pre-compute metadata
@@ -987,8 +1066,10 @@ class MCPowerBase(ABC):
         all_results = []
         all_results_corrected = []
 
-        for i in range(self.n_simulations):
-            result = self._single_simulation(i, target_indices,
+        seed = self.seed
+        for sim_id in range(self.n_simulations):
+            sim_seed = seed + 3*sim_id if seed is not None else None
+            result = self._single_simulation(sim_id, target_indices,
                                              sample_size, n_vars, correlation_matrix, 
                                              var_types, var_params,
                                              upload_normal_values, upload_data_values,
@@ -996,7 +1077,7 @@ class MCPowerBase(ABC):
                                              heterogeneity, heteroskedasticity,
                                              alpha, correction_method,
                                              effects_to_use,
-                                             seed = seed)
+                                             sim_seed = sim_seed)
             if result is not None:
                 sim_significant, sim_significant_corrected = result
                 all_results.append(sim_significant)
@@ -1008,7 +1089,7 @@ class MCPowerBase(ABC):
         return self._calculate_powers(all_results, all_results_corrected, target_tests)
 
     def _run_power_simulations_scenario(self, sample_size, formula_to_test, target_tests, 
-                                        seed, correction, scenario_config):
+                                        correction, scenario_config):
         """Run simulations with per-simulation perturbations."""
 
         # Pre-compute metadata
@@ -1026,14 +1107,15 @@ class MCPowerBase(ABC):
         all_results = []
         all_results_corrected = []
 
-        for i in range(self.n_simulations):
-            sim_seed = seed + i if seed is not None else None
+        seed = self.seed
+        for sim_id in range(self.n_simulations):
+            sim_seed = seed + 3*sim_id if seed is not None else None
 
             # Apply per-simulation perturbations
             perturbed_corr, perturbed_types = self._apply_per_simulation_perturbations(
                 correlation_matrix, var_types, scenario_config, sim_seed)
             
-            result = self._single_simulation(i, target_indices,
+            result = self._single_simulation(sim_id, target_indices,
                                              sample_size, n_vars, perturbed_corr, 
                                              perturbed_types, var_params,
                                              upload_normal_values, upload_data_values,
@@ -1041,7 +1123,7 @@ class MCPowerBase(ABC):
                                              heterogeneity, heteroskedasticity,
                                              alpha, correction_method,
                                              effects_to_use,
-                                             seed = seed)
+                                             sim_seed = sim_seed)
             
             if result is not None:
                 sim_significant, sim_significant_corrected = result
@@ -1061,10 +1143,10 @@ class MCPowerBase(ABC):
                            heterogeneity, heteroskedasticity,
                            alpha, correction_method,
                            effects_to_use=None,
-                           seed=None):
+                           sim_seed=None):
         """Execute single Monte Carlo simulation."""
 
-        sim_seed = seed + sim_id if seed is not None else -1
+        
         
         try:
             X = _generate_X(sample_size, n_vars, correlation_matrix,
@@ -1078,7 +1160,7 @@ class MCPowerBase(ABC):
             # Generate Y
             y = self._generate_dependent_variable(X_expanded=X_expanded, effect_sizes_expanded=effect_sizes_expanded,
                                                 heterogeneity=heterogeneity, heteroskedasticity=heteroskedasticity,
-                                                seed=sim_seed)
+                                                sim_seed=sim_seed)
             
             # Run statistical analysis
             results = self._run_statistical_analysis(X_expanded, y, target_indices, alpha, correction_method)
@@ -1099,17 +1181,17 @@ class MCPowerBase(ABC):
             print(f"SIMULATION {sim_id} FAILED: {str(e)}")
             return None
 
-    def _run_sample_size_analysis(self, sample_sizes, target_tests, formula_to_test, seed, correction, 
+    def _run_sample_size_analysis(self, sample_sizes, target_tests, formula_to_test, correction, 
                                   scenario_config=None):
         """Run sample size analysis with passed parameters."""
         
         if self.parallel and len(sample_sizes) > 1:
             results = self._run_sample_size_analysis_parallel(
-                sample_sizes, target_tests, formula_to_test, seed, correction, scenario_config
+                sample_sizes, target_tests, formula_to_test, correction, scenario_config
             )
         else:
             results = self._run_sample_size_analysis_seq(
-                sample_sizes, target_tests, formula_to_test, seed, correction, scenario_config
+                sample_sizes, target_tests, formula_to_test, correction, scenario_config
             )
         
         return {
@@ -1133,7 +1215,7 @@ class MCPowerBase(ABC):
         }
 
     def _run_sample_size_analysis_parallel(self, sample_sizes, target_tests, formula_to_test, 
-                                           seed, correction, scenario_config):
+                                           correction, scenario_config):
         """Run sample size analysis in parallel."""
         
         n_jobs = min(len(sample_sizes), self.n_cores)
@@ -1143,7 +1225,6 @@ class MCPowerBase(ABC):
                 sample_size=sample_size,
                 target_tests=target_tests,
                 formula_to_test=formula_to_test,
-                seed=seed,
                 correction=correction,
                 scenario_config=scenario_config
             )
@@ -1157,7 +1238,7 @@ class MCPowerBase(ABC):
         return self._process_power_results(results, target_tests, correction)
 
     def _run_sample_size_analysis_seq(self, sample_sizes, target_tests, formula_to_test, 
-                                    seed, correction, scenario_config):
+                                     correction, scenario_config):
         """Run sample size analysis sequentially."""
         
         results = []
@@ -1167,7 +1248,6 @@ class MCPowerBase(ABC):
                 sample_size=sample_size,
                 target_tests=target_tests,
                 formula_to_test=formula_to_test,
-                seed=seed,
                 correction=correction,
                 scenario_config=scenario_config
             )
@@ -1218,13 +1298,22 @@ class MCPowerBase(ABC):
         results_array = np.array(all_results, dtype=bool)
         results_corrected_array = np.array(all_results_corrected, dtype=bool)
         
-        # Individual powers
+        # Individual powers - FIXED: properly map test names to columns
         individual_powers = {}
         individual_powers_corrected = {}
         
-        for i, test in enumerate(target_tests):
-            individual_powers[test] = np.mean(results_array[:, i]) * 100
-            individual_powers_corrected[test] = np.mean(results_corrected_array[:, i]) * 100
+        for test in target_tests:
+            if test == 'overall':
+                # F-test is always at column 0
+                individual_powers[test] = np.mean(results_array[:, 0]) * 100
+                individual_powers_corrected[test] = np.mean(results_corrected_array[:, 0]) * 100
+            else:
+                # Find position among non-'overall' tests and add 1 for F-test offset
+                non_overall_tests = [t for t in target_tests if t != 'overall']
+                pos = non_overall_tests.index(test)
+                col_idx = pos + 1  # +1 because column 0 is F-test
+                individual_powers[test] = np.mean(results_array[:, col_idx]) * 100
+                individual_powers_corrected[test] = np.mean(results_corrected_array[:, col_idx]) * 100
         
         # Combined probabilities
         combined = {}
@@ -1261,31 +1350,15 @@ class MCPowerBase(ABC):
             'n_simulations_used': n_sims
         }
 
-    # Scenarios
+    # --- Scenarios  --- 
 
-    def _get_scenario_configs(self):
-        """Define default realistic/doomer scenario parameters."""
-       
-        return {
-            'realistic': {
-                'heterogeneity': 0.2,
-                'heteroskedasticity': 0.1, 
-                'correlation_noise_sd': 0.2,
-                'distribution_change_prob': 0.3,
-                'new_distributions': ['right_skewed', 'left_skewed', 'uniform']
-            },
-            'doomer': {
-                'heterogeneity': 0.4,
-                'heteroskedasticity': 0.2,
-                'correlation_noise_sd': 0.4, 
-                'distribution_change_prob': 0.6,
-                'new_distributions': ['right_skewed', 'left_skewed', 'uniform']
-            }
-        }
+    def get_scenario_configs(self):
+        """Return realistic/doomer scenario parameters."""
+        return self.default_scenario_config if self.custom_scenario_configs is None else self.custom_scenario_configs
 
     def _run_scenario_analysis(self, analysis_type, **kwargs):
         """Execute optimistic/realistic/doomer scenario comparison."""
-        configs = self._get_scenario_configs()
+        configs = self.get_scenario_configs()
         results = {}
         summary = kwargs.pop('summary', 'short')
         print_results = kwargs.pop('print_results', True)
@@ -1294,7 +1367,9 @@ class MCPowerBase(ABC):
             print(f"\n{'='*80}")
             print("SCENARIO-BASED MONTE CARLO POWER ANALYSIS RESULTS")
             print(f"{'='*80}")
-            
+            if self.custom_scenario_configs is None:
+                  print("Default configuration")
+            else: print("Custom configuration")
             # Optimistic (user's original settings)
             print("Running OPTIMISTIC scenario (original settings)...")
         if analysis_type == 'power':
@@ -1361,7 +1436,7 @@ class MCPowerBase(ABC):
             type_mapping = {
                 'right_skewed': 2, 'left_skewed': 3, 'uniform': 5
             }
-            new_type_codes = [type_mapping[dist] for dist in scenario_config['new_distributions']]
+            new_type_codes = [type_mapping[distribution] for distribution in scenario_config['new_distributions']]
             
             for i in range(len(var_types)):
                 if (var_types[i] == 0 and  # normal distribution
@@ -1444,4 +1519,3 @@ class MCPowerBase(ABC):
                             target_tests=target_tests,
                             target_power=self.power,
                             title=f"{scenario_labels[i]} Scenario - Corrected Power ({correction})")
-

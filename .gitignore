@@ -2,8 +2,10 @@
 *.nbc
 *.nbi
 *.pkl
-mcpower/_dev_test.py
+venv/*
+*.egg-info/
 
 # development phase
 mcpower/cpp/* 
-
+mcpower/_dev_test.py
+todo.md

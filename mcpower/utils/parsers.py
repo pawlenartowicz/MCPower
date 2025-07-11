@@ -239,6 +239,8 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
     Returns:
         tuple: (variables_dict, effects_dict)
     """
+    from itertools import combinations
+    
     terms = re.split(r'[+\-]', formula)
     
     variables = {}
@@ -263,10 +265,10 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
                     seen_variables.add(var)
                     variable_counter += 1
             
-            # For x1*x2: add main effects + interaction
-            # For x1:x2: add only interaction
             if '*' in term:
-                # Add main effects first for * notation
+                # For x1*x2*x3: add main effects + all possible interactions
+                
+                # Add main effects first
                 for var in interaction_vars:
                     if var not in seen_effects:
                         effects[f'effect_{effect_counter}'] = {
@@ -275,17 +277,30 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
                         }
                         seen_effects.add(var)
                         effect_counter += 1
-            
-            # Add interaction effect (for both * and :)
-            interaction_name = ':'.join(interaction_vars)
-            if interaction_name not in seen_effects:
-                effects[f'effect_{effect_counter}'] = {
-                    'name': interaction_name, 
-                    'type': 'interaction',
-                    'var_names': interaction_vars
-                }
-                seen_effects.add(interaction_name)
-                effect_counter += 1
+                
+                # Add all possible interactions (2-way, 3-way, ..., n-way)
+                for r in range(2, len(interaction_vars) + 1):
+                    for combo in combinations(interaction_vars, r):
+                        interaction_name = ':'.join(combo)
+                        if interaction_name not in seen_effects:
+                            effects[f'effect_{effect_counter}'] = {
+                                'name': interaction_name, 
+                                'type': 'interaction',
+                                'var_names': list(combo)
+                            }
+                            seen_effects.add(interaction_name)
+                            effect_counter += 1
+            else:
+                # For x1:x2:x3: add only the specific interaction
+                interaction_name = ':'.join(interaction_vars)
+                if interaction_name not in seen_effects:
+                    effects[f'effect_{effect_counter}'] = {
+                        'name': interaction_name, 
+                        'type': 'interaction',
+                        'var_names': interaction_vars
+                    }
+                    seen_effects.add(interaction_name)
+                    effect_counter += 1
         else:
             # Main effect term
             variables_in_term = re.findall(r'[a-zA-Z][a-zA-Z0-9_]*', term)

@@ -1,10 +1,22 @@
 """
-X generator with Numba - base_normal and cholesky inside compiled function.
+Optimized design matrix generator for Monte Carlo Power Analysis with Numba compilation.
+Generates correlated predictor variables with various distributions (normal, binary, skewed, etc.)
+using lookup tables and Cholesky decomposition for enhanced performance.
 """
 
-import numpy as np
-import numba as nb
 import os
+
+if os.environ.get('NUMBA_AOT_BUILD'):
+    from numba.pycc import CC
+    cc = CC('mcpower_compiled')
+    compile_function = lambda sig: lambda func: cc.export(func.__name__, sig)(func) # type: ignore
+else:
+    from numba import njit
+    cc = None
+    compile_function = lambda sig: njit(sig, cache=True)
+
+
+import numpy as np
 import pickle
 from typing import Dict, List, Optional, Tuple
 
@@ -17,36 +29,36 @@ SKEW_MEAN = np.exp(0.5)
 SKEW_STD = np.sqrt(np.exp(2) - np.exp(1))
 NORM_SCALE  = (DIST_RESOLUTION - 1) / (NORM_RANGE[1] - NORM_RANGE[0])
 PERC_SCALE = (DIST_RESOLUTION - 1) / (PERCENTILE_RANGE[1] - PERCENTILE_RANGE[0])
+FLOAT_NEAR_ZERO = 1e-15 # for division by 0 protection
 
 # Global tables
-_NORM_CDF_TABLE = None
-_T3_PPF_TABLE = None
+NORM_CDF_TABLE = None
+T3_PPF_TABLE = None
 
 def _init_tables():
     """Initialize distribution lookup tables."""
-    global _NORM_CDF_TABLE, _T3_PPF_TABLE
+    global NORM_CDF_TABLE, T3_PPF_TABLE
     
     cache_file = os.path.join(os.path.dirname(__file__), '.generator_lookup_tables.pkl')
     
     try:
         with open(cache_file, 'rb') as f:
-            _NORM_CDF_TABLE, _T3_PPF_TABLE = pickle.load(f)
+            NORM_CDF_TABLE, T3_PPF_TABLE = pickle.load(f)
     except (FileNotFoundError, pickle.PickleError):
-        print("Creating X generator lookup tables, it will take some seconds")
         from scipy.stats import norm, t
 
         # Normal CDF table
         x_norm = np.linspace(*NORM_RANGE, DIST_RESOLUTION)
-        _NORM_CDF_TABLE = norm.cdf(x_norm)
+        NORM_CDF_TABLE = norm.cdf(x_norm)
         
         # T(3) PPF table
         percentile_points= np.linspace(*PERCENTILE_RANGE, DIST_RESOLUTION)
-        _T3_PPF_TABLE = t.ppf(percentile_points, 3) / np.sqrt(3)
+        T3_PPF_TABLE = t.ppf(percentile_points, 3) / np.sqrt(3)
         
         # Cache
         try:
             with open(cache_file, 'wb') as f:
-                pickle.dump((_NORM_CDF_TABLE, _T3_PPF_TABLE), f)
+                pickle.dump((NORM_CDF_TABLE, T3_PPF_TABLE), f)
         except:
             pass
 
@@ -101,16 +113,16 @@ def create_uploaded_lookup_tables(data_matrix: np.ndarray) -> Tuple[np.ndarray, 
 # f8[:,:] - upload_normal_values (uploaded normal quantiles)
 # f8[:,:] - upload_data_values (uploaded data values)
 # i8 - seed
-@nb.jit('f8[:,:](i8, i8, f8[:,:], i8[:], f8[:], f8[:], f8[:], f8[:,:], f8[:,:], i8)', nopython=True, cache=True)
+@compile_function('f8[:,:](i8, i8, f8[:,:], i8[:], f8[:], f8[:], f8[:], f8[:,:], f8[:,:], i8)')
 def _generate_X_compiled(sample_size, n_vars, correlation_matrix, 
                          var_types, var_params, 
                          norm_cdf_table, t3_ppf_table, 
                          upload_normal_values, upload_data_values, 
-                         seed):
+                         sim_seed):
     """
-    Generate X matrix with correlations and distributions.
-    ALL computation inside this function - no external dependencies.
+    Generate X matrix with added correlations and transformed into specified distributions.
     """
+    
     def _vectorized_norm_cdf_lookup(x_array):
         """Vectorized normal CDF lookup."""
         n = len(x_array)
@@ -193,12 +205,11 @@ def _generate_X_compiled(sample_size, n_vars, correlation_matrix,
             return np.linalg.cholesky(corr_matrix)
         except:
             eigenvals, eigenvecs = np.linalg.eigh(corr_matrix)
-            eigenvals = np.maximum(eigenvals, 1e-10)
+            eigenvals = np.maximum(eigenvals, FLOAT_NEAR_ZERO)
             return eigenvecs @ np.diag(np.sqrt(eigenvals))
 
     def _transform_distribution(data, dist_type, param, var_idx):
         """Transform standard normal to target distribution - vectorized."""
-        n_samples = len(data)
         
         if dist_type == 0:  # normal
             return data.copy()
@@ -229,15 +240,16 @@ def _generate_X_compiled(sample_size, n_vars, correlation_matrix,
         else:
             return data.copy()
     
-    if seed >= 0:
-        np.random.seed(seed)
+    # Create matrix with random data
+    if sim_seed >= 0:
+        np.random.seed(sim_seed)
     base_normal = np.random.standard_normal((sample_size, n_vars))
     
-    # Compute Cholesky decomposition INSIDE compiled function
+    # Create correlated data from random, and correlation matrix
     cholesky_matrix = _cholesky_decomposition(correlation_matrix)
     correlated_data = base_normal @ cholesky_matrix.T
     
-    # Transform distributions
+    # Transform into specified distributions
     X = np.zeros((sample_size, n_vars))
     for j in range(n_vars):
         X[:, j] = _transform_distribution(correlated_data[:, j], var_types[j], var_params[j], j)
@@ -252,12 +264,13 @@ def _generate_X(sample_size: int, n_vars: int, correlation_matrix: Optional[np.n
     """
     Generate X design matrix with specified distributions and correlations.
     Wrapper only prepares metadata - all computation in compiled function.
-    """    
+    """
+
     # backup correlation_matrix creation, probably unnecesary
     if correlation_matrix is None:
         correlation_matrix = np.eye(n_vars)
     
-    # Prepare uploaded data tables (empty if None)
+    # Prepare uploaded data tables (empty if None), probably unnecesary
     if normal_values is None:
         normal_values = np.zeros((2, 2))  # Small dummy size
     if uploaded_values is None:
@@ -267,7 +280,7 @@ def _generate_X(sample_size: int, n_vars: int, correlation_matrix: Optional[np.n
     X = _generate_X_compiled(
                              sample_size, n_vars, correlation_matrix, 
                              var_types, var_params, 
-                             _NORM_CDF_TABLE, _T3_PPF_TABLE,
+                             NORM_CDF_TABLE, T3_PPF_TABLE,
                              normal_values, uploaded_values,
                              seed if seed is not None else -1
     )

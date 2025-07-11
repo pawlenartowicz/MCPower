@@ -1,6 +1,6 @@
 # MCPower
 
-**Monte Carlo power analysis made simple.** Find the sample size you need or check if your study has enough power - even with complex models that traditional power analysis can't handle.
+**Simple Monte Carlo power analysis for complex models.** Find the sample size you need or check if your study has enough power - even with complex models that traditional power analysis can't handle.
 
 ## Why MCPower?
 
@@ -10,13 +10,18 @@
 ✅ **R-style formulas**: `outcome = treatment + covariate + treatment*covariate`  
 ✅ **Two simple commands**: Find sample size or check power  
 ✅ **Scenario analysis**: Test robustness under realistic conditions  
-✅ **No math required**: Just specify your model and effects
+✅ **Minimal math required**: Just specify your model and effects
 
 ## Get Started in 2 Minutes
 
 ### Install
 ```bash
 pip install git+https://github.com/pawlenartowicz/MCPower
+```
+
+### Update to the latest version (every few days).
+```bash
+pip install --upgrade git+https://github.com/pawlenartowicz/MCPower
 ```
 
 ### Your First Power Analysis
@@ -31,10 +36,13 @@ model = mcpower.LinearRegression("satisfaction = treatment + motivation")
 # 2. Set effect sizes (how big you expect effects to be)
 model.set_effects("treatment=0.5, motivation=0.3")
 
-# 3. Find the sample size you need
+# 3. Change the treatment to "binary" (people receive treatment or not).
+model.set_variable_type("treatment=binary")
+
+# 4. Find the sample size you need
 model.find_sample_size(target_test="treatment", from_size=50, to_size=200)
 ```
-**Output**: "You need N=156 for 80% power to detect the treatment effect"
+**Output**: "You need N=75 for 80% power to detect the treatment effect"
 
 That's it! 🎉
 
@@ -55,9 +63,11 @@ model.find_sample_size(
 ```
 SCENARIO SUMMARY
 ================================================================================
+
+Uncorrected Sample Sizes:
 Test                                     Optimistic   Realistic    Doomer      
---------------------------------------------------------------------------------
-treatment                                N=156        N=189        N=234       
+-------------------------------------------------------------------------------
+treatment                                75           85           100         
 ================================================================================
 ```
 
@@ -86,6 +96,11 @@ model.set_effects("treatment=0.5, age=0.3, income=0.2")
 - **`income=0.2`**: Each 1 SD increase in income → 0.2 SD increase in outcome
 
 **Effect size guidelines:**
+- **0.1** = Small effect (detectable but modest)
+- **0.25** = Medium effect (clearly noticeable) 
+- **0.4** = Large effect (substantial impact)
+
+**Effect size guidelines (binary variables):**
 - **0.2** = Small effect (detectable but modest)
 - **0.5** = Medium effect (clearly noticeable) 
 - **0.8** = Large effect (substantial impact)
@@ -151,7 +166,7 @@ model.set_variable_type("treatment=(binary,0.3)")
 import pandas as pd
 
 # Use your pilot data for realistic simulations
-df = pd.read_csv('pilot_data.csv')
+df = pd.read_csv('examples/cars.csv')
 model.upload_own_data(df)  # Automatically preserves correlations
 ```
 
@@ -237,6 +252,8 @@ model.set_parallel(True)
 - Assumption violations
 
 This gives you a **range of realistic outcomes** instead of a single optimistic estimate.
+⚠️ **Important**: Scenario analysis and uploaded data features are experimental. 
+Use with caution for critical decisions.
 
 <details>
 <summary><strong>📚 Advanced Features (Click to expand)</strong></summary>
@@ -297,9 +314,6 @@ model.set_correlations("corr(x1, x2)=0.3, corr(x1, x3)=-0.2")
 
 # Shorthand format  
 model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
-
-# Old format (still works)
-model.set_correlations("x1_x2=0.3, x1_x3=-0.2")
 ```
 
 </details>
@@ -318,12 +332,13 @@ model.set_correlations("x1_x2=0.3, x1_x3=-0.2")
 ## Aim for future (waiting for suggestions)
 - ✅ Linear Regression
 - 🚧 Logistic Regression (coming soon)
-- 🚧 Tweaking sceniarios (coming soon)
-- 🚧 Guide about methods, corrections
-- 📋 ANOVA
+- 🚧 Tweaking scenarios, robustness analysis (coming soon)
+- 🚧 Guide about methods, corrections (coming soon)
+- 🚧 ANOVA (and factor as variables) (coming soon)
 - 📋 Mixed Effects Models
 - 📋 2 groups comparision with alternative tests
 - 📋 Robust regression methods
+
 
 ## License & Citation
 

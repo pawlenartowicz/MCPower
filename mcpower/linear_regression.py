@@ -24,19 +24,17 @@ class LinearRegression(MCPowerBase):
 
     def _generate_dependent_variable(self, X_expanded: np.ndarray, effect_sizes_expanded: np.ndarray,
                                      heterogeneity: float = 0.0, heteroskedasticity: float = 0.0,
-                                     seed: Optional[int] = None) -> np.ndarray:
+                                     sim_seed: Optional[int] = None) -> np.ndarray:
         """
         Generate continuous dependent variable for linear regression.
 
         Returns:
             y: Generated dependent variable
         """
-        
-        seed_val = int(seed) if seed is not None else -1
 
         # Generate y using compiled function
         y = _generate_y(X_expanded=X_expanded, effect_sizes=effect_sizes_expanded,
                         heterogeneity=heterogeneity, heteroskedasticity=heteroskedasticity,
-                        seed=seed_val
+                        sim_seed=sim_seed if sim_seed is not None else -1
         )
         return y

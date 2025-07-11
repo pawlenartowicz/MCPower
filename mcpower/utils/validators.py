@@ -114,8 +114,8 @@ def _validate_sample_size(sample_size: Any) -> _ValidationResult:
     # Range check
     if sample_size <= 0:
         errors.append(f"sample_size must be positive, got {sample_size}")
-    elif sample_size > 1000000:
-        errors.append(f"sample_size too large ({sample_size:,}). Maximum recommended: 1,000,000")
+    elif sample_size > 100000:
+        errors.append(f"sample_size too large ({sample_size:,}). Maximum recommended: 100,000. We cannot guarantee stability for such small p-values.")
     
     return _ValidationResult(len(errors) == 0, errors, [])
 
@@ -144,7 +144,7 @@ def _validate_sample_size_range(from_size: Any, to_size: Any, by: Any) -> _Valid
     
     # Warning for many tests
     n_tests = len(range(from_size, to_size + 1, by))
-    if n_tests > 50:
+    if n_tests > 100:
         warnings.append(
             f"Large number of sample sizes to test ({n_tests}). This may take significant time."
         )
@@ -179,10 +179,9 @@ def _validate_correlation_matrix(corr_matrix: Optional[np.ndarray]) -> _Validati
     # Positive semi-definite check
     try:
         eigenvals = np.linalg.eigvals(corr_matrix)
-        if np.any(eigenvals < -1e-8):
+        if np.any(eigenvals < -1e-8): # Tolerance for floating point noise
             errors.append(
                 f"Correlation matrix must be positive semi-definite. "
-                f"Minimum eigenvalue: {np.min(eigenvals):.6f}"
             )
     except np.linalg.LinAlgError:
         errors.append("Cannot compute eigenvalues of correlation matrix")
