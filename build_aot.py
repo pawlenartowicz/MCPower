@@ -23,7 +23,10 @@ def main():
         import mcpower.utils.ols
         import mcpower.utils.data_generation            
     except Exception as e:
+        import traceback
         print(f"AOT compilation failed: {e}")
+        print("Full traceback:")
+        traceback.print_exc()
         return 1
     finally:
         # Clean up environment
