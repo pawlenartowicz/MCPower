@@ -41,7 +41,7 @@ Issues = "https://github.com/pawlenartowicz/MCPower/issues"
 [tool.setuptools]
 packages = ["mcpower", "mcpower.utils"]
 zip-safe = false
-
+include-package-data = true
 
 [tool.setuptools.package-data]
 "mcpower.utils" = ["*.so", "*.pyd", "*.dll", "*_compiled*"]
