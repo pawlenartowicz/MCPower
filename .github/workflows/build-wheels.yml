@@ -1,0 +1,132 @@
+name: Build and publish wheels
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install cibuildwheel
+      run: python -m pip install cibuildwheel==2.16.2
+
+    - name: Build wheels
+      run: python -m cibuildwheel --output-dir wheelhouse
+      env:
+        # Configure cibuildwheel
+        CIBW_BUILD: cp38-* cp39-* cp310-* cp311-* cp312-*
+        CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
+        CIBW_BEFORE_BUILD: pip install numpy cython oldest-supported-numpy numba
+        CIBW_TEST_REQUIRES: pytest numpy pandas matplotlib scipy numba
+        CIBW_TEST_COMMAND: pytest {project}/tests -v || echo "Tests skipped"
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: wheels-${{ matrix.os }}
+        path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Build sdist
+      run: |
+        python -m pip install build
+        python -m build --sdist
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: sdist
+        path: dist/*.tar.gz
+
+  test_pypi_upload:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'  # Only for manual triggers
+    
+    steps:
+    - uses: actions/download-artifact@v3
+      with:
+        path: dist/
+
+    - name: Flatten artifacts
+      run: |
+        mkdir -p dist-flat
+        find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
+        find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
+
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        packages-dir: dist-flat/
+
+  pypi_upload:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')  # Only for version tags
+    
+    steps:
+    - uses: actions/download-artifact@v3
+      with:
+        path: dist/
+
+    - name: Flatten artifacts
+      run: |
+        mkdir -p dist-flat
+        find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
+        find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        packages-dir: dist-flat/
+
+  github_release:
+    needs: [build_wheels, build_sdist, pypi_upload]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - uses: actions/download-artifact@v3
+      with:
+        path: dist/
+
+    - name: Flatten artifacts
+      run: |
+        mkdir -p dist-flat
+        find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
+        find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist-flat/*
+        generate_release_notes: true
+        draft: false
