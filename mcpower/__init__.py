@@ -31,7 +31,7 @@ from .linear_regression import LinearRegression
 from importlib.metadata import version
 
 # Version info
-__version__ = version("MCPower")
+__version__ = "0.2.3"
 __author__ = 'Paweł Lenartowicz'
 __email__ = 'pawellenartowicz@europe.com'
 
