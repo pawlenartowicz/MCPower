@@ -9,6 +9,7 @@ import sys
 import shutil
 import glob
 from pathlib import Path
+from setuptools.command.build_py import build_py
 
 MODULES_TO_COMPILE = [
     'ols',
@@ -35,6 +36,13 @@ def main():
     del os.environ['NUMBA_AOT_BUILD']
     
     return 0
+
+
+class BuildPyWithAOT(build_py):
+    def run(self):
+        main()
+        super().run()
+
 
 if __name__ == "__main__":
     sys.exit(main())
