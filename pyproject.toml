@@ -61,7 +61,7 @@ test-requires = ["pytest", "numpy", "pandas", "matplotlib", "scipy", "numba"]
 test-command = "pytest {project}/tests -v || echo 'Tests skipped'"
 
 [tool.cibuildwheel.linux]
-before-all = "yum install -y gcc gcc-c++"
+before-all = "apt-get update && apt-get install -y gcc g++"
 
 [tool.cibuildwheel.macos]
 before-all = "brew install gcc"
