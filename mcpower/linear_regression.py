@@ -33,8 +33,6 @@ class LinearRegression(MCPowerBase):
         """
 
         # Generate y using compiled function
-        y = _generate_y(X_expanded=X_expanded, effect_sizes=effect_sizes_expanded,
-                        heterogeneity=heterogeneity, heteroskedasticity=heteroskedasticity,
-                        sim_seed=sim_seed if sim_seed is not None else -1
-        )
-        return y
+        return _generate_y(X_expanded, effect_sizes_expanded, heterogeneity, heteroskedasticity, 
+                        sim_seed if sim_seed is not None else -1)
+        

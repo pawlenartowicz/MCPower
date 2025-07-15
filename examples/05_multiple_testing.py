@@ -75,31 +75,20 @@ print("\n" + "=" * 60)
 print("SAMPLE SIZE WITH CORRECTIONS")
 print("=" * 60)
 
-print("\n1. UNCORRECTED SAMPLE SIZE:")
-uncorr_n = model.find_sample_size(
-    target_test="biomarker1",
-    from_size=50,
-    to_size=300,
-    by=25,
-    correction=None,
-    scenarios=True,
-    summary='short'
-)
-
-print("\n2. BONFERRONI SAMPLE SIZE:")
+print("\n1. BONFERRONI SAMPLE SIZE:")
 bonf_n = model.find_sample_size(
-    target_test="biomarker1",
-    from_size=100,
-    to_size=500,
-    by=50,
+    target_test="all",
+    from_size=50,
+    to_size=250,
+    by=10,
     correction="Bonferroni",
     scenarios=True,
     summary='short'
 )
 
-print("\n3. BENJAMINI-HOCHBERG SAMPLE SIZE:")
+print("\n2. BENJAMINI-HOCHBERG SAMPLE SIZE:")
 bh_n = model.find_sample_size(
-    target_test="biomarker1",
+    target_test="all",
     from_size=75,
     to_size=400,
     by=25,
