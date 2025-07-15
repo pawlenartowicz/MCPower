@@ -42,7 +42,7 @@ jobs:
 
   build_sdist:
     name: Build source distribution
-    runs-on: ubuntu-latestyum install
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
@@ -67,7 +67,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'  # Only for manual triggers
     
     steps:
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         path: dist/
 
@@ -90,7 +90,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')  # Only for version tags
     
     steps:
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         path: dist/
 
@@ -114,7 +114,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         path: dist/
 
