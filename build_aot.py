@@ -6,43 +6,31 @@ Compiles Numba functions to native code for distribution.
 
 import os
 import sys
-import shutil
-import glob
 from pathlib import Path
-from setuptools.command.build_py import build_py
-
-MODULES_TO_COMPILE = [
-    'ols',
-    'data_generation',
-]
 
 def main():
-    """Compile AOT modules."""    
-    # Setup
+    """Compile AOT modules."""
+    # Set AOT build flag
     os.environ['NUMBA_AOT_BUILD'] = '1'
-    script_dir = Path(__file__).parent
     
+    # Change to script directory and add to path
+    script_dir = Path(__file__).parent
     os.chdir(script_dir)
     sys.path.insert(0, str(script_dir))
     
-    # Compile modules
     try:
-        for module_name in MODULES_TO_COMPILE:
-            __import__(f'mcpower.utils.{module_name}')
+        # Import modules to trigger AOT compilation
+        import mcpower.utils.ols
+        import mcpower.utils.data_generation            
     except Exception as e:
-        return 0
-    
-    # Clear environment variable
-    del os.environ['NUMBA_AOT_BUILD']
+        print(f"AOT compilation failed: {e}")
+        return 1
+    finally:
+        # Clean up environment
+        if 'NUMBA_AOT_BUILD' in os.environ:
+            del os.environ['NUMBA_AOT_BUILD']
     
     return 0
-
-
-class BuildPyWithAOT(build_py):
-    def run(self):
-        main()
-        super().run()
-
 
 if __name__ == "__main__":
     sys.exit(main())
