@@ -96,7 +96,7 @@ setup(
     author_email="pawellenartowicz@europe.com",
     url="https://github.com/pawlenartowicz/MCPower",
     packages=find_packages(),
-    python_requires=">=3.9",
+    python_requires=">=3.10",
     install_requires=[
         "numpy>=2.0.0",
         "pandas>=2.0.0",

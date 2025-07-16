@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_wheels:
-    name: Build wheels with AOT (Python 3.9-3.12)
+    name: Build wheels with AOT (Python 3.10-3.12)
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -20,9 +20,9 @@ jobs:
     - name: Build wheels
       run: python -m cibuildwheel --output-dir wheelhouse
       env:
-        CIBW_BUILD: cp39-* cp310-* cp311-* cp312-*
+        CIBW_BUILD: cp310-* cp311-* cp312-*
         CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
-        CIBW_BEFORE_BUILD: "pip install setuptools>=80.0 numpy>=2.0.0 numba>=0.61.0 scipy>=1.11.0 && python build_aot.py"
+      CIBW_BEFORE_BUILD: "pip install setuptools>=80.0 numpy>=2.0.0 numba>=0.61.0 scipy>=1.11.0 && python build_aot.py"
         CIBW_TEST_REQUIRES: pytest numpy pandas matplotlib scipy numba
         CIBW_TEST_COMMAND: pytest {project}/tests -v || echo "Tests skipped"
         CIBW_BEFORE_ALL_MACOS: "brew install gcc || echo 'GCC already installed'"
