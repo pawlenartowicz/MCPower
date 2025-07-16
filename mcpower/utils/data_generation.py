@@ -277,13 +277,13 @@ else:
         # Try AOT compiled version first
         from .data_generation_compiled import _generate_X_core as _generate_X_core_aot
         _generate_X_runtime = _generate_X_core_aot
-        print("Using AOT compiled data generation")
+        print("Using AOT data generation")
     except (ImportError, AttributeError):
         try:
             # Fall back to JIT compilation
             from numba import njit
             _generate_X_runtime = njit('f8[:,:](i8, i8, f8[:,:], i8[:], f8[:], f8[:], f8[:], f8[:,:], f8[:,:], i8)', cache=True)(_generate_X_core)
-            print("JIT compiled data generation")
+            print("Using JIT data generation")
         except ImportError:
             # Pure Python fallback
             _generate_X_runtime = _generate_X_core

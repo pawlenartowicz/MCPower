@@ -429,7 +429,7 @@ else:
         from .ols_compiled import _ols_core as _ols_core_aot, _generate_y_core as _generate_y_core_aot
         _ols_runtime = _ols_core_aot
         _generate_y_runtime = _generate_y_core_aot
-        print("Using AOT compiled OLS")
+        print("Using AOT OLS")
     except (ImportError, AttributeError):
         try:
             # Fall back to JIT compilation
