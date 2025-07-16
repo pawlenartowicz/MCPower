@@ -79,9 +79,14 @@ _init_tables()
 
 # AOT compilation setup (build-time only)
 if os.environ.get('NUMBA_AOT_BUILD'):
-    from numba.pycc import CC
-    cc = CC('data_generation_compiled')
-    compile_function = lambda sig: lambda func: cc.export(func.__name__, sig)(func) # type: ignore
+    try:
+        from numba.pycc import CC
+        cc = CC('data_generation_compiled')
+        compile_function = lambda sig: lambda func: cc.export(func.__name__, sig)(func)
+    except ImportError as e:
+        print(f"Warning: AOT compilation not available: {e}")
+        cc = None
+        compile_function = None
 else:
     cc = None
     compile_function = None
