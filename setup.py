@@ -98,11 +98,11 @@ setup(
     packages=find_packages(),
     python_requires=">=3.9",
     install_requires=[
-        "numpy>=1.26.0",
+        "numpy>=2.0.0",
         "pandas>=2.0.0",
         "matplotlib>=3.8.0",
         "scipy>=1.11.0",
-        "numba>=0.58.0",
+        "numba>=0.61.0",
     ],
     extras_require={
         "parallel": ["joblib>=1.3.0"],
