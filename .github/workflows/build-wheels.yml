@@ -1,15 +1,17 @@
 name: Build and publish wheels
-
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - 'v*'  # Trigger on version tags
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  build_linux_wheels:
-    name: Build Linux wheels
-    runs-on: ubuntu-latest
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
     - uses: actions/checkout@v4
     
@@ -18,69 +20,82 @@ jobs:
       with:
         python-version: '3.11'
     
-    - name: Install dependencies and build AOT
+    - name: Install dependencies
       run: |
-        pip install numpy numba scipy build
-        python build_aot.py
-        
-    - name: Build wheels
-      run: python -m build --wheel
-      
-    - name: Upload Linux wheels
-      uses: actions/upload-artifact@v4
-      with:
-        name: wheels-linux
-        path: dist/*.whl
-
-  build_windows_wheels:
-    name: Build Windows wheels
-    runs-on: windows-latest
-    steps:
-    - uses: actions/checkout@v4
+        python -m pip install --upgrade pip
+        pip install numpy>=1.26.0 numba>=0.58.0 scipy>=1.11.0
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies and build AOT
+    - name: Test AOT compilation locally
       run: |
-        pip install numpy numba scipy build
+        echo "Testing AOT compilation..."
         python build_aot.py
-        
+        echo "Listing compiled files:"
+        ls -la mcpower/utils/ | grep -E '\.(so|pyd|dll|compiled)' || echo "No compiled files found"
+    
+    - name: Install cibuildwheel
+      run: python -m pip install cibuildwheel==2.16.2
+    
     - name: Build wheels
-      run: python -m build --wheel
-      
-    - name: Upload Windows wheels
-      uses: actions/upload-artifact@v4
-      with:
-        name: wheels-windows
-        path: dist/*.whl
-
-  build_macos_wheels:
-    name: Build macOS wheels
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v4
+      run: python -m cibuildwheel --output-dir wheelhouse
+      env:
+        CIBW_BUILD: cp39-* cp310-* cp311-* cp312-*
+        CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
+        
+        # Install dependencies and run AOT compilation
+        CIBW_BEFORE_BUILD: |
+          pip install --upgrade pip
+          pip install numpy>=1.26.0 numba>=0.58.0 scipy>=1.11.0
+          echo "Running AOT compilation in cibuildwheel..."
+          python build_aot.py
+          echo "Compiled files after AOT:"
+          ls -la mcpower/utils/ | grep -E '\.(so|pyd|dll|compiled)' || echo "No compiled files found"
+        
+        # Don't repair wheels - keep AOT compiled files
+        CIBW_REPAIR_WHEEL_COMMAND: ""
+        
+        # Test configuration
+        CIBW_TEST_REQUIRES: pytest numpy pandas matplotlib scipy numba
+        CIBW_TEST_COMMAND: pytest {project}/tests -v || echo "Tests skipped"
+        
+        # Force platform-specific wheel
+        CIBW_ENVIRONMENT: SETUPTOOLS_USE_DISTUTILS=stdlib
+        
+        # macOS specific: ensure we have a compiler
+        CIBW_BEFORE_ALL_MACOS: |
+          brew install gcc || echo "GCC already installed"
+        
+        # Linux specific: ensure we have build tools
+        CIBW_BEFORE_ALL_LINUX: |
+          yum install -y gcc gcc-c++ || apt-get update && apt-get install -y gcc g++ || echo "Compilers already available"
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies and build AOT
+    - name: List and inspect built wheels
       run: |
-        pip install numpy numba scipy build
-        python build_aot.py
-        
-    - name: Build wheels
-      run: python -m build --wheel
-      
-    - name: Upload macOS wheels
-      uses: actions/upload-artifact@v4
+        echo "Built wheels:"
+        ls -la wheelhouse/
+        echo "Inspecting wheel contents:"
+        python -m zipfile -l wheelhouse/*.whl | grep -E '\.(so|pyd|dll|compiled)' || echo "No compiled files in wheels"
+    
+    - name: Verify wheel is platform-specific
+      run: |
+        echo "Checking wheel tags:"
+        python -c "
+        import glob
+        import os
+        wheels = glob.glob('wheelhouse/*.whl')
+        for wheel in wheels:
+            print(f'Wheel: {os.path.basename(wheel)}')
+            if 'py2.py3-none-any' in wheel:
+                print('  ERROR: Pure Python wheel detected!')
+                exit(1)
+            else:
+                print('  OK: Platform-specific wheel')
+        print('All wheels are platform-specific!')
+        "
+    
+    - uses: actions/upload-artifact@v4
       with:
-        name: wheels-macos
-        path: dist/*.whl
+        name: wheels-${{ matrix.os }}
+        path: ./wheelhouse/*.whl
 
   build_sdist:
     name: Build source distribution
@@ -95,17 +110,16 @@ jobs:
     
     - name: Build sdist
       run: |
-        pip install build
+        python -m pip install build
         python -m build --sdist
-        
-    - name: Upload sdist
-      uses: actions/upload-artifact@v4
+    
+    - uses: actions/upload-artifact@v4
       with:
         name: sdist
         path: dist/*.tar.gz
 
   test_pypi_upload:
-    needs: [build_linux_wheels, build_windows_wheels, build_macos_wheels, build_sdist]
+    needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     
@@ -113,13 +127,18 @@ jobs:
     - uses: actions/download-artifact@v4
       with:
         path: dist/
-        
+    
     - name: Flatten artifacts
       run: |
         mkdir -p dist-flat
         find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
         find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
-        
+    
+    - name: List final artifacts
+      run: |
+        echo "Final artifacts for TestPyPI:"
+        ls -la dist-flat/
+    
     - name: Publish to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
@@ -128,7 +147,7 @@ jobs:
         packages-dir: dist-flat/
 
   pypi_upload:
-    needs: [build_linux_wheels, build_windows_wheels, build_macos_wheels, build_sdist]
+    needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
@@ -136,13 +155,13 @@ jobs:
     - uses: actions/download-artifact@v4
       with:
         path: dist/
-        
+    
     - name: Flatten artifacts
       run: |
         mkdir -p dist-flat
         find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
         find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
-        
+    
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
@@ -150,7 +169,7 @@ jobs:
         packages-dir: dist-flat/
 
   github_release:
-    needs: [build_linux_wheels, build_windows_wheels, build_macos_wheels, build_sdist, pypi_upload]
+    needs: [build_wheels, build_sdist, pypi_upload]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
@@ -160,13 +179,13 @@ jobs:
     - uses: actions/download-artifact@v4
       with:
         path: dist/
-        
+    
     - name: Flatten artifacts
       run: |
         mkdir -p dist-flat
         find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
         find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
-        
+    
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:

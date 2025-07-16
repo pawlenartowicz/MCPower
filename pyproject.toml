@@ -38,6 +38,7 @@ Homepage = "https://github.com/pawlenartowicz/MCPower"
 Repository = "https://github.com/pawlenartowicz/MCPower"
 Issues = "https://github.com/pawlenartowicz/MCPower/issues"
 
+# Note: Most config now in setup.py for better AOT control
 [tool.setuptools]
 packages = ["mcpower", "mcpower.utils"]
 zip-safe = false
@@ -45,13 +46,3 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "mcpower.utils" = ["*.so", "*.pyd", "*.dll", "*_compiled*"]
-
-[tool.cibuildwheel]
-build = "cp39-* cp310-* cp311-* cp312-*"
-skip = "*-win32 *-manylinux_i686 *-musllinux_*"
-before-build = "pip install numpy numba && python build_aot.py"
-test-requires = ["pytest", "numpy", "pandas", "matplotlib", "scipy", "numba"]
-test-command = "pytest {project}/tests -v || echo 'Tests skipped'"
-
-[tool.cibuildwheel.macos]
-before-all = "brew install gcc"
