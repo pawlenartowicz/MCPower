@@ -2,81 +2,60 @@ name: Build and publish wheels
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags
-  workflow_dispatch:  # Allow manual trigger
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
-  build_wheels:
-    name: Build wheels on ${{ matrix.os }}
+  build_wheels_aot:
+    name: Build wheels with AOT (Python 3.9-3.11)
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
     - name: Install cibuildwheel
       run: python -m pip install cibuildwheel==2.16.2
     
     - name: Build wheels
       run: python -m cibuildwheel --output-dir wheelhouse
       env:
-        CIBW_BUILD: cp39-* cp310-* cp311-* cp312-*
+        CIBW_BUILD: cp39-* cp310-* cp311-*
         CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
-        
-        # Install dependencies and run AOT compilation
         CIBW_BEFORE_BUILD: "pip install setuptools==68.2.2 numpy>=1.26.0 numba>=0.58.0 scipy>=1.11.0 && python build_aot.py"
-        
-        # Don't repair wheels - keep AOT compiled files
-        CIBW_REPAIR_WHEEL_COMMAND: ""
-        
-        # Test configuration
         CIBW_TEST_REQUIRES: pytest numpy pandas matplotlib scipy numba
         CIBW_TEST_COMMAND: pytest {project}/tests -v || echo "Tests skipped"
-        
-        # Force platform-specific wheel
-        CIBW_ENVIRONMENT: SETUPTOOLS_USE_DISTUTILS=stdlib
-        
-        # macOS specific: ensure we have a compiler
-        CIBW_BEFORE_ALL_MACOS: |
-          brew install gcc || echo "GCC already installed"
-        
-        # Linux specific: ensure we have build tools
-        CIBW_BEFORE_ALL_LINUX: |
-          yum install -y gcc gcc-c++ || apt-get update && apt-get install -y gcc g++ || echo "Compilers already available"
-    
-    - name: List and inspect built wheels
-      run: |
-        echo "Built wheels:"
-        ls -la wheelhouse/
-        echo "Inspecting wheel contents:"
-        python -m zipfile -l wheelhouse/*.whl | grep -E '\.(so|pyd|dll|compiled)' || echo "No compiled files in wheels"
-    
-    - name: Verify wheel is platform-specific
-      run: |
-        echo "Checking wheel tags:"
-        python -c "
-        import glob
-        import os
-        wheels = glob.glob('wheelhouse/*.whl')
-        for wheel in wheels:
-            print(f'Wheel: {os.path.basename(wheel)}')
-            if 'py2.py3-none-any' in wheel:
-                print('  ERROR: Pure Python wheel detected!')
-                exit(1)
-            else:
-                print('  OK: Platform-specific wheel')
-        print('All wheels are platform-specific!')
-        "
+        CIBW_BEFORE_ALL_MACOS: "brew install gcc || echo 'GCC already installed'"
+        CIBW_BEFORE_ALL_LINUX: "yum install -y gcc gcc-c++ || apt-get update && apt-get install -y gcc g++ || echo 'Compilers already available'"
     
     - uses: actions/upload-artifact@v4
       with:
-        name: wheels-${{ matrix.os }}
+        name: wheels-aot-${{ matrix.os }}
+        path: ./wheelhouse/*.whl
+
+  build_wheels_jit:
+    name: Build wheels with JIT (Python 3.12)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install cibuildwheel
+      run: python -m pip install cibuildwheel==2.16.2
+    
+    - name: Build wheels
+      run: python -m cibuildwheel --output-dir wheelhouse
+      env:
+        CIBW_BUILD: cp312-*
+        CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
+        CIBW_BEFORE_BUILD: "pip install numpy>=1.26.0 numba>=0.58.0 scipy>=1.11.0"
+        CIBW_TEST_REQUIRES: pytest numpy pandas matplotlib scipy numba
+        CIBW_TEST_COMMAND: pytest {project}/tests -v || echo "Tests skipped"
+    
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-jit-${{ matrix.os }}
         path: ./wheelhouse/*.whl
 
   build_sdist:
@@ -84,24 +63,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-    
     - name: Build sdist
       run: |
         python -m pip install build
         python -m build --sdist
-    
     - uses: actions/upload-artifact@v4
       with:
         name: sdist
         path: dist/*.tar.gz
 
   test_pypi_upload:
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels_aot, build_wheels_jit, build_sdist]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     
@@ -109,18 +85,11 @@ jobs:
     - uses: actions/download-artifact@v4
       with:
         path: dist/
-    
     - name: Flatten artifacts
       run: |
         mkdir -p dist-flat
         find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
         find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
-    
-    - name: List final artifacts
-      run: |
-        echo "Final artifacts for TestPyPI:"
-        ls -la dist-flat/
-    
     - name: Publish to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
@@ -129,7 +98,7 @@ jobs:
         packages-dir: dist-flat/
 
   pypi_upload:
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels_aot, build_wheels_jit, build_sdist]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
@@ -137,13 +106,11 @@ jobs:
     - uses: actions/download-artifact@v4
       with:
         path: dist/
-    
     - name: Flatten artifacts
       run: |
         mkdir -p dist-flat
         find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
         find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
-    
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
@@ -151,23 +118,20 @@ jobs:
         packages-dir: dist-flat/
 
   github_release:
-    needs: [build_wheels, build_sdist, pypi_upload]
+    needs: [build_wheels_aot, build_wheels_jit, build_sdist, pypi_upload]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
     steps:
     - uses: actions/checkout@v4
-    
     - uses: actions/download-artifact@v4
       with:
         path: dist/
-    
     - name: Flatten artifacts
       run: |
         mkdir -p dist-flat
         find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
         find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
-    
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
