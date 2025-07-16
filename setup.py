@@ -88,7 +88,7 @@ dummy_extension = Extension(
 
 setup(
     name="MCPower",
-    version="0.2.4",
+    version="0.3.0",
     description="Monte Carlo Power Analysis for Statistical Models",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -102,9 +102,9 @@ setup(
         "pandas>=2.0.0",
         "matplotlib>=3.8.0",
         "scipy>=1.11.0",
-        "numba>=0.61.0",
     ],
     extras_require={
+        "JIT": ["numba>=0.61.0"],
         "parallel": ["joblib>=1.3.0"],
         "dev": ["pytest>=7.0.0", "pytest-cov>=4.0.0", "build>=0.10.0", "twine>=4.0.0"],
         "all": ["joblib>=1.3.0", "pytest>=7.0.0", "pytest-cov>=4.0.0"],
@@ -123,7 +123,6 @@ setup(
         "Intended Audience :: Science/Research",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",

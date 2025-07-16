@@ -27,11 +27,10 @@ Example Usage:
 """
 
 from .linear_regression import LinearRegression
-
 from importlib.metadata import version
 
 # Version info
-__version__ = "0.2.4"
+__version__ = "0.3.0"
 __author__ = 'Paweł Lenartowicz'
 __email__ = 'pawellenartowicz@europe.com'
 

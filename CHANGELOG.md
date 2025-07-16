@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-07-16
+
+### Major changes
+- AOT Compiled files added
+- PyPI release
+
+### Minor changes
+- Small changes in documentation, added fallback to compilation
+
+
+## [0.2.4] - 2025-07-16
+- Test PYPI release
+
+## [0.2.3] - 2025-07-16
+- Test PYPI release
+
 ## [0.2.2] - 2025-07-11
 
 ### Major changes

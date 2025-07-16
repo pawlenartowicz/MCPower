@@ -82,7 +82,7 @@ if os.environ.get('NUMBA_AOT_BUILD'):
     try:
         from numba.pycc import CC
         cc = CC('data_generation_compiled')
-        compile_function = lambda sig: lambda func: cc.export(func.__name__, sig)(func)
+        compile_function = lambda sig: lambda func: cc.export(func.__name__, sig)(func) # type: ignore
     except ImportError as e:
         print(f"Warning: AOT compilation not available: {e}")
         cc = None
