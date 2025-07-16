@@ -8,7 +8,7 @@ version = "0.2.3"
 description = "Monte Carlo Power Analysis for Statistical Models"
 readme = "README.md"
 authors = [{name = "Paweł Lenartowicz", email = "pawellenartowicz@europe.com"}]
-license = "GPL-3.0-or-later"
+license = {text = "GPL-3.0-or-later"}
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
