@@ -32,8 +32,8 @@ def _check_for_updates(current_version):
     # Show update message
     if cache.get('latest_version') and cache['latest_version'] != cache.get('current_version'):
         print("=" * 60)
-        print(f"📦 NEW MCPower VERSION AVAILABLE: {cache['latest_version']} (you have {cache.get('current_version')})")
-        print("🚀 Update now: pip install --upgrade MCPower")
+        print(f"NEW MCPower VERSION AVAILABLE: {cache['latest_version']} (you have {cache.get('current_version')})")
+        print("Update now: pip install --upgrade MCPower")
         print("=" * 60)
 
 
