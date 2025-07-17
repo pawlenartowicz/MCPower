@@ -9,4 +9,6 @@ venv/*
 # development phase
 mcpower/cpp/* 
 mcpower/_dev_test.py
+_dev_test.py
 todo.md
+mcpower/.mcpower_cache.json

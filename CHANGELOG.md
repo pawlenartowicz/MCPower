@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2025-07-17
+
+### Major changes
+- Added weekly update checker
+
+### Minor changes
+- Small changes in documentation
+
+
 ## [0.3.0] - 2025-07-16
 
 ### Major changes
@@ -13,10 +22,10 @@ All notable changes to this project will be documented in this file.
 
 
 ## [0.2.4] - 2025-07-16
-- Test PYPI release
+- Test PyPI release
 
 ## [0.2.3] - 2025-07-16
-- Test PYPI release
+- Test PyPI release
 
 ## [0.2.2] - 2025-07-11
 

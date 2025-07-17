@@ -16,12 +16,12 @@
 
 ### Install
 ```bash
-pip install git+https://github.com/pawlenartowicz/MCPower
+pip install mcpower
 ```
 
 ### Update to the latest version (every few days).
 ```bash
-pip install --upgrade git+https://github.com/pawlenartowicz/MCPower
+pip install --upgrade mcpower
 ```
 
 ### Your First Power Analysis
@@ -331,10 +331,11 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 
 ## Aim for future (waiting for suggestions)
 - ✅ Linear Regression
+- ✅ Scenarios, robustness analysis
 - 🚧 Logistic Regression (coming soon)
-- 🚧 Tweaking scenarios, robustness analysis (coming soon)
-- 🚧 Guide about methods, corrections (coming soon)
 - 🚧 ANOVA (and factor as variables) (coming soon)
+- 🚧 Guide about methods, corrections (coming soon)
+- 📋 Rewriting to Cython (backend change)
 - 📋 Mixed Effects Models
 - 📋 2 groups comparision with alternative tests
 - 📋 Robust regression methods

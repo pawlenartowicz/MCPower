@@ -27,10 +27,9 @@ Example Usage:
 """
 
 from .linear_regression import LinearRegression
-from importlib.metadata import version
 
 # Version info
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __author__ = 'Paweł Lenartowicz'
 __email__ = 'pawellenartowicz@europe.com'
 
@@ -51,3 +50,7 @@ def get_info():
         'author': __author__,
         'email': __email__
     }
+
+# Check for updates
+from .utils.updates import _check_for_updates
+_check_for_updates(__version__)

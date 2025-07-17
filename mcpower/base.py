@@ -14,8 +14,10 @@ from .utils.validators import (
 from .utils.formatters import _format_results
 from .utils.visualization import _create_power_plot
 from .utils.data_generation import _generate_X
-
 DUMMY_MATRIX = np.zeros((2, 2), dtype=np.float64)
+
+
+
 
 class MCPowerBase(ABC):
     """

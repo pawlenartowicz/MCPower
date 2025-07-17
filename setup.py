@@ -88,7 +88,7 @@ dummy_extension = Extension(
 
 setup(
     name="MCPower",
-    version="0.3.0",
+    version="0.3.1",
     description="Monte Carlo Power Analysis for Statistical Models",
     long_description=long_description,
     long_description_content_type="text/markdown",
