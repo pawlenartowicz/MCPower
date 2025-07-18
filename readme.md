@@ -36,7 +36,7 @@ pip install --upgrade mcpower
 ### Your First Power Analysis
 ```python
 
-# 0. First initialization could take a few seconds, due to compilation (package is not distributed yet with compiled files)
+# 0. Import installed package
 import mcpower
 
 # 1. Define your model (just like R)
