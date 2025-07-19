@@ -1219,7 +1219,8 @@ class MCPowerBase(ABC):
     def _run_sample_size_analysis_parallel(self, sample_sizes, target_tests, formula_to_test, 
                                            correction, scenario_config):
         """Run sample size analysis in parallel."""
-        
+        from joblib import Parallel, delayed
+
         n_jobs = min(len(sample_sizes), self.n_cores)
         
         def analyze_single_size(sample_size):
