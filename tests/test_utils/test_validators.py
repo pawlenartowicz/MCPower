@@ -326,10 +326,26 @@ class TestParallelSettingsValidation:
     
     def test_valid_settings(self):
         """Test valid parallel settings."""
-        settings, result = _validate_parallel_settings(True, 4)
+        import multiprocessing as mp
+        max_cores = mp.cpu_count()
+        
+        # Test with a reasonable number of cores that should be available
+        requested_cores = min(4, max_cores)
+        settings, result = _validate_parallel_settings(True, requested_cores)
         assert result.is_valid is True
         assert settings[0] is True
-        assert settings[1] == 4
+        assert settings[1] == requested_cores
+    
+    def test_cores_capped_at_available(self):
+        """Test that cores are capped at available CPU count."""
+        import multiprocessing as mp
+        max_cores = mp.cpu_count()
+        
+        # Request more cores than available
+        settings, result = _validate_parallel_settings(True, max_cores + 10)
+        assert result.is_valid is True
+        assert settings[0] is True
+        assert settings[1] <= max_cores  # Should be capped
     
     def test_invalid_enable_type(self):
         """Test invalid enable parameter."""
@@ -351,7 +367,6 @@ class TestParallelSettingsValidation:
         settings, result = _validate_parallel_settings(True, None)
         assert result.is_valid is True
         assert settings[1] > 0  # Should get default value
-
 
 class TestModelReadyValidation:
     """Test model readiness validation."""
