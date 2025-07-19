@@ -1,4 +1,8 @@
 ![Tests](https://github.com/pawlenartowicz/MCPower/workflows/Tests/badge.svg)
+![PyPI](https://img.shields.io/pypi/v/MCPower)
+![Python](https://img.shields.io/pypi/pyversions/mcpower)
+![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)
+
 
 ```
 ███╗   ███╗  ██████╗ ██████╗ 
