@@ -1,3 +1,5 @@
+![Tests](https://github.com/pawlenartowicz/MCPower/workflows/Tests/badge.svg)
+
 ```
 ███╗   ███╗  ██████╗ ██████╗ 
 ████╗ ████║ ██╔════╝ ██╔══██╗ ██████╗ ██╗    ██╗███████╗██████╗ 
