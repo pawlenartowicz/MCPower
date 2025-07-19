@@ -1,3 +1,12 @@
+"""
+Linear Regression implementation for MCPower framework.
+
+This module provides Monte Carlo power analysis for linear regression models.
+It extends the MCPowerBase abstract class to implement OLS-specific functionality.
+Additional statistical models (LogisticRegression, ANOVA, etc.) can be
+implemented as separate modules following the same pattern.
+"""
+
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 from .base import MCPowerBase
@@ -10,6 +19,15 @@ class LinearRegression(MCPowerBase):
 
     Supports continuous predictors, interactions, and correlations between predictors.
     Uses Ordinary Least Squares estimation with F-tests and t-tests.
+
+    Note:
+        This class implements the abstract methods from MCPowerBase to provide
+        linear regression-specific functionality.
+
+    Example:
+        >>> model = LinearRegression("outcome = treatment + age")
+        >>> model.set_effects("treatment=0.5, age=0.3")
+        >>> model.find_power(sample_size=100)
     """
 
     @property

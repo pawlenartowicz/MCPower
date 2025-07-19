@@ -55,7 +55,7 @@ model.set_effects("treatment=0.5, motivation=0.3")
 model.set_variable_type("treatment=binary")
 
 # 4. Find the sample size you need
-model.find_sample_size(target_test="treatment", from_size=50, to_size=200)
+model.find_sample_size(target_test="treatment", from_size=50, to_size=200, summary="long")
 ```
 **Output**: "You need N=75 for 80% power to detect the treatment effect"
 
@@ -176,7 +176,7 @@ model.set_variable_type("treatment=binary, income=right_skewed, age=normal")
 model.set_variable_type("treatment=(binary,0.3)")
 ```
 
-### Your Own Data (be careful, not yet well tested)
+### Your Own Data
 ```python
 import pandas as pd
 
@@ -222,7 +222,8 @@ model.set_parallel(True)
 |-----------------|--------------|
 | Find required sample size | `model.find_sample_size(target_test="effect_name")` |
 | Check power for specific N | `model.find_power(sample_size=150, target_test="effect_name")` |
-| **Test robustness** | **Add `scenarios=True` to either method** |
+|**Test robustness** | **Add `scenarios=True` to either method** |
+|**Detailed output with plots**  | **Add `summary="long"` to either method** |
 | Test overall model | `target_test="overall"` |
 | Test multiple effects | `target_test="effect1, effect2"` or `"all"` |
 | Binary variables | `model.set_variable_type("var=binary")` |

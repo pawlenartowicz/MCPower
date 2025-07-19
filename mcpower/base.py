@@ -1,3 +1,13 @@
+"""
+Base framework for Monte Carlo power analysis across statistical models.
+
+This module provides the abstract base class MCPowerBase that defines the common
+interface and functionality for all statistical model implementations.
+Concrete models (LinearRegression, LogisticRegression, etc.) inherit from this
+base to implement model-specific statistical tests while sharing common features
+like data generation, scenario analysis, and result formatting.
+"""
+
 import numpy as np
 from typing import Optional, List, Dict, Any, Tuple
 from abc import ABC, abstractmethod
@@ -917,7 +927,12 @@ class MCPowerBase(ABC):
         alpha: float,
         correction_method: int,
     ) -> np.ndarray:
-        """Return: (uncorrected_significance, corrected_significance)"""
+        """
+        Run model-specific statistical analysis on simulated data.
+
+        Must return array: [f_test_significant, individual_tests..., corrected_tests...]
+        where each element is 0.0 (not significant) or 1.0 (significant).
+        """
         pass
 
     @abstractmethod
@@ -929,6 +944,20 @@ class MCPowerBase(ABC):
         heteroskedasticity: float = 0.0,
         sim_seed: Optional[int] = None,
     ) -> np.ndarray:
+        """
+        Generate dependent variable for Monte Carlo simulation.
+
+        Args:
+            X_expanded: Design matrix with interaction terms (n_samples, n_effects)
+            effect_sizes_expanded: Effect sizes for each column in X_expanded
+            heterogeneity: SD of effect size variation across observations (0=constant effects)
+            heteroskedasticity: Correlation between predictor and error variance (-1 to 1)
+            sim_seed: Random seed for reproducible generation
+
+        Returns:
+            Generated dependent variable array (n_samples,)
+
+        """
         pass
 
     # =====================================
