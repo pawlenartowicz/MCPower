@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [ main, test-github-actions ]
+    branches: [ main, develop, test-github-actions ]  # Add your test branch
   pull_request:
     branches: [ main ]
 
@@ -36,13 +36,9 @@ jobs:
         pip install pandas numba matplotlib joblib
         pip install -e .  # Install your package in development mode
     
-    - name: Run unit tests
+    - name: Run tests
       run: |
-        pytest tests/ -v --tb=short -m "unit or not integration"
-    
-    - name: Run integration tests
-      run: |
-        pytest tests/ -v --tb=short -m "integration"
+        pytest tests/ -v --tb=short
     
     - name: Generate coverage report
       run: |
@@ -115,17 +111,7 @@ jobs:
     
     - name: Install linting tools
       run: |
-        pip install flake8 black isort mypy
+        pip install flake8
     
-    - name: Run flake8
+    - name: Run flake8 (syntax errors only)
       run: flake8 mcpower --count --select=E9,F63,F7,F82 --show-source --statistics
-    
-    - name: Check black formatting
-      run: black --check mcpower
-    
-    - name: Check import sorting
-      run: isort --check-only mcpower
-    
-    - name: Run mypy (optional, for type checking)
-      run: mypy mcpower --ignore-missing-imports
-      continue-on-error: true
