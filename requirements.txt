@@ -1,9 +1,0 @@
-# Core dependencies
-numpy>=1.26.0
-pandas>=2.0.0
-matplotlib>=3.8.0
-scipy>=1.11.0
-numba>=0.58.0
-
-# Optional: for parallel processing
-joblib>=1.1.0

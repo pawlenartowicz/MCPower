@@ -1,0 +1,152 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, test-github-actions ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', '**/setup.py', '**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        pip install pytest pytest-cov
+        pip install -e .  # Install your package in development mode
+        # Install optional dependencies for full testing
+        pip install numba matplotlib joblib pandas
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v --tb=short -m "unit or not integration"
+    
+    - name: Run integration tests
+      run: |
+        pytest tests/ -v --tb=short -m "integration"
+    
+    - name: Generate coverage report
+      run: |
+        pytest tests/ --cov=mcpower --cov-report=xml --cov-report=html
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  test-minimal:
+    # Test with minimal dependencies (no numba, no optional packages)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install minimal dependencies
+      run: |
+        pip install pytest
+        # Install only core dependencies (no numba)
+        pip install numpy scipy scikit-learn matplotlib
+        pip install -e . --no-deps
+    
+    - name: Test fallback to pure Python
+      run: |
+        pytest tests/ -v --tb=short
+        
+  test-compilation:
+    # Test different compilation modes
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mode: [jit, python-only]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies for JIT testing
+      if: matrix.mode == 'jit'
+      run: |
+        pip install pytest
+        pip install numba  # Enable JIT compilation
+        pip install numpy scipy scikit-learn matplotlib joblib pandas
+        pip install -e .
+    
+    - name: Install dependencies for Python-only testing  
+      if: matrix.mode == 'python-only'
+      run: |
+        pip install pytest
+        # Deliberately exclude numba to force Python fallback
+        pip install numpy scipy scikit-learn matplotlib joblib pandas
+        pip install -e . --no-deps
+    
+    - name: Test JIT compilation mode
+      if: matrix.mode == 'jit'
+      run: |
+        # Should print "Using JIT OLS" and "Using JIT data generation"
+        python -c "import mcpower; print('JIT mode working')"
+        pytest tests/ -v --tb=short
+    
+    - name: Test Python-only fallback mode
+      if: matrix.mode == 'python-only'
+      run: |
+        # Should print "Using Python OLS" and "Using Python data generation"
+        python -c "import mcpower; print('Python fallback working')"
+        pytest tests/ -v --tb=short
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install linting tools
+      run: |
+        pip install flake8 black isort mypy
+    
+    - name: Run flake8
+      run: flake8 mcpower --count --select=E9,F63,F7,F82 --show-source --statistics
+    
+    - name: Check black formatting
+      run: black --check mcpower
+    
+    - name: Check import sorting
+      run: isort --check-only mcpower
+    
+    - name: Run mypy (optional, for type checking)
+      run: mypy mcpower --ignore-missing-imports
+      continue-on-error: true  # Don't fail CI if type checking fails
