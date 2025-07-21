@@ -14,7 +14,7 @@ authors:
     corresponding: true
     affiliation: 1
 affiliations:
- - name: [Stowarzyszenie na rzecz Otwartej Nauki (Society for Open Science)], [Poland]
+ - name: "Stowarzyszenie na rzecz Otwartej Nauki (Society for Open Science), Poland"
    index: 1
 date: [Current Date]
 bibliography: paper.bib
