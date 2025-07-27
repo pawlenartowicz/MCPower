@@ -154,7 +154,7 @@ class _AssignmentParser:
     def _parse_variable_type_value(
         self, value: str
     ) -> Tuple[Dict[str, Any], Optional[str]]:
-        """Parse variable type value (e.g., 'binary' or '(binary,0.3)')."""
+        """Parse variable type value including factor support."""
         supported_types = [
             "normal",
             "binary",
@@ -162,33 +162,100 @@ class _AssignmentParser:
             "left_skewed",
             "high_kurtosis",
             "uniform",
+            "factor",
         ]
 
         if value.startswith("(") and value.endswith(")"):
-            # Tuple format: (type, param)
+            # Tuple format: (type, param) or (type, param1, param2, ...)
             content = value[1:-1]
             if "," not in content:
-                return {}, "Invalid tuple format. Expected '(type,value)'"
+                return (
+                    {},
+                    "Invalid tuple format. Expected '(type,value)' or '(type,val1,val2,...)'",
+                )
 
             parts = [p.strip() for p in content.split(",")]
-            if len(parts) != 2:
-                return {}, "Expected exactly 2 values in tuple"
+            if len(parts) < 2:
+                return {}, "Expected at least 2 values in tuple"
 
-            var_type, param_str = parts
+            var_type = parts[0]
 
             if var_type not in supported_types:
                 return {}, f"Unsupported type '{var_type}'"
 
             if var_type == "binary":
+                if len(parts) != 2:
+                    return (
+                        {},
+                        "Binary type expects exactly 2 values: (binary, proportion)",
+                    )
                 try:
-                    proportion = float(param_str)
+                    proportion = float(parts[1])
                     if not 0 <= proportion <= 1:
                         return {}, f"Proportion must be between 0 and 1"
                     return {"type": var_type, "proportion": proportion}, None
                 except ValueError:
-                    return {}, f"Invalid proportion value '{param_str}'"
+                    return {}, f"Invalid proportion value '{parts[1]}'"
+
+            elif var_type == "factor":
+                if len(parts) == 2:
+                    # Format: (factor, n_levels) - equal proportions
+                    try:
+                        n_levels = int(parts[1])
+                        if n_levels < 2:
+                            return {}, "Factor must have at least 2 levels"
+                        if n_levels > 20:
+                            return {}, "Factor cannot have more than 20 levels"
+
+                        # Equal proportions for all levels
+                        proportions = [1.0 / n_levels] * n_levels
+                        return {
+                            "type": var_type,
+                            "n_levels": n_levels,
+                            "proportions": proportions,
+                        }, None
+                    except ValueError:
+                        return (
+                            {},
+                            f"Invalid number of levels '{parts[1]}'. Must be integer",
+                        )
+
+                elif len(parts) >= 3:
+                    # Format: (factor, prop1, prop2, ...) - custom proportions
+                    try:
+                        proportions = [float(p) for p in parts[1:]]
+                        n_levels = len(proportions)
+
+                        if n_levels < 2:
+                            return {}, "Factor must have at least 2 levels"
+                        if n_levels > 20:
+                            return {}, "Factor cannot have more than 20 levels"
+
+                        # Check for zero/negative proportions
+                        if any(p <= 0 for p in proportions):
+                            return (
+                                {},
+                                "All proportions must be positive (greater than 0)",
+                            )
+
+                        # Normalize proportions to sum to 1
+                        total = sum(proportions)
+                        proportions = [p / total for p in proportions]
+
+                        return {
+                            "type": var_type,
+                            "n_levels": n_levels,
+                            "proportions": proportions,
+                        }, None
+                    except ValueError:
+                        return {}, "Invalid proportions. All values must be numeric"
+                else:
+                    return (
+                        {},
+                        "Factor format: (factor,n_levels) or (factor,prop1,prop2,...)",
+                    )
             else:
-                return {}, "Tuple format only supported for binary variables"
+                return {}, "Tuple format only supported for binary and factor variables"
         else:
             # Simple type
             if value not in supported_types:
@@ -199,7 +266,11 @@ class _AssignmentParser:
 
             result = {"type": value}
             if value == "binary":
-                result["proportion"] = 0.5  # type: ignore
+                result["proportion"] = 0.5
+            elif value == "factor":
+                # Default factor: 3 levels with equal proportions
+                result["n_levels"] = 3
+                result["proportions"] = [1 / 3, 1 / 3, 1 / 3]
             return result, None
 
     def _parse_correlation_value(self, value: str) -> Tuple[float, Optional[str]]:
@@ -365,6 +436,9 @@ def _validate_and_parse_effects(
     """
     Parse and validate names/assignments against available items.
 
+    Simplified version that no longer handles factor-wide effects.
+    Only supports explicit effect names (including bracket notation like 'treatment[2]').
+
     Args:
         input_data: String assignments, dict, or list of names
         available_items: Dict or list of available items to validate against
@@ -376,7 +450,10 @@ def _validate_and_parse_effects(
     """
     # Handle different input formats
     if isinstance(input_data, str):
-        assignments = [a.strip() for a in input_data.split(",")]
+        # Use the parser's assignment splitting to handle parentheses correctly
+        from .parsers import _parser
+
+        assignments = _parser._split_assignments(input_data)
         parsed_items = []
         parsing_errors = []
 
@@ -420,7 +497,7 @@ def _validate_and_parse_effects(
     else:
         available_names = list(available_items)
 
-    # Validate names
+    # Validate names - simple exact matching only
     valid_names = [name for name in names_to_check if name in available_names]
     invalid_names = [name for name in names_to_check if name not in available_names]
 

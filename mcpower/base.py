@@ -14,7 +14,6 @@ from abc import ABC, abstractmethod
 
 from .utils.parsers import (
     _parser,
-    _validate_and_parse_effects,
     _parse_equation,
     _parse_independent_variables,
 )
@@ -28,10 +27,11 @@ from .utils.validators import (
     _validate_correction_method,
     _validate_model_ready,
     _validate_test_formula,
+    _validate_variable_type_timing,
 )
 from .utils.formatters import _format_results
 from .utils.visualization import _create_power_plot
-from .utils.data_generation import _generate_X
+from .utils.data_generation import _generate_X, _generate_factors
 
 DUMMY_MATRIX = np.zeros((2, 2), dtype=np.float64)
 
@@ -71,19 +71,25 @@ class MCPowerBase(ABC):
         self.parallel = False
         self.n_cores = 1
 
-        # Flags for tracking initialization status
-        self.effect_sizes_initiated = False
+        # State flags
+        self.correlations_set = False
+        self.effects_set = False
+        self.variable_types_set = False
+        self.data_uploaded = False
 
+        # Model equation and variable definitions
         self.equation = equation.strip()
         self.variables = {}
         self.effects = {}
         self.correlations = {}
         self.correlation_matrix = None
-        self.predictor_vars_order = []
-
-        # State flags
-        self.variable_types_initiated = False
-        self.data_uploaded = False
+        self.predictor_vars_order = (
+            []
+        )  # This will be the actual data columns after factor expansion
+        self.factor_variables = (
+            {}
+        )  # {factor_name: {n_levels, proportions, reference_level}}
+        self.factor_dummy_mapping = {}  # {dummy_var_name: {factor_name, level}}
 
         # Scenario configurations
         self.default_scenario_config = {
@@ -125,7 +131,7 @@ class MCPowerBase(ABC):
         if not self.effects:
             raise ValueError("No predictor variables found in equation")
 
-        # Set predictor order
+        # Set initial predictor order (before factor expansion)
         self.predictor_vars_order = [
             info["name"] for key, info in self.variables.items() if key != "variable_0"
         ]
@@ -276,21 +282,17 @@ class MCPowerBase(ABC):
     def set_effects(self, effects_string: str):
         """
         Set effect sizes for predictors using string assignments.
+        Factor variables must use bracket notation like 'treatment[2]=0.5'.
 
         Args:
-            effects_string: Comma-separated assignments (e.g., 'x1=0.5, x2=0.3, x1:x2=0.2')
+            effects_string: Comma-separated assignments (e.g., 'x1=0.5, treatment[2]=0.3, x1:treatment[2]=0.2')
 
         Returns:
             self: For method chaining
 
-        Raises:
-            TypeError: If effects_string is not a string
-            ValueError: If effects_string is empty or contains invalid assignments
-
         Example:
-            >>> model.set_effects("treatment=0.6, age=0.2, treatment:age=0.3")
+            >>> model.set_effects("treatment[2]=0.6, age=0.2, treatment[2]:age=0.3")
         """
-
         if not isinstance(effects_string, str):
             raise TypeError(
                 f"effects_string must be a string, got {type(effects_string).__name__}"
@@ -300,71 +302,101 @@ class MCPowerBase(ABC):
             raise ValueError("effects_string cannot be empty")
 
         try:
-            valid_items, find_by_name = _validate_and_parse_effects(
-                effects_string, self.effects, "effect", self.equation
-            )
+            from .utils.parsers import _parser
+
+            assignments = _parser._split_assignments(effects_string)
+
+            valid_items = []
+            errors = []
+
+            for assignment in assignments:
+                if "=" not in assignment:
+                    errors.append(
+                        f"Invalid format '{assignment}'. Expected: 'name=value'"
+                    )
+                    continue
+
+                name, value_str = assignment.split("=", 1)
+                name, value_str = name.strip(), value_str.strip()
+
+                # Parse value
+                try:
+                    value = float(value_str)
+                except ValueError:
+                    errors.append(
+                        f"Invalid value '{value_str}' for '{name}'. Must be a number."
+                    )
+                    continue
+
+                # Check if effect exists
+                if any(info["name"] == name for info in self.effects.values()):
+                    valid_items.append({"name": name, "value": value})
+                else:
+                    available = [info["name"] for info in self.effects.values()]
+                    errors.append(
+                        f"Effect '{name}' not found. Available: {', '.join(available)}"
+                    )
+
+            if errors:
+                raise ValueError(
+                    "Validation failed:\n" + "\n".join(f"• {err}" for err in errors)
+                )
 
             if not valid_items:
                 available_effects = [info["name"] for info in self.effects.values()]
                 raise ValueError(
-                    f"No valid effect assignments found in '{effects_string}'. "
-                    f"Available effects: {', '.join(available_effects)}"
+                    f"No valid effect assignments found. Available: {', '.join(available_effects)}"
                 )
 
+            # Apply effects
             successful = []
             for item in valid_items:
-                key, effect_info = find_by_name(item["name"])
-                if effect_info:
-                    effect_info["effect_size"] = item["value"]
-                    successful.append(f"{item['name']}={item['value']}")
+                effect_name = item["name"]
+                effect_value = item["value"]
+
+                for effect_key, effect_info in self.effects.items():
+                    if effect_info["name"] == effect_name:
+                        effect_info["effect_size"] = effect_value
+                        successful.append(f"{effect_name}={effect_value}")
+                        break
 
             if successful:
                 print(f"Successfully set effects: {', '.join(successful)}")
-
-            self.effect_sizes_initiated = True
 
         except Exception as e:
             available_effects = [
                 effect_info["name"] for effect_info in self.effects.values()
             ]
             raise ValueError(
-                f"Error setting effects from '{effects_string}': {str(e)}\n"
-                f"Available effects: {', '.join(available_effects)}"
+                f"Error setting effects: {str(e)}\nAvailable: {', '.join(available_effects)}"
             ) from e
 
+        self.effects_set = True
         return self
 
     def set_variable_type(self, variable_types_string: str):
         """
-        Set distribution types for predictor variables.
-
-        Args:
-            variable_types_string: Comma-separated type assignments
-                (e.g., 'x1=binary, x2=right_skewed, x3=(binary,0.3)')
-
-        Returns:
-            self: For method chaining
-
-        Raises:
-            TypeError: If variable_types_string is not a string
-            ValueError: If invalid variable types or formats are specified
-
-        Supported types:
-            - normal: Standard normal distribution (default)
-            - binary: Binary (0/1) with optional proportion
-            - right_skewed, left_skewed: Skewed distributions
-            - high_kurtosis: Heavy-tailed distribution
-            - uniform: Uniform distribution
+        Set distribution types for predictor variables with factor support.
+        Must be called before set_correlations() or set_effects().
         """
+        if variable_types_string != "":
+            timing_result = _validate_variable_type_timing(
+                self.correlations_set, self.effects_set
+            )
+            if not timing_result.is_valid:
+                raise ValueError(
+                    "Timing error:\n"
+                    + "\n".join(f"• {err}" for err in timing_result.errors)
+                )
 
         if not isinstance(variable_types_string, str):
             raise TypeError(f"variable_types_string must be a string")
 
         # Initialize defaults
-        if not self.variable_types_initiated:
+        if not self.variable_types_set:
             for var_key, var_info in self.variables.items():
                 var_info["type"] = "normal"
-            self.variable_types_initiated = True
+            self.variable_types_set = True
 
         if not variable_types_string.strip():
             print(
@@ -372,9 +404,8 @@ class MCPowerBase(ABC):
             )
             return self
 
-        available_vars = [
-            info["name"] for key, info in self.variables.items() if key != "variable_0"
-        ]
+        # Use original names before factor expansion
+        available_vars = self._original_predictor_names
 
         try:
             parsed_vars, errors = _parser._parse(
@@ -387,27 +418,45 @@ class MCPowerBase(ABC):
                 )
                 raise ValueError(error_msg)
 
-            # Apply parsed types
+            # Apply parsed types and handle factors
             successful = []
+            factors_to_expand = []
+
             for var_name, var_data in parsed_vars.items():
                 for key, info in self.variables.items():
                     if key != "variable_0" and info["name"] == var_name:
                         info.update(var_data)
-                        if "proportion" in var_data:
+
+                        if var_data["type"] == "factor":
+                            # Store factor info
+                            self.factor_variables[var_name] = {
+                                "n_levels": var_data["n_levels"],
+                                "proportions": var_data["proportions"],
+                                "reference_level": 1,  # Always level 1 is reference
+                            }
+                            factors_to_expand.append((var_name, var_data))
                             successful.append(
-                                f"{var_name}=({var_data['type']},{var_data['proportion']})"
+                                f"{var_name}=(factor,{var_data['n_levels']} levels)"
                             )
                         else:
-                            successful.append(f"{var_name}={var_data['type']}")
+                            if "proportion" in var_data:
+                                successful.append(
+                                    f"{var_name}=({var_data['type']},{var_data['proportion']})"
+                                )
+                            else:
+                                successful.append(f"{var_name}={var_data['type']}")
                         break
+
+            # Expand factors into dummy variables
+            if factors_to_expand:
+                self._expand_factors(factors_to_expand)
 
             if successful:
                 print(f"Successfully set variable types: {', '.join(successful)}")
 
         except Exception as e:
             raise ValueError(
-                f"Error setting variable types: {str(e)}\n"
-                f"Available variables: {', '.join(available_vars)}"
+                f"Error setting variable types: {str(e)}\nAvailable variables: {', '.join(available_vars)}"
             ) from e
 
         return self
@@ -430,16 +479,41 @@ class MCPowerBase(ABC):
 
         Note:
             Correlation matrix must be positive semi-definite with 1s on diagonal.
+            Factor variables cannot be used in correlations.
         """
 
         if not isinstance(correlations_input, (str, np.ndarray)):
             raise TypeError("correlations_input must be string or numpy array")
 
-        if not self.variable_types_initiated:
+        if not self.variable_types_set:
             self.set_variable_type("")
 
         if len(self.predictor_vars_order) < 2:
             raise ValueError(f"Need at least 2 variables for correlations")
+
+        # Validate factor usage in correlation strings
+        if isinstance(correlations_input, str) and correlations_input.strip():
+            if self.factor_variables:
+                import re
+
+                var_pattern = r"corr\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*\)|^\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*\)"
+                matches = re.findall(var_pattern, correlations_input)
+
+                factor_vars_found = []
+                for match in matches:
+                    vars_in_match = [v.strip() for v in match if v.strip()]
+                    for var in vars_in_match:
+                        if var in self.factor_variables:
+                            factor_vars_found.append(var)
+
+                if factor_vars_found:
+                    continuous_vars = self._non_factor_vars
+                    raise ValueError(
+                        f"Factor validation failed:\n"
+                        f"• Cannot use factor variables in correlations: {', '.join(set(factor_vars_found))}. "
+                        f"Factors are categorical and expand into dummy variables.\n"
+                        f"• Use continuous variables: {', '.join(continuous_vars)}"
+                    )
 
         # Initialize correlation matrix
         if self.correlation_matrix is None:
@@ -469,7 +543,7 @@ class MCPowerBase(ABC):
                     self.correlation_matrix[idx1, idx2] = correlation
                     self.correlation_matrix[idx2, idx1] = correlation
 
-                # Validate
+                # Validate matrix
                 result = _validate_correlation_matrix(self.correlation_matrix)
                 if not result.is_valid:
                     raise ValueError(
@@ -491,6 +565,13 @@ class MCPowerBase(ABC):
                         f"Matrix shape {correlations_input.shape} doesn't match {num_vars} variables"
                     )
 
+                if self.factor_variables:
+                    factor_names = list(self.factor_variables.keys())
+                    print(
+                        f"Warning: Factor variables detected ({', '.join(factor_names)}). "
+                        f"Ensure correlation matrix only covers continuous variables."
+                    )
+
                 result = _validate_correlation_matrix(correlations_input)
                 if not result.is_valid:
                     raise ValueError(
@@ -503,10 +584,10 @@ class MCPowerBase(ABC):
 
         except Exception as e:
             raise ValueError(
-                f"Error setting correlations: {str(e)}\n"
-                f"Available variables: {', '.join(self.predictor_vars_order)}"
+                f"Error setting correlations: {str(e)}\nAvailable variables: {', '.join(self.predictor_vars_order)}"
             ) from e
 
+        self.correlations_set = True
         return self
 
     def set_heterogeneity(self, heterogeneity):
@@ -697,11 +778,11 @@ class MCPowerBase(ABC):
                 var_info["type"] = "uploaded_data"
 
         # Initialize synthetic variables if not already done
-        if not self.variable_types_initiated:
+        if not self.variable_types_set:
             for _, var_info in self.variables.items():
                 if var_info["name"] in synthetic_vars:
                     var_info["type"] = "normal"
-            self.variable_types_initiated = True
+            self.variable_types_set = True
 
         # Measure correlations and update correlation matrix if requested
         if preserve_correlation and len(uploaded_predictors) > 1:
@@ -1076,9 +1157,33 @@ class MCPowerBase(ABC):
         except Exception as e:
             raise ValueError(f"Error parsing test_formula '{test_formula}': {str(e)}")
 
+    def _parse_bracket_syntax(self, effect_name):
+        """Parse bracket syntax like 'treatment[2]' with validation."""
+        import re
+
+        match = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\[(\d+)\]$", effect_name)
+        if match:
+            factor_name = match.group(1)
+            level = int(match.group(2))
+
+            if factor_name in self.factor_variables:
+                max_levels = self.factor_variables[factor_name]["n_levels"]
+                if level == 1:
+                    raise ValueError(
+                        f"Level 1 is the reference level for factor '{factor_name}' and cannot have an effect"
+                    )
+                elif level < 2 or level > max_levels:
+                    raise ValueError(
+                        f"Level {level} invalid for factor '{factor_name}' (has {max_levels} levels, valid: 2-{max_levels})"
+                    )
+                return factor_name, level
+            else:
+                raise ValueError(f"'{factor_name}' is not a factor variable")
+
+        return None, None
+
     def _create_X_extended(self, X, effects_to_use=None):
         """Create extended design matrix with interactions."""
-
         if effects_to_use is None:
             effects_to_use = self.effects
 
@@ -1086,6 +1191,7 @@ class MCPowerBase(ABC):
 
         for effect_info in effects_to_use.values():
             if effect_info["type"] == "main":
+                # All main effects (continuous + factor dummies) use column index
                 col_idx = effect_info["column_index"]
                 columns.append(X[:, col_idx])
             else:  # interaction
@@ -1098,32 +1204,44 @@ class MCPowerBase(ABC):
         return np.column_stack(columns) if columns else np.empty((X.shape[0], 0))
 
     def _prepare_metadata(self, target_tests, correction=None, formula_to_test=None):
-        """Pre-compute arrays and metadata for simulations."""
+        """Pre-compute arrays and metadata for simulations with factor support."""
 
-        # Use filtered effects if formula_to_test provided
         effects_to_use = (
             formula_to_test if formula_to_test is not None else self.effects
         )
 
-        # target_indices - based on filtered effects order
         effect_order = [info["name"] for info in effects_to_use.values()]
         target_indices = np.array(
             [effect_order.index(test) for test in target_tests if test != "overall"],
             dtype=np.int64,
         )
 
-        # n_vars
-        n_vars = len(self.predictor_vars_order)
+        # Get non-factor variables only for data generation
+        non_factor_vars = self._non_factor_vars
+        n_non_factor_vars = len(non_factor_vars)
 
-        # Correlation matrix
-        if self.correlation_matrix is None and len(self.predictor_vars_order) > 1:
-            correlation_matrix = np.eye(n_vars)
+        # Correlation matrix - only for non-factor variables
+        if n_non_factor_vars == 0:
+            correlation_matrix = np.eye(1)  # Dummy
+        elif self.correlation_matrix is None:
+            correlation_matrix = np.eye(n_non_factor_vars)
         else:
-            correlation_matrix = self.correlation_matrix
+            # Extract submatrix for non-factor variables
+            non_factor_indices = [
+                self.predictor_vars_order.index(var)
+                for var in non_factor_vars
+                if var in self.predictor_vars_order
+            ]
+            if non_factor_indices:
+                correlation_matrix = self.correlation_matrix[
+                    np.ix_(non_factor_indices, non_factor_indices)
+                ]
+            else:
+                correlation_matrix = np.eye(max(1, n_non_factor_vars))
 
-        # var_types, var_params
-        var_types = np.zeros(n_vars, dtype=np.int64)
-        var_params = np.zeros(n_vars, dtype=np.float64)
+        # var_types, var_params - for non-factor variables only
+        var_types = np.zeros(max(1, n_non_factor_vars), dtype=np.int64)
+        var_params = np.zeros(max(1, n_non_factor_vars), dtype=np.float64)
 
         type_mapping = {
             "normal": 0,
@@ -1135,7 +1253,7 @@ class MCPowerBase(ABC):
             "uploaded_data": 99,
         }
 
-        for i, var_name in enumerate(self.predictor_vars_order):
+        for i, var_name in enumerate(non_factor_vars):
             for var_key, info in self.variables.items():
                 if var_key != "variable_0" and info["name"] == var_name:
                     var_type = info.get("type", "normal")
@@ -1143,11 +1261,16 @@ class MCPowerBase(ABC):
                     var_params[i] = info.get("proportion", 0.5)
                     break
 
-        # upload data
-        upload_normal_values = self.upload_normal_values
-        upload_data_values = self.upload_data_values
+        # Factor specifications
+        factor_specs = []
+        for factor_name, factor_info in self.factor_variables.items():
+            factor_specs.append(
+                {
+                    "n_levels": factor_info["n_levels"],
+                    "proportions": factor_info["proportions"],
+                }
+            )
 
-        # effect_sizes_expanded - use filtered effects
         effect_sizes_expanded = np.array(
             [info.get("effect_size", 0.0) for info in effects_to_use.values()]
         )
@@ -1165,16 +1288,150 @@ class MCPowerBase(ABC):
 
         return (
             target_indices,
-            n_vars,
+            n_non_factor_vars,
             correlation_matrix,
             var_types,
             var_params,
-            upload_normal_values,
-            upload_data_values,
+            factor_specs,
+            self.upload_normal_values,
+            self.upload_data_values,
             effect_sizes_expanded,
             correction_method,
             effects_to_use,
         )
+
+    # --- Factor helpers  ---
+
+    def _expand_factors(self, factors_to_expand):
+        """Expand factor variables into dummy variables and update predictor order."""
+
+        original_effects = self.effects.copy()
+        new_variables = {}
+        new_effects = {}
+
+        # Keep all non-factor variables
+        for var_key, var_info in self.variables.items():
+            if var_key == "variable_0" or var_info.get("type") != "factor":
+                new_variables[var_key] = var_info.copy()
+
+        # Keep ALL non-factor effects (both main and interactions)
+        for effect_key, effect_info in self.effects.items():
+            effect_name = effect_info["name"]
+            if effect_name not in self.factor_variables and not any(
+                factor in effect_info.get("var_names", [effect_name])
+                for factor in self.factor_variables
+            ):
+                new_effects[effect_key] = effect_info.copy()
+
+        var_counter = len([k for k in self.variables.keys() if k != "variable_0"]) + 1
+        effect_counter = len(self.effects) + 1
+
+        # Create dummy variables and effects
+        for factor_name, factor_data in factors_to_expand:
+            n_levels = factor_data["n_levels"]
+
+            for level in range(2, n_levels + 1):
+                dummy_name = f"{factor_name}[{level}]"
+
+                new_var_key = f"variable_{var_counter}"
+                new_variables[new_var_key] = {
+                    "name": dummy_name,
+                    "type": "factor_dummy",
+                    "factor_source": factor_name,
+                    "factor_level": level,
+                }
+
+                new_effect_key = f"effect_{effect_counter}"
+                new_effects[new_effect_key] = {
+                    "name": dummy_name,
+                    "type": "main",
+                    "column_index": var_counter - 1,
+                    "factor_source": factor_name,
+                    "factor_level": level,
+                }
+
+                self.factor_dummy_mapping[dummy_name] = {
+                    "factor_name": factor_name,
+                    "level": level,
+                }
+
+                var_counter += 1
+                effect_counter += 1
+
+        # Handle interactions involving factors
+        for effect_key, effect_info in original_effects.items():
+            if effect_info["type"] == "interaction":
+                var_names = effect_info["var_names"]
+                factor_vars_in_interaction = [
+                    v for v in var_names if v in self.factor_variables
+                ]
+
+                if factor_vars_in_interaction:
+                    # Create new interactions for each combination of factor levels
+                    for factor_var in factor_vars_in_interaction:
+                        if factor_var in self.factor_variables:
+                            n_levels = self.factor_variables[factor_var]["n_levels"]
+                            for level in range(2, n_levels + 1):
+                                dummy_name = f"{factor_var}[{level}]"
+
+                                # Replace factor name with dummy name in interaction
+                                new_var_names = [
+                                    dummy_name if v == factor_var else v
+                                    for v in var_names
+                                ]
+                                new_interaction_name = ":".join(new_var_names)
+
+                                new_effect_key = f"effect_{effect_counter}"
+                                new_effects[new_effect_key] = {
+                                    "name": new_interaction_name,
+                                    "type": "interaction",
+                                    "var_names": new_var_names,
+                                    "column_indices": [],  # Will be updated later
+                                }
+                                effect_counter += 1
+
+        self.variables = new_variables
+        self.effects = new_effects
+
+        # Update predictor order - this is now the ONLY predictor order list
+        regular_predictors = []
+        factor_dummies = []
+
+        for var_key, var_info in self.variables.items():
+            if var_key != "variable_0":
+                if var_info.get("factor_source"):  # This is a dummy variable
+                    factor_dummies.append(var_info["name"])
+                elif (
+                    var_info.get("type") != "factor"
+                ):  # This is a regular variable (not the original factor)
+                    regular_predictors.append(var_info["name"])
+
+        # Update the single predictor order (this will be used for data generation)
+        self.predictor_vars_order = regular_predictors + factor_dummies
+
+        # Update column indices for all effects
+        for effect_key, effect_info in self.effects.items():
+            if effect_info["type"] == "main":
+                var_name = effect_info["name"]
+                if var_name in self.predictor_vars_order:
+                    effect_info["column_index"] = self.predictor_vars_order.index(
+                        var_name
+                    )
+            elif effect_info["type"] == "interaction":
+                var_names = effect_info["var_names"]
+                effect_info["column_indices"] = [
+                    self.predictor_vars_order.index(var)
+                    for var in var_names
+                    if var in self.predictor_vars_order
+                ]
+
+        print(
+            f"Expanded {len(factors_to_expand)} factors into {len(factor_dummies)} dummy variables"
+        )
+
+    def _is_dummy_variable(self, var_name):
+        """Check if variable is a dummy variable for a factor."""
+        return var_name in self.factor_dummy_mapping
 
     # --- Main process  ---
 
@@ -1189,12 +1446,11 @@ class MCPowerBase(ABC):
         """Execute power analysis with scenario support."""
 
         if scenario_config is None:
-            # call find_power with parsed values
+            # Run simulations parsed values
             power_results = self._run_power_simulations_fixed(
                 sample_size, formula_to_test, target_tests, correction
             )
         else:
-            # Scenario behavior - run simulations directly with scenario parameters
             # Run simulations with scenario config
             power_results = self._run_power_simulations_scenario(
                 sample_size,
@@ -1232,10 +1488,11 @@ class MCPowerBase(ABC):
         # Pre-compute metadata
         (
             target_indices,
-            n_vars,
+            n_non_factor_vars,  # changed from n_vars
             correlation_matrix,
             var_types,
             var_params,
+            factor_specs,  # new
             upload_normal_values,
             upload_data_values,
             effect_sizes_expanded,
@@ -1256,10 +1513,11 @@ class MCPowerBase(ABC):
                 sim_id,
                 target_indices,
                 sample_size,
-                n_vars,
+                n_non_factor_vars,
                 correlation_matrix,
                 var_types,
                 var_params,
+                factor_specs,
                 upload_normal_values,
                 upload_data_values,
                 effect_sizes_expanded,
@@ -1288,10 +1546,11 @@ class MCPowerBase(ABC):
         # Pre-compute metadata
         (
             target_indices,
-            n_vars,
+            n_non_factor_vars,
             correlation_matrix,
             var_types,
             var_params,
+            factor_specs,
             upload_normal_values,
             upload_data_values,
             effect_sizes_expanded,
@@ -1312,7 +1571,7 @@ class MCPowerBase(ABC):
         for sim_id in range(self.n_simulations):
             sim_seed = seed + 3 * sim_id if seed is not None else None
 
-            # Apply per-simulation perturbations
+            # Apply per-simulation perturbations (only affects non-factor variables)
             perturbed_corr, perturbed_types = self._apply_per_simulation_perturbations(
                 correlation_matrix, var_types, scenario_config, sim_seed
             )
@@ -1321,10 +1580,11 @@ class MCPowerBase(ABC):
                 sim_id,
                 target_indices,
                 sample_size,
-                n_vars,
+                n_non_factor_vars,
                 perturbed_corr,
                 perturbed_types,
                 var_params,
+                factor_specs,
                 upload_normal_values,
                 upload_data_values,
                 effect_sizes_expanded,
@@ -1351,10 +1611,11 @@ class MCPowerBase(ABC):
         sim_id,
         target_indices,
         sample_size,
-        n_vars,
+        n_non_factor_vars,
         correlation_matrix,
         var_types,
         var_params,
+        factor_specs,
         upload_normal_values,
         upload_data_values,
         effect_sizes_expanded,
@@ -1365,19 +1626,32 @@ class MCPowerBase(ABC):
         effects_to_use=None,
         sim_seed=None,
     ):
-        """Execute single Monte Carlo simulation."""
+        """Execute single Monte Carlo simulation with factor support."""
 
         try:
-            X = _generate_X(
-                sample_size,
-                n_vars,
-                correlation_matrix,
-                var_types,
-                var_params,
-                upload_normal_values,
-                upload_data_values,
-                sim_seed,
-            )
+            # Generate non-factor variables
+            if n_non_factor_vars > 0:
+                X_non_factors = _generate_X(
+                    sample_size,
+                    n_non_factor_vars,
+                    correlation_matrix,
+                    var_types,
+                    var_params,
+                    upload_normal_values,
+                    upload_data_values,
+                    sim_seed,
+                )
+            else:
+                X_non_factors = np.empty((sample_size, 0), dtype=float)
+
+            # Generate factor variables (as dummy variables)
+            X_factors = _generate_factors(sample_size, factor_specs, sim_seed)
+
+            # Merge: non-factors first, then factors (matches predictor_vars_order)
+            if X_factors.shape[1] > 0:
+                X = np.column_stack([X_non_factors, X_factors])
+            else:
+                X = X_non_factors
 
             # Use filtered effects for X_expanded
             X_expanded = self._create_X_extended(X, effects_to_use)
@@ -1810,3 +2084,23 @@ class MCPowerBase(ABC):
                         target_power=self.power,
                         title=f"{scenario_labels[i]} Scenario - Corrected Power ({correction})",
                     )
+
+    # --- Helpers   ---
+
+    @property
+    def _original_predictor_names(self):
+        """Get original predictor names before factor expansion."""
+        return [
+            info["name"]
+            for key, info in self.variables.items()
+            if key != "variable_0" and info.get("type") != "factor_dummy"
+        ]
+
+    @property
+    def _non_factor_vars(self):
+        """Get non-factor variables from current predictor order."""
+        return [
+            var
+            for var in self.predictor_vars_order
+            if var not in self.factor_variables and not self._is_dummy_variable(var)
+        ]

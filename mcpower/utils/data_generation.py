@@ -368,8 +368,8 @@ def _generate_X(
 
     return _generate_X_runtime(
         sample_size,
-        n_vars,
-        correlation_matrix,  # type: ignore
+        n_vars,  # type: ignore
+        correlation_matrix,
         var_types,
         var_params,
         NORM_CDF_TABLE,
@@ -377,4 +377,50 @@ def _generate_X(
         normal_values,
         uploaded_values,
         seed if seed is not None else -1,
+    )
+
+
+def _generate_factors(sample_size, factor_specs, seed):
+    """
+    Generate factor variables as dummy variables for linear regression.
+
+    Args:
+        sample_size: Number of observations
+        factor_specs: List of factor specifications, each containing:
+                     {'n_levels': int, 'proportions': [float, ...]}
+        seed: Random seed or None
+
+    Returns:
+        X_factors: (sample_size, total_dummies) array of binary values
+                  For each factor with n levels, creates n-1 dummy variables
+                  Level 1 is reference (all dummies = 0)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    if not factor_specs:
+        return np.empty((sample_size, 0), dtype=float)
+
+    # Generate all factor columns efficiently
+    factor_columns = []
+
+    for spec in factor_specs:
+        n_levels = spec["n_levels"]
+        proportions = spec["proportions"]
+
+        # Generate categorical data
+        factor_data = np.random.choice(n_levels, size=sample_size, p=proportions)
+
+        # Vectorized dummy variable creation using one-hot encoding
+        # Create identity matrix and index into it
+        dummies = np.eye(n_levels, dtype=float)[factor_data]
+
+        # Remove reference level (first column) and append remaining columns
+        factor_columns.append(dummies[:, 1:])  # Skip level 0 (reference)
+
+    # Concatenate all factor columns horizontally
+    return (
+        np.hstack(factor_columns)
+        if factor_columns
+        else np.empty((sample_size, 0), dtype=float)
     )

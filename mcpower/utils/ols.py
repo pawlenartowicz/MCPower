@@ -1,35 +1,3 @@
-"""
-Statistical Analysis for Monte Carlo Power Analysis
-
-OVERVIEW:
-=========
-Performs OLS regression with statistical tests optimized for repeated simulation:
-- F-tests for overall model significance
-- t-tests for individual coefficients
-- Multiple comparison corrections (Bonferroni, FDR, Holm)
-- Fast p-value computation via lookup tables
-
-OPTIMIZATION STRATEGY:
-=====================
-Same three-tier system as data generation:
-1. AOT compiled (fastest) - pre-compiled native code
-2. JIT compiled (fast) - runtime compilation via numba
-3. Pure Python (slowest) - fallback when numba unavailable
-
-CORE ALGORITHM:
-==============
-1. QR decomposition for numerical stability (vs normal equations)
-2. Lookup tables for p-values (vs scipy.stats calls)
-3. Vectorized operations for multiple testing corrections
-
-LOOKUP TABLES:
-=============
-Pre-computed p-value tables for common test statistics:
-- F_PVAL_TABLE: F-distribution p-values [dfn, dfd, F-stat]
-- T_PVAL_TABLE: t-distribution p-values [df, t-stat]
-- Z_PVAL_TABLE: Normal distribution p-values [z-stat]
-"""
-
 import os
 import numpy as np
 import pickle
@@ -116,6 +84,10 @@ else:
     compile_function = None
 
 
+# REMOVED: _find_dfd_index function to avoid Numba compilation issues
+# The logic is now inlined in _f_to_pval function
+
+
 def _ols_core(
     X_expanded,
     y,
@@ -164,20 +136,31 @@ def _ols_core(
             + z_pval_table[x_idx_int + 1] * x_frac
         )
 
+    def _z_to_pval_1tail(x: float) -> float:
+        """ADDED: Fast normal p-value 1-tailed upper tail."""
+        # Get 2-tailed p-value and divide by 2 for upper tail
+        two_tailed = _z_to_pval(x)
+        return two_tailed / 2.0
+
     def _chi2_to_pval(x: float, df: int) -> float:
-        """Chi-squared p-value using Wilson-Hilferty approximation for large df."""
+        """FIXED: Chi-squared p-value using Wilson-Hilferty approximation for large df (1-tailed)."""
+        if x <= 0:
+            return 1.0
+
         if df == 1:
-            return 2 * (1 - _z_to_pval(x**0.5))
+            # FIXED: 1-tailed instead of 2-tailed
+            return _z_to_pval_1tail(x**0.5)
         elif df == 2:
             return np.exp(-x / 2)
         else:
             # Wilson-Hilferty normal approximation
             h = 2.0 / (9.0 * df)
             z = ((x / df) ** (1.0 / 3.0) - 1.0 + h) / (h**0.5)
-            return 2 * (1 - _z_to_pval(abs(z)))
+            # FIXED: 1-tailed instead of 2-tailed
+            return _z_to_pval_1tail(abs(z))
 
     def _f_to_pval(x: float, dfn: int, dfd: int) -> float:
-        """Fast F p-value via lookup table with fallbacks for extreme cases."""
+        """FIXED: Fast F p-value via lookup table with fallbacks for extreme cases."""
         if x <= F_X_MIN:
             return 1.0
         if x >= F_X_MAX:
@@ -190,11 +173,38 @@ def _ols_core(
                 return _chi2_to_pval(chi2_stat, dfn)
             else:
                 z = (chi2_stat - dfn) / ((2 * dfn) ** 0.5)
-                return 2 * (1 - _z_to_pval(abs(z)))
+                # FIXED: 1-tailed instead of 2-tailed
+                return _z_to_pval_1tail(abs(z))
 
-        # Lookup table indices with bounds checking
+        # FIXED: Correct lookup table indexing
         dfn_idx = min(max(dfn - 1, 0), 29)
-        dfd_idx = min(max((dfd - 10) // 5, 0), 98)
+
+        # FIXED: Inline dfd index calculation for Numba compatibility
+        # f_dfd_range structure: [10-30, 35-100 by 5, 110-200 by 10, 220-500 by 20]
+        if dfd <= 10:
+            dfd_idx = 0
+        elif dfd <= 30:
+            dfd_idx = dfd - 10  # indices 0-20 for dfd 10-30
+        elif dfd < 35:
+            dfd_idx = 20  # Use dfd=30 (closest)
+        elif dfd <= 100:
+            # Map to 35, 40, 45, ..., 100 range (indices 21-34)
+            rounded_dfd = ((dfd - 35) // 5) * 5 + 35
+            dfd_idx = 21 + (rounded_dfd - 35) // 5
+        elif dfd < 110:
+            dfd_idx = 34  # Use dfd=100 (closest)
+        elif dfd <= 200:
+            # Map to 110, 120, 130, ..., 200 range (indices 35-44)
+            rounded_dfd = ((dfd - 110) // 10) * 10 + 110
+            dfd_idx = 35 + (rounded_dfd - 110) // 10
+        elif dfd < 220:
+            dfd_idx = 44  # Use dfd=200 (closest)
+        elif dfd <= 500:
+            # Map to 220, 240, 260, ..., 500 range (indices 45-59)
+            rounded_dfd = ((dfd - 220) // 20) * 20 + 220
+            dfd_idx = 45 + (rounded_dfd - 220) // 20
+        else:
+            dfd_idx = 59  # Use dfd=500 (highest in table)
 
         x_idx = (x - F_X_MIN) / (F_X_MAX - F_X_MIN) * (F_RESOLUTION - 1)
         x_idx_int = int(x_idx)
@@ -507,8 +517,8 @@ def _ols_analysis(X_expanded, y, target_indices, correction_method=0, alpha=0.05
     """
     return _ols_runtime(
         X_expanded,
-        y,
-        target_indices,  # type: ignore
+        y,  # type: ignore
+        target_indices,
         F_PVAL_TABLE,
         T_PVAL_TABLE,
         Z_PVAL_TABLE,

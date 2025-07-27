@@ -42,8 +42,8 @@ print("\n1. BASIC POWER (Optimistic Assumptions):")
 power_result = model.find_power(
     sample_size=160,
     target_test="treatment",  # Focus on treatment effect
-    scenarios=False,          # No robustness testing
-    summary='short'           # Concise output
+    scenarios=False,  # No robustness testing
+    summary="short",  # Concise output
 )
 
 # 5. Test robustness with scenario analysis
@@ -51,23 +51,24 @@ print("\n2. ROBUST POWER (Realistic Conditions):")
 robust_result = model.find_power(
     sample_size=160,
     target_test="treatment",
-    scenarios=True,           # Test under realistic violations
-    summary='short'
+    scenarios=True,  # Test under realistic violations
+    summary="short",
 )
 
 # 6. Detailed analysis with all information
 print("\n3. DETAILED ANALYSIS:")
 detailed_result = model.find_power(
     sample_size=160,
-    target_test="all",        # Test all effects
+    target_test="all",  # Test all effects
     scenarios=True,
-    summary='long'            # Comprehensive output with plots
+    summary="long",  # Comprehensive output with plots
 )
 
 print("\n" + "=" * 60)
 print("INTERPRETATION GUIDE")
 print("=" * 60)
-print("""
+print(
+    """
 Key takeaways:
 - Use 'scenarios=True' for realistic planning
 - 'summary=long' provides detailed tables and plots
@@ -78,4 +79,5 @@ Next steps:
 - If power is too low, increase sample size
 - If power is adequate, you're ready to proceed
 - Consider multiple testing if testing several effects
-""")
+"""
+)

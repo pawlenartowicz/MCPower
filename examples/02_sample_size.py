@@ -2,7 +2,7 @@
 Sample Size Calculation Example
 ===============================
 
-This example shows how to find the minimum sample size needed to detect 
+This example shows how to find the minimum sample size needed to detect
 your expected effects with adequate statistical power.
 """
 
@@ -16,7 +16,9 @@ print("SAMPLE SIZE CALCULATION EXAMPLE")
 print("=" * 60)
 
 # 1. Define your study model
-model = mcpower.LinearRegression("test_score = intervention + prior_knowledge + motivation")
+model = mcpower.LinearRegression(
+    "test_score = intervention + prior_knowledge + motivation"
+)
 
 # 2. Set expected effect sizes based on literature/pilot data
 # intervention = 0.4 means a medium-sized improvement from the intervention
@@ -37,12 +39,12 @@ print("=" * 60)
 
 print("\n1. BASIC CALCULATION (Optimistic Assumptions):")
 basic_result = model.find_sample_size(
-    target_test="intervention",   # Focus on intervention effect
-    from_size=30,                # Start searching from N=30
-    to_size=200,                 # Up to N=200
-    by=10,                       # Test every 10 participants
-    scenarios=False,             # Ideal conditions
-    summary='short'
+    target_test="intervention",  # Focus on intervention effect
+    from_size=30,  # Start searching from N=30
+    to_size=200,  # Up to N=200
+    by=10,  # Test every 10 participants
+    scenarios=False,  # Ideal conditions
+    summary="short",
 )
 
 # 5. Robust sample size with scenario analysis
@@ -50,39 +52,40 @@ print("\n2. ROBUST CALCULATION (Realistic Conditions):")
 robust_result = model.find_sample_size(
     target_test="intervention",
     from_size=30,
-    to_size=300,                 # Extended range for robustness
+    to_size=300,  # Extended range for robustness
     by=10,
-    scenarios=True,              # Test assumption violations
-    summary='short'
+    scenarios=True,  # Test assumption violations
+    summary="short",
 )
 
 # 6. Comprehensive analysis for all effects
 print("\n3. COMPREHENSIVE ANALYSIS:")
 comprehensive_result = model.find_sample_size(
-    target_test="all",           # Find N for all effects
+    target_test="all",  # Find N for all effects
     from_size=50,
     to_size=300,
     by=10,
     scenarios=True,
-    summary='long'               # Detailed output with power curves
+    summary="long",  # Detailed output with power curves
 )
 
 # 7. Custom power target
 print("\n4. HIGH POWER REQUIREMENT (90% power):")
-model.set_power(90)              # Increase from default 80% to 90%
+model.set_power(90)  # Increase from default 80% to 90%
 high_power_result = model.find_sample_size(
     target_test="intervention",
     from_size=50,
     to_size=400,
     by=10,
     scenarios=True,
-    summary='short'
+    summary="short",
 )
 
 print("\n" + "=" * 60)
 print("PLANNING RECOMMENDATIONS")
 print("=" * 60)
-print("""
+print(
+    """
 Sample size decision framework:
 
 1. BASIC CALCULATION: Use for initial estimates
@@ -99,4 +102,5 @@ Sample size decision framework:
    - Budget limitations
    - Time constraints
    - Population availability
-""")
+"""
+)

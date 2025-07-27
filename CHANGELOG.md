@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2025-07-27
+
+### Major changes
+- Factors are now supported
+- The workflow requires that the set_variable_types be set before the correlation and effects
+
 ## [0.3.1] - 2025-07-17
 
 ### Major changes

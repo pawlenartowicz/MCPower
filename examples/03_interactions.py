@@ -39,17 +39,17 @@ print("=" * 60)
 print("\n1. POWER FOR INTERACTION EFFECT:")
 interaction_power = model.find_power(
     sample_size=200,
-    target_test="advertising:age",    # Focus on interaction
+    target_test="advertising:age",  # Focus on interaction
     scenarios=False,
-    summary='short'
+    summary="short",
 )
 
 print("\n2. ROBUST INTERACTION TESTING:")
 robust_interaction = model.find_power(
     sample_size=200,
     target_test="advertising:age",
-    scenarios=True,                   # More conservative
-    summary='short'
+    scenarios=True,  # More conservative
+    summary="short",
 )
 
 # 5. Sample size for detecting interaction
@@ -60,16 +60,16 @@ interaction_n = model.find_sample_size(
     to_size=600,
     by=50,
     scenarios=True,
-    summary='short'
+    summary="short",
 )
 
 # 6. Test all effects simultaneously
 print("\n4. COMPREHENSIVE ANALYSIS:")
 all_effects = model.find_power(
     sample_size=300,
-    target_test="all",               # Test main effects + interaction
+    target_test="all",  # Test main effects + interaction
     scenarios=True,
-    summary='long'                   # Detailed output with plots
+    summary="long",  # Detailed output with plots
 )
 
 # 7. Complex interaction example
@@ -78,10 +78,14 @@ print("THREE-WAY INTERACTION EXAMPLE")
 print("=" * 60)
 
 # More complex model with three-way interaction
-complex_model = mcpower.LinearRegression("outcome = treatment + gender + age + treatment*gender*age")
+complex_model = mcpower.LinearRegression(
+    "outcome = treatment + gender + age + treatment*gender*age"
+)
 
 # Set effects (three-way interactions need large samples)
-complex_model.set_effects("treatment=0.5, gender=0.2, age=0.3, treatment:gender=0.2, treatment:age=0.1, gender:age=0.1, treatment:gender:age=0.4")
+complex_model.set_effects(
+    "treatment=0.5, gender=0.2, age=0.3, treatment:gender=0.2, treatment:age=0.1, gender:age=0.1, treatment:gender:age=0.4"
+)
 
 complex_model.set_variable_type("treatment=binary, gender=binary")
 
@@ -95,13 +99,14 @@ complex_n = complex_model.find_sample_size(
     to_size=1000,
     by=100,
     scenarios=True,
-    summary='short'
+    summary="short",
 )
 
 print("\n" + "=" * 60)
 print("INTERACTION ANALYSIS GUIDELINES")
 print("=" * 60)
-print("""
+print(
+    """
 Key insights about interactions:
 
 1. SAMPLE SIZE: Interactions need larger samples than main effects
@@ -125,4 +130,5 @@ Key insights about interactions:
       
 5. ATTENTION!
    - Most variablity in power for replication is from correlation (next example)
-""")
+"""
+)

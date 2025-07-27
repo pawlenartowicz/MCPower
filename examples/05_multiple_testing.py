@@ -2,7 +2,7 @@
 Multiple Testing Correction Example
 ===================================
 
-This example demonstrates how to control Type I error when testing multiple 
+This example demonstrates how to control Type I error when testing multiple
 hypotheses simultaneously. Essential for studies with many variables.
 """
 
@@ -16,14 +16,20 @@ print("MULTIPLE TESTING CORRECTION EXAMPLE")
 print("=" * 60)
 
 # 1. Define model with multiple predictors to test
-model = mcpower.LinearRegression("treatment_response = biomarker1 + biomarker2 + biomarker3 + biomarker4 + age")
+model = mcpower.LinearRegression(
+    "treatment_response = biomarker1 + biomarker2 + biomarker3 + biomarker4 + age"
+)
 
 # 2. Set effect sizes - some biomarkers have no effect (null hypotheses)
-model.set_effects("biomarker1=0.4, biomarker2=0.0, biomarker3=0.3, biomarker4=0.0, age=0.2")
+model.set_effects(
+    "biomarker1=0.4, biomarker2=0.0, biomarker3=0.3, biomarker4=0.0, age=0.2"
+)
 
 print("Multiple testing scenario:")
 print(f"Formula: {model.equation}")
-print("True effects: biomarker1=0.4, biomarker2=0.0, biomarker3=0.3, biomarker4=0.0, age=0.2")
+print(
+    "True effects: biomarker1=0.4, biomarker2=0.0, biomarker3=0.3, biomarker4=0.0, age=0.2"
+)
 print("Testing 5 hypotheses simultaneously")
 
 # 3. Power analysis without correction (liberal)
@@ -37,7 +43,7 @@ uncorrected = model.find_power(
     target_test="all",
     correction=None,
     scenarios=False,
-    summary='short'
+    summary="short",
 )
 
 # 4. Bonferroni correction (conservative)
@@ -47,7 +53,7 @@ bonferroni = model.find_power(
     target_test="all",
     correction="Bonferroni",
     scenarios=False,
-    summary='short'
+    summary="short",
 )
 
 # 5. Benjamini-Hochberg correction (balanced)
@@ -57,7 +63,7 @@ bh_correction = model.find_power(
     target_test="all",
     correction="Benjamini-Hochberg",
     scenarios=False,
-    summary='short'
+    summary="short",
 )
 
 # 6. Holm correction (step-down)
@@ -67,7 +73,7 @@ holm = model.find_power(
     target_test="all",
     correction="Holm",
     scenarios=False,
-    summary='short'
+    summary="short",
 )
 
 # 7. Sample size requirements with corrections
@@ -83,7 +89,7 @@ bonf_n = model.find_sample_size(
     by=10,
     correction="Bonferroni",
     scenarios=True,
-    summary='short'
+    summary="short",
 )
 
 print("\n2. BENJAMINI-HOCHBERG SAMPLE SIZE:")
@@ -94,7 +100,7 @@ bh_n = model.find_sample_size(
     by=25,
     correction="BH",
     scenarios=True,
-    summary='short'
+    summary="short",
 )
 
 # 8. Comprehensive comparison
@@ -108,7 +114,7 @@ detailed = model.find_power(
     target_test="all",
     correction="Benjamini-Hochberg",
     scenarios=True,
-    summary='long'                    # Full output with plots
+    summary="long",  # Full output with plots
 )
 
 # 9. Focused testing example
@@ -120,10 +126,10 @@ print("=" * 60)
 print("\n1. PRIMARY HYPOTHESES ONLY:")
 primary = model.find_power(
     sample_size=200,
-    target_test="biomarker1, biomarker3",    # Only test promising biomarkers
+    target_test="biomarker1, biomarker3",  # Only test promising biomarkers
     correction="Bonferroni",
     scenarios=True,
-    summary='short'
+    summary="short",
 )
 
 # 10. Exploratory vs confirmatory
@@ -131,24 +137,25 @@ print("\n2. EXPLORATORY PHASE (Liberal):")
 exploratory = model.find_power(
     sample_size=150,
     target_test="all",
-    correction=None,                          # No correction for exploration
+    correction=None,  # No correction for exploration
     scenarios=False,
-    summary='short'
+    summary="short",
 )
 
 print("\n3. CONFIRMATORY PHASE (Conservative):")
 confirmatory = model.find_power(
     sample_size=400,
-    target_test="biomarker1, biomarker3",    # Only confirmed hypotheses
+    target_test="biomarker1, biomarker3",  # Only confirmed hypotheses
     correction="Bonferroni",
     scenarios=True,
-    summary='short'
+    summary="short",
 )
 
 print("\n" + "=" * 60)
 print("MULTIPLE TESTING GUIDELINES")
 print("=" * 60)
-print("""
+print(
+    """
 Correction method selection:
 
 1. BONFERRONI:
@@ -176,4 +183,5 @@ Strategy recommendations:
 - Consider two-stage design: exploratory → confirmatory
 - FDR correction for most situations
 - Bonferroni for critical decisions
-""")
+"""
+)

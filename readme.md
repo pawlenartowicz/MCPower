@@ -19,10 +19,11 @@
 
 ## Why MCPower?
 
-**Traditional power analysis breaks down** with interactions, correlated predictors, or non-normal data. MCPower uses simulation instead of formulas - it generates thousands of datasets exactly like yours, then sees how often your analysis finds real effects.
+**Traditional power analysis breaks down** with interactions, correlated predictors, categorical variables, or non-normal data. MCPower uses simulation instead of formulas - it generates thousands of datasets exactly like yours, then sees how often your analysis finds real effects.
 
-✅ **Works with complexity**: Interactions, correlations, any distribution  
+✅ **Works with complexity**: Interactions, correlations, factors, any distribution  
 ✅ **R-style formulas**: `outcome = treatment + covariate + treatment*covariate`  
+✅ **Categorical variables**: Multi-level factors automatically handled  
 ✅ **Two simple commands**: Find sample size or check power  
 ✅ **Scenario analysis**: Test robustness under realistic conditions  
 ✅ **Minimal math required**: Just specify your model and effects
@@ -100,6 +101,7 @@ treatment                                75           85           100
 - **Effect size = 0.5** means the outcome increases by **0.5 standard deviations** when:
   - **Continuous variables**: Predictor increases by 1 standard deviation  
   - **Binary variables**: Predictor changes from 0 to 1 (e.g., control → treatment)
+  - **Factor variables**: Each level compared to reference level (first level)
 
 **Practical examples:**
 ```python
@@ -151,6 +153,21 @@ model.set_variable_type("treatment=binary, user_type=binary")
 model.find_power(sample_size=400, target_test="treatment:user_type", scenarios=True)
 ```
 
+### Multi-Group Study with Categorical Variables
+```python
+import mcpower
+
+# Study with 3 treatment groups and 4 education levels
+model = mcpower.LinearRegression("wellbeing = treatment + education + age")
+model.set_variable_type("treatment=(factor,3), education=(factor,4)")
+
+# Set effects for each factor level (vs. reference level 1)
+model.set_effects("treatment[2]=0.4, treatment[3]=0.6, education[2]=0.3, education[3]=0.5, education[4]=0.7, age=0.2")
+
+# Find sample size for treatment effects
+model.find_sample_size(target_test="treatment[2], treatment[3]", scenarios=True)
+```
+
 ### Survey with Correlated Predictors
 ```python
 import mcpower
@@ -169,11 +186,24 @@ model.find_sample_size(target_test="all", from_size=200, to_size=800,
 
 ### Different Variable Types
 ```python
-# Binary (0/1), skewed, or other distributions
-model.set_variable_type("treatment=binary, income=right_skewed, age=normal")
+# Binary, factors, skewed, or other distributions
+model.set_variable_type("treatment=binary, condition=(factor,3), income=right_skewed, age=normal")
 
 # Binary with custom proportions (30% get treatment)
 model.set_variable_type("treatment=(binary,0.3)")
+
+# Factors with custom group sizes (20%, 50%, 30%)
+model.set_variable_type("condition=(factor,0.2,0.5,0.3)")
+```
+
+### Working with Factors (Categorical Variables)
+```python
+# Factors automatically create dummy variables
+model = mcpower.LinearRegression("outcome = treatment + education")
+model.set_variable_type("treatment=(factor,3), education=(factor,4)")
+
+# Set effects for specific levels (level 1 is always reference)
+model.set_effects("treatment[2]=0.5, treatment[3]=0.7, education[2]=0.3, education[3]=0.4, education[4]=0.6")
 ```
 
 ### Your Own Data
@@ -227,6 +257,8 @@ model.set_parallel(True)
 | Test overall model | `target_test="overall"` |
 | Test multiple effects | `target_test="effect1, effect2"` or `"all"` |
 | Binary variables | `model.set_variable_type("var=binary")` |
+| **Factor variables** | **`model.set_variable_type("var=(factor,3)")`** |
+| **Factor effects** | **`model.set_effects("var[2]=0.5, var[3]=0.7")`** |
 | Correlated predictors | `model.set_correlations("corr(var1, var2)=0.4")` |
 | Multiple testing correction | Add `correction="FDR", or "Holm" pr "Bonferroni"`|
 
@@ -234,6 +266,7 @@ model.set_parallel(True)
 
 **✅ Use MCPower when you have:**
 - Interaction terms (`treatment*covariate`)
+- **Categorical variables with multiple levels**
 - Binary or non-normal variables
 - Correlated predictors
 - Multiple effects to test
@@ -281,6 +314,8 @@ Use with caution for critical decisions.
 model.set_variable_type("""
     treatment=binary,           # 0/1 with 50% split
     ses=(binary,0.3),          # 0/1 with 30% split  
+    condition=(factor,3),       # 3-level factor (equal proportions)
+    education=(factor,0.2,0.5,0.3), # 3-level factor (custom proportions)
     age=normal,                # Standard normal (default)
     income=right_skewed,       # Positively skewed
     depression=left_skewed,    # Negatively skewed
@@ -289,11 +324,35 @@ model.set_variable_type("""
 """)
 ```
 
+### Factor Variables in Detail
+```python
+# Factor variables are categorical with multiple levels
+model = mcpower.LinearRegression("outcome = treatment + education")
+
+# Create factors
+model.set_variable_type("treatment=(factor,3), education=(factor,4)")
+
+# This creates dummy variables automatically:
+# treatment[2], treatment[3] (treatment[1] is reference)
+# education[2], education[3], education[4] (education[1] is reference)
+
+# Set effects for specific levels
+model.set_effects("treatment[2]=0.5, treatment[3]=0.7, education[2]=0.3")
+
+# Or set same effect for all levels of a factor
+model.set_effects("treatment=0.5")  # Applies to treatment[2] and treatment[3]
+
+# Important: Factors cannot be used in correlations
+# This will error: model.set_correlations("corr(treatment, education)=0.3")
+# Use continuous variables only: model.set_correlations("corr(age, income)=0.3")
+```
+
 ### Complex Correlation Structures
 ```python
 import numpy as np
 
-# Full correlation matrix for 3 variables
+# Full correlation matrix for 3 CONTINUOUS variables only
+# (Factors are excluded from correlation matrices)
 corr_matrix = np.array([
     [1.0, 0.4, 0.6],    # Variable 1 with others
     [0.4, 1.0, 0.2],    # Variable 2 with others
@@ -323,13 +382,16 @@ model.set_simulations(10000)  # High precision (slower)
 "x1*x2*x3"      # All main effects + all interactions
 ```
 
-### Correlation Syntax
+### Correlation Syntax (Continuous Variables Only)
 ```python
 # String format (recommended)
 model.set_correlations("corr(x1, x2)=0.3, corr(x1, x3)=-0.2")
 
 # Shorthand format  
 model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
+
+# Note: Factor variables cannot be correlated
+# Only use continuous/binary variables in correlations
 ```
 
 </details>
@@ -348,8 +410,9 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 ## Aim for future (waiting for suggestions)
 - ✅ Linear Regression
 - ✅ Scenarios, robustness analysis
+- ✅ Factor variables (categorical predictors)
 - 🚧 Logistic Regression (coming soon)
-- 🚧 ANOVA (and factor as variables) (coming soon)
+- 🚧 ANOVA (coming soon)
 - 🚧 Guide about methods, corrections (coming soon)
 - 📋 Rewriting to Cython (backend change)
 - 📋 Mixed Effects Models

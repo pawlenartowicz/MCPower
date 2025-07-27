@@ -277,8 +277,8 @@ def _validate_model_ready(model) -> _ValidationResult:
     errors = []
     warnings = []
 
-    # Check effect sizes
-    if not hasattr(model, "effect_sizes_initiated") or not model.effect_sizes_initiated:
+    # Check effect sizes using the new flag name
+    if not hasattr(model, "effects_set") or not model.effects_set:
         if hasattr(model, "effects"):
             available = [info["name"] for info in model.effects.values()]
             errors.append(
@@ -344,3 +344,125 @@ def _validate_test_formula(
     except Exception as e:
         errors.append(f"Error parsing test_formula: {str(e)}")
         return _ValidationResult(False, errors, [])
+
+
+def _validate_factor_specification(
+    n_levels: int, proportions: List[float]
+) -> _ValidationResult:
+    """Validate factor variable specification."""
+    errors = []
+    warnings = []
+
+    # Validate n_levels
+    if not isinstance(n_levels, int):
+        errors.append("n_levels must be an integer")
+    elif n_levels < 2:
+        errors.append("Factor must have at least 2 levels")
+    elif n_levels > 20:
+        errors.append("Factor cannot have more than 20 levels (computational limits)")
+
+    # Validate proportions
+    if not isinstance(proportions, (list, tuple)):
+        errors.append("proportions must be a list or tuple")
+    elif len(proportions) != n_levels:
+        errors.append(
+            f"Number of proportions ({len(proportions)}) must match n_levels ({n_levels})"
+        )
+    else:
+        # Check individual proportions
+        for i, prop in enumerate(proportions):
+            if not isinstance(prop, (int, float)):
+                errors.append(f"Proportion {i+1} must be numeric")
+            elif prop < 0:
+                errors.append(f"Proportion {i+1} cannot be negative")
+            elif prop == 0:
+                warnings.append(f"Proportion {i+1} is zero - level will never appear")
+
+        # Check if they sum to approximately 1
+        if not errors:  # Only if no errors with individual proportions
+            total = sum(proportions)
+            if abs(total - 1.0) > 1e-6:
+                warnings.append(
+                    f"Proportions sum to {total:.4f}, not 1.0 (will be normalized)"
+                )
+
+    # Warn about many levels
+    if n_levels > 10:
+        warnings.append(
+            f"Factor has {n_levels} levels. This creates {n_levels-1} dummy variables, which may require large sample sizes"
+        )
+
+    return _ValidationResult(len(errors) == 0, errors, warnings)
+
+
+def _validate_variable_type_timing(
+    correlations_set: bool, effects_set: bool
+) -> _ValidationResult:
+    """
+    Validate that variable types are set at the correct time.
+
+    Variable types must be set before correlations and effects to ensure
+    proper factor expansion and validation.
+
+    Args:
+        correlations_set: Whether correlations have been set
+        effects_set: Whether effects have been set
+
+    Returns:
+        _ValidationResult indicating if timing is valid
+    """
+    errors = []
+
+    if correlations_set:
+        errors.append(
+            "Cannot set variable types after correlations have been set. "
+            "Call set_variable_type() before set_correlations()."
+        )
+
+    if effects_set:
+        errors.append(
+            "Cannot set variable types after effects have been set. "
+            "Call set_variable_type() before set_effects()."
+        )
+
+    return _ValidationResult(len(errors) == 0, errors, [])
+
+
+def _validate_factor_in_correlations(
+    correlation_pairs: List[Tuple[str, str]],
+    factor_variables: Dict[str, Any],
+    all_predictor_vars: List[str],
+) -> _ValidationResult:
+    """
+    Validate that no factor variables are specified in correlations.
+
+    Args:
+        correlation_pairs: List of (var1, var2) tuples from correlation specification
+        factor_variables: Dictionary of factor variable specifications
+        all_predictor_vars: List of all predictor variable names
+
+    Returns:
+        _ValidationResult with any errors
+    """
+    errors = []
+    factor_names = set(factor_variables.keys())
+
+    # Find all factor variables used in correlations
+    factors_in_correlations = set()
+    for var1, var2 in correlation_pairs:
+        if var1 in factor_names:
+            factors_in_correlations.add(var1)
+        if var2 in factor_names:
+            factors_in_correlations.add(var2)
+
+    # Single error message if factors found
+    if factors_in_correlations:
+        factor_list = ", ".join(sorted(factors_in_correlations))
+        errors.append(f"Cannot use factor variables in correlations: {factor_list}. ")
+
+        # Show available continuous variables
+        continuous_vars = [var for var in all_predictor_vars if var not in factor_names]
+        if continuous_vars:
+            errors.append(f"Use variables: {', '.join(continuous_vars)}")
+
+    return _ValidationResult(len(errors) == 0, errors, [])
