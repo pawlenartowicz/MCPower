@@ -2,6 +2,7 @@
 ![PyPI](https://img.shields.io/pypi/v/MCPower)
 ![Python](https://img.shields.io/pypi/pyversions/mcpower)
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16502735.svg)](https://doi.org/10.5281/zenodo.16502735)
 
 
 ```
@@ -424,12 +425,16 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 
 GPL v3. If you use MCPower in research, please cite:
 
+Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Statistical Models [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.16502735
+
 ```bibtex
 @software{mcpower2025,
   author = {Pawel Lenartowicz},
   title = {MCPower: Monte Carlo Power Analysis for Statistical Models},
   year = {2025},
-  url = {https://github.com/pawlenartowicz/MCPower}
+  publisher = {Zenodo},
+  doi = {10.5281/zenodo.16502735},
+  url = {https://doi.org/10.5281/zenodo.16502735}
 }
 ```
 
