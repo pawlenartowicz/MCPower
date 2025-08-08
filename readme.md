@@ -4,7 +4,6 @@
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16502735.svg)](https://doi.org/10.5281/zenodo.16502735)
 
-
 ```
 ███╗   ███╗  ██████╗ ██████╗ 
 ████╗ ████║ ██╔════╝ ██╔══██╗ ██████╗ ██╗    ██╗███████╗██████╗ 
@@ -399,9 +398,9 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 
 ## Requirements
 
-- Python ≥ 3.7
-- NumPy, SciPy, scikit-learn, matplotlib
-- joblib (optional, for parallel processing)
+- Python ≥ 3.10
+- NumPy, SciPy, matplotlib, Pandas
+- joblib (optional, for parallel processing), Numba (optional, for development)
 
 ## Need Help?
 
@@ -441,3 +440,8 @@ Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Statistical Mode
 ---
 
 **🚀 Ready to start?** Copy one of the examples above and adapt it to your study!
+
+I created this project for free without receiving any payment, 
+and if you'd like to support my work, donations are appreciated!
+
+[💖 Support this project](https://freestylerscientist.pl/support_me)
