@@ -87,7 +87,7 @@ jobs:
         find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
         find dist/ -name "*.tar.gz" -exec cp {} dist-flat/ \;
     - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-token@release/v1
+      uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}
         packages-dir: dist-flat/
