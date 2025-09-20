@@ -274,15 +274,16 @@ model.set_parallel(True)
 - Complex models where traditional power analysis fails
 
 **✅ Use Scenario Analysis when:**
-- Planning important studies (grants, dissertations)
+- Planning important studies
 - Working with messy real-world data
 - Effect sizes are uncertain
 - Want conservative sample size estimates
-- Stakeholders need confidence in your numbers
+- You need confidence in your numbers
 
 **❌ Use traditional power analysis for:**
 - For models that are not yet implemented
-- When all assumptions are clearly met
+- For simple models where all assumptions are clearly met.
+- For large analyses with tens of thousands of observations, tiny effects, or very low alpha levels.
 
 ## What Makes Scenarios Different? (Be careful, unvalidated, preliminary scenarios)
 

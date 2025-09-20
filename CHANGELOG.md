@@ -1,6 +1,9 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.3.3] - 2025-07-27
+### Major changes
+- Wheels for pyhon 3.13
 
 ## [0.3.2] - 2025-07-27
 

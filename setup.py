@@ -93,7 +93,7 @@ dummy_extension = Extension(
 
 setup(
     name="MCPower",
-    version="0.3.2",
+    version="0.3.3",
     description="Monte Carlo Power Analysis for Statistical Models",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -129,6 +129,7 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
     ],
     keywords=["power analysis", "statistics", "monte carlo", "linear regression"],
     cmdclass={
