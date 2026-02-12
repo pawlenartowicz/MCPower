@@ -29,7 +29,7 @@ class PythonBackend:
         correction_method: int,
     ) -> np.ndarray:
         """Run OLS regression and return significance flags."""
-        return _ols_core(
+        return _ols_core(  # type: ignore[no-any-return]
             X,
             y,
             target_indices,
@@ -48,7 +48,7 @@ class PythonBackend:
         seed: int,
     ) -> np.ndarray:
         """Generate the dependent variable y = X @ effects + error."""
-        return _generate_y_core(X, effects, heterogeneity, heteroskedasticity, seed)
+        return _generate_y_core(X, effects, heterogeneity, heteroskedasticity, seed)  # type: ignore[no-any-return]
 
     def generate_X(
         self,
@@ -62,7 +62,7 @@ class PythonBackend:
         seed: int,
     ) -> np.ndarray:
         """Generate the predictor matrix X with correlated, typed columns."""
-        return _generate_X_core(
+        return _generate_X_core(  # type: ignore[no-any-return]
             n_samples,
             n_vars,
             correlation_matrix,

@@ -58,6 +58,9 @@ def _compute_t3_sd():
     Replicates the vectorised norm-CDF -> t(3)-PPF lookup chain on a large
     fixed-seed sample to get a stable SD estimate.
     """
+    assert NORM_CDF_TABLE is not None
+    assert T3_PPF_TABLE is not None
+
     rng_state = np.random.get_state()
     np.random.seed(999999)
     z = np.random.standard_normal(200000)
@@ -315,7 +318,7 @@ def _generate_X(
     if uploaded_values is None:
         uploaded_values = np.zeros((2, 2))
 
-    return _generate_X_jit(
+    return _generate_X_jit(  # type: ignore[no-any-return]
         sample_size,
         n_vars,
         correlation_matrix,

@@ -45,7 +45,7 @@ class JITBackend:
         correction_method: int,
     ) -> np.ndarray:
         """Run JIT-compiled OLS regression and return significance flags."""
-        return _ols_jit(
+        return _ols_jit(  # type: ignore[no-any-return]
             X,
             y,
             target_indices,
@@ -64,7 +64,7 @@ class JITBackend:
         seed: int,
     ) -> np.ndarray:
         """Generate the dependent variable using JIT-compiled code."""
-        return _generate_y_jit(X, effects, heterogeneity, heteroskedasticity, seed)
+        return _generate_y_jit(X, effects, heterogeneity, heteroskedasticity, seed)  # type: ignore[no-any-return]
 
     def generate_X(
         self,
@@ -78,7 +78,7 @@ class JITBackend:
         seed: int,
     ) -> np.ndarray:
         """Generate the predictor matrix using JIT-compiled code."""
-        return _generate_X_jit(
+        return _generate_X_jit(  # type: ignore[no-any-return]
             n_samples,
             n_vars,
             correlation_matrix,

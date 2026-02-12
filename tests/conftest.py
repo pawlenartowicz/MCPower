@@ -141,6 +141,29 @@ def reset_backend_after_test():
     reset_backend()
 
 
+def _statsmodels_available():
+    """Check if statsmodels is installed (required for LME tests)."""
+    try:
+        import statsmodels.regression.mixed_linear_model  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+_has_statsmodels = _statsmodels_available()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip LME tests when statsmodels is not installed."""
+    if _has_statsmodels:
+        return
+    skip_lme = pytest.mark.skip(reason="statsmodels not installed")
+    for item in items:
+        if "lme" in item.keywords:
+            item.add_marker(skip_lme)
+
+
 @pytest.fixture(autouse=True)
 def reset_lme_cache():
     """

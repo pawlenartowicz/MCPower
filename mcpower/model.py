@@ -6,7 +6,7 @@ using Monte Carlo simulations.
 """
 
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -98,7 +98,7 @@ class MCPower:
         self._test_method = "linear_regression"
 
         # Core configuration (applied immediately)
-        self.seed = 2137
+        self.seed: Optional[int] = 2137
         self.power = 80.0
         self.alpha = 0.05
         self.n_simulations = 1600
@@ -107,7 +107,7 @@ class MCPower:
         # Parallel processing
         import multiprocessing as mp
 
-        self.parallel = "mixedmodels"
+        self.parallel: Union[bool, str] = "mixedmodels"
         self.n_cores = max(1, (mp.cpu_count() or 1) // 2)
 
         # Simulation failure tolerance
@@ -117,15 +117,15 @@ class MCPower:
         self._registry = VariableRegistry(data_generation_formula)
 
         # Scenario configurations
-        self._scenario_configs = None
+        self._scenario_configs: Optional[Dict[str, Dict[str, Any]]] = None
 
         # Pending inputs (deferred until apply())
         self._pending_variable_types: Optional[str] = None
         self._pending_effects: Optional[str] = None
-        self._pending_correlations = None  # str or np.ndarray
+        self._pending_correlations: Optional[Union[str, np.ndarray]] = None
         self._pending_heterogeneity: Optional[float] = None
         self._pending_heteroskedasticity: Optional[float] = None
-        self._pending_data = None  # Dict with 'data' and 'columns'
+        self._pending_data: Optional[Dict[str, Any]] = None
         self._pending_clusters: Dict[str, Dict] = {}  # {grouping_var: {n_clusters, cluster_size, icc}}
 
         # Detect mixed model formula
@@ -144,15 +144,15 @@ class MCPower:
         self.heteroskedasticity = 0.0
 
         # Data storage
-        self.upload_normal_values = None
-        self.upload_data_values = None
-        self._uploaded_raw_data = None  # For strict mode bootstrap
+        self.upload_normal_values: Optional[np.ndarray] = None
+        self.upload_data_values: Optional[np.ndarray] = None
+        self._uploaded_raw_data: Optional[np.ndarray] = None
         self._uploaded_data_n = 0  # Sample count for warning
         self._preserve_correlation = "strict"  # Default mode
-        self._uploaded_var_metadata = {}  # {var_name: {type, registry_position, ...}}
+        self._uploaded_var_metadata: Dict[str, Any] = {}
 
         # Phase 2 Optimization: Effect plan cache for _create_X_extended
-        self._effect_plan_cache = None
+        self._effect_plan_cache: Optional[List[Tuple[str, Any]]] = None
 
         # Print summary
         predictor_names = self._registry.predictor_names
@@ -1001,6 +1001,8 @@ class MCPower:
                         self.upload_normal_values = np.zeros((n_vars, len(col_data)), dtype=np.float64)
                         self.upload_data_values = np.zeros((n_vars, len(col_data)), dtype=np.float64)
 
+                    assert self.upload_normal_values is not None
+                    assert self.upload_data_values is not None
                     self.upload_normal_values[var_idx] = normal_vals[0]
                     self.upload_data_values[var_idx] = uploaded_vals[0]
 
@@ -1326,6 +1328,7 @@ class MCPower:
             cluster_spec = list(self._registry._cluster_specs.values())[0]
             n_fixed_effects = len(self._registry.effect_names)
 
+            assert cluster_spec.n_clusters is not None
             complexity_result = _validate_lme_model_complexity(
                 sample_size=sample_size,
                 n_clusters=cluster_spec.n_clusters,
@@ -1574,8 +1577,10 @@ class MCPower:
             if spec.n_clusters is not None:
                 spec.cluster_size = sample_size // spec.n_clusters
             else:
+                assert spec.cluster_size is not None
                 spec.n_clusters = sample_size // spec.cluster_size
 
+            assert spec.n_clusters is not None and spec.cluster_size is not None
             actual_n = spec.n_clusters * spec.cluster_size
             if actual_n != sample_size:
                 print(
@@ -1586,7 +1591,7 @@ class MCPower:
 
             _validate_cluster_sample_size(sample_size, spec.n_clusters, spec.cluster_size).raise_if_invalid()
 
-    def _parse_target_tests(self, target_test) -> List[str]:
+    def _parse_target_tests(self, target_test: Union[str, List[str]]) -> List[str]:
         """Parse a target_test argument into a list of effect names to test."""
         if isinstance(target_test, str):
             if target_test.strip().lower() == "all":

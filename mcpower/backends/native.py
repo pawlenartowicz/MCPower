@@ -9,7 +9,7 @@ import numpy as np
 
 # Import the compiled module
 try:
-    from . import mcpower_native
+    from . import mcpower_native  # type: ignore[attr-defined]
 
     _NATIVE_AVAILABLE = True
 except ImportError:
@@ -82,7 +82,7 @@ class NativeBackend:
         target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
         correction_t_crits = np.ascontiguousarray(correction_t_crits, dtype=np.float64)
 
-        return mcpower_native.ols_analysis(X, y, target_indices, f_crit, t_crit, correction_t_crits, correction_method)
+        return mcpower_native.ols_analysis(X, y, target_indices, f_crit, t_crit, correction_t_crits, correction_method)  # type: ignore[no-any-return]
 
     def generate_y(
         self,
@@ -108,7 +108,7 @@ class NativeBackend:
         X = np.ascontiguousarray(X, dtype=np.float64)
         effects = np.ascontiguousarray(effects, dtype=np.float64)
 
-        return mcpower_native.generate_y(X, effects, heterogeneity, heteroskedasticity, seed)
+        return mcpower_native.generate_y(X, effects, heterogeneity, heteroskedasticity, seed)  # type: ignore[no-any-return]
 
     def generate_X(
         self,
@@ -143,7 +143,7 @@ class NativeBackend:
         upload_normal = np.ascontiguousarray(upload_normal, dtype=np.float64)
         upload_data = np.ascontiguousarray(upload_data, dtype=np.float64)
 
-        return mcpower_native.generate_X(
+        return mcpower_native.generate_X(  # type: ignore[no-any-return]
             n_samples,
             n_vars,
             correlation_matrix,

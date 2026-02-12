@@ -59,7 +59,8 @@ class _AssignmentParser:
                     # Special validation for correlation pairs
                     valid, error = self._validate_correlation_pair(name, available_items)
                     if not valid:
-                        errors.append(error)
+                        if error is not None:
+                            errors.append(error)
                         continue
                 else:
                     if name not in available_items:
@@ -88,7 +89,7 @@ class _AssignmentParser:
     def _split_assignments(self, input_string: str) -> List[str]:
         """Split assignments respecting parentheses."""
         assignments = []
-        current = []
+        current: List[str] = []
         paren_count = 0
 
         for char in input_string:
@@ -259,7 +260,7 @@ class _AssignmentParser:
                     f"Unsupported type '{value}'. Valid: {', '.join(supported_types)}",
                 )
 
-            result = {"type": value}
+            result: Dict[str, Any] = {"type": value}
             if value == "binary":
                 result["proportion"] = 0.5
             elif value == "factor":

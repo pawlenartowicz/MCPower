@@ -761,7 +761,7 @@ class _ResultFormatter:
     def _format_cumulative_recommendations(self, results: Dict, is_scenario: bool = False) -> List[str]:
         """Format cumulative probability recommendations."""
 
-        lines = []
+        lines: List[str] = []
 
         if is_scenario:
             # Handle scenario results

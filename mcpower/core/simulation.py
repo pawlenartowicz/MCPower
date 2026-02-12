@@ -6,7 +6,7 @@ from the original base.py for better separation of concerns.
 """
 
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -119,23 +119,23 @@ class SimulationRunner:
         all_results = []
         all_results_corrected = []
         n_wald_fallbacks = 0
-        collected_diagnostics = [] if metadata.verbose else None
-        failure_reasons = {} if metadata.verbose else None
+        collected_diagnostics: Optional[List[Dict[str, Any]]] = [] if metadata.verbose else None
+        failure_reasons: Optional[Dict[str, int]] = {} if metadata.verbose else None
 
         # Phase 2 Optimization: Precompute values that are constant across simulations
         # This eliminates redundant computations in the simulation loop
 
         # Precompute cluster IDs (8-12% speedup)
         if metadata.cluster_specs:
-            metadata.cluster_ids_template = _generate_cluster_id_array(sample_size, metadata.cluster_specs)
+            metadata.cluster_ids_template = _generate_cluster_id_array(sample_size, metadata.cluster_specs)  # type: ignore[assignment]
 
         # Precompute fixed effect mask (3-5% speedup)
         if metadata.cluster_effect_indices:
             all_indices = np.arange(len(metadata.effect_sizes))
-            metadata.fixed_effect_mask = ~np.isin(all_indices, metadata.cluster_effect_indices)
-            metadata.fixed_effect_sizes_cached = metadata.effect_sizes[metadata.fixed_effect_mask]
+            metadata.fixed_effect_mask = ~np.isin(all_indices, metadata.cluster_effect_indices)  # type: ignore[assignment]
+            metadata.fixed_effect_sizes_cached = metadata.effect_sizes[metadata.fixed_effect_mask]  # type: ignore[assignment]
         else:
-            metadata.fixed_effect_sizes_cached = metadata.effect_sizes
+            metadata.fixed_effect_sizes_cached = metadata.effect_sizes  # type: ignore[assignment]
 
         for sim_id in range(self.n_simulations):
             if cancel_check is not None and cancel_check():
@@ -175,7 +175,8 @@ class SimulationRunner:
                     if result.get("failed"):
                         # Track failure
                         reason = result.get("failure_reason", "Unknown")
-                        failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+                        if failure_reasons is not None:
+                            failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                     else:
                         # Extract results and diagnostics
                         sim_significant, sim_significant_corrected = result["results"]
@@ -183,7 +184,7 @@ class SimulationRunner:
                         all_results_corrected.append(sim_significant_corrected)
                         if result.get("wald_fallback"):
                             n_wald_fallbacks += 1
-                        if "diagnostics" in result:
+                        if "diagnostics" in result and collected_diagnostics is not None:
                             diag = result["diagnostics"].copy()
                             diag["sim_id"] = sim_id
                             collected_diagnostics.append(diag)
@@ -199,7 +200,7 @@ class SimulationRunner:
                     sim_significant, sim_significant_corrected = result
                     all_results.append(sim_significant)
                     all_results_corrected.append(sim_significant_corrected)
-            elif metadata.verbose:
+            elif metadata.verbose and failure_reasons is not None:
                 # Track as unknown failure
                 failure_reasons["Unknown (returned None)"] = failure_reasons.get("Unknown (returned None)", 0) + 1
 
@@ -244,13 +245,13 @@ class SimulationRunner:
 
         # ICC comparison: warn if estimated ICC differs substantially from specified
         if metadata.verbose and collected_diagnostics and metadata.cluster_specs:
-            icc_estimates = [
-                d.get("icc_estimated")
+            icc_estimates: List[float] = [
+                d["icc_estimated"]
                 for d in collected_diagnostics
                 if d.get("icc_estimated") is not None and not np.isnan(d.get("icc_estimated", np.nan))
             ]
             if icc_estimates:
-                mean_icc = np.mean(icc_estimates)
+                mean_icc = float(np.mean(icc_estimates))
                 _warn_icc_mismatch(metadata, mean_icc)
 
         result_dict = {
@@ -278,7 +279,7 @@ class SimulationRunner:
         analyze_func: Callable,
         create_X_extended_func: Callable,
         sim_seed: Optional[int] = None,
-    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    ) -> Any:
         """
         Execute a single Monte Carlo simulation.
 

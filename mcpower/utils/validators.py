@@ -73,8 +73,8 @@ def _validate_numeric_parameter(
     allow_rounding: bool = False,
 ) -> _ValidationResult:
     """Generic validation for numeric parameters."""
-    errors = []
-    warnings = []
+    errors: List[str] = []
+    warnings: List[str] = []
 
     # Type check
     type_error = _validator._check_type(value, expected_types, name)
@@ -170,8 +170,8 @@ def _validate_sample_size_for_model(sample_size: int, n_variables: int) -> _Vali
 
 def _validate_sample_size_range(from_size: Any, to_size: Any, by: Any) -> _ValidationResult:
     """Validate sample size range parameters."""
-    errors = []
-    warnings = []
+    errors: List[str] = []
+    warnings: List[str] = []
 
     # Type checks
     for param, name in [(from_size, "from_size"), (to_size, "to_size"), (by, "by")]:
@@ -295,8 +295,8 @@ def _validate_model_ready(model) -> _ValidationResult:
     Returns:
         _ValidationResult with any errors or warnings
     """
-    errors = []
-    warnings = []
+    errors: List[str] = []
+    warnings: List[str] = []
 
     # Check effect sizes - check if pending effects were set
     has_effects = hasattr(model, "_pending_effects") and model._pending_effects is not None
@@ -432,8 +432,8 @@ def _validate_cluster_config(
     parsed_grouping_vars: List[str],
 ) -> _ValidationResult:
     """Validate cluster configuration parameters."""
-    errors = []
-    warnings = []
+    errors: List[str] = []
+    warnings: List[str] = []
 
     # Grouping var must be in formula
     if grouping_var not in parsed_grouping_vars:
@@ -491,8 +491,8 @@ def _validate_cluster_sample_size(
     Returns:
         ValidationResult with errors if observations per cluster < 15
     """
-    errors = []
-    warnings = []
+    errors: List[str] = []
+    warnings: List[str] = []
 
     # Compute effective cluster size
     if cluster_size is not None:

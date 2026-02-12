@@ -5,7 +5,7 @@ This module handles power calculation and result formatting from
 simulation outputs.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -120,8 +120,8 @@ class ResultsProcessor:
         Returns:
             Dictionary with sample size analysis results
         """
-        powers_by_test = {test: [] for test in target_tests}
-        powers_by_test_corrected = {test: [] for test in target_tests}
+        powers_by_test: Dict[str, List[float]] = {test: [] for test in target_tests}
+        powers_by_test_corrected: Dict[str, List[float]] = {test: [] for test in target_tests}
         first_achieved = dict.fromkeys(target_tests, -1)
         first_achieved_corrected = dict.fromkeys(target_tests, -1)
 
@@ -161,7 +161,7 @@ def build_power_result(
     n_simulations: int,
     correction: Optional[str],
     target_power: float,
-    parallel: bool,
+    parallel: Union[bool, str],
     power_results: Dict,
 ) -> Dict[str, Any]:
     """
@@ -210,7 +210,7 @@ def build_sample_size_result(
     n_simulations: int,
     correction: Optional[str],
     target_power: float,
-    parallel: bool,
+    parallel: Union[bool, str],
     analysis_results: Dict,
 ) -> Dict[str, Any]:
     """
