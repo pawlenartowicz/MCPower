@@ -1,59 +1,39 @@
-"""
-Monte Carlo Power Analysis Package.
+"""MCPower - Monte Carlo Power Analysis.
 
-A flexible framework for conducting power analysis using Monte Carlo simulations
-for various statistical models including Linear Regression, Logistic Regression,
-ANOVA, and Mixed Effects models.
+A simulation-based framework for statistical power analysis supporting
+linear regression and linear mixed-effects models with interactions,
+correlated predictors, non-normal distributions, and empirical data upload.
 
-Main Classes:
-    MCPowerBase: Base class for all power analysis models
-    LinearRegression: Power analysis for linear regression models
-    LogisticRegression: Power analysis for logistic regression models (coming soon)
-
-Example Usage:
-    >>> from mcpower import LinearRegression
+Example:
+    >>> from mcpower import MCPower
     >>>
-    >>> # Create model
-    >>> mc = LinearRegression("y = x1 + x2 + x1:x2")
+    >>> model = MCPower("y = x1 + x2 + x1:x2")
+    >>> model.set_effects("x1=0.5, x2=0.3, x1:x2=0.2")
+    >>> model.find_power(sample_size=100)
     >>>
-    >>> # Set effect sizes
-    >>> mc.set_effects("x1=0.5, x2=0.3, x1:x2=0.2")
-    >>>
-    >>> # Find power
-    >>> mc.find_power(sample_size=100)
-    >>>
-    >>> # Find required sample size
-    >>> mc.find_sample_size(target_test='x1', from_size=50, to_size=200)
+    >>> model.find_sample_size(target_test='x1', from_size=50, to_size=200)
 """
 
-from .linear_regression import LinearRegression
+from importlib.metadata import version as _get_version
 
-# Version info
-__version__ = "0.3.3"
-__author__ = "Paweł Lenartowicz"
+from .backends import get_backend_info, set_backend
+from .model import MCPower
+from .progress import PrintReporter, ProgressReporter, TqdmReporter
+
+__version__ = _get_version("MCPower")
+__author__ = "Pawel Lenartowicz"
 __email__ = "pawellenartowicz@europe.com"
 
-# Public API
 __all__ = [
-    # Model classes
-    "LinearRegression"
+    "MCPower",
+    "set_backend",
+    "get_backend_info",
+    "ProgressReporter",
+    "PrintReporter",
+    "TqdmReporter",
 ]
 
 
-# Module metadata
-def get_info():
-    """Get package information."""
-    return {
-        "name": "mcpower",
-        "version": __version__,
-        "description": "Monte Carlo Power Analysis for Statistical Models",
-        "models": ["LinearRegression"],
-        "author": __author__,
-        "email": __email__,
-    }
-
-
-# Check for updates
 from .utils.updates import _check_for_updates
 
 _check_for_updates(__version__)

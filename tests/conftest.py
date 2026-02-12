@@ -1,143 +1,162 @@
 """
-Shared pytest fixtures for MCPower tests.
+Shared fixtures for MCPower tests.
 """
 
-import pytest
-import numpy as np
-import pandas as pd
-import tempfile
-import os
+import sys
 from pathlib import Path
 
-# Set random seed for reproducible tests
-np.random.seed(42)
+import numpy as np
+import pytest
 
-
-@pytest.fixture
-def sample_model():
-    """Basic LinearRegression model for testing - unconfigured."""
-    import mcpower
-
-    model = mcpower.LinearRegression("y = x1 + x2 + x1:x2")
-    return model
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 @pytest.fixture
 def simple_model():
-    """Simple model with one predictor - unconfigured."""
-    import mcpower
+    """Create a simple two-predictor model."""
+    from mcpower import MCPower
 
-    model = mcpower.LinearRegression("outcome = treatment")
+    model = MCPower("y = x1 + x2")
     return model
 
 
 @pytest.fixture
-def configured_sample_model():
-    """Pre-configured sample model following correct timing order."""
-    import mcpower
+def configured_model():
+    """Create a fully configured model ready for analysis."""
+    from mcpower import MCPower
 
-    model = mcpower.LinearRegression("y = x1 + x2 + x1:x2")
-    model.set_variable_type("x1=binary")
-    model.set_effects("x1=0.5, x2=0.3, x1:x2=0.2")
+    model = MCPower("y = x1 + x2")
+    model.set_effects("x1=0.3, x2=0.2")
     return model
 
 
 @pytest.fixture
-def configured_simple_model():
-    """Pre-configured simple model following correct timing order."""
-    import mcpower
+def interaction_model():
+    """Create a model with interaction term."""
+    from mcpower import MCPower
 
-    model = mcpower.LinearRegression("outcome = treatment")
-    model.set_variable_type("treatment=binary")
-    model.set_effects("treatment=0.4")
+    model = MCPower("y = a + b + a:b")
+    model.set_effects("a=0.4, b=0.3, a:b=0.2")
     return model
 
 
 @pytest.fixture
-def sample_data():
-    """Sample dataset for upload tests - uses cars.csv."""
-    # Try to find cars.csv in multiple locations
-    possible_paths = [
-        Path(__file__).parent / "cars.csv",  # tests/cars.csv
-        Path(__file__).parent / "../examples/cars.csv",  # examples/cars.csv
-        Path("examples/cars.csv"),  # from project root
-        Path("cars.csv"),  # current directory
-    ]
+def factor_model():
+    """Create a model with factor variable."""
+    from mcpower import MCPower
 
-    for path in possible_paths:
-        if path.exists():
-            return pd.read_csv(path)
-
-    # Fallback to synthetic data if cars.csv not found
-    np.random.seed(123)
-    n = 32  # Same size as cars dataset
-    data = {
-        "mpg": np.random.normal(20, 6, n),
-        "hp": np.random.normal(140, 60, n),
-        "wt": np.random.normal(3.2, 1, n),
-        "am": np.random.choice([0, 1], n),
-    }
-    return pd.DataFrame(data)
+    model = MCPower("y = group + x1")
+    model.set_variable_type("group=(factor,3)")
+    model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
+    return model
 
 
 @pytest.fixture
-def temp_csv_file(sample_data):
-    """Temporary CSV file for data upload tests."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        sample_data.to_csv(f.name, index=False)
-        yield f.name
-    os.unlink(f.name)
-
-
-@pytest.fixture
-def cars_data():
-    """Cars dataset specifically for realistic testing."""
-    # Same logic as sample_data but clearer name
-    possible_paths = [
-        Path(__file__).parent / "cars.csv",
-        Path(__file__).parent / "../examples/cars.csv",
-        Path("examples/cars.csv"),
-        Path("cars.csv"),
-    ]
-
-    for path in possible_paths:
-        if path.exists():
-            return pd.read_csv(path)
-
-    # Fallback to synthetic cars-like data
-    np.random.seed(123)
-    n = 32
-    data = {
-        "mpg": np.random.normal(20, 6, n),
-        "hp": np.random.normal(140, 60, n),
-        "wt": np.random.normal(3.2, 1, n),
-        "am": np.random.choice([0, 1], n),
-    }
-    return pd.DataFrame(data)
+def correlation_matrix_2x2():
+    """Create a simple 2x2 correlation matrix."""
+    return np.array([[1.0, 0.5], [0.5, 1.0]])
 
 
 @pytest.fixture
 def correlation_matrix_3x3():
-    """Valid 3x3 correlation matrix."""
-    return np.array([[1.0, 0.3, 0.5], [0.3, 1.0, 0.2], [0.5, 0.2, 1.0]])
+    """Create a 3x3 correlation matrix."""
+    return np.array([[1.0, 0.3, 0.2], [0.3, 1.0, 0.4], [0.2, 0.4, 1.0]])
 
 
 @pytest.fixture
-def small_simulation_settings():
-    """Settings for fast tests."""
-    return {"n_simulations": 100, "parallel": False}
+def sample_data():
+    """Create sample empirical data."""
+    np.random.seed(42)
+    return {
+        "x1": np.random.exponential(2, 100),
+        "x2": np.random.normal(0, 1, 100),
+    }
 
 
-# Test data constants
-VALID_EQUATIONS = [
-    "y = x1 + x2",
-    "outcome ~ treatment + age",
-    "y = x1 * x2",
-    "response = a + b + a:b",
-]
+@pytest.fixture
+def native_python_backends():
+    """Return (NativeBackend, PythonBackend) pair; skip if native unavailable."""
+    try:
+        from mcpower.backends.native import NativeBackend
 
-INVALID_EQUATIONS = ["", "y = ", "= x1 + x2", "y ~ "]
+        native = NativeBackend()
+    except (ImportError, Exception):
+        pytest.skip("Native C++ backend not available")
+    from mcpower.backends.python import PythonBackend
 
-VALID_EFFECT_STRINGS = ["x1=0.5, x2=0.3", "treatment=0.4", "a=0.1, b=0.2, a:b=0.15"]
+    return native, PythonBackend()
 
-INVALID_EFFECT_STRINGS = ["", "x1=invalid", "nonexistent=0.5", "x1="]
+
+@pytest.fixture
+def suppress_output(capsys):
+    """Suppress print output during tests by capturing it."""
+    # Using capsys instead of monkeypatching print to avoid conflicts with numba
+    yield
+    # Output is automatically captured by capsys
+
+
+def _native_available():
+    """Check if native C++ backend is available."""
+    try:
+        from mcpower.backends.native import NativeBackend
+
+        NativeBackend()
+        return True
+    except (ImportError, Exception):
+        return False
+
+
+# Available backends for parametrization
+BACKENDS = ["python"]
+if _native_available():
+    BACKENDS.append("c++")
+
+
+@pytest.fixture(params=BACKENDS)
+def backend(request):
+    """
+    Force MCPower to run on a specific backend.
+
+    Parametrizes tests across all available backends (Python + C++ if available).
+    Automatically resets backend after each test.
+    """
+    from mcpower.backends import reset_backend, set_backend
+
+    set_backend(request.param)
+    yield request.param
+    reset_backend()
+
+
+@pytest.fixture(autouse=True)
+def reset_backend_after_test():
+    """
+    Automatically reset backend to default after every test.
+
+    Ensures no hidden backend state leaks between tests.
+    """
+    yield
+    from mcpower.backends import reset_backend
+
+    reset_backend()
+
+
+@pytest.fixture(autouse=True)
+def reset_lme_cache():
+    """
+    Automatically reset LME warm start cache before each test.
+
+    The warm start cache stores parameters from previous fits to speed up
+    convergence. However, it can cause failures when model structure changes
+    between tests (e.g., different number of predictors).
+
+    This fixture ensures tests start with clean state.
+    """
+    try:
+        from mcpower.utils.mixed_models import reset_warm_start_cache
+
+        reset_warm_start_cache()
+    except ImportError:
+        # mixed_models module not available, skip
+        pass
+    yield

@@ -1,108 +1,93 @@
 """
-Data Generator for Monte Carlo Power Analysis
+Data Generator for Monte Carlo Power Analysis.
 
-OVERVIEW:
-=========
-Generates synthetic datasets with specified:
+Generates synthetic datasets with:
 - Distributions (normal, binary, skewed, etc.)
 - Correlation structures
-- Variable transformations
 - Uploaded data structure preservation
 
-OPTIMIZATION STRATEGY:
-=====================
-Three-tier performance system:
-1. AOT compiled (fastest) - pre-compiled native code
-2. JIT compiled (fast) - runtime compilation via numba
-3. Pure Python (slowest) - fallback when numba unavailable
-
-CORE CONCEPT:
-============
-1. Generate correlated normal data using Cholesky decomposition
-2. Transform to target distributions via lookup tables
-3. Use quantile matching for uploaded data structure preservation
-
-LOOKUP TABLES:
-=============
-Pre-computed CDF/PPF tables avoid repeated scipy calls:
-- NORM_CDF_TABLE: Normal CDF for distribution transforms
-- T3_PPF_TABLE: t distributed with df = 3 quantiles for heavy-tailed distributions
+Performance: JIT compiled via numba, falls back to pure Python.
+Future: C++ backend via pybind11 (see mcpower/backends/native.py)
 """
 
-import os
-import numpy as np
-import pickle
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
-# Distribution resolution and ranges
-DIST_RESOLUTION = 2048  # Lookup table size (accuracy vs memory)
-PERCENTILE_RANGE = (0.001, 0.999)  # Avoid extreme quantiles
-NORM_RANGE = (-6, 6)  # Normal distribution range
+import numpy as np
+
+# Distribution constants
+DIST_RESOLUTION = 2048
+PERCENTILE_RANGE = (0.001, 0.999)
+NORM_RANGE = (-6, 6)
 SQRT3 = np.sqrt(3)
-SKEW_MEAN = np.exp(0.5)  # Lognormal standardization
+SKEW_MEAN = np.exp(0.5)
 SKEW_STD = np.sqrt(np.exp(2) - np.exp(1))
 NORM_SCALE = (DIST_RESOLUTION - 1) / (NORM_RANGE[1] - NORM_RANGE[0])
 PERC_SCALE = (DIST_RESOLUTION - 1) / (PERCENTILE_RANGE[1] - PERCENTILE_RANGE[0])
 FLOAT_NEAR_ZERO = 1e-15
 
-# Global lookup tables (initialized on import)
+# Global lookup tables
 NORM_CDF_TABLE = None
 T3_PPF_TABLE = None
+T3_SD = 1.0  # Effective SD of t(3) values from the lookup pipeline
 
 
 def _init_tables():
-    """Initialize/load cached distribution lookup tables for fast transforms."""
-    global NORM_CDF_TABLE, T3_PPF_TABLE
+    """Initialize distribution lookup tables from the shared LookupTableManager.
 
-    cache_file = os.path.join(os.path.dirname(__file__), ".generator_lookup_tables.pkl")
+    Both the Python and C++ backends load from the same source to guarantee
+    identical table data and therefore identical distribution transforms.
+    """
+    global NORM_CDF_TABLE, T3_PPF_TABLE, T3_SD
+    from ..tables import get_table_manager
 
-    try:
-        with open(cache_file, "rb") as f:
-            NORM_CDF_TABLE, T3_PPF_TABLE = pickle.load(f)
-    except (FileNotFoundError, pickle.PickleError):
-        from scipy.stats import norm, t
+    manager = get_table_manager()
+    NORM_CDF_TABLE = manager.load_norm_cdf_table().astype(np.float64)
+    T3_PPF_TABLE = manager.load_t3_ppf_table().astype(np.float64)
 
-        # Build lookup tables
-        x_norm = np.linspace(*NORM_RANGE, DIST_RESOLUTION)
-        NORM_CDF_TABLE = norm.cdf(x_norm)
+    # Compute the effective SD of t(3) values produced by the lookup pipeline.
+    # The t(3) distribution has theoretical variance = 3, but the lookup table
+    # clips percentiles to [0.001, 0.999] and uses interpolation, yielding a
+    # lower empirical SD (~0.93). We normalise by this SD so that the
+    # high-kurtosis distribution has Var ≈ 1, matching normal/uniform/skewed.
+    T3_SD = _compute_t3_sd()
 
-        percentile_points = np.linspace(*PERCENTILE_RANGE, DIST_RESOLUTION)
-        T3_PPF_TABLE = t.ppf(percentile_points, 3) / SQRT3
 
-        # Cache for future use
-        try:
-            with open(cache_file, "wb") as f:
-                pickle.dump((NORM_CDF_TABLE, T3_PPF_TABLE), f)
-        except:
-            pass
+def _compute_t3_sd():
+    """Compute the effective SD of high-kurtosis values from the lookup pipeline.
+
+    Replicates the vectorised norm-CDF -> t(3)-PPF lookup chain on a large
+    fixed-seed sample to get a stable SD estimate.
+    """
+    rng_state = np.random.get_state()
+    np.random.seed(999999)
+    z = np.random.standard_normal(200000)
+    np.random.set_state(rng_state)
+
+    # Step 1: Normal CDF lookup (z -> percentile)
+    z_clipped = np.clip(z, NORM_RANGE[0], NORM_RANGE[1])
+    idx = (z_clipped - NORM_RANGE[0]) * NORM_SCALE
+    idx_int = np.clip(idx.astype(int), 0, DIST_RESOLUTION - 2)
+    frac = idx - idx_int
+    cdf_vals = NORM_CDF_TABLE[idx_int] * (1 - frac) + NORM_CDF_TABLE[idx_int + 1] * frac
+
+    # Step 2: t(3) PPF lookup (percentile -> t3 quantile)
+    cdf_vals = np.clip(cdf_vals, PERCENTILE_RANGE[0], PERCENTILE_RANGE[1])
+    idx2 = (cdf_vals - PERCENTILE_RANGE[0]) * PERC_SCALE
+    idx2_int = np.clip(idx2.astype(int), 0, DIST_RESOLUTION - 2)
+    frac2 = idx2 - idx2_int
+    t3_vals = T3_PPF_TABLE[idx2_int] * (1 - frac2) + T3_PPF_TABLE[idx2_int + 1] * frac2
+
+    return float(np.std(t3_vals))
 
 
 _init_tables()
-
-# AOT compilation setup (build-time only)
-if os.environ.get("NUMBA_AOT_BUILD"):
-    try:
-        from numba.pycc import CC
-
-        cc = CC("data_generation_compiled")
-        compile_function = lambda sig: lambda func: cc.export(func.__name__, sig)(func)  # type: ignore
-    except ImportError as e:
-        print(f"Warning: AOT compilation not available: {e}")
-        cc = None
-        compile_function = None
-else:
-    cc = None
-    compile_function = None
 
 
 def create_uploaded_lookup_tables(
     data_matrix: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Create quantile-matching tables for uploaded data variables.
-
-    Maps normal quantiles to empirical data quantiles, preserving
-    the original distribution shape when generating new samples.
+    Create quantile-matching tables for uploaded data.
 
     Args:
         data_matrix: (n_samples, n_vars) empirical data
@@ -122,10 +107,7 @@ def create_uploaded_lookup_tables(
         normalized = (data - np.mean(data)) / np.std(data)
         sorted_uploaded = np.sort(normalized)
 
-        # Map to uniform then to normal quantiles
-        percentiles = np.linspace(
-            1 / (n_samples + 1), n_samples / (n_samples + 1), n_samples
-        )
+        percentiles = np.linspace(1 / (n_samples + 1), n_samples / (n_samples + 1), n_samples)
         normal_quantiles = norm.ppf(percentiles)
 
         normal_values[var_idx] = normal_quantiles
@@ -146,24 +128,29 @@ def _generate_X_core(
     upload_data_values,
     sim_seed,
 ):
-    """
-    Core data generation: correlated normal → distribution transforms.
+    """Generate the predictor matrix ``X`` with correlated, typed columns.
 
-    ALGORITHM:
-    1. Generate multivariate normal with specified correlations
-    2. Transform each variable to target distribution via lookup tables
-    3. Handle uploaded data via quantile matching
+    Algorithm:
 
-    Distribution types (var_types):
+    1. Draw ``(sample_size, n_vars)`` i.i.d. standard normals.
+    2. Apply the Cholesky factor of *correlation_matrix* to induce
+       the desired correlation structure.
+    3. Transform each column to its target distribution via
+       probability-integral transforms using pre-computed lookup tables.
+
+    Distribution codes (``var_types``):
     0=normal, 1=binary, 2=right_skewed, 3=left_skewed,
-    4=high_kurtosis, 5=uniform, 99=uploaded_data
+    4=high_kurtosis (t with df=3), 5=uniform,
+    97=uploaded_factor, 98=uploaded_binary, 99=uploaded_data.
+
+    This function is also used as the body for the Numba JIT-compiled
+    ``_generate_X_jit`` variant.
     """
 
     def _vectorized_norm_cdf_lookup(x_array):
-        """Fast normal CDF via linear interpolation in lookup table."""
+        """Map standard-normal values to CDF probabilities via lookup table."""
         n = len(x_array)
         result = np.zeros(n)
-
         for i in range(n):
             x = x_array[i]
             if x < NORM_RANGE[0]:
@@ -173,22 +160,17 @@ def _generate_X_core(
             else:
                 idx = (x - NORM_RANGE[0]) * NORM_SCALE
                 idx_int = int(idx)
-
                 if idx_int >= DIST_RESOLUTION - 1:
                     result[i] = norm_cdf_table[DIST_RESOLUTION - 1]
                 else:
                     frac = idx - idx_int
-                    result[i] = (
-                        norm_cdf_table[idx_int] * (1 - frac)
-                        + norm_cdf_table[idx_int + 1] * frac
-                    )
+                    result[i] = norm_cdf_table[idx_int] * (1 - frac) + norm_cdf_table[idx_int + 1] * frac
         return result
 
     def _vectorized_t3_ppf_lookup(percentile_array):
-        """Fast t(3) quantiles for heavy-tailed distributions."""
+        """Map CDF probabilities to t(df=3) quantiles via lookup table."""
         n = len(percentile_array)
         result = np.zeros(n)
-
         for i in range(n):
             percentile = percentile_array[i]
             if percentile <= PERCENTILE_RANGE[0]:
@@ -198,32 +180,25 @@ def _generate_X_core(
             else:
                 idx = (percentile - PERCENTILE_RANGE[0]) * PERC_SCALE
                 idx_int = int(idx)
-
                 if idx_int >= DIST_RESOLUTION - 1:
                     result[i] = t3_ppf_table[DIST_RESOLUTION - 1]
                 else:
                     frac = idx - idx_int
-                    result[i] = (
-                        t3_ppf_table[idx_int] * (1 - frac)
-                        + t3_ppf_table[idx_int + 1] * frac
-                    )
+                    result[i] = t3_ppf_table[idx_int] * (1 - frac) + t3_ppf_table[idx_int + 1] * frac
         return result
 
     def _vectorized_uploaded_lookup(normal_array, normal_vals, uploaded_vals):
-        """Map normal values to uploaded data via binary search + interpolation."""
+        """Interpolate uploaded empirical quantiles from normal values."""
         n_samples = len(normal_array)
         n_lookup = len(normal_vals)
         result = np.zeros(n_samples)
-
         for i in range(n_samples):
             normal_value = normal_array[i]
-
             if normal_value <= normal_vals[0]:
                 result[i] = uploaded_vals[0]
             elif normal_value >= normal_vals[-1]:
                 result[i] = uploaded_vals[-1]
             else:
-                # Binary search for bracketing values
                 left, right = 0, n_lookup - 1
                 while left < right - 1:
                     mid = (left + right) // 2
@@ -231,106 +206,81 @@ def _generate_X_core(
                         left = mid
                     else:
                         right = mid
-
-                # Linear interpolation
-                frac = (normal_value - normal_vals[left]) / (
-                    normal_vals[right] - normal_vals[left]
-                )
-                result[i] = (
-                    uploaded_vals[left] * (1 - frac) + uploaded_vals[right] * frac
-                )
-
+                frac = (normal_value - normal_vals[left]) / (normal_vals[right] - normal_vals[left])
+                result[i] = uploaded_vals[left] * (1 - frac) + uploaded_vals[right] * frac
         return result
 
     def _cholesky_decomposition(corr_matrix):
-        """Robust Cholesky with eigenvalue correction for near-singular matrices."""
+        """Compute Cholesky factor, falling back to eigen-decomposition if needed."""
         try:
             return np.linalg.cholesky(corr_matrix)
-        except:
-            # Fallback: eigenvalue decomposition with regularization
+        except Exception:
             eigenvals, eigenvecs = np.linalg.eigh(corr_matrix)
             eigenvals = np.maximum(eigenvals, FLOAT_NEAR_ZERO)
             return eigenvecs @ np.diag(np.sqrt(eigenvals))
 
     def _transform_distribution(data, dist_type, param, var_idx):
-        """Transform standard normal to target distribution."""
+        """Transform a standard-normal column to the target distribution."""
         if dist_type == 0:  # normal
             return data.copy()
         elif dist_type == 1:  # binary
             percentiles = _vectorized_norm_cdf_lookup(data)
             binary_data = (percentiles < param).astype(np.float64)
-            return binary_data - np.mean(binary_data)  # Center at 0
-        elif dist_type == 2:  # right_skewed (exponential-like)
+            return binary_data - np.mean(binary_data)
+        elif dist_type == 2:  # right_skewed
             percentiles = _vectorized_norm_cdf_lookup(data)
+            percentiles = np.clip(percentiles, PERCENTILE_RANGE[0], PERCENTILE_RANGE[1])
             return (-np.log(percentiles) - SKEW_MEAN) / SKEW_STD
         elif dist_type == 3:  # left_skewed
             percentiles = _vectorized_norm_cdf_lookup(data)
+            percentiles = np.clip(percentiles, PERCENTILE_RANGE[0], PERCENTILE_RANGE[1])
             return (np.log(1 - percentiles) + SKEW_MEAN) / SKEW_STD
-        elif dist_type == 4:  # high_kurtosis (t-distribution)
+        elif dist_type == 4:  # high_kurtosis
             percentiles = _vectorized_norm_cdf_lookup(data)
-            return _vectorized_t3_ppf_lookup(percentiles)
+            return _vectorized_t3_ppf_lookup(percentiles) / T3_SD
         elif dist_type == 5:  # uniform
             percentiles = _vectorized_norm_cdf_lookup(data)
-            return SQRT3 * (2 * percentiles - 1)  # Uniform[-√3, √3], var=1
-        elif dist_type == 99:  # uploaded_data
+            return SQRT3 * (2 * percentiles - 1)
+        elif dist_type == 97:  # uploaded_factor (handled via bootstrap, shouldn't reach here)
+            return data.copy()
+        elif dist_type == 98:  # uploaded_binary (handled via bootstrap, shouldn't reach here)
+            return data.copy()
+        elif dist_type == 99:  # uploaded_data (continuous with lookup tables)
             if var_idx < upload_normal_values.shape[0]:
                 normal_vals = upload_normal_values[var_idx]
                 uploaded_vals = upload_data_values[var_idx]
                 return _vectorized_uploaded_lookup(data, normal_vals, uploaded_vals)
-            else:
-                return data.copy()
+            return data.copy()
         else:
             return data.copy()
 
-    # Main generation algorithm
+    # Main algorithm
     if sim_seed >= 0:
         np.random.seed(sim_seed)
     base_normal = np.random.standard_normal((sample_size, n_vars))
 
-    # Apply correlation structure
     cholesky_matrix = _cholesky_decomposition(correlation_matrix)
     correlated_data = base_normal @ cholesky_matrix.T
 
-    # Transform to target distributions
     X = np.zeros((sample_size, n_vars))
     for j in range(n_vars):
-        X[:, j] = _transform_distribution(
-            correlated_data[:, j], var_types[j], var_params[j], j
-        )
+        X[:, j] = _transform_distribution(correlated_data[:, j], var_types[j], var_params[j], j)
 
     return X
 
 
-# COMPILATION SETUP: AOT → JIT → Python fallback
-if os.environ.get("NUMBA_AOT_BUILD"):
-    if compile_function and cc:
-        _generate_X_core = compile_function(
-            "f8[:,:](i8, i8, f8[:,:], i8[:], f8[:], f8[:], f8[:], f8[:,:], f8[:,:], i8)"
-        )(_generate_X_core)
-        cc.compile()
-    _generate_X_runtime = _generate_X_core
-else:
-    try:
-        # Try AOT compiled version first
-        from .data_generation_compiled import _generate_X_core as _generate_X_core_aot
+# Try JIT compilation, fall back to pure Python
+try:
+    from numba import njit
 
-        _generate_X_runtime = _generate_X_core_aot
-        print("Using AOT data generation")
-    except (ImportError, AttributeError):
-        try:
-            # Fall back to JIT compilation
-            from numba import njit
-
-            _generate_X_runtime = njit(
-                "f8[:,:](i8, i8, f8[:,:], i8[:], f8[:], f8[:], f8[:], f8[:,:], f8[:,:], i8)",
-                cache=True,
-            )(_generate_X_core)
-            print("Using JIT data generation")
-        except ImportError:
-            # Pure Python fallback
-            _generate_X_runtime = _generate_X_core
-            print("Using Python data generation")
-            print("Install numba for faster performance: pip install numba")
+    _generate_X_jit = njit(
+        "f8[:,:](i8, i8, f8[:,:], i8[:], f8[:], f8[:], f8[:], f8[:,:], f8[:,:], i8)",
+        cache=True,
+    )(_generate_X_core)
+    _USE_JIT = True
+except ImportError:
+    _generate_X_jit = _generate_X_core
+    _USE_JIT = False
 
 
 def _generate_X(
@@ -350,25 +300,24 @@ def _generate_X(
         sample_size: Number of observations
         n_vars: Number of variables
         correlation_matrix: Variable correlations (default: identity)
-        var_types: Distribution types per variable (default: all normal)
-        var_params: Distribution parameters (e.g., binary proportions)
+        var_types: Distribution types per variable
+        var_params: Distribution parameters
         normal_values, uploaded_values: Lookup tables for uploaded data
-        seed: Random seed for reproducibility
+        seed: Random seed
 
     Returns:
         X: (sample_size, n_vars) design matrix
     """
     if correlation_matrix is None:
         correlation_matrix = np.eye(n_vars)
-
     if normal_values is None:
         normal_values = np.zeros((2, 2))
     if uploaded_values is None:
         uploaded_values = np.zeros((2, 2))
 
-    return _generate_X_runtime(
+    return _generate_X_jit(
         sample_size,
-        n_vars,  # type: ignore
+        n_vars,
         correlation_matrix,
         var_types,
         var_params,
@@ -382,18 +331,15 @@ def _generate_X(
 
 def _generate_factors(sample_size, factor_specs, seed):
     """
-    Generate factor variables as dummy variables for linear regression.
+    Generate factor variables as dummy variables.
 
     Args:
         sample_size: Number of observations
-        factor_specs: List of factor specifications, each containing:
-                     {'n_levels': int, 'proportions': [float, ...]}
-        seed: Random seed or None
+        factor_specs: List of {'n_levels': int, 'proportions': [float, ...]}
+        seed: Random seed
 
     Returns:
-        X_factors: (sample_size, total_dummies) array of binary values
-                  For each factor with n levels, creates n-1 dummy variables
-                  Level 1 is reference (all dummies = 0)
+        X_factors: (sample_size, total_dummies) array
     """
     if seed is not None:
         np.random.seed(seed)
@@ -401,26 +347,147 @@ def _generate_factors(sample_size, factor_specs, seed):
     if not factor_specs:
         return np.empty((sample_size, 0), dtype=float)
 
-    # Generate all factor columns efficiently
     factor_columns = []
-
     for spec in factor_specs:
         n_levels = spec["n_levels"]
         proportions = spec["proportions"]
-
-        # Generate categorical data
         factor_data = np.random.choice(n_levels, size=sample_size, p=proportions)
-
-        # Vectorized dummy variable creation using one-hot encoding
-        # Create identity matrix and index into it
         dummies = np.eye(n_levels, dtype=float)[factor_data]
+        factor_columns.append(dummies[:, 1:])
 
-        # Remove reference level (first column) and append remaining columns
-        factor_columns.append(dummies[:, 1:])  # Skip level 0 (reference)
+    return np.hstack(factor_columns) if factor_columns else np.empty((sample_size, 0), dtype=float)
 
-    # Concatenate all factor columns horizontally
-    return (
-        np.hstack(factor_columns)
-        if factor_columns
-        else np.empty((sample_size, 0), dtype=float)
-    )
+
+def bootstrap_uploaded_data(
+    sample_size: int,
+    raw_data: np.ndarray,
+    var_metadata: dict,
+    seed: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Bootstrap uploaded data for strict correlation preservation mode.
+
+    Samples whole rows from the uploaded data (preserving exact relationships),
+    then transforms binary and factor variables appropriately.
+
+    Args:
+        sample_size: Number of samples to generate
+        raw_data: Original uploaded data (n_samples × n_vars), normalized for continuous
+        var_metadata: Dict mapping var_name to {type, data_index, unique_values, ...}
+        seed: Random seed
+
+    Returns:
+        X_non_factors: Non-factor variables (continuous + binary mapped to 0-1)
+        X_factors: Factor dummy variables
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    # Bootstrap whole rows
+    n_samples = raw_data.shape[0]
+    row_indices = np.random.choice(n_samples, size=sample_size, replace=True)
+    bootstrapped_data = raw_data[row_indices, :]
+
+    # Separate by type
+    non_factor_columns = []
+    factor_columns = []
+
+    # Sort by data_index to maintain order
+    sorted_vars = sorted(var_metadata.items(), key=lambda x: x[1]["data_index"])
+
+    for _var_name, info in sorted_vars:
+        idx = info["data_index"]
+        col_data = bootstrapped_data[:, idx]
+
+        if info["type"] == "binary":
+            # Map to 0-1
+            unique_vals = info["unique_values"]
+            # Map first unique value to 0, second to 1
+            binary_data = np.where(col_data == unique_vals[0], 0.0, 1.0)
+            # Center: mean = 0
+            binary_data = binary_data - np.mean(binary_data)
+            non_factor_columns.append(binary_data)
+
+        elif info["type"] == "factor":
+            # Create dummy variables
+            unique_vals = info["unique_values"]
+            n_levels = len(unique_vals)
+
+            # Map values to indices
+            factor_indices = np.zeros(sample_size, dtype=int)
+            for level_idx, val in enumerate(unique_vals):
+                factor_indices[col_data == val] = level_idx
+
+            # Create dummies (drop first level)
+            dummies = np.eye(n_levels, dtype=float)[factor_indices]
+            factor_columns.append(dummies[:, 1:])
+
+        else:  # continuous
+            # Already normalized, keep as-is
+            non_factor_columns.append(col_data)
+
+    # Stack results
+    X_non_factors = np.column_stack(non_factor_columns) if non_factor_columns else np.empty((sample_size, 0), dtype=float)
+
+    X_factors = np.hstack(factor_columns) if factor_columns else np.empty((sample_size, 0), dtype=float)
+
+    return X_non_factors, X_factors
+
+
+def _generate_cluster_effects(
+    sample_size: int,
+    cluster_specs: Dict[str, Dict],
+    sim_seed: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Generate cluster random effect columns for mixed model data.
+
+    For each cluster spec:
+    1. Generate cluster_id assignments (each ID repeated cluster_size times)
+    2. Generate random intercepts b_i ~ N(0, tau²) for each cluster
+    3. Create id_effect column where each observation gets its cluster's b_i
+
+    Args:
+        sample_size: Total number of observations (n_clusters * cluster_size)
+        cluster_specs: Dict of {grouping_var: {n_clusters, cluster_size, tau_squared, ...}}
+        sim_seed: Random seed
+
+    Returns:
+        X_cluster: (sample_size, n_cluster_vars) array of random effect columns
+    """
+    if sim_seed is not None:
+        # Use a derived seed to avoid collision with X generation seed
+        np.random.seed(sim_seed + 3)
+
+    columns = []
+
+    for _gv, spec in cluster_specs.items():
+        n_clusters = spec["n_clusters"]
+        cluster_size = spec["cluster_size"]
+        tau_sq = spec["tau_squared"]
+
+        # Compute cluster_size from sample_size if not provided
+        if cluster_size is None:
+            cluster_size = sample_size // n_clusters
+
+        # Generate random intercepts for each cluster
+        tau = np.sqrt(tau_sq)
+        random_intercepts = np.random.normal(0, tau, size=n_clusters)
+
+        # Create id_effect column: repeat each cluster's intercept
+        # cluster_id assignment: [0,0,...,0, 1,1,...,1, ..., K-1,K-1,...,K-1]
+        id_effect = np.repeat(random_intercepts, cluster_size)
+
+        # Trim or pad to exact sample_size (handles rounding)
+        if len(id_effect) > sample_size:
+            id_effect = id_effect[:sample_size]
+        elif len(id_effect) < sample_size:
+            # Should not happen if sample_size = n_clusters * cluster_size
+            id_effect = np.pad(id_effect, (0, sample_size - len(id_effect)))
+
+        columns.append(id_effect)
+
+    if not columns:
+        return np.empty((sample_size, 0), dtype=float)
+
+    return np.column_stack(columns)

@@ -6,13 +6,20 @@ and various model-specific configurations.
 """
 
 import re
-from typing import Dict, List, Tuple, Any, Optional, Callable
+from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = []
 
 
 class _AssignmentParser:
-    """Generic parser for assignment strings with specialized handlers."""
+    """Parses comma-separated ``name=value`` assignment strings.
+
+    Supports three parse types — ``"variable_type"``, ``"correlation"``,
+    and ``"effect"`` — each with a specialised value handler. Correlation
+    assignments use the syntax ``corr(var1, var2)=value``.
+
+    A module-level singleton ``_parser`` is used throughout the codebase.
+    """
 
     def __init__(self):
         self.handlers = {
@@ -21,19 +28,20 @@ class _AssignmentParser:
             "effect": self._parse_effect_value,
         }
 
-    def _parse(
-        self, input_string: str, parse_type: str, available_items: List[str]
-    ) -> Tuple[Dict, List[str]]:
-        """
-        Generic parser for assignment strings.
+    def _parse(self, input_string: str, parse_type: str, available_items: List[str]) -> Tuple[Dict, List[str]]:
+        """Parse a comma-separated assignment string.
 
         Args:
-            input_string: String with assignments
-            parse_type: Type of parsing ('variable_type', 'correlation', 'effect')
-            available_items: List of valid item names
+            input_string: Raw user input (e.g. ``"x1=0.5, x2=binary"``).
+            parse_type: One of ``"variable_type"``, ``"correlation"``,
+                or ``"effect"``.
+            available_items: Valid names that may appear on the left-hand
+                side of assignments.
 
         Returns:
-            tuple: (parsed_dict, error_list)
+            Tuple of ``(parsed_dict, error_list)``. For correlations the
+            dict is keyed by sorted variable-name tuples; otherwise by
+            variable name.
         """
         if parse_type not in self.handlers:
             return {}, [f"Unknown parse type: {parse_type}"]
@@ -49,17 +57,13 @@ class _AssignmentParser:
                 # Validate name
                 if parse_type == "correlation":
                     # Special validation for correlation pairs
-                    valid, error = self._validate_correlation_pair(
-                        name, available_items
-                    )
+                    valid, error = self._validate_correlation_pair(name, available_items)
                     if not valid:
                         errors.append(error)
                         continue
                 else:
                     if name not in available_items:
-                        errors.append(
-                            f"'{name}' not found. Available: {', '.join(available_items)}"
-                        )
+                        errors.append(f"'{name}' not found. Available: {', '.join(available_items)}")
                         continue
 
                 # Parse value using type-specific handler
@@ -117,9 +121,7 @@ class _AssignmentParser:
             name, value = assignment.split("=", 1)
             return name.strip(), value.strip()
 
-    def _parse_correlation_assignment(
-        self, assignment: str
-    ) -> Tuple[Tuple[str, str], str]:
+    def _parse_correlation_assignment(self, assignment: str) -> Tuple[Tuple[str, str], str]:
         """Parse correlation assignment like 'corr(x1,x2)=0.5'."""
         left, right = assignment.split("=", 1)
 
@@ -128,17 +130,12 @@ class _AssignmentParser:
         match = re.match(pattern, left.strip())
 
         if not match:
-            raise ValueError(
-                f"Invalid correlation format: '{left}'. "
-                "Expected 'corr(var1, var2)' or '(var1, var2)'"
-            )
+            raise ValueError(f"Invalid correlation format: '{left}'. Expected 'corr(var1, var2)' or '(var1, var2)'")
 
         var1, var2 = match.groups()
         return (var1.strip(), var2.strip()), right.strip()
 
-    def _validate_correlation_pair(
-        self, pair: Tuple[str, str], available_vars: List[str]
-    ) -> Tuple[bool, Optional[str]]:
+    def _validate_correlation_pair(self, pair: Tuple[str, str], available_vars: List[str]) -> Tuple[bool, Optional[str]]:
         """Validate correlation variable pair."""
         var1, var2 = pair
 
@@ -151,9 +148,7 @@ class _AssignmentParser:
 
         return True, None
 
-    def _parse_variable_type_value(
-        self, value: str
-    ) -> Tuple[Dict[str, Any], Optional[str]]:
+    def _parse_variable_type_value(self, value: str) -> Tuple[Dict[str, Any], Optional[str]]:
         """Parse variable type value including factor support."""
         supported_types = [
             "normal",
@@ -192,7 +187,7 @@ class _AssignmentParser:
                 try:
                     proportion = float(parts[1])
                     if not 0 <= proportion <= 1:
-                        return {}, f"Proportion must be between 0 and 1"
+                        return {}, "Proportion must be between 0 and 1"
                     return {"type": var_type, "proportion": proportion}, None
                 except ValueError:
                     return {}, f"Invalid proportion value '{parts[1]}'"
@@ -294,15 +289,23 @@ class _AssignmentParser:
 _parser = _AssignmentParser()
 
 
-def _parse_equation(equation: str) -> Tuple[str, str]:
-    """
-    Parse R-style equation into components.
+def _parse_equation(equation: str) -> Tuple[str, str, List[Dict]]:
+    """Parse an R-style formula into its components.
+
+    Splits the equation at ``~`` or ``=``, extracts random-intercept
+    terms ``(1|group)``, and returns the cleaned fixed-effect formula.
 
     Args:
-        equation: R-style equation string (e.g., "y ~ x1 + x2" or "y = x1 + x2")
+        equation: Formula string (e.g. ``"y ~ x1 + x2 + (1|cluster)"``).
 
     Returns:
-        tuple: (dependent_variable_name, formula_part)
+        Tuple of ``(dependent_var, fixed_formula, random_effects)`` where
+        *random_effects* is a list of dicts with keys ``"type"``
+        (``"random_intercept"``) and ``"grouping_var"``.
+
+    Raises:
+        ValueError: If random slopes are used (not yet supported) or a
+            grouping variable appears more than once.
     """
     equation = equation.replace(" ", "")
 
@@ -318,18 +321,54 @@ def _parse_equation(equation: str) -> Tuple[str, str]:
         dep_var = "explained_variable"
         formula_part = equation
 
-    return dep_var, formula_part
+    # Extract random effects from formula
+    random_effects = []
+
+    # First check for unsupported random slopes syntax
+    slope_pattern = r"\(\s*1\s*\+.+?\|.+?\)"
+    if re.search(slope_pattern, formula_part):
+        raise ValueError(
+            "Random slopes not yet supported. Only random intercepts (1|group) are allowed. Found random slope syntax like (1 + x|group)."
+        )
+
+    # Extract random intercepts: (1|var)
+    intercept_pattern = r"\(\s*1\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
+    matches = re.finditer(intercept_pattern, formula_part)
+
+    seen_grouping_vars = set()
+    for match in matches:
+        grouping_var = match.group(1)
+        if grouping_var in seen_grouping_vars:
+            raise ValueError(f"Duplicate random effect grouping variable: '{grouping_var}'")
+        seen_grouping_vars.add(grouping_var)
+        random_effects.append({"type": "random_intercept", "grouping_var": grouping_var})
+
+    # Remove random effects from formula string
+    formula_part = re.sub(intercept_pattern, "", formula_part)
+
+    # Clean up extra + signs and whitespace
+    formula_part = re.sub(r"\+\s*\+", "+", formula_part)  # ++ -> +
+    formula_part = re.sub(r"^\+", "", formula_part)  # leading +
+    formula_part = re.sub(r"\+$", "", formula_part)  # trailing +
+    formula_part = formula_part.strip()
+
+    return dep_var, formula_part, random_effects
 
 
 def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
-    """
-    Extract independent variables and effects from formula string.
+    """Extract predictor variables and effects from the fixed-effect formula.
+
+    Handles ``+`` for additive terms, ``:`` for specific interactions, and
+    ``*`` for full factorial expansion (all main effects plus all two-way
+    through n-way interactions).
 
     Args:
-        formula: Formula string (right side of equation)
+        formula: Right-hand side of the equation (fixed effects only).
 
     Returns:
-        tuple: (variables_dict, effects_dict)
+        Tuple of ``(variables_dict, effects_dict)`` where each dict is
+        keyed by auto-generated identifiers (``variable_1``, ``effect_1``,
+        etc.) with value dicts describing the variable or effect.
     """
     from itertools import combinations
 
@@ -409,9 +448,7 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
                     effect_counter += 1
 
     # Add column indices after parsing
-    predictor_vars = [
-        info["name"] for key, info in variables.items() if key != "variable_0"
-    ]
+    predictor_vars = [info["name"] for key, info in variables.items() if key != "variable_0"]
 
     for effect_info in effects.values():
         if effect_info["type"] == "main":
@@ -420,132 +457,6 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
                 effect_info["column_index"] = predictor_vars.index(var_name)
         else:  # interaction
             var_names = effect_info["var_names"]
-            effect_info["column_indices"] = [
-                predictor_vars.index(var) for var in var_names
-            ]
+            effect_info["column_indices"] = [predictor_vars.index(var) for var in var_names]
 
     return variables, effects
-
-
-def _validate_and_parse_effects(
-    input_data: Any,
-    available_items: Any,
-    item_type: str = "item",
-    equation: Optional[str] = None,
-) -> Tuple[List[Dict], Callable]:
-    """
-    Parse and validate names/assignments against available items.
-
-    Simplified version that no longer handles factor-wide effects.
-    Only supports explicit effect names (including bracket notation like 'treatment[2]').
-
-    Args:
-        input_data: String assignments, dict, or list of names
-        available_items: Dict or list of available items to validate against
-        item_type: Type description for error messages
-        equation: Optional equation context for error messages
-
-    Returns:
-        tuple: (valid_items, find_by_name_function)
-    """
-    # Handle different input formats
-    if isinstance(input_data, str):
-        # Use the parser's assignment splitting to handle parentheses correctly
-        from .parsers import _parser
-
-        assignments = _parser._split_assignments(input_data)
-        parsed_items = []
-        parsing_errors = []
-
-        for assignment in assignments:
-            if "=" not in assignment:
-                parsing_errors.append(
-                    f"Invalid format '{assignment}'. Expected: 'name=value'"
-                )
-                continue
-
-            name, value_str = assignment.split("=", 1)
-            name, value_str = name.strip(), value_str.strip()
-
-            try:
-                value = float(value_str)
-                parsed_items.append({"name": name, "value": value})
-            except ValueError:
-                parsing_errors.append(
-                    f"Invalid value '{value_str}' for '{name}'. Must be a number."
-                )
-
-        names_to_check = [item["name"] for item in parsed_items]
-
-    elif isinstance(input_data, dict):
-        names_to_check = list(input_data.keys())
-        parsed_items = [
-            {"name": name, "value": value} for name, value in input_data.items()
-        ]
-        parsing_errors = []
-
-    else:
-        names_to_check = list(input_data)
-        parsed_items = [{"name": name} for name in names_to_check]
-        parsing_errors = []
-
-    # Get available names
-    if isinstance(available_items, dict):
-        available_names = [
-            item["name"] for item in available_items.values() if "name" in item
-        ]
-    else:
-        available_names = list(available_items)
-
-    # Validate names - simple exact matching only
-    valid_names = [name for name in names_to_check if name in available_names]
-    invalid_names = [name for name in names_to_check if name not in available_names]
-
-    # Collect validation errors
-    validation_errors = []
-    validation_errors.extend(parsing_errors)
-
-    if invalid_names:
-        context = f" in equation '{equation}'" if equation else ""
-        validation_errors.append(
-            f"The following {item_type}(s) were not found: {', '.join(invalid_names)}. "
-            f"Available {item_type}s{context}: {', '.join(available_names)}"
-        )
-
-    if validation_errors:
-        error_msg = f"Validation failed:\n" + "\n".join(
-            f"• {err}" for err in validation_errors
-        )
-        raise ValueError(error_msg)
-
-    # Return valid items and find function
-    valid_items = [item for item in parsed_items if item["name"] in valid_names]
-
-    def find_by_name(name):
-        for key, item in available_items.items():
-            if isinstance(item, dict) and item.get("name") == name:
-                return key, item
-        return None, None
-
-    return valid_items, find_by_name
-
-
-def _parse_lr_variable_types(
-    assignments: List[str], available_vars: List[str]
-) -> Tuple[Dict, List[str]]:
-    """Parse variable type assignments for LinearRegression."""
-    input_string = ", ".join(assignments)
-    return _parser._parse(input_string, "variable_type", available_vars)
-
-
-def _parse_lr_correlations(
-    assignments: List[str], available_vars: List[str]
-) -> Tuple[Dict, List[str]]:
-    """Parse correlation assignments with function syntax."""
-    input_string = ", ".join(assignments)
-    return _parser._parse(input_string, "correlation", available_vars)
-
-
-def _parse_lr_assignments_with_parentheses(input_string: str) -> List[str]:
-    """Parse comma-separated assignments that respects parentheses."""
-    return _parser._split_assignments(input_string)

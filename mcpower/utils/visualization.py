@@ -4,8 +4,9 @@ Visualization utilities for Monte Carlo Power Analysis.
 This module provides plotting functions for power analysis results.
 """
 
+from typing import Dict, List
+
 import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
 
 __all__ = []
 
@@ -18,8 +19,28 @@ def _create_power_plot(
     target_power: float,
     title: str,
 ):
-    """Create sample size vs power plot."""
-    import matplotlib.pyplot as plt
+    """Create a sample-size vs. power line plot with achievement markers.
+
+    Draws one line per target test, a horizontal dashed line at the
+    target power, and annotates the first sample size that reaches
+    the target.
+
+    Args:
+        sample_sizes: X-axis values.
+        powers_by_test: Mapping of test name to list of power percentages.
+        first_achieved: Mapping of test name to the first sample size
+            that achieved target power (``-1`` if not achieved).
+        target_tests: Ordered list of test names to plot.
+        target_power: Target power percentage (drawn as reference line).
+        title: Plot title.
+
+    Raises:
+        ImportError: If ``matplotlib`` is not installed.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ImportError("matplotlib required for plotting: pip install mcpower[plot]") from None
 
     fig, ax = plt.subplots(figsize=(12, 8))
     colors = plt.get_cmap("Set1")(np.linspace(0, 1, len(target_tests)))
@@ -57,8 +78,8 @@ def _create_power_plot(
                 xy=(first_achieved[test], achieved_power),
                 xytext=(10, 10),
                 textcoords="offset points",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor=colors[i], alpha=0.3),
-                arrowprops=dict(arrowstyle="->", color=colors[i]),
+                bbox={"boxstyle": "round,pad=0.3", "facecolor": colors[i], "alpha": 0.3},
+                arrowprops={"arrowstyle": "->", "color": colors[i]},
             )
 
     # Target power line

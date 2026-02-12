@@ -5,43 +5,44 @@ This module provides validation functions for model inputs, parameters,
 and mathematical constraints.
 """
 
-import numpy as np
-from typing import Any, List, Dict, Optional, Union, Tuple
 from dataclasses import dataclass
+from typing import Any, List, Optional, Tuple, Union
+
+import numpy as np
 
 __all__ = []
 
 
 @dataclass
 class _ValidationResult:
-    """Result of validation with errors and warnings."""
+    """Outcome of a validation check, carrying errors and warnings.
+
+    Attributes:
+        is_valid: ``True`` if no errors were found.
+        errors: List of error messages (empty when valid).
+        warnings: List of non-fatal warning messages.
+    """
 
     is_valid: bool
     errors: List[str]
     warnings: List[str]
 
     def raise_if_invalid(self):
-        """Raise ValueError if validation failed."""
+        """Raise ``ValueError`` if the validation failed."""
         if not self.is_valid:
-            error_msg = "Validation failed:\n" + "\n".join(
-                f"• {err}" for err in self.errors
-            )
+            error_msg = "Validation failed:\n" + "\n".join(f"• {err}" for err in self.errors)
             raise ValueError(error_msg)
 
 
 class _Validator:
-    """Base validator with common functionality."""
+    """Static helpers for type and range checks used by all validators."""
 
     @staticmethod
     def _check_type(value: Any, expected_types: tuple, name: str) -> Optional[str]:
         """Check if value has expected type."""
         if not isinstance(value, expected_types):
             actual_type = type(value).__name__
-            expected = (
-                expected_types[0].__name__
-                if len(expected_types) == 1
-                else f"one of {[t.__name__ for t in expected_types]}"
-            )
+            expected = expected_types[0].__name__ if len(expected_types) == 1 else f"one of {[t.__name__ for t in expected_types]}"
             return f"{name} must be {expected}, got {actual_type}"
         return None
 
@@ -107,35 +108,32 @@ def _validate_alpha(alpha: Any) -> _ValidationResult:
 
 def _validate_simulations(n_simulations: Any) -> Tuple[int, _ValidationResult]:
     """Validate and process number of simulations."""
-    result = _validate_numeric_parameter(
-        n_simulations, "Number of simulations", min_val=1, allow_rounding=True
-    )
+    result = _validate_numeric_parameter(n_simulations, "Number of simulations", min_val=1, allow_rounding=True)
 
     if result.is_valid:
         rounded = int(round(n_simulations))
         if rounded < 1000:
-            result.warnings.append(
-                f"Low simulation count ({rounded}). Consider using at least 1000 for reliable results."
-            )
+            result.warnings.append(f"Low simulation count ({rounded}). Consider using at least 1000 for reliable results.")
         return rounded, result
 
     return 0, result
 
 
 def _validate_sample_size(sample_size: Any) -> _ValidationResult:
-    """Validate sample size parameter."""
+    """Validate sample size parameter.
+
+    Requires an integer >= 20 and <= 100,000.
+    """
     errors = []
 
     # Must be integer
     if not isinstance(sample_size, int):
-        errors.append(
-            f"sample_size must be an integer, got {type(sample_size).__name__}"
-        )
+        errors.append(f"sample_size must be an integer, got {type(sample_size).__name__}")
         return _ValidationResult(False, errors, [])
 
     # Range check
-    if sample_size <= 0:
-        errors.append(f"sample_size must be positive, got {sample_size}")
+    if sample_size < 20:
+        errors.append(f"sample_size must be at least 20, got {sample_size}")
     elif sample_size > 100000:
         errors.append(
             f"sample_size too large ({sample_size:,}). Maximum recommended: 100,000. We cannot guarantee stability for such small p-values."
@@ -144,9 +142,33 @@ def _validate_sample_size(sample_size: Any) -> _ValidationResult:
     return _ValidationResult(len(errors) == 0, errors, [])
 
 
-def _validate_sample_size_range(
-    from_size: Any, to_size: Any, by: Any
-) -> _ValidationResult:
+def _validate_sample_size_for_model(sample_size: int, n_variables: int) -> _ValidationResult:
+    """Validate that sample size is sufficient for the model complexity.
+
+    Requires sample_size >= 15 + n_variables, where n_variables is the number
+    of columns in the design matrix (continuous predictors, factor dummy
+    variables, and interaction terms).
+
+    Args:
+        sample_size: Total number of observations.
+        n_variables: Number of design-matrix columns (excluding intercept).
+
+    Returns:
+        _ValidationResult with errors if sample size is insufficient.
+    """
+    errors = []
+    min_required = 15 + n_variables
+
+    if sample_size < min_required:
+        errors.append(
+            f"sample_size ({sample_size}) is too small for a model with {n_variables} "
+            f"variables. Minimum required: {min_required} (15 + {n_variables} variables)."
+        )
+
+    return _ValidationResult(len(errors) == 0, errors, [])
+
+
+def _validate_sample_size_range(from_size: Any, to_size: Any, by: Any) -> _ValidationResult:
     """Validate sample size range parameters."""
     errors = []
     warnings = []
@@ -164,17 +186,12 @@ def _validate_sample_size_range(
         errors.append(f"from_size ({from_size}) must be less than to_size ({to_size})")
 
     if by > (to_size - from_size):
-        errors.append(
-            f"Step size 'by' ({by}) is larger than range ({to_size - from_size}). "
-            "This will only test one sample size."
-        )
+        errors.append(f"Step size 'by' ({by}) is larger than range ({to_size - from_size}). This will only test one sample size.")
 
     # Warning for many tests
     n_tests = len(range(from_size, to_size + 1, by))
     if n_tests > 100:
-        warnings.append(
-            f"Large number of sample sizes to test ({n_tests}). This may take significant time."
-        )
+        warnings.append(f"Large number of sample sizes to test ({n_tests}). This may take significant time.")
 
     return _ValidationResult(len(errors) == 0, errors, warnings)
 
@@ -210,7 +227,7 @@ def _validate_correlation_matrix(
     try:
         eigenvals = np.linalg.eigvals(corr_matrix)
         if np.any(eigenvals < -1e-8):  # Tolerance for floating point noise
-            errors.append(f"Correlation matrix must be positive semi-definite. ")
+            errors.append("Correlation matrix must be positive semi-definite. ")
     except np.linalg.LinAlgError:
         errors.append("Cannot compute eigenvalues of correlation matrix")
 
@@ -228,32 +245,36 @@ def _validate_correction_method(correction: Optional[str]) -> _ValidationResult:
     if method not in valid_methods:
         return _ValidationResult(
             False,
-            [
-                f"Unknown correction method: {correction}. "
-                f"Valid options: 'Bonferroni', 'Benjamini-Hochberg' (or 'BH', 'FDR'), 'Holm'"
-            ],
+            [f"Unknown correction method: {correction}. Valid options: 'Bonferroni', 'Benjamini-Hochberg' (or 'BH', 'FDR'), 'Holm'"],
             [],
         )
 
     return _ValidationResult(True, [], [])
 
 
-def _validate_parallel_settings(
-    enable: Any, n_cores: Optional[int]
-) -> Tuple[Tuple[bool, int], _ValidationResult]:
-    """Validate parallel processing settings."""
+def _validate_parallel_settings(enable: Any, n_cores: Optional[int]) -> Tuple[Tuple[Any, int], _ValidationResult]:
+    """Validate parallel processing settings.
+
+    Args:
+        enable: True, False, or "mixedmodels"
+        n_cores: Number of CPU cores (positive int or None for auto)
+
+    Returns:
+        ((enable, n_cores), ValidationResult)
+    """
     import multiprocessing as mp
 
     errors = []
 
     # Validate enable
-    if not isinstance(enable, bool):
-        errors.append(f"enable must be True or False, got {type(enable).__name__}")
+    valid_values = (True, False, "mixedmodels")
+    if enable not in valid_values:
+        errors.append(f"enable must be True, False, or 'mixedmodels', got {enable!r}")
         return (False, 1), _ValidationResult(False, errors, [])
 
     # Validate n_cores
     max_cores = mp.cpu_count()
-    validated_n_cores = max(1, max_cores - 1)
+    validated_n_cores = max(1, max_cores // 2)
 
     if n_cores is not None:
         if not isinstance(n_cores, int) or n_cores <= 0:
@@ -277,13 +298,13 @@ def _validate_model_ready(model) -> _ValidationResult:
     errors = []
     warnings = []
 
-    # Check effect sizes using the new flag name
-    if not hasattr(model, "effects_set") or not model.effects_set:
-        if hasattr(model, "effects"):
-            available = [info["name"] for info in model.effects.values()]
+    # Check effect sizes - check if pending effects were set
+    has_effects = hasattr(model, "_pending_effects") and model._pending_effects is not None
+    if not has_effects:
+        if hasattr(model, "_registry"):
+            available = model._registry.effect_names
             errors.append(
-                f"Effect sizes must be set using set_effects() before running analysis. "
-                f"Available effects: {', '.join(available)}"
+                f"Effect sizes must be set using set_effects() before running analysis. Available effects: {', '.join(available)}"
             )
         else:
             errors.append("Effect sizes must be set before running analysis")
@@ -297,9 +318,7 @@ def _validate_model_ready(model) -> _ValidationResult:
     return _ValidationResult(len(errors) == 0, errors, warnings)
 
 
-def _validate_test_formula(
-    test_formula: str, available_variables: List[str]
-) -> _ValidationResult:
+def _validate_test_formula(test_formula: str, available_variables: List[str]) -> _ValidationResult:
     """
     Simple validation for test_formula - just check if variables exist.
 
@@ -335,8 +354,7 @@ def _validate_test_formula(
         missing_vars = variables_in_formula - set(available_variables)
         if missing_vars:
             errors.append(
-                f"Variables not found in original model: {', '.join(sorted(missing_vars))}. "
-                f"Available: {', '.join(available_variables)}"
+                f"Variables not found in original model: {', '.join(sorted(missing_vars))}. Available: {', '.join(available_variables)}"
             )
 
         return _ValidationResult(len(errors) == 0, errors, [])
@@ -346,9 +364,7 @@ def _validate_test_formula(
         return _ValidationResult(False, errors, [])
 
 
-def _validate_factor_specification(
-    n_levels: int, proportions: List[float]
-) -> _ValidationResult:
+def _validate_factor_specification(n_levels: int, proportions: List[float]) -> _ValidationResult:
     """Validate factor variable specification."""
     errors = []
     warnings = []
@@ -365,104 +381,192 @@ def _validate_factor_specification(
     if not isinstance(proportions, (list, tuple)):
         errors.append("proportions must be a list or tuple")
     elif len(proportions) != n_levels:
-        errors.append(
-            f"Number of proportions ({len(proportions)}) must match n_levels ({n_levels})"
-        )
+        errors.append(f"Number of proportions ({len(proportions)}) must match n_levels ({n_levels})")
     else:
         # Check individual proportions
         for i, prop in enumerate(proportions):
             if not isinstance(prop, (int, float)):
-                errors.append(f"Proportion {i+1} must be numeric")
+                errors.append(f"Proportion {i + 1} must be numeric")
             elif prop < 0:
-                errors.append(f"Proportion {i+1} cannot be negative")
+                errors.append(f"Proportion {i + 1} cannot be negative")
             elif prop == 0:
-                warnings.append(f"Proportion {i+1} is zero - level will never appear")
+                warnings.append(f"Proportion {i + 1} is zero - level will never appear")
 
         # Check if they sum to approximately 1
         if not errors:  # Only if no errors with individual proportions
             total = sum(proportions)
             if abs(total - 1.0) > 1e-6:
-                warnings.append(
-                    f"Proportions sum to {total:.4f}, not 1.0 (will be normalized)"
-                )
+                warnings.append(f"Proportions sum to {total:.4f}, not 1.0 (will be normalized)")
 
     # Warn about many levels
     if n_levels > 10:
-        warnings.append(
-            f"Factor has {n_levels} levels. This creates {n_levels-1} dummy variables, which may require large sample sizes"
+        warnings.append(f"Factor has {n_levels} levels. This creates {n_levels - 1} dummy variables, which may require large sample sizes")
+
+    return _ValidationResult(len(errors) == 0, errors, warnings)
+
+
+def _validate_upload_data(data: np.ndarray) -> _ValidationResult:
+    """Validate uploaded data array after normalization.
+
+    Checks:
+        - Array is 2-dimensional.
+        - At least 25 samples (rows) for reliable quantile matching.
+    """
+    errors = []
+
+    if data.ndim != 2:
+        errors.append("data must be 2-dimensional (samples x variables)")
+        return _ValidationResult(False, errors, [])
+
+    if data.shape[0] < 25:
+        errors.append(f"Need at least 25 samples for reliable quantile matching, got {data.shape[0]}")
+
+    return _ValidationResult(len(errors) == 0, errors, [])
+
+
+def _validate_cluster_config(
+    grouping_var: str,
+    icc: float,
+    n_clusters: Optional[int],
+    cluster_size: Optional[int],
+    parsed_grouping_vars: List[str],
+) -> _ValidationResult:
+    """Validate cluster configuration parameters."""
+    errors = []
+    warnings = []
+
+    # Grouping var must be in formula
+    if grouping_var not in parsed_grouping_vars:
+        errors.append(
+            f"Grouping variable '{grouping_var}' not found in formula random effects. Expected one of: {', '.join(parsed_grouping_vars)}"
+        )
+
+    # ICC range - strict validation for numerical stability
+    if not isinstance(icc, (int, float)):
+        errors.append("ICC must be a number")
+    elif icc < 0 or icc >= 1:
+        errors.append(f"ICC must be between 0 and 1 (exclusive on upper end), got {icc}")
+    elif icc != 0 and (icc < 0.1 or icc > 0.9):
+        # ICC must be exactly 0 (no random effects) OR in the stable range [0.1, 0.9]
+        errors.append(
+            f"ICC must be 0 (no clustering) or between 0.1 and 0.9 for numerical stability. "
+            f"Got {icc}. Extreme ICC values (< 0.1 or > 0.9) cause convergence issues in mixed models."
+        )
+
+    # Mutual exclusivity
+    if n_clusters is not None and cluster_size is not None:
+        errors.append("Specify either n_clusters OR cluster_size, not both")
+    elif n_clusters is None and cluster_size is None:
+        errors.append("Must specify either n_clusters or cluster_size")
+
+    # n_clusters validation
+    if n_clusters is not None:
+        if not isinstance(n_clusters, int) or n_clusters < 2:
+            errors.append(f"n_clusters must be an integer >= 2, got {n_clusters}")
+
+    # cluster_size validation - minimum 15 observations per cluster for stability
+    if cluster_size is not None:
+        if not isinstance(cluster_size, int) or cluster_size < 15:
+            errors.append(
+                f"cluster_size must be an integer >= 15 for reliable mixed model estimation. "
+                f"Got {cluster_size}. Small cluster sizes cause convergence issues."
+            )
+
+    return _ValidationResult(len(errors) == 0, errors, warnings)
+
+
+def _validate_cluster_sample_size(
+    sample_size: int,
+    n_clusters: int,
+    cluster_size: Optional[int],
+) -> _ValidationResult:
+    """
+    Validate that cluster configuration with sample_size provides sufficient observations.
+
+    Args:
+        sample_size: Total number of observations
+        n_clusters: Number of clusters
+        cluster_size: Size per cluster (if fixed), or None (computed from sample_size)
+
+    Returns:
+        ValidationResult with errors if observations per cluster < 15
+    """
+    errors = []
+    warnings = []
+
+    # Compute effective cluster size
+    if cluster_size is not None:
+        effective_cluster_size = cluster_size
+    else:
+        effective_cluster_size = sample_size // n_clusters
+
+    # Check minimum observations per cluster
+    if effective_cluster_size < 25:
+        errors.append(
+            f"Insufficient observations per cluster: {effective_cluster_size} (sample_size={sample_size}, "
+            f"n_clusters={n_clusters}). Need at least 25 observations per cluster for reliable "
+            f"mixed model estimation. Either increase sample_size to {n_clusters * 25} or reduce n_clusters to {sample_size // 25}."
         )
 
     return _ValidationResult(len(errors) == 0, errors, warnings)
 
 
-def _validate_variable_type_timing(
-    correlations_set: bool, effects_set: bool
+def _validate_lme_model_complexity(
+    sample_size: int,
+    n_clusters: int,
+    n_fixed_effects: int,
+    cluster_size: Optional[int] = None,
 ) -> _ValidationResult:
     """
-    Validate that variable types are set at the correct time.
+    Validate cluster configuration provides sufficient data for model complexity.
 
-    Variable types must be set before correlations and effects to ensure
-    proper factor expansion and validation.
+    Linear Mixed-Effects models require adequate observations per cluster relative
+    to parameters being estimated. Conservative guideline: 10 observations per parameter.
 
-    Args:
-        correlations_set: Whether correlations have been set
-        effects_set: Whether effects have been set
-
-    Returns:
-        _ValidationResult indicating if timing is valid
-    """
-    errors = []
-
-    if correlations_set:
-        errors.append(
-            "Cannot set variable types after correlations have been set. "
-            "Call set_variable_type() before set_correlations()."
-        )
-
-    if effects_set:
-        errors.append(
-            "Cannot set variable types after effects have been set. "
-            "Call set_variable_type() before set_effects()."
-        )
-
-    return _ValidationResult(len(errors) == 0, errors, [])
-
-
-def _validate_factor_in_correlations(
-    correlation_pairs: List[Tuple[str, str]],
-    factor_variables: Dict[str, Any],
-    all_predictor_vars: List[str],
-) -> _ValidationResult:
-    """
-    Validate that no factor variables are specified in correlations.
+    Parameters estimated:
+    - Fixed effects (including intercept)
+    - Random effect variance (1 per random intercept)
+    - Residual variance
 
     Args:
-        correlation_pairs: List of (var1, var2) tuples from correlation specification
-        factor_variables: Dictionary of factor variable specifications
-        all_predictor_vars: List of all predictor variable names
+        sample_size: Total number of observations
+        n_clusters: Number of clusters
+        n_fixed_effects: Number of fixed effects (excluding intercept)
+        cluster_size: Size per cluster (if fixed), computed if None
 
     Returns:
-        _ValidationResult with any errors
+        ValidationResult with warnings or errors
     """
     errors = []
-    factor_names = set(factor_variables.keys())
+    warnings = []
 
-    # Find all factor variables used in correlations
-    factors_in_correlations = set()
-    for var1, var2 in correlation_pairs:
-        if var1 in factor_names:
-            factors_in_correlations.add(var1)
-        if var2 in factor_names:
-            factors_in_correlations.add(var2)
+    # Compute effective cluster size
+    if cluster_size is not None:
+        effective_cluster_size = cluster_size
+    else:
+        effective_cluster_size = sample_size // n_clusters
 
-    # Single error message if factors found
-    if factors_in_correlations:
-        factor_list = ", ".join(sorted(factors_in_correlations))
-        errors.append(f"Cannot use factor variables in correlations: {factor_list}. ")
+    # Estimate total parameters: intercept + fixed effects + random variance + residual variance
+    n_total_params = 1 + n_fixed_effects + 2
 
-        # Show available continuous variables
-        continuous_vars = [var for var in all_predictor_vars if var not in factor_names]
-        if continuous_vars:
-            errors.append(f"Use variables: {', '.join(continuous_vars)}")
+    # Compute observations per parameter ratio
+    obs_per_param = effective_cluster_size / n_total_params
 
-    return _ValidationResult(len(errors) == 0, errors, [])
+    # Conservative threshold: 10 observations per parameter
+    # Warning threshold: 7 observations per parameter
+    if obs_per_param < 7:
+        errors.append(
+            f"Insufficient observations per parameter for mixed model: {obs_per_param:.1f} "
+            f"(cluster_size={effective_cluster_size}, parameters={n_total_params}). "
+            f"Need at least {10 * n_total_params} observations per cluster (10 per parameter). "
+            f"Either increase sample_size to {n_clusters * 10 * n_total_params} or reduce model complexity."
+        )
+    elif obs_per_param < 10:
+        warnings.append(
+            f"Low observations per parameter ratio: {obs_per_param:.1f} "
+            f"(cluster_size={effective_cluster_size}, parameters={n_total_params}). "
+            f"Recommended: at least {10 * n_total_params} observations per cluster for reliable estimation. "
+            f"This may cause convergence issues in mixed models."
+        )
+
+    return _ValidationResult(len(errors) == 0, errors, warnings)

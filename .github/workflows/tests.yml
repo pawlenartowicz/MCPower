@@ -2,207 +2,135 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop, test-github-actions ]  # Add your test branch
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_call:
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13']
-      fail-fast: false  # Continue testing other versions if one fails
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5  # Updated to v5 for Python 3.13 support
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-    
+
     - name: Cache pip dependencies
-      uses: actions/cache@v4  # Updated to v4
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/setup.py', '**/pyproject.toml') }}
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
         restore-keys: |
           ${{ runner.os }}-pip-${{ matrix.python-version }}-
           ${{ runner.os }}-pip-
-    
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pytest pytest-cov
         pip install pandas joblib matplotlib
-        # Try to install numba, fallback gracefully for Python 3.13
         pip install numba || echo "Numba not available for Python ${{ matrix.python-version }}, will use Python fallback"
-        pip install -e .  # Install your package in development mode
-    
-    - name: Run tests
-      run: |
-        pytest tests/ -v --tb=short
-    
-    - name: Generate coverage report
-      run: |
-        pytest tests/ --cov=mcpower --cov-report=xml --cov-report=html
-    
+        pip install -e .
+
+    - name: Run tests with coverage
+      run: pytest tests/ -v --tb=short --cov=mcpower --cov-report=xml -m "not slow"
+
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4  # Updated to v4
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
         flags: unittests
-        name: codecov-umbrella-${{ matrix.os }}-${{ matrix.python-version }}
+        name: codecov-${{ matrix.os }}-${{ matrix.python-version }}
         fail_ci_if_error: false
-
-  test-python313-compatibility:
-    # Dedicated Python 3.13 compatibility test
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.13
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.13'
-    
-    - name: Install dependencies for Python 3.13
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pandas joblib matplotlib
-        # Install numpy and scipy with explicit versions that support 3.13
-        pip install "numpy>=2.0.0" "scipy>=1.11.0"
-        # Try numba, expect it might fail
-        pip install numba || echo "Numba not yet compatible with Python 3.13"
-        pip install -e . --no-deps
-    
-    - name: Test basic functionality
-      run: |
-        python -c "
-        import mcpower
-        print('✓ Package imports successfully')
-        lr = mcpower.LinearRegression('y = x1 + x2')
-        lr.set_effects('x1=0.5, x2=0.3')
-        print('✓ Model creation and configuration works')
-        "
-    
-    - name: Run core tests
-      run: |
-        pytest tests/ -v --tb=short -k "not slow"  # Skip slow tests for compatibility check
-
-  test-without-numba:
-    # Test pure Python fallback (no numba)
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-    
-    - name: Install dependencies without numba
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pandas joblib
-        pip install numpy scipy matplotlib
-        pip install -e . --no-deps
-    
-    - name: Test Python fallback mode
-      run: |
-        # Should print "Using Python OLS" and "Using Python data generation"
-        python -c "import mcpower; print('Python fallback mode working')"
-        pytest tests/ -v --tb=short
-        
-  test-with-numba:
-    # Test JIT compilation with numba
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']  # Python 3.13 tested separately
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Install dependencies with numba
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pandas joblib
-        pip install numba  # Enable JIT compilation
-        pip install numpy scipy matplotlib
-        pip install -e .
-    
-    - name: Test JIT compilation mode
-      run: |
-        # Should print "Using JIT OLS" and "Using JIT data generation"
-        python -c "import mcpower; print('JIT compilation mode working')"
-        pytest tests/ -v --tb=short
-
-  test-performance:
-    # Performance regression test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'  # Only run on PRs
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pytest pandas joblib numba numpy scipy matplotlib
-        pip install -e .
-    
-    - name: Run performance tests
-      run: |
-        python -c "
-        import time
-        import mcpower
-        
-        # Quick performance check
-        start = time.time()
-        lr = mcpower.LinearRegression('y = x1 + x2')
-        lr.set_effects('x1=0.5, x2=0.3')
-        lr.set_simulations(100)  # Small number for CI
-        result = lr.find_power(sample_size=50, print_results=False, return_results=True)
-        elapsed = time.time() - start
-        
-        print(f'Performance test completed in {elapsed:.2f}s')
-        assert elapsed < 30, f'Performance regression: took {elapsed:.2f}s (should be < 30s)'
-        print('✓ Performance test passed')
-        "
 
   lint:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python
+
+    - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'  # Use stable version for linting
-    
-    - name: Install linting tools
+        python-version: '3.12'
+
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 black isort
-    
-    - name: Run flake8 (syntax errors only)
-      run: flake8 mcpower --count --select=E9,F63,F7,F82 --show-source --statistics
-    
-    - name: Check code formatting with black
-      run: black --check --diff mcpower/
-      continue-on-error: true  # Don't fail CI for formatting issues
-    
-    - name: Check import sorting
-      run: isort --check-only --diff mcpower/
-      continue-on-error: true  # Don't fail CI for import sorting issues
+        pip install ruff mypy
+        pip install numpy scipy pandas joblib
+        pip install -e .
+
+    - name: Ruff check
+      run: ruff check mcpower/
+
+    - name: Ruff format check
+      run: ruff format --check mcpower/
+
+    - name: Mypy type check
+      run: mypy mcpower/
+
+  test-without-numba:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies without numba
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pandas joblib
+        pip install numpy scipy matplotlib
+        pip install -e .
+
+    - name: Test Python fallback mode
+      run: |
+        python -c "import mcpower; print('Python fallback mode working')"
+        pytest tests/ -v --tb=short -m "not slow"
+
+  test-performance:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pandas joblib numba numpy scipy matplotlib
+        pip install -e .
+
+    - name: Run performance tests
+      run: |
+        python -c "
+        import time
+        import mcpower
+
+        start = time.time()
+        m = mcpower.MCPower('y = x1 + x2')
+        m.set_effects('x1=0.5, x2=0.3')
+        m.set_simulations(100)
+        result = m.find_power(sample_size=50, print_results=False, return_results=True)
+        elapsed = time.time() - start
+
+        print(f'Performance test completed in {elapsed:.2f}s')
+        assert elapsed < 30, f'Performance regression: took {elapsed:.2f}s (should be < 30s)'
+        print('Performance test passed')
+        "

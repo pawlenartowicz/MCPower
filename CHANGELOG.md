@@ -1,6 +1,28 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [0.4.0b0] - 2026-02-12
+
+The package has been almost entirely rebuilt from the ground up.
+
+### Major changes
+- **Complete code reorganization**: Monolithic `base.py` split into modular structure (`mcpower/core/`, `mcpower/backends/`, `mcpower/model.py`)
+- **C++ native backend**: New PyBind11/Eigen-based compute backend for OLS and data generation (~3x speedup), removev Numba AOT
+- **Multi-backend architecture**: Automatic selection between C++ native, Numba JIT, and pure Python backends with graceful fallback
+- **Mixed-effects models**: Random intercept models via `(1|group)` syntax with statsmodels MixedLM
+- **New CI/CD pipeline**: Separate workflows for stable releases (PyPI) and pre-releases (TestPyPI)
+- **Build system migration**: Moved from setuptools to scikit-build-core with CMake for C++ compilation
+- **Python 3.14 support**
+- **Lookup tables reduced and reorganized**: removed lookuptables from OLS, precomputed critical values added
+
+### Minor changes
+- **Dependency restructuring**: `joblib` is now a core dependency; `statsmodels` moved to optional `[mixed]` extra
+- Progress callback system for GUI/notebook integration
+- Comprehensive test suite overhaul (650 tests across unit, integration, spec, and mixed-model categories)
+- Pre-commit hooks with ruff for linting and formatting
+- Removed legacy `setup.py`, `pytest.ini`, and `paper/` directory
+
 ## [0.3.3] - 2025-07-27
 ### Major changes
 - Wheels for pyhon 3.13

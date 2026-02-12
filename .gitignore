@@ -1,15 +1,58 @@
-*.pyc
+# Python
+__pycache__/
+*.py[cod]
 *.pyd
+*.so
+*.dylib
+
+# Distribution / packaging
+build/
+dist/
+wheelhouse/
+*.egg-info/
+*.egg
+*.whl
+
+# Numba AOT / JIT cache
 *.nbc
 *.nbi
-*.pkl
-venv/*
-*.egg-info/
 
-# development phase
-mcpower/cpp/* 
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Testing / coverage
+.pytest_cache/
+htmlcov/
+coverage.xml
+.coverage
+*.cover
+
+# C++ build artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+_deps/
+*.o
+*.obj
+
+# Compiled native extensions
+mcpower/backends/mcpower_native*.so
+mcpower/backends/mcpower_native*.pyd
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Development phase
+mcpower/cpp/*
 mcpower/_dev_test.py
 _dev_test.py
 todo.md
 mcpower/.mcpower_cache.json
-.vscode/settings.json
+*.pkl
