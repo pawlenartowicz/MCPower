@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-02-12
+
+Releasing pipeline fixed
+
 ## [0.4.0b0] - 2026-02-12
 
 The package has been almost entirely rebuilt from the ground up.

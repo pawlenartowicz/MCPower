@@ -2,7 +2,7 @@
 ![PyPI](https://img.shields.io/pypi/v/MCPower)
 ![Python](https://img.shields.io/pypi/pyversions/mcpower)
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16502735.svg)](https://doi.org/10.5281/zenodo.16502735)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16502734.svg)](https://doi.org/10.5281/zenodo.16502734)
 
 ```
 ███╗   ███╗  ██████╗ ██████╗ 
@@ -517,7 +517,7 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 
 GPL v3. If you use MCPower in research, please cite:
 
-Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Statistical Models [Computer software]. Zenodo. DOI: 10.5281/zenodo.16502735
+Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Statistical Models. Zenodo. DOI: 10.5281/zenodo.16502734
 
 ```bibtex
 @software{mcpower2025,
@@ -525,8 +525,8 @@ Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Statistical Mode
   title = {MCPower: Monte Carlo Power Analysis for Statistical Models},
   year = {2025},
   publisher = {Zenodo},
-  doi = {10.5281/zenodo.16502735},
-  url = {https://doi.org/10.5281/zenodo.16502735}
+  doi = {10.5281/zenodo.16502734},
+  url = {https://doi.org/10.5281/zenodo.16502734}
 }
 ```
 
