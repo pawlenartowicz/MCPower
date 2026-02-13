@@ -205,6 +205,7 @@ class TestAlphaCorrectionAccuracy:
                 f"[{backend}] alpha={alpha}, {correction} FWER violation for {var}: corrected power = {corr:.2f}%"
             )
 
+    @pytest.mark.slow
     @pytest.mark.parametrize("alpha", [0.01, 0.10])
     def test_bonferroni_more_conservative_than_fdr_at_alpha(self, backend, alpha):
         """Bonferroni should reject <= FDR (BH) under non-null at non-default alpha."""

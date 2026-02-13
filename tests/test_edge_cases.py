@@ -128,6 +128,7 @@ class TestExtremeICCValues:
             assert 0 <= power <= 100
 
     @pytest.mark.lme
+    @pytest.mark.slow
     def test_high_icc(self):
         """ICC=0.5 should substantially reduce power compared to OLS."""
         model = MCPower("y ~ x1 + (1|group)")

@@ -21,6 +21,7 @@ def _quiet():
         yield
 
 
+@pytest.mark.slow
 class TestPowerMonotonicity:
     """Power must increase with effect size, sample size, and alpha."""
 

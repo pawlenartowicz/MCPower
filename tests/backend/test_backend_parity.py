@@ -42,7 +42,6 @@ class TestCrossFrontendParity:
 
         return NativeBackend(), PythonBackend()
 
-    @pytest.mark.slow
     def test_power_agreement_simple(self):
         """y = x1, beta=0.3, n=100, 2000 sims — power within MC margin."""
         from mcpower import MCPower
@@ -75,7 +74,6 @@ class TestCrossFrontendParity:
             margin = mc_proportion_margin(max(p_cpp, p_py, 0.01), 2000)
             assert abs(p_cpp - p_py) < margin, f"{test_name}: C++={p_cpp:.1%} vs Python={p_py:.1%}, margin={margin:.4f}"
 
-    @pytest.mark.slow
     def test_rejection_rates_agree(self):
         """Per-predictor rejection rates agree within MC margin (2000 datasets)."""
         native, python = self._get_backends()

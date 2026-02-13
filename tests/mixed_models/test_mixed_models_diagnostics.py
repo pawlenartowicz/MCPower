@@ -31,7 +31,7 @@ from tests.config import (
     N_CLUSTERS_MODERATE,
 )
 
-pytestmark = [pytest.mark.lme, pytest.mark.slow]
+pytestmark = pytest.mark.lme
 
 
 class TestLMEConvergencePatterns:
@@ -84,7 +84,6 @@ class TestLMEConvergencePatterns:
         assert n_failed <= 2  # At most 4% failures
         print(f"Zero ICC: {n_failed}/50 simulations failed ({n_failed / 50 * 100:.1f}%)")
 
-    @pytest.mark.slow
     def test_moderate_conditions_low_failure(self):
         """Moderate, well-powered design should have very low failure rate."""
         model = MCPower("y ~ x + (1|cluster)")

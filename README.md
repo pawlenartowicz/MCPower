@@ -1,7 +1,7 @@
-![Tests](https://github.com/pawlenartowicz/MCPower/workflows/Tests/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/MCPower)
-![Python](https://img.shields.io/pypi/pyversions/mcpower)
-![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)
+[![Tests](https://github.com/pawlenartowicz/MCPower/workflows/Tests/badge.svg)](https://github.com/pawlenartowicz/MCPower/actions)
+[![PyPI](https://img.shields.io/pypi/v/MCPower)](https://pypi.org/project/MCPower/)
+[![Python](https://img.shields.io/pypi/pyversions/mcpower)](https://pypi.org/project/MCPower/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16502734.svg)](https://doi.org/10.5281/zenodo.16502734)
 
 ```
@@ -16,6 +16,10 @@
 # MCPower
 
 **Simple Monte Carlo power analysis for complex models.** Find the sample size you need or check if your study has enough power - even with complex models that traditional power analysis can't handle.
+
+## Desktop Application
+
+It it Python package, prefer a graphical interface? **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone desktop app — no Python installation required. Download ready-to-run executables for Windows, Linux, and macOS from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest).
 
 ## Why MCPower?
 
@@ -494,6 +498,7 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 - C++ compiler (automatically used during install for native backend; falls back to Python if unavailable)
 - statsmodels (optional, for mixed-effects models — install with `pip install mcpower[mixed]`)
 - Numba (optional, for JIT compilation fallback — install with `pip install mcpower[JIT]`)
+
 
 ## Need Help?
 

@@ -32,7 +32,6 @@ skip_if_no_native = pytest.mark.skipif(
 
 
 @skip_if_no_native
-@pytest.mark.slow
 class TestDataGenerationIsolation:
     """
     Generate data with each backend, but always analyze with the Python

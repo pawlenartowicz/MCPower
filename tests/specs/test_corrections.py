@@ -68,6 +68,7 @@ class TestCorrectionConservativeness:
                 f"[{backend}] {correction} FWER violation for {var}: corrected power = {corr:.2f}%"
             )
 
+    @pytest.mark.slow
     def test_bonferroni_more_conservative_than_fdr(self, backend):
         """Bonferroni should reject ≤ FDR (BH) under non-null."""
         from mcpower import MCPower

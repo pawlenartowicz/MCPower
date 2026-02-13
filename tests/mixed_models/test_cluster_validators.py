@@ -93,7 +93,6 @@ class TestClusterSizeValidation:
                 model.set_cluster("cluster", ICC=0.2, n_clusters=n)
 
 
-@pytest.mark.slow
 class TestSampleSizeValidation:
     """Test sample size validation with cluster configuration."""
 
@@ -147,7 +146,6 @@ class TestSampleSizeValidation:
         assert "4" in error_msg  # 100 // 25 = 4
 
 
-@pytest.mark.slow
 class TestValidatorIntegration:
     """Test validator integration with actual power analysis."""
 

@@ -31,7 +31,6 @@ skip_if_no_native = pytest.mark.skipif(
 
 
 @skip_if_no_native
-@pytest.mark.slow
 class TestOLSAnalysisIsolation:
     """
     Generate data with plain numpy, then run OLS with each backend.
