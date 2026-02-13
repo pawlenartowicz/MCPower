@@ -192,10 +192,13 @@ class TestParallelConfiguration:
 
     def test_set_parallel_with_n_cores(self, suppress_output):
         """set_parallel can configure number of cores."""
+        from unittest.mock import patch
+
         from mcpower import MCPower
 
         model = MCPower("y = x1 + x2")
-        model.set_parallel(True, n_cores=4)
+        with patch("multiprocessing.cpu_count", return_value=8):
+            model.set_parallel(True, n_cores=4)
 
         assert model.parallel is True
         assert model.n_cores == 4
