@@ -72,11 +72,15 @@ jobs:
         CIBW_ARCHS_WINDOWS: "AMD64"
         CIBW_ENVIRONMENT: "CIBUILDWHEEL=1"
         CIBW_BUILD_VERBOSITY: 1
-        CIBW_BEFORE_ALL_LINUX: "yum install -y openblas-devel || true"
+        CIBW_BEFORE_ALL_LINUX: >-
+          yum install -y dnf-plugins-core &&
+          (yum config-manager --set-enabled powertools || yum config-manager --set-enabled crb || true) &&
+          yum install -y openblas-devel
         CIBW_TEST_REQUIRES: "pytest numpy pandas matplotlib scipy statsmodels"
         CIBW_TEST_COMMAND: "pytest {project}/tests -v -x --ignore={project}/tests/backend/ -m \"not slow\""
 
     - name: Verify native extension in wheels
+      shell: bash
       run: |
         for whl in ./wheelhouse/*.whl; do
           echo "Checking $whl..."
