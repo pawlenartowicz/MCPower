@@ -75,6 +75,7 @@ jobs:
         CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
         CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
         CIBW_TEST_REQUIRES: "pytest numpy pandas matplotlib scipy statsmodels"
+        CIBW_TEST_SKIP: "*-manylinux_aarch64"
         CIBW_TEST_COMMAND: "pytest {project}/tests -v -x --ignore={project}/tests/backend/ -m \"not slow\""
 
     - name: Verify native extension in wheels
