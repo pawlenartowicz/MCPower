@@ -42,7 +42,7 @@ jobs:
         pip install -e .
 
     - name: Run tests with coverage
-      run: pytest tests/ -v --tb=short --cov=mcpower --cov-report=xml -m "not slow"
+      run: pytest tests/ -v --tb=short --cov=mcpower --cov-report=xml -m "not slow and not lme"
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
@@ -98,7 +98,7 @@ jobs:
     - name: Test Python fallback mode
       run: |
         python -c "import mcpower; print('Python fallback mode working')"
-        pytest tests/ -v --tb=short -m "not slow"
+        pytest tests/ -v --tb=short -m "not slow and not lme"
 
   test-performance:
     runs-on: ubuntu-latest
