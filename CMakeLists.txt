@@ -6,11 +6,32 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Find pybind11 — optional so sdist installs without a compiler still succeed
-find_package(pybind11 CONFIG)
+# Find pybind11 — try CONFIG first, then query the Python module as fallback
+find_package(pybind11 CONFIG QUIET)
 if(NOT pybind11_FOUND)
-    message(WARNING "pybind11 not found — building Python-only package (no C++ backend)")
-    return()
+    # Fallback: ask the pybind11 Python module where its cmake files live
+    # (scikit-build-core may not always add site-packages to CMAKE_PREFIX_PATH on Windows)
+    find_package(Python COMPONENTS Interpreter QUIET)
+    if(Python_FOUND)
+        execute_process(
+            COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
+            OUTPUT_VARIABLE _pybind11_cmake_dir
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _pybind11_result
+        )
+        if(_pybind11_result EQUAL 0 AND _pybind11_cmake_dir)
+            find_package(pybind11 CONFIG REQUIRED PATHS "${_pybind11_cmake_dir}" NO_DEFAULT_PATH)
+        endif()
+    endif()
+endif()
+if(NOT pybind11_FOUND)
+    if(DEFINED ENV{CIBUILDWHEEL})
+        message(FATAL_ERROR "pybind11 not found in CI — cannot build wheel without native extension")
+    else()
+        message(WARNING "pybind11 not found — building Python-only package (no C++ backend)")
+        return()
+    endif()
 endif()
 
 # Try to find Eigen3, make it optional
