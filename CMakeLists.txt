@@ -79,6 +79,7 @@ elseif(MSVC)
         /fp:fast
         /DNDEBUG
     )
+    target_compile_definitions(mcpower_native PRIVATE _USE_MATH_DEFINES)
 endif()
 
 # OpenMP support (optional)
