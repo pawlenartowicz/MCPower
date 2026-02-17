@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.4.2] - 2026-02-17
 
 ### Major changes
 - **Custom LME solver**: Replaced statsmodels MixedLM with a custom profiled-deviance REML solver (Python + C++ + JIT backends), eliminating the statsmodels runtime dependency for mixed models
