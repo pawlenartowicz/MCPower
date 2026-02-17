@@ -5,6 +5,7 @@ This module provides functions for printing and formatting analysis results
 in a clear, professional manner.
 """
 
+import math
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -130,8 +131,11 @@ class _ResultFormatter:
 
             for test in model["target_tests"]:
                 power_corr = results["individual_powers_corrected"][test]
-                status = "✓" if power_corr >= target else "✗"
-                rows_corrected.append([test, f"{power_corr:.1f}", f"{target:.0f}", status])
+                if isinstance(power_corr, float) and math.isnan(power_corr):
+                    rows_corrected.append([test, "-", f"{target:.0f}", "-"])
+                else:
+                    status = "✓" if power_corr >= target else "✗"
+                    rows_corrected.append([test, f"{power_corr:.1f}", f"{target:.0f}", status])
 
             lines.append(self._table._create_table(headers, rows_corrected, [40, 8, 8, 8]))
 
@@ -158,16 +162,19 @@ class _ResultFormatter:
                 power = results["individual_powers"][test]
                 power_corr = results.get("individual_powers_corrected", {}).get(test, power)
                 target = model.get("target_power", 80.0)
-                achieved = "✓" if power_corr >= target else "✗"
-                rows.append(
-                    [
-                        test,
-                        f"{power:.2f}",
-                        f"{power_corr:.2f}",
-                        f"{target:.1f}",
-                        achieved,
-                    ]
-                )
+                if isinstance(power_corr, float) and math.isnan(power_corr):
+                    rows.append([test, f"{power:.2f}", "-", f"{target:.1f}", "-"])
+                else:
+                    achieved = "✓" if power_corr >= target else "✗"
+                    rows.append(
+                        [
+                            test,
+                            f"{power:.2f}",
+                            f"{power_corr:.2f}",
+                            f"{target:.1f}",
+                            achieved,
+                        ]
+                    )
 
             lines.append(self._table._create_table(headers, rows))
         else:
@@ -221,7 +228,12 @@ class _ResultFormatter:
                 n_required_corrected = results["first_achieved_corrected"][test]
 
                 uncorr_str = str(n_required) if n_required > 0 else f">{to_size}"
-                corr_str = str(n_required_corrected) if n_required_corrected > 0 else f">{to_size}"
+                if n_required_corrected == -1:
+                    corr_str = "-"
+                elif n_required_corrected > 0:
+                    corr_str = str(n_required_corrected)
+                else:
+                    corr_str = f">{to_size}"
 
                 rows.append([test, uncorr_str, corr_str])
 
@@ -344,7 +356,10 @@ class _ResultFormatter:
                 for scenario in ["optimistic", "realistic", "doomer"]:
                     if scenario in scenarios and "results" in scenarios[scenario]:
                         power_corr = scenarios[scenario]["results"]["individual_powers_corrected"][test]
-                        row.append(f"{power_corr:.1f}")
+                        if isinstance(power_corr, float) and math.isnan(power_corr):
+                            row.append("-")
+                        else:
+                            row.append(f"{power_corr:.1f}")
                     else:
                         row.append("N/A")
                 rows_corr.append(row)
@@ -494,7 +509,12 @@ class _ResultFormatter:
                         max_tested = scenarios[scenario]["model"]["sample_size_range"]["to_size"]
 
                         uncorr_str = str(n_uncorr) if n_uncorr > 0 else f">{max_tested}"
-                        corr_str = str(n_corr) if n_corr > 0 else f">{max_tested}"
+                        if n_corr == -1:
+                            corr_str = "-"
+                        elif n_corr > 0:
+                            corr_str = str(n_corr)
+                        else:
+                            corr_str = f">{max_tested}"
                         row.extend([uncorr_str, corr_str])
                     else:
                         row.extend(["N/A", "N/A"])
@@ -683,7 +703,16 @@ class _ResultFormatter:
     ):
         """Add cumulative probability table with sample sizes as rows."""
 
-        n_tests = len(target_tests)
+        # Filter out tests with NaN power (e.g. non-contrast tests under Tukey correction)
+        def _has_nan_power(t: str) -> bool:
+            vals = powers_by_test[t]
+            return bool(vals and isinstance(vals[0], float) and math.isnan(vals[0]))
+
+        valid_tests = [t for t in target_tests if not _has_nan_power(t)]
+        if not valid_tests:
+            return
+
+        n_tests = len(valid_tests)
 
         # Create headers: Sample Size | ≥1 | ≥2 | ≥3 | ... | All
         headers = ["Sample Size"]
@@ -699,7 +728,7 @@ class _ResultFormatter:
             row = [f"N={size}"]
 
             # Get individual probabilities for this sample size
-            individual_probs = [powers_by_test[test][i] / 100.0 for test in target_tests]
+            individual_probs = [powers_by_test[test][i] / 100.0 for test in valid_tests]
 
             # Calculate cumulative probabilities using binomial approach
             # P(at least k significant) = sum of combinations

@@ -6,6 +6,7 @@ Queries PyPI at most once per week (cached on disk) and issues a
 
 import json
 import os
+import sys
 import urllib.request
 import warnings
 from datetime import datetime, timedelta
@@ -16,8 +17,13 @@ def _check_for_updates(current_version):
     """Check PyPI weekly for a newer MCPower version and warn if found.
 
     Uses a JSON cache file to avoid repeated network requests. Skipped
-    silently in worker processes (detected via environment variable).
+    silently in worker processes (detected via environment variable)
+    and in frozen (PyInstaller) bundles where pip is unavailable.
     """
+
+    # Skip in frozen bundles (PyInstaller) — the GUI has its own update checker
+    if getattr(sys, "frozen", False):
+        return
 
     # Skip in worker processes (loky/joblib inherit env vars from parent)
     if os.environ.get("_MCPOWER_UPDATE_CHECKED"):

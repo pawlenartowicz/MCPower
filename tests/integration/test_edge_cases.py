@@ -223,7 +223,7 @@ class TestHighKurtosisStandardisation:
 
     def test_high_kurtosis_variance_near_one(self):
         """High-kurtosis variable should have Var ≈ 1.0 (standardised)."""
-        from mcpower.utils.data_generation import (
+        from mcpower.stats.data_generation import (
             NORM_CDF_TABLE,
             T3_PPF_TABLE,
             _generate_X_core,
@@ -248,7 +248,7 @@ class TestHighKurtosisStandardisation:
 
     def test_normal_variance_near_one(self):
         """Normal variable should have Var ≈ 1.0 (baseline check)."""
-        from mcpower.utils.data_generation import (
+        from mcpower.stats.data_generation import (
             NORM_CDF_TABLE,
             T3_PPF_TABLE,
             _generate_X_core,

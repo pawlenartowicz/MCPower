@@ -22,8 +22,8 @@ from .core import (
     build_sample_size_result,
     prepare_metadata,
 )
+from .stats.ols import compute_critical_values
 from .utils.formatters import _format_results
-from .utils.ols import compute_critical_values
 from .utils.upload_data_utils import normalize_upload_input
 from .utils.validators import (
     _validate_alpha,
@@ -121,6 +121,7 @@ class MCPower:
 
         # Pending inputs (deferred until apply())
         self._pending_variable_types: Optional[str] = None
+        self._pending_factor_levels: Optional[str] = None
         self._pending_effects: Optional[str] = None
         self._pending_correlations: Optional[Union[str, np.ndarray]] = None
         self._pending_heterogeneity: Optional[float] = None
@@ -150,6 +151,9 @@ class MCPower:
         self._uploaded_data_n = 0  # Sample count for warning
         self._preserve_correlation = "strict"  # Default mode
         self._uploaded_var_metadata: Dict[str, Any] = {}
+
+        # Post-hoc tests
+        self._posthoc_specs: List = []
 
         # Phase 2 Optimization: Effect plan cache for _create_X_extended
         self._effect_plan_cache: Optional[List[Tuple[str, Any]]] = None
@@ -466,6 +470,30 @@ class MCPower:
         self._applied = False
         return self
 
+    def set_factor_levels(self, spec: str):
+        """Define named factor levels without uploaded data.
+
+        The first listed level becomes the reference level.
+
+        Args:
+            spec: Factor definitions. Format: ``"var=level1,level2,level3"``.
+                Multiple factors separated by ``;``:
+                ``"group=control,drug_a; dose=low,medium,high"``
+
+        Returns:
+            self: For method chaining.
+
+        Raises:
+            TypeError: If *spec* is not a string.
+            ValueError: If variable not in formula, or fewer than 2 levels
+                (checked at apply time).
+        """
+        if not isinstance(spec, str):
+            raise TypeError("spec must be a string")
+        self._pending_factor_levels = spec
+        self._applied = False
+        return self
+
     def set_heterogeneity(self, heterogeneity: float):
         """Set heterogeneity (random variation) in effect sizes.
 
@@ -525,54 +553,125 @@ class MCPower:
     def set_cluster(
         self,
         grouping_var: str,
-        ICC: float,
+        ICC: Optional[float] = None,
         n_clusters: Optional[int] = None,
         cluster_size: Optional[int] = None,
+        random_slopes: Optional[List[str]] = None,
+        slope_variance: float = 0.0,
+        slope_intercept_corr: float = 0.0,
+        n_per_parent: Optional[int] = None,
     ):
-        """Configure a cluster/grouping variable for a random intercept.
+        """Configure a cluster/grouping variable for random effects.
 
         Sets up the clustering structure for a linear mixed-effects model.
-        The grouping variable must correspond to a ``(1|group)`` term in the
-        formula. Specify either *n_clusters* or *cluster_size* — the other
-        is derived from the sample size at analysis time.
+        The grouping variable must correspond to a random-effect term in
+        the formula. Specify either *n_clusters* or *cluster_size* — the
+        other is derived from the sample size at analysis time.
 
         This setting is deferred until ``apply()`` is called.
 
         Args:
             grouping_var: Name of the grouping variable (must match a
-                ``(1|group)`` term in the formula).
+                random-effect term in the formula).
             ICC: Intraclass correlation coefficient (0 <= ICC < 1).
-                Determines the proportion of total variance attributable to
-                between-cluster differences.
+                Determines the proportion of total variance attributable
+                to between-cluster differences. Required for non-nested
+                terms; for nested child terms, specifies the child-level
+                ICC.
             n_clusters: Number of clusters. Mutually exclusive with
-                *cluster_size*.
+                *cluster_size*. Not required for nested child terms
+                (derived from parent).
             cluster_size: Number of observations per cluster. Mutually
                 exclusive with *n_clusters*.
+            random_slopes: List of predictor names with random slopes.
+                Requires a ``(1 + x|group)`` term in the formula.
+            slope_variance: Between-cluster variance of the random slope.
+                Only meaningful when *random_slopes* is set.
+            slope_intercept_corr: Correlation between random intercept and
+                random slope. Must be in [-1, 1].
+            n_per_parent: Number of sub-groups per parent group (required
+                for nested effects when the formula has ``(1|A/B)``).
 
         Returns:
             self: For method chaining.
 
         Raises:
             ValueError: If *grouping_var* is not in the formula, both or
-                neither of *n_clusters*/*cluster_size* are given, or *ICC*
-                is out of range.
+                neither of *n_clusters*/*cluster_size* are given, *ICC*
+                is out of range, or slope parameters are invalid.
 
         Example:
+            >>> # Random intercept only (backward compatible)
             >>> model = MCPower("y ~ x1 + x2 + (1|school)")
             >>> model.set_cluster("school", ICC=0.2, n_clusters=20)
+
+            >>> # Random slopes with correlation
+            >>> model = MCPower("y ~ x1 + (1 + x1|school)")
+            >>> model.set_cluster("school", ICC=0.2, n_clusters=20,
+            ...     random_slopes=["x1"], slope_variance=0.1,
+            ...     slope_intercept_corr=0.3)
+
+            >>> # Nested: formula has (1|school/classroom)
+            >>> model = MCPower("y ~ treatment + (1|school/classroom)")
+            >>> model.set_cluster("school", ICC=0.15, n_clusters=10)
+            >>> model.set_cluster("classroom", ICC=0.10, n_per_parent=3)
         """
         from .utils.validators import _validate_cluster_config
 
-        # Validate cluster configuration
-        parsed_grouping_vars = [re["grouping_var"] for re in self._registry._random_effects_parsed]
-        result = _validate_cluster_config(grouping_var, ICC, n_clusters, cluster_size, parsed_grouping_vars)
+        # Determine if this is a nested child term
+        parsed_re = self._registry._random_effects_parsed
+        parsed_grouping_vars = [re["grouping_var"] for re in parsed_re]
+
+        # For nested child terms, find the parent and map to the composite name
+        parent_var = None
+        actual_grouping_var = grouping_var
+
+        # Check if this grouping_var is a child of a nested term
+        for re_spec in parsed_re:
+            if re_spec.get("parent_var") and re_spec["grouping_var"].endswith(f":{grouping_var}"):
+                parent_var = re_spec["parent_var"]
+                actual_grouping_var = re_spec["grouping_var"]  # e.g. "school:classroom"
+                break
+
+        # Set default ICC
+        if ICC is None:
+            ICC = 0.0
+
+        # For nested child terms, n_clusters/cluster_size are derived from parent
+        if parent_var is not None:
+            if n_clusters is not None or cluster_size is not None:
+                raise ValueError(
+                    f"For nested child variable '{grouping_var}', n_clusters and cluster_size "
+                    f"are derived from the parent '{parent_var}'. Use n_per_parent instead."
+                )
+            if n_per_parent is None:
+                raise ValueError(
+                    f"n_per_parent is required for nested child variable '{grouping_var}'. "
+                    f"This specifies how many '{grouping_var}' groups exist within each '{parent_var}'."
+                )
+            # Validate using parent's grouping var as the target
+            result = _validate_cluster_config(actual_grouping_var, ICC, None, None, parsed_grouping_vars, nested_child=True)
+        else:
+            result = _validate_cluster_config(actual_grouping_var, ICC, n_clusters, cluster_size, parsed_grouping_vars)
+
         result.raise_if_invalid()
 
+        # Validate slope parameters
+        if slope_variance > 0 and not random_slopes:
+            raise ValueError("slope_variance > 0 requires random_slopes to be set")
+        if not -1 <= slope_intercept_corr <= 1:
+            raise ValueError("slope_intercept_corr must be in [-1, 1]")
+
         # Store pending configuration
-        self._pending_clusters[grouping_var] = {
+        self._pending_clusters[actual_grouping_var] = {
             "n_clusters": n_clusters,
             "cluster_size": cluster_size,
             "icc": ICC,
+            "random_slopes": random_slopes,
+            "slope_variance": slope_variance,
+            "slope_intercept_corr": slope_intercept_corr,
+            "parent_var": parent_var,
+            "n_per_parent": n_per_parent,
         }
         self._applied = False
         return self
@@ -583,6 +682,7 @@ class MCPower:
         columns: Optional[List[str]] = None,
         preserve_correlation: str = "strict",
         data_types: Optional[Dict[str, str]] = None,
+        preserve_factor_level_names: bool = True,
     ):
         """
         Upload empirical data to preserve distribution shapes (deferred until apply()).
@@ -607,9 +707,13 @@ class MCPower:
                 - 'no': No correlation preservation (default generation)
                 - 'partial': Compute correlations from data, merge with user correlations
                 - 'strict': Bootstrap whole rows to preserve exact relationships (default)
-            data_types: Override auto-detection for specific variables
-                (e.g., {"hp": "continuous", "cyl": "factor"})
+            data_types: Override auto-detection for specific variables.
+                Simple: {"hp": "continuous", "cyl": "factor"}
+                With reference level: {"cyl": ("factor", 8)} or {"origin": ("factor", "USA")}
                 Valid types: "binary", "factor", "continuous"
+            preserve_factor_level_names: When True (default), factor dummy variables
+                use original data values as level names (e.g., cyl[6], cyl[8]).
+                When False, uses integer indices (e.g., cyl[2], cyl[3]).
 
         Example:
             >>> # Using pandas DataFrame with default partial correlation preservation
@@ -643,7 +747,13 @@ class MCPower:
         if data_types is not None:
             valid_types = ["binary", "factor", "continuous"]
             for var, dtype in data_types.items():
-                if dtype not in valid_types:
+                if isinstance(dtype, tuple):
+                    if len(dtype) != 2:
+                        raise ValueError(f"Tuple data_type for '{var}' must have 2 elements: (type, reference_level)")
+                    actual_type = dtype[0]
+                    if actual_type not in valid_types:
+                        raise ValueError(f"Invalid type '{actual_type}' for variable '{var}'. Must be one of {valid_types}")
+                elif dtype not in valid_types:
                     raise ValueError(f"Invalid type '{dtype}' for variable '{var}'. Must be one of {valid_types}")
                 if var not in columns:
                     raise ValueError(f"Variable '{var}' in data_types not found in data columns: {columns}")
@@ -663,6 +773,7 @@ class MCPower:
             "preserve_correlation": preserve_correlation,
             "data_types": data_types or {},
             "uploaded_n": data.shape[0],
+            "preserve_factor_level_names": preserve_factor_level_names,
         }
         self._applied = False
 
@@ -713,12 +824,14 @@ class MCPower:
         Apply all pending settings to the model.
 
         Processes settings in the correct order:
-        1. Variable types (expands factors)
-        2. Cluster configurations (random effects)
-        3. Uploaded data (sets variable types to uploaded_data)
-        4. Effects
-        5. Correlations
-        6. Heterogeneity/heteroskedasticity
+        1. Variable types
+        2. Factor level definitions
+        3. Expand factors into dummy variables
+        4. Cluster configurations (random effects)
+        5. Uploaded data (sets variable types to uploaded_data)
+        6. Effects
+        7. Correlations
+        8. Heterogeneity/heteroskedasticity
 
         This method is called automatically before find_power() or find_sample_size()
         if any settings have changed since the last apply().
@@ -728,25 +841,33 @@ class MCPower:
         """
         from .utils.parsers import _parser
 
-        # 1. Apply variable types first (may expand factors)
+        # 1. Apply variable types first (sets factor metadata)
         self._apply_variable_types(_parser)
 
-        # 2. Apply cluster configurations (needs expanded factor names)
+        # 2. Apply factor level definitions (may set additional factor types)
+        self._apply_factor_levels()
+
+        # 3. Expand factors into dummy variables
+        if self._registry.factor_names:
+            self._registry.expand_factors()
+            print(f"Expanded {len(self._registry.factor_names)} factors")
+
+        # 4. Apply cluster configurations (needs expanded factor names)
         self._apply_clusters()
 
-        # 3. Apply uploaded data (overrides variable types for matched columns)
+        # 5. Apply uploaded data (overrides variable types for matched columns)
         self._apply_data()
 
-        # 4. Apply effects (needs expanded factor names + cluster effects)
+        # 6. Apply effects (needs expanded factor names + cluster effects)
         self._apply_effects(_parser)
 
-        # 5. Apply correlations
+        # 7. Apply correlations
         self._apply_correlations(_parser)
 
-        # 6. Apply heterogeneity/heteroskedasticity
+        # 8. Apply heterogeneity/heteroskedasticity
         self._apply_heterogeneity()
 
-        # 6. Validate model is ready
+        # 9. Validate model is ready
         model_result = _validate_model_ready(self)
         model_result.raise_if_invalid()
 
@@ -793,13 +914,40 @@ class MCPower:
                 else:
                     successful.append(f"{var_name}={var_type}")
 
-        # Expand factors
-        if self._registry.factor_names:
-            self._registry.expand_factors()
-            print(f"Expanded {len(self._registry.factor_names)} factors")
-
         if successful:
             print(f"Variable types: {', '.join(successful)}")
+
+    def _apply_factor_levels(self):
+        """Apply pending factor level definitions to the registry."""
+        if self._pending_factor_levels is None:
+            return
+
+        specs = [s.strip() for s in self._pending_factor_levels.split(";") if s.strip()]
+        for spec in specs:
+            if "=" not in spec:
+                raise ValueError(f"Invalid format '{spec}'. Expected 'var=level1,level2,...'")
+            var_name, levels_str = spec.split("=", 1)
+            var_name = var_name.strip()
+            levels = [level.strip() for level in levels_str.split(",") if level.strip()]
+
+            if len(levels) < 2:
+                raise ValueError(f"Factor '{var_name}' must have at least 2 levels, got {len(levels)}")
+
+            if var_name not in self._registry._predictors:
+                raise ValueError(f"Variable '{var_name}' not found in model predictors")
+
+            n_levels = len(levels)
+            proportions = [1.0 / n_levels] * n_levels
+            self._registry.set_variable_type(
+                var_name,
+                "factor",
+                n_levels=n_levels,
+                proportions=proportions,
+                level_labels=levels,
+                reference_level=levels[0],
+            )
+
+        self._pending_factor_levels = None
 
     def _apply_clusters(self):
         """Register pending cluster specifications in the variable registry."""
@@ -820,8 +968,13 @@ class MCPower:
             if gv not in parsed_grouping_vars:
                 raise ValueError(f"set_cluster('{gv}', ...) called but (1|{gv}) not found in formula.")
 
-        # Register each cluster
-        for grouping_var, config in self._pending_clusters.items():
+        # Register clusters in order: parents first, then children (nested)
+        # This ensures parent specs exist before child specs reference them
+        parent_vars = [gv for gv, c in self._pending_clusters.items() if c.get("parent_var") is None]
+        child_vars = [gv for gv, c in self._pending_clusters.items() if c.get("parent_var") is not None]
+
+        for grouping_var in parent_vars + child_vars:
+            config = self._pending_clusters[grouping_var]
             # Warn if ICC=0
             if config["icc"] == 0:
                 print(f"Warning: ICC=0 for '{grouping_var}'. No random variation between clusters.")
@@ -831,6 +984,11 @@ class MCPower:
                 n_clusters=config["n_clusters"],
                 cluster_size=config["cluster_size"],
                 icc=config["icc"],
+                random_slopes=config.get("random_slopes"),
+                slope_variance=config.get("slope_variance", 0.0),
+                slope_intercept_corr=config.get("slope_intercept_corr", 0.0),
+                parent_var=config.get("parent_var"),
+                n_per_parent=config.get("n_per_parent"),
             )
 
         print(f"Cluster variables configured: {', '.join(self._pending_clusters.keys())}")
@@ -874,55 +1032,92 @@ class MCPower:
         matched_data = data[:, matched_indices]
 
         # Convert to float64 if object dtype (common with mixed-type DataFrames)
+        # String columns are encoded to integer indices; mapping is stored in string_col_indices
+        string_col_indices = {}
+
         if matched_data.dtype == object:
-            try:
-                matched_data = matched_data.astype(np.float64)
-            except (ValueError, TypeError):
-                # Per-column conversion for mixed numeric/string matched columns
-                for ci in range(matched_data.shape[1]):
-                    try:
-                        matched_data[:, ci] = matched_data[:, ci].astype(np.float64)
-                    except (ValueError, TypeError):
-                        raise TypeError(
-                            f"Column '{matched_columns[ci]}' contains non-numeric data "
-                            f"that cannot be converted to float. Please ensure uploaded "
-                            f"data columns contain numeric values."
+            for ci in range(matched_data.shape[1]):
+                col = matched_columns[ci]
+                try:
+                    matched_data[:, ci] = matched_data[:, ci].astype(np.float64)
+                except (ValueError, TypeError):
+                    # String column — encode to sorted integer indices, store mapping
+                    raw_strings = matched_data[:, ci]
+                    unique_strings = sorted({str(v) for v in raw_strings})
+                    if len(unique_strings) > 20:
+                        raise ValueError(
+                            f"Column '{col}' has {len(unique_strings)} unique string values — "
+                            f"too many unique values for a factor. Use data_types to override."
                         ) from None
-                matched_data = matched_data.astype(np.float64)
+                    label_map = {label: idx for idx, label in enumerate(unique_strings)}
+                    encoded = np.array([label_map[str(v)] for v in raw_strings], dtype=np.float64)
+                    matched_data[:, ci] = encoded
+                    string_col_indices[col] = {
+                        "labels": unique_strings,
+                        "label_map": label_map,
+                    }
+            matched_data = matched_data.astype(np.float64)
 
         # Auto-detect variable types based on unique values
         print("\n=== Auto-detecting variable types ===")
         auto_detected_types = {}
         dropped_columns = []
 
+        preserve_labels = self._pending_data.get("preserve_factor_level_names", True)
+
         for i, col in enumerate(matched_columns):
             col_data = matched_data[:, i]
             unique_vals = np.unique(col_data[~np.isnan(col_data)])
             n_unique = len(unique_vals)
 
-            # Check for override
-            if col in data_types_override:
-                detected_type = data_types_override[col]
-                print(f"{col}: {n_unique} unique values -> {detected_type} (overridden)")
-            elif n_unique == 1:
-                print(f"{col}: {n_unique} unique value -> DROPPED (constant)")
-                dropped_columns.append(col)
-                continue
-            elif n_unique == 2:
-                detected_type = "binary"
-                print(f"{col}: {n_unique} unique values -> binary")
-            elif 3 <= n_unique <= 6:
-                detected_type = "factor"
-                print(f"{col}: {n_unique} unique values -> factor")
-            else:  # n_unique >= 7
-                detected_type = "continuous"
-                print(f"{col}: {n_unique} unique values -> continuous")
+            # Determine level_labels
+            level_labels = None
+
+            if col in string_col_indices:
+                # String column — use the sorted string labels
+                if preserve_labels:
+                    level_labels = string_col_indices[col]["labels"]
+                # String columns always auto-detect as factor (unless overridden)
+                if col in data_types_override:
+                    detected_type = data_types_override[col]
+                    if isinstance(detected_type, tuple):
+                        detected_type = detected_type[0]
+                    print(f"{col}: {n_unique} unique values -> {detected_type} (overridden)")
+                else:
+                    detected_type = "factor"
+                    print(f"{col}: {n_unique} unique string values -> factor")
+            else:
+                # Numeric column — existing detection logic
+                if col in data_types_override:
+                    detected_type = data_types_override[col]
+                    if isinstance(detected_type, tuple):
+                        detected_type = detected_type[0]
+                    print(f"{col}: {n_unique} unique values -> {detected_type} (overridden)")
+                elif n_unique == 1:
+                    print(f"{col}: {n_unique} unique value -> DROPPED (constant)")
+                    dropped_columns.append(col)
+                    continue
+                elif n_unique == 2:
+                    detected_type = "binary"
+                    print(f"{col}: {n_unique} unique values -> binary")
+                elif 3 <= n_unique <= 6:
+                    detected_type = "factor"
+                    print(f"{col}: {n_unique} unique values -> factor")
+                else:  # n_unique >= 7
+                    detected_type = "continuous"
+                    print(f"{col}: {n_unique} unique values -> continuous")
+
+                # Compute level labels for factors from numeric values
+                if preserve_labels and detected_type == "factor":
+                    sorted_vals = sorted(unique_vals)
+                    level_labels = [str(int(v)) if v == int(v) else str(v) for v in sorted_vals]
 
             auto_detected_types[col] = {
                 "type": detected_type,
                 "unique_count": n_unique,
                 "unique_values": unique_vals,
                 "data_index": i,
+                "level_labels": level_labels,
             }
 
         # Remove dropped columns
@@ -936,18 +1131,31 @@ class MCPower:
         if not matched_columns:
             raise ValueError("All uploaded columns were dropped (constant values)")
 
+        # Validate reference levels from data_types tuples
+        for col, dt in data_types_override.items():
+            if isinstance(dt, tuple) and len(dt) == 2:
+                _, ref_val = dt
+                ref_str = str(ref_val)
+                if col in auto_detected_types:
+                    labels = auto_detected_types[col].get("level_labels")
+                    if labels and ref_str not in labels:
+                        raise ValueError(f"Reference level '{ref_val}' not found in unique values for column '{col}'. Available: {labels}")
+
         # Process based on mode
         if preserve_correlation == "strict":
-            self._apply_data_strict_mode(matched_data, matched_columns, auto_detected_types)
+            self._apply_data_strict_mode(matched_data, matched_columns, auto_detected_types, data_types_override)
         else:  # 'no' or 'partial'
-            self._apply_data_normal_mode(matched_data, matched_columns, auto_detected_types, preserve_correlation)
+            self._apply_data_normal_mode(matched_data, matched_columns, auto_detected_types, preserve_correlation, data_types_override)
 
         print(f"\nUploaded data: {', '.join(matched_columns)} ({data.shape[0]} samples)")
         print(f"Correlation preservation mode: {preserve_correlation}")
 
-    def _apply_data_normal_mode(self, data, columns, type_info, mode):
+    def _apply_data_normal_mode(self, data, columns, type_info, mode, data_types_override=None):
         """Apply uploaded data in 'no' or 'partial' mode using quantile-matched lookup tables."""
-        from .utils.data_generation import create_uploaded_lookup_tables
+        from .stats.data_generation import create_uploaded_lookup_tables
+
+        if data_types_override is None:
+            data_types_override = {}
 
         # Process each variable based on detected type
         for col in columns:
@@ -974,6 +1182,14 @@ class MCPower:
                 # Convert to existing factor system
                 unique_vals = info["unique_values"]
                 n_levels = len(unique_vals)
+                level_labels = info.get("level_labels")
+
+                # Determine reference from data_types tuple override
+                reference_level = None
+                if col in data_types_override:
+                    dt = data_types_override[col]
+                    if isinstance(dt, tuple) and len(dt) == 2:
+                        reference_level = str(dt[1])
 
                 # Calculate proportions for each level
                 proportions = []
@@ -981,7 +1197,13 @@ class MCPower:
                     prop = np.sum(col_data == val) / len(col_data)
                     proportions.append(prop)
 
-                self._registry.set_variable_type(col, "factor", n_levels=n_levels, proportions=proportions)
+                kwargs = {"n_levels": n_levels, "proportions": proportions}
+                if level_labels is not None:
+                    kwargs["level_labels"] = level_labels
+                if reference_level is not None:
+                    kwargs["reference_level"] = reference_level
+
+                self._registry.set_variable_type(col, "factor", **kwargs)
 
             else:  # continuous
                 # Normalize: mean=0, sd=1
@@ -1070,8 +1292,11 @@ class MCPower:
         self._registry.set_correlation_matrix(existing_corr)
         print(f"Computed correlations from {len(continuous_cols)} continuous variables")
 
-    def _apply_data_strict_mode(self, data, columns, type_info):
+    def _apply_data_strict_mode(self, data, columns, type_info, data_types_override=None):
         """Apply uploaded data in 'strict' mode, storing normalised rows for bootstrapping."""
+        if data_types_override is None:
+            data_types_override = {}
+
         # Store raw data for bootstrap
         # Normalize continuous variables
         normalized_data = np.copy(data)
@@ -1103,15 +1328,31 @@ class MCPower:
                 factor_cols.append(idx)
                 unique_vals = info["unique_values"]
                 n_levels = len(unique_vals)
+                level_labels = info.get("level_labels")
+
+                # Determine reference from data_types tuple override
+                reference_level = None
+                if col in data_types_override:
+                    dt = data_types_override[col]
+                    if isinstance(dt, tuple) and len(dt) == 2:
+                        reference_level = str(dt[1])
 
                 self._uploaded_var_metadata[col] = {
                     "type": "factor",
                     "unique_values": unique_vals,
                     "n_levels": n_levels,
                     "data_index": idx,
+                    "level_labels": level_labels,
                 }
+
                 # Register as factor but mark for bootstrap
-                self._registry.set_variable_type(col, "factor", n_levels=n_levels, proportions=[1 / n_levels] * n_levels)
+                kwargs = {"n_levels": n_levels, "proportions": [1 / n_levels] * n_levels}
+                if level_labels is not None:
+                    kwargs["level_labels"] = level_labels
+                if reference_level is not None:
+                    kwargs["reference_level"] = reference_level
+
+                self._registry.set_variable_type(col, "factor", **kwargs)
                 # Mark as uploaded_factor
                 pred = self._registry.get_predictor(col)
                 if pred:
@@ -1270,7 +1511,7 @@ class MCPower:
     def find_power(
         self,
         sample_size: int,
-        target_test: str = "overall",
+        target_test: str = "all",
         correction: Optional[str] = None,
         print_results: bool = True,
         scenarios: bool = False,
@@ -1285,7 +1526,14 @@ class MCPower:
 
         Args:
             sample_size: Number of observations per simulation
-            target_test: Effect(s) to test - "overall", specific name, or "all"
+            target_test: Effect(s) to test. Defaults to ``"all"``.
+                - ``"all"`` (default): overall F-test + all individual fixed effects (no contrasts)
+                - ``"all-posthoc"``: all pairwise contrasts for every factor variable
+                - ``"overall"``, ``"x1"``, etc.: specific tests
+                - ``"factor[a] vs factor[b]"``: post-hoc pairwise comparison
+                - ``"-test_name"``: exclude a test from keyword expansion
+                - Comma-separated combinations: ``"all, all-posthoc, -overall"``
+                Duplicate tests raise ``ValueError``.
             correction: Multiple comparison correction (None, "bonferroni", "benjamini-hochberg", "holm")
             print_results: Whether to print results
             scenarios: Run scenario analysis
@@ -1355,6 +1603,13 @@ class MCPower:
         resolved_test_formula = self._resolve_test_formula(test_formula)
         target_tests = self._parse_target_tests(target_test)
 
+        if correction and correction.lower() == "tukey" and not self._posthoc_specs:
+            raise ValueError(
+                "Tukey correction requires at least one post-hoc comparison "
+                "(e.g., target_test='group[0] vs group[1]'). "
+                "Tukey HSD only applies to pairwise contrasts between factor levels."
+            )
+
         # Resolve progress callback
         from .progress import PrintReporter, ProgressReporter, compute_total_simulations
 
@@ -1410,7 +1665,7 @@ class MCPower:
 
     def find_sample_size(
         self,
-        target_test: str = "overall",
+        target_test: str = "all",
         from_size: int = 30,
         to_size: int = 200,
         by: int = 5,
@@ -1427,7 +1682,8 @@ class MCPower:
         Find minimum sample size needed for target power.
 
         Args:
-            target_test: Effect(s) to test - "overall", specific name, or "all"
+            target_test: Effect(s) to test. Defaults to ``"all"``.
+                See :meth:`find_power` for full keyword/exclusion syntax.
             from_size: Minimum sample size to test
             to_size: Maximum sample size to test
             by: Step size between sample sizes
@@ -1477,6 +1733,14 @@ class MCPower:
         validation_result.raise_if_invalid()
 
         target_tests = self._parse_target_tests(target_test)
+
+        if correction and correction.lower() == "tukey" and not self._posthoc_specs:
+            raise ValueError(
+                "Tukey correction requires at least one post-hoc comparison "
+                "(e.g., target_test='group[0] vs group[1]'). "
+                "Tukey HSD only applies to pairwise contrasts between factor levels."
+            )
+
         sample_sizes = list(range(from_size, to_size + 1, by))
 
         # Resolve progress callback
@@ -1592,24 +1856,197 @@ class MCPower:
             _validate_cluster_sample_size(sample_size, spec.n_clusters, spec.cluster_size).raise_if_invalid()
 
     def _parse_target_tests(self, target_test: Union[str, List[str]]) -> List[str]:
-        """Parse a target_test argument into a list of effect names to test."""
-        if isinstance(target_test, str):
-            if target_test.strip().lower() == "all":
-                # Exclude cluster effects - they are random effects, not fixed effects to test
-                cluster_effects = self._registry.cluster_effect_names
-                fixed_effects = [e for e in self._registry.effect_names if e not in cluster_effects]
-                target_test = ["overall"] + fixed_effects
-            elif "," in target_test:
-                target_test = [t.strip() for t in target_test.split(",")]
+        """Parse a target_test argument into a list of effect names to test.
+
+        Supports regular effect names (e.g. ``"x1"``, ``"overall"``),
+        post-hoc pairwise comparison syntax ``"factor[a] vs factor[b]"``
+        where ``a`` and ``b`` are 1-indexed user levels, keyword expansion,
+        exclusion prefixes, and uniqueness validation.
+
+        Keywords (case-insensitive):
+            - ``"all"``: overall F-test + all individual fixed effects
+              (no contrasts). This is the default.
+            - ``"all-posthoc"``: all pairwise contrasts for every factor
+              variable (C(n,2) pairs per factor).
+
+        Exclusions:
+            Prefix a test name with ``"-"`` to remove it from the expanded
+            set, e.g. ``"all, -overall"`` or ``"all-posthoc, -group[1] vs group[2]"``.
+
+        Uniqueness:
+            Duplicate tests (e.g. ``"all, x1"`` where ``x1`` is already
+            in the ``"all"`` expansion) raise ``ValueError``.
+        """
+        import re as re_mod
+
+        from .core.variables import PostHocSpec
+
+        # -- Phase 1: Tokenize ---------------------------------------------------
+        if isinstance(target_test, list):
+            target_test = ", ".join(target_test)
+        tokens = [t.strip() for t in target_test.split(",") if t.strip()]
+
+        # -- Phase 2: Classify tokens --------------------------------------------
+        keywords: list[str] = []
+        exclusions: list[str] = []
+        explicit_tests: list[str] = []
+
+        for tok in tokens:
+            tok_lower = tok.lower()
+            if tok_lower in {"all", "all-posthoc"}:
+                keywords.append(tok_lower)
+            elif tok.startswith("-"):
+                exclusions.append(tok[1:].strip())
             else:
-                target_test = [target_test.strip()]
+                explicit_tests.append(tok)
 
-        dep_var_name = self._registry.dependent
-        target_test = ["overall" if t in {dep_var_name, "y"} else t for t in target_test]
-
-        # Validate: cluster effects cannot be tested (they're random effects)
+        # -- Phase 3: Expand keywords --------------------------------------------
+        keyword_expansion: list[str] = []
         cluster_effects = self._registry.cluster_effect_names
-        cluster_in_targets = [t for t in target_test if t in cluster_effects]
+
+        if "all" in keywords:
+            fixed_effects = [e for e in self._registry.effect_names if e not in cluster_effects]
+            keyword_expansion += ["overall"] + fixed_effects
+
+        if "all-posthoc" in keywords:
+            posthoc_from_keyword: list[str] = []
+            for factor_name in self._registry.factor_names:
+                factor_info = self._registry._factors[factor_name]
+                level_labels = factor_info.get("level_labels")
+                if level_labels:
+                    from itertools import combinations
+
+                    for a, b in combinations(level_labels, 2):
+                        posthoc_from_keyword.append(f"{factor_name}[{a}] vs {factor_name}[{b}]")
+                else:
+                    n_levels = factor_info["n_levels"]
+                    for a in range(1, n_levels + 1):
+                        for b in range(a + 1, n_levels + 1):
+                            posthoc_from_keyword.append(f"{factor_name}[{a}] vs {factor_name}[{b}]")
+            if not posthoc_from_keyword and not keyword_expansion and not explicit_tests:
+                raise ValueError(
+                    "'all-posthoc' was specified but the model has no factor variables. Post-hoc contrasts require at least one factor."
+                )
+            keyword_expansion += posthoc_from_keyword
+
+        # -- Phase 4: Merge ------------------------------------------------------
+        expanded = keyword_expansion + explicit_tests
+
+        # -- Phase 5: Apply dependent-variable alias ------------------------------
+        dep_var_name = self._registry.dependent
+        alias_set = {dep_var_name, "y"}
+        expanded = ["overall" if t in alias_set else t for t in expanded]
+        exclusions = ["overall" if e in alias_set else e for e in exclusions]
+
+        # -- Phase 6: Apply exclusions --------------------------------------------
+        for excl in exclusions:
+            if excl not in expanded:
+                raise ValueError(f"Exclusion '-{excl}' does not match any test in the expanded set. Available tests: {', '.join(expanded)}")
+            expanded.remove(excl)
+
+        if not expanded:
+            raise ValueError("All tests were excluded — nothing left to analyse.")
+
+        # -- Phase 7: Validate uniqueness -----------------------------------------
+        seen: dict[str, int] = {}
+        for t in expanded:
+            seen[t] = seen.get(t, 0) + 1
+        duplicates = [t for t, count in seen.items() if count > 1]
+        if duplicates:
+            raise ValueError(
+                f"Duplicate target test(s): {', '.join(duplicates)}. "
+                "Each test may appear only once. If using keyword expansion "
+                "(e.g. 'all'), do not also list tests that are already included."
+            )
+
+        # -- Phase 8: Parse posthoc specs + validate ------------------------------
+        regular_tests: list[str] = []
+        posthoc_specs: list[PostHocSpec] = []
+        vs_pattern = re_mod.compile(r"^(\w+)\[([^\]]+)\]\s+vs\s+(\w+)\[([^\]]+)\]$")
+
+        for t in expanded:
+            m = vs_pattern.match(t)
+            if m:
+                factor_a, level_a_str, factor_b, level_b_str = m.groups()
+                level_a: int | str
+                level_b: int | str
+                try:
+                    level_a = int(level_a_str)
+                except ValueError:
+                    level_a = level_a_str
+                try:
+                    level_b = int(level_b_str)
+                except ValueError:
+                    level_b = level_b_str
+
+                if factor_a != factor_b:
+                    raise ValueError(f"Post-hoc comparison must be between levels of the same factor, got '{factor_a}' vs '{factor_b}'")
+
+                factor_name = factor_a
+                if factor_name not in self._registry._factors:
+                    raise ValueError(
+                        f"Factor '{factor_name}' not found. Available factors: {', '.join(self._registry._factors.keys()) or 'none'}"
+                    )
+
+                factor_info = self._registry._factors[factor_name]
+                level_labels = factor_info.get("level_labels")
+
+                if level_labels:
+                    # Named levels -- validate against labels
+                    if str(level_a) not in level_labels:
+                        raise ValueError(f"Level '{level_a}' not found for factor '{factor_name}'. Available: {level_labels}")
+                    if str(level_b) not in level_labels:
+                        raise ValueError(f"Level '{level_b}' not found for factor '{factor_name}'. Available: {level_labels}")
+                else:
+                    # Integer levels -- existing validation
+                    n_levels = factor_info["n_levels"]
+                    if not isinstance(level_a, int) or level_a < 1 or level_a > n_levels:
+                        raise ValueError(f"Level {level_a} out of range for factor '{factor_name}' (valid: 1 to {n_levels})")
+                    if not isinstance(level_b, int) or level_b < 1 or level_b > n_levels:
+                        raise ValueError(f"Level {level_b} out of range for factor '{factor_name}' (valid: 1 to {n_levels})")
+                if level_a == level_b:
+                    raise ValueError(f"Cannot compare a level to itself: {t}")
+
+                # Map user 1-indexed levels to internal column indices in X_expanded
+                # User level 1 = reference (no dummy → col_idx=None)
+                # User level k (k≥2) = dummy factor[k]
+                effect_order = list(self._registry._effects.keys())
+
+                def _level_to_col(factor_name, user_level, _effect_order=effect_order):
+                    factor_info = self._registry._factors[factor_name]
+                    reference = factor_info.get("reference_level", 1)
+                    if str(user_level) == str(reference):
+                        return None  # reference level
+                    dummy_name = f"{factor_name}[{user_level}]"
+                    if dummy_name in _effect_order:
+                        return _effect_order.index(dummy_name)
+                    raise ValueError(f"Dummy '{dummy_name}' not found in effects")
+
+                col_a = _level_to_col(factor_name, level_a)
+                col_b = _level_to_col(factor_name, level_b)
+
+                n_levels = factor_info["n_levels"]
+                label = f"{factor_name}[{level_a}] vs {factor_name}[{level_b}]"
+                posthoc_specs.append(
+                    PostHocSpec(
+                        factor_name=factor_name,
+                        level_a=level_a,
+                        level_b=level_b,
+                        col_idx_a=col_a,
+                        col_idx_b=col_b,
+                        n_levels=n_levels,
+                        label=label,
+                    )
+                )
+                regular_tests.append(label)
+            else:
+                regular_tests.append(t)
+
+        # Store post-hoc specs on the model for metadata preparation
+        self._posthoc_specs = posthoc_specs
+
+        # Validate regular (non-posthoc) tests
+        cluster_in_targets = [t for t in regular_tests if t in cluster_effects]
         if cluster_in_targets:
             raise ValueError(
                 f"Cannot test cluster effects {cluster_in_targets} - they are random effects. "
@@ -1617,13 +2054,14 @@ class MCPower:
             )
 
         valid_effects = self._registry.effect_names
-        invalid = [t for t in target_test if t != "overall" and t not in valid_effects]
+        posthoc_labels = {s.label for s in posthoc_specs}
+        invalid = [t for t in regular_tests if t != "overall" and t not in valid_effects and t not in posthoc_labels]
 
         if invalid:
             valid_options = ["overall"] + [e for e in valid_effects if e not in cluster_effects]
             raise ValueError(f"Invalid target test(s): {', '.join(invalid)}. Available: {', '.join(valid_options)}")
 
-        return target_test
+        return regular_tests
 
     def _create_X_extended(self, X):
         """Build the extended design matrix by adding interaction columns.
@@ -1726,8 +2164,49 @@ class MCPower:
         p = len(metadata.effect_sizes)
         dof = sample_size - p - 1
         n_targets = len(metadata.target_indices)
+        n_posthoc = len(metadata.posthoc_specs)
 
-        f_crit, t_crit, correction_t_crits = compute_critical_values(self.alpha, p, dof, n_targets, metadata.correction_method)
+        if n_posthoc > 0 and metadata.posthoc_method == "t-test":
+            # t-test post-hoc: combined correction family
+            n_combined = n_targets + n_posthoc
+            f_crit, t_crit, correction_t_crits_combined = compute_critical_values(
+                self.alpha,
+                p,
+                dof,
+                n_combined,
+                metadata.correction_method,
+            )
+            # For Bonferroni (same threshold for all), pass combined crits to regular analysis
+            # For FDR/Holm, pass first n_targets crits to regular analysis (approximate;
+            # exact combined correction is applied in compute_posthoc_contrasts)
+            correction_t_crits = correction_t_crits_combined[:n_targets]
+            metadata.posthoc_correction_t_crits_combined = correction_t_crits_combined
+        else:
+            # No post-hoc or Tukey post-hoc: regular correction unchanged
+            f_crit, t_crit, correction_t_crits = compute_critical_values(
+                self.alpha,
+                p,
+                dof,
+                n_targets,
+                metadata.correction_method,
+            )
+
+        # Store uncorrected t_crit for post-hoc use
+        metadata.posthoc_t_crit = t_crit
+
+        # Compute Tukey critical values per factor (if Tukey method)
+        if n_posthoc > 0 and metadata.posthoc_method == "tukey":
+            from .stats.ols import compute_tukey_critical_value
+
+            factors_seen = set()
+            for spec in metadata.posthoc_specs:
+                if spec.factor_name not in factors_seen:
+                    factors_seen.add(spec.factor_name)
+                    metadata.posthoc_tukey_crits[spec.factor_name] = compute_tukey_critical_value(
+                        self.alpha,
+                        spec.n_levels,
+                        dof,
+                    )
 
         # Create analyze function with precomputed critical values
         def analyze_func(X, y, indices, alpha, correction):
@@ -1758,6 +2237,13 @@ class MCPower:
         # Add n_simulations_failed to power_results
         if "n_simulations_failed" in sim_results:
             power_results["n_simulations_failed"] = sim_results["n_simulations_failed"]
+
+        # Tukey correction only applies to pairwise contrasts; NaN-ify others
+        if correction and correction.lower() == "tukey" and power_results.get("individual_powers_corrected"):
+            posthoc_labels = {s.label for s in self._posthoc_specs}
+            for test in target_tests:
+                if test not in posthoc_labels:
+                    power_results["individual_powers_corrected"][test] = float("nan")
 
         return build_power_result(
             model_type=self.model_type,
@@ -1850,6 +2336,16 @@ class MCPower:
 
         processor = ResultsProcessor(target_power=self.power)
         analysis_results = processor.process_sample_size_results(results, target_tests, correction)
+
+        # Tukey correction only applies to pairwise contrasts; NaN-ify others
+        if correction and correction.lower() == "tukey":
+            posthoc_labels = {s.label for s in self._posthoc_specs}
+            if analysis_results.get("powers_by_test_corrected"):
+                for test in target_tests:
+                    if test not in posthoc_labels:
+                        n_points = len(analysis_results["powers_by_test_corrected"][test])
+                        analysis_results["powers_by_test_corrected"][test] = [float("nan")] * n_points
+                        analysis_results["first_achieved_corrected"][test] = -1
 
         return build_sample_size_result(
             model_type=self.model_type,

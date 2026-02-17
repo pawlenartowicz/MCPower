@@ -43,7 +43,7 @@ class TestICCRecovery:
         np.random.seed(42)
 
         # Generate data using MCPower's internal functions
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         sample_size = 500
         n_clusters = 20
@@ -88,7 +88,7 @@ class TestICCRecovery:
 
         np.random.seed(123)
 
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         sample_size = 500
         n_clusters = 20
@@ -131,7 +131,7 @@ class TestFixedEffectRecovery:
 
         np.random.seed(42)
 
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         sample_size = 500
         n_clusters = 25
@@ -255,7 +255,7 @@ class TestConvergenceDiagnostics:
 
     def test_diagnostics_available(self):
         """Verify diagnostics are captured when using internal API."""
-        from mcpower.utils.mixed_models import _lme_analysis_wrapper
+        from mcpower.stats.mixed_models import _lme_analysis_wrapper
 
         np.random.seed(42)
 

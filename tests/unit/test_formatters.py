@@ -157,6 +157,38 @@ class TestFormatPower:
         out = self.formatter._format_long_power(data)
         assert "Corrected" in out
 
+    def test_short_power_tukey_nan_shows_dash(self):
+        data = self._make_power_data(
+            correction="tukey",
+            powers={"overall": 90.0, "group[0] vs group[1]": 75.0},
+            powers_corr={"overall": float("nan"), "group[0] vs group[1]": 70.0},
+        )
+        out = self.formatter._format_short_power(data)
+        assert "tukey" in out.lower()
+        # Find the corrected section, then check overall shows "-"
+        sections = out.split("tukey correction:")
+        assert len(sections) == 2
+        corrected_section = sections[1]
+        lines = corrected_section.split("\n")
+        for line in lines:
+            if "overall" in line:
+                assert "-" in line
+                break
+
+    def test_long_power_tukey_nan_shows_dash(self):
+        data = self._make_power_data(
+            correction="tukey",
+            powers={"overall": 90.0, "group[0] vs group[1]": 75.0},
+            powers_corr={"overall": float("nan"), "group[0] vs group[1]": 70.0},
+        )
+        out = self.formatter._format_long_power(data)
+        assert "Corrected" in out
+        lines = out.split("\n")
+        for line in lines:
+            if "overall" in line:
+                assert "-" in line
+                break
+
     def test_format_results_dispatches_power(self):
         data = self._make_power_data()
         out = _format_results("power", data, "short")
@@ -213,6 +245,20 @@ class TestFormatSampleSize:
         out = self.formatter._format_short_sample_size(data)
         assert "Uncorrected N" in out
         assert "Corrected N" in out
+
+    def test_short_sample_size_tukey_dash(self):
+        data = self._make_ss_data(
+            correction="tukey",
+            achieved={"overall": 80, "group[0] vs group[1]": 120},
+            achieved_corr={"overall": -1, "group[0] vs group[1]": 150},
+        )
+        out = self.formatter._format_short_sample_size(data)
+        assert "Corrected N" in out
+        lines = out.split("\n")
+        for line in lines:
+            if "overall" in line:
+                assert "-" in line
+                break
 
     def test_long_sample_size_includes_probability_table(self):
         data = self._make_ss_data()
@@ -286,6 +332,43 @@ class TestFormatScenarioPower:
         out = self.formatter._format_scenario_power(data, "long")
         assert "ROBUSTNESS ANALYSIS" in out
 
+    def test_scenario_power_tukey_nan_shows_dash(self):
+        target_tests = ["overall", "group[0] vs group[1]"]
+
+        def scenario_template(powers, powers_corr):
+            return {
+                "model": {
+                    "sample_size": 100,
+                    "target_tests": target_tests,
+                    "target_power": 80.0,
+                    "correction": "tukey",
+                },
+                "results": {
+                    "individual_powers": dict(zip(target_tests, powers, strict=True)),
+                    "individual_powers_corrected": dict(zip(target_tests, powers_corr, strict=True)),
+                    "cumulative_probabilities": {"at_least_1": 95.0, "all": 70.0},
+                },
+            }
+
+        data = {
+            "scenarios": {
+                "optimistic": scenario_template([95.0, 90.0], [float("nan"), 85.0]),
+                "realistic": scenario_template([80.0, 70.0], [float("nan"), 65.0]),
+                "doomer": scenario_template([50.0, 40.0], [float("nan"), 35.0]),
+            }
+        }
+        out = self.formatter._format_scenario_power_short(data["scenarios"], target_tests, "tukey")
+        assert "Corrected Power" in out
+        # overall should show "-" in the corrected table (not the uncorrected one)
+        sections = out.split("Corrected Power")
+        assert len(sections) == 2
+        corrected_section = sections[1]
+        lines = corrected_section.split("\n")
+        for line in lines:
+            if "overall" in line:
+                assert "-" in line
+                break
+
 
 # ---------------------------------------------------------------------------
 # Scenario sample-size formatting
@@ -339,6 +422,40 @@ class TestFormatScenarioSampleSize:
             s["results"]["first_achieved_corrected"] = {"x1": 150}
         out = self.formatter._format_scenario_sample_size(data, "short")
         assert "(U)" in out or "Uncorrected" in out or "Opt(U)" in out
+
+    def test_scenario_ss_short_tukey_dash(self):
+        target_tests = ["overall", "group[0] vs group[1]"]
+
+        def scenario(n_uncorr, n_corr):
+            return {
+                "model": {
+                    "target_tests": target_tests,
+                    "target_power": 80.0,
+                    "correction": "tukey",
+                    "sample_size_range": {"to_size": 200},
+                },
+                "results": {
+                    "first_achieved": dict(zip(target_tests, n_uncorr, strict=True)),
+                    "first_achieved_corrected": dict(zip(target_tests, n_corr, strict=True)),
+                    "sample_sizes_tested": [50, 100, 150, 200],
+                    "powers_by_test": {t: [30.0, 60.0, 80.0, 95.0] for t in target_tests},
+                },
+            }
+
+        data = {
+            "scenarios": {
+                "optimistic": scenario([80, 100], [-1, 120]),
+                "realistic": scenario([100, 150], [-1, 180]),
+                "doomer": scenario([150, 0], [-1, 0]),
+            }
+        }
+        out = self.formatter._format_scenario_sample_size_short(data["scenarios"], target_tests, "tukey")
+        # overall corrected should show "-"
+        lines = out.split("\n")
+        for line in lines:
+            if "overall" in line:
+                assert "-" in line
+                break
 
     def test_scenario_ss_long_recommendations(self):
         data = self._make_scenario_ss_data()

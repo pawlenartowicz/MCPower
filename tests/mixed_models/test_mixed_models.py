@@ -301,7 +301,7 @@ class TestWarmStartOptimization:
 
     def test_warm_start_reset(self):
         """Test that warm start cache can be reset."""
-        from mcpower.utils.mixed_models import reset_warm_start_cache
+        from mcpower.stats.mixed_models import reset_warm_start_cache
 
         # Run a model to populate cache (5 params → 50 obs/cluster × 5 clusters)
         model = MCPower("y ~ x + (1|cluster)")
@@ -401,7 +401,7 @@ class TestLmeAnalysisWrapper:
     """Test _lme_analysis_wrapper routing."""
 
     def test_unknown_backend_raises(self):
-        from mcpower.utils.mixed_models import _lme_analysis_wrapper
+        from mcpower.stats.mixed_models import _lme_analysis_wrapper
 
         with pytest.raises(ValueError, match="Unknown backend"):
             _lme_analysis_wrapper(

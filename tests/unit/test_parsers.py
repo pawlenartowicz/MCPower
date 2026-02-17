@@ -59,11 +59,14 @@ class TestParseEquation:
         assert random_effects[0]["grouping_var"] == "school"
         assert random_effects[1]["grouping_var"] == "classroom"
 
-    def test_random_slope_raises_error(self):
+    def test_random_slope_parses(self):
         from mcpower.utils.parsers import _parse_equation
 
-        with pytest.raises(ValueError, match="Random slopes not yet supported"):
-            _parse_equation("y ~ x1 + (1 + x1|school)")
+        dep, formula, random_effects = _parse_equation("y ~ x1 + (1 + x1|school)")
+        assert len(random_effects) == 1
+        assert random_effects[0]["type"] == "random_slope"
+        assert random_effects[0]["grouping_var"] == "school"
+        assert random_effects[0]["slope_vars"] == ["x1"]
 
     def test_duplicate_grouping_var_raises_error(self):
         from mcpower.utils.parsers import _parse_equation

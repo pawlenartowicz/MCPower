@@ -9,7 +9,7 @@ class TestGenerateX:
     """Test _generate_X function."""
 
     def test_basic_generation(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 100
         n_vars = 3
@@ -24,7 +24,7 @@ class TestGenerateX:
         assert X.shape == (n_samples, n_vars)
 
     def test_reproducibility_with_seed(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 50
         n_vars = 2
@@ -40,7 +40,7 @@ class TestGenerateX:
         assert np.allclose(X1, X2)
 
     def test_different_seeds(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 50
         n_vars = 2
@@ -56,7 +56,7 @@ class TestGenerateX:
         assert not np.allclose(X1, X2)
 
     def test_correlation_structure(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 5000  # Large sample for correlation estimation
         n_vars = 2
@@ -73,7 +73,7 @@ class TestGenerateX:
         assert abs(empirical_corr[0, 1] - 0.7) < 0.05
 
     def test_binary_variable(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 1000
         n_vars = 1
@@ -99,7 +99,7 @@ class TestGenerateFactors:
     """Test _generate_factors function."""
 
     def test_basic_factor(self):
-        from mcpower.utils.data_generation import _generate_factors
+        from mcpower.stats.data_generation import _generate_factors
 
         n_samples = 100
         specs = [{"n_levels": 3, "proportions": [1 / 3, 1 / 3, 1 / 3]}]
@@ -109,7 +109,7 @@ class TestGenerateFactors:
         assert X.shape == (n_samples, 2)  # n_levels - 1 dummies
 
     def test_factor_dummy_coding(self):
-        from mcpower.utils.data_generation import _generate_factors
+        from mcpower.stats.data_generation import _generate_factors
 
         n_samples = 100
         specs = [{"n_levels": 3, "proportions": [1 / 3, 1 / 3, 1 / 3]}]
@@ -121,7 +121,7 @@ class TestGenerateFactors:
             assert sum(row) <= 1
 
     def test_factor_proportions(self):
-        from mcpower.utils.data_generation import _generate_factors
+        from mcpower.stats.data_generation import _generate_factors
 
         n_samples = 3000
         specs = [{"n_levels": 3, "proportions": [0.5, 0.3, 0.2]}]
@@ -139,7 +139,7 @@ class TestGenerateFactors:
         assert abs(level3_count / n_samples - 0.2) < 0.05
 
     def test_multiple_factors(self):
-        from mcpower.utils.data_generation import _generate_factors
+        from mcpower.stats.data_generation import _generate_factors
 
         n_samples = 100
         specs = [{"n_levels": 3, "proportions": [1 / 3, 1 / 3, 1 / 3]}, {"n_levels": 2, "proportions": [0.5, 0.5]}]
@@ -150,7 +150,7 @@ class TestGenerateFactors:
         assert X.shape == (n_samples, 3)
 
     def test_no_factors(self):
-        from mcpower.utils.data_generation import _generate_factors
+        from mcpower.stats.data_generation import _generate_factors
 
         n_samples = 100
         specs = []
@@ -164,7 +164,7 @@ class TestCreateUploadedLookupTables:
     """Test create_uploaded_lookup_tables function."""
 
     def test_basic_creation(self):
-        from mcpower.utils.data_generation import create_uploaded_lookup_tables
+        from mcpower.stats.data_generation import create_uploaded_lookup_tables
 
         np.random.seed(42)
         data = np.random.randn(100, 2)
@@ -175,7 +175,7 @@ class TestCreateUploadedLookupTables:
         assert uploaded_vals.shape == (2, 100)
 
     def test_sorted_uploaded_values(self):
-        from mcpower.utils.data_generation import create_uploaded_lookup_tables
+        from mcpower.stats.data_generation import create_uploaded_lookup_tables
 
         np.random.seed(42)
         data = np.random.randn(50, 2)
@@ -187,7 +187,7 @@ class TestCreateUploadedLookupTables:
             assert np.all(np.diff(uploaded_vals[i]) >= 0)
 
     def test_normal_quantiles_range(self):
-        from mcpower.utils.data_generation import create_uploaded_lookup_tables
+        from mcpower.stats.data_generation import create_uploaded_lookup_tables
 
         np.random.seed(42)
         data = np.random.randn(100, 2)
@@ -204,7 +204,7 @@ class TestDistributionTypes:
     """Test different distribution types."""
 
     def test_normal_distribution(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 5000
         n_vars = 1
@@ -223,7 +223,7 @@ class TestDistributionTypes:
     def test_right_skewed_distribution(self):
         from scipy.stats import skew
 
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 5000
         n_vars = 1
@@ -239,7 +239,7 @@ class TestDistributionTypes:
         assert skew(X.flatten()) > 0.5
 
     def test_uniform_distribution(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 5000
         n_vars = 1
@@ -260,7 +260,7 @@ class TestDistributionTypes:
     def test_left_skewed_distribution(self):
         from scipy.stats import skew
 
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 5000
         n_vars = 1
@@ -278,7 +278,7 @@ class TestDistributionTypes:
     def test_high_kurtosis_distribution(self):
         from scipy.stats import kurtosis
 
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 5000
         n_vars = 1
@@ -294,7 +294,7 @@ class TestDistributionTypes:
         assert kurtosis(X.flatten()) > 1.0
 
     def test_uploaded_data_distribution(self):
-        from mcpower.utils.data_generation import _generate_X, create_uploaded_lookup_tables
+        from mcpower.stats.data_generation import _generate_X, create_uploaded_lookup_tables
 
         np.random.seed(42)
         # Create uploaded data with known shape
@@ -314,7 +314,7 @@ class TestDistributionTypes:
         assert np.std(X) > 0
 
     def test_unknown_distribution_type_returns_copy(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         n_samples = 100
         n_vars = 1
@@ -334,7 +334,7 @@ class TestGenerateClusterEffects:
     """Test _generate_cluster_effects function."""
 
     def test_basic_cluster_effects(self):
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         sample_size = 100
         cluster_specs = {"school": {"n_clusters": 10, "cluster_size": 10, "tau_squared": 0.5}}
@@ -342,7 +342,7 @@ class TestGenerateClusterEffects:
         assert result.shape == (sample_size, 1)
 
     def test_cluster_effects_shape_multiple(self):
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         sample_size = 60
         cluster_specs = {
@@ -352,7 +352,7 @@ class TestGenerateClusterEffects:
         assert result.shape == (sample_size, 1)
 
     def test_cluster_effects_variance(self):
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         sample_size = 1000
         tau_sq = 1.0
@@ -363,7 +363,7 @@ class TestGenerateClusterEffects:
         assert len(unique_vals) == 100
 
     def test_cluster_effects_seed_reproducibility(self):
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         sample_size = 50
         specs = {"g": {"n_clusters": 5, "cluster_size": 10, "tau_squared": 0.5}}
@@ -372,13 +372,13 @@ class TestGenerateClusterEffects:
         assert np.allclose(r1, r2)
 
     def test_cluster_effects_empty_specs(self):
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         result = _generate_cluster_effects(100, {}, sim_seed=42)
         assert result.shape == (100, 0)
 
     def test_cluster_effects_trim_to_sample_size(self):
-        from mcpower.utils.data_generation import _generate_cluster_effects
+        from mcpower.stats.data_generation import _generate_cluster_effects
 
         # cluster_size * n_clusters > sample_size → should be trimmed
         sample_size = 25
@@ -391,7 +391,7 @@ class TestCholeskyEdgeCases:
     """Test Cholesky decomposition fallback in _generate_X_core."""
 
     def test_near_singular_matrix_fallback(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         # Near-singular correlation matrix
         corr = np.array([[1.0, 0.999], [0.999, 1.0]])
@@ -407,7 +407,7 @@ class TestCholeskyEdgeCases:
         assert X.shape == (n_samples, n_vars)
 
     def test_negative_eigenvalue_repair(self):
-        from mcpower.utils.data_generation import _generate_X
+        from mcpower.stats.data_generation import _generate_X
 
         # Construct a matrix that is NOT positive semi-definite
         corr = np.array(

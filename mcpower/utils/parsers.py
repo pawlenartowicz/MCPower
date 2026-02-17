@@ -293,20 +293,28 @@ _parser = _AssignmentParser()
 def _parse_equation(equation: str) -> Tuple[str, str, List[Dict]]:
     """Parse an R-style formula into its components.
 
-    Splits the equation at ``~`` or ``=``, extracts random-intercept
-    terms ``(1|group)``, and returns the cleaned fixed-effect formula.
+    Splits the equation at ``~`` or ``=``, extracts random-effect
+    terms, and returns the cleaned fixed-effect formula.
+
+    Supported random-effect syntax:
+    - ``(1|group)`` — random intercept
+    - ``(1 + x|group)`` — random intercept and slope
+    - ``(1 + x1 + x2|group)`` — random intercept and multiple slopes
+    - ``(1|A/B)`` — nested random intercepts (expands to ``(1|A) + (1|A:B)``)
 
     Args:
         equation: Formula string (e.g. ``"y ~ x1 + x2 + (1|cluster)"``).
 
     Returns:
         Tuple of ``(dependent_var, fixed_formula, random_effects)`` where
-        *random_effects* is a list of dicts with keys ``"type"``
-        (``"random_intercept"``) and ``"grouping_var"``.
+        *random_effects* is a list of dicts with keys:
+        - ``"type"``: ``"random_intercept"`` or ``"random_slope"``
+        - ``"grouping_var"``: grouping variable name
+        - ``"slope_vars"``: list of slope variable names (slopes only)
+        - ``"parent_var"``: parent grouping var name (nested only)
 
     Raises:
-        ValueError: If random slopes are used (not yet supported) or a
-            grouping variable appears more than once.
+        ValueError: If a grouping variable appears more than once.
     """
     equation = equation.replace(" ", "")
 
@@ -323,28 +331,68 @@ def _parse_equation(equation: str) -> Tuple[str, str, List[Dict]]:
         formula_part = equation
 
     # Extract random effects from formula
-    random_effects = []
+    random_effects: List[Dict] = []
+    seen_grouping_vars: set = set()
 
-    # First check for unsupported random slopes syntax
-    slope_pattern = r"\(\s*1\s*\+.+?\|.+?\)"
-    if re.search(slope_pattern, formula_part):
-        raise ValueError(
-            "Random slopes not yet supported. Only random intercepts (1|group) are allowed. Found random slope syntax like (1 + x|group)."
+    # 1. Extract nested random intercepts: (1|A/B)
+    nested_pattern = r"\(\s*1\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*/\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
+    for match in re.finditer(nested_pattern, formula_part):
+        parent_var = match.group(1)
+        child_var = match.group(2)
+        nested_var = f"{parent_var}:{child_var}"
+
+        if parent_var in seen_grouping_vars:
+            raise ValueError(f"Duplicate random effect grouping variable: '{parent_var}'")
+        if nested_var in seen_grouping_vars:
+            raise ValueError(f"Duplicate random effect grouping variable: '{nested_var}'")
+
+        seen_grouping_vars.add(parent_var)
+        seen_grouping_vars.add(nested_var)
+
+        random_effects.append({"type": "random_intercept", "grouping_var": parent_var})
+        random_effects.append(
+            {
+                "type": "random_intercept",
+                "grouping_var": nested_var,
+                "parent_var": parent_var,
+            }
         )
 
-    # Extract random intercepts: (1|var)
-    intercept_pattern = r"\(\s*1\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
-    matches = re.finditer(intercept_pattern, formula_part)
+    formula_part = re.sub(nested_pattern, "", formula_part)
 
-    seen_grouping_vars = set()
-    for match in matches:
+    # 2. Extract random slopes: (1 + var1 + var2 | group)
+    slope_pattern = r"\(\s*1\s*\+\s*([^|]+?)\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
+    for match in re.finditer(slope_pattern, formula_part):
+        slope_vars_str = match.group(1)
+        grouping_var = match.group(2)
+
+        if grouping_var in seen_grouping_vars:
+            raise ValueError(f"Duplicate random effect grouping variable: '{grouping_var}'")
+        seen_grouping_vars.add(grouping_var)
+
+        slope_vars = [v.strip() for v in slope_vars_str.split("+") if v.strip()]
+        if not slope_vars:
+            raise ValueError(f"No slope variables found in random effect term for '{grouping_var}'")
+
+        random_effects.append(
+            {
+                "type": "random_slope",
+                "grouping_var": grouping_var,
+                "slope_vars": slope_vars,
+            }
+        )
+
+    formula_part = re.sub(slope_pattern, "", formula_part)
+
+    # 3. Extract random intercepts: (1|var)
+    intercept_pattern = r"\(\s*1\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
+    for match in re.finditer(intercept_pattern, formula_part):
         grouping_var = match.group(1)
         if grouping_var in seen_grouping_vars:
             raise ValueError(f"Duplicate random effect grouping variable: '{grouping_var}'")
         seen_grouping_vars.add(grouping_var)
         random_effects.append({"type": "random_intercept", "grouping_var": grouping_var})
 
-    # Remove random effects from formula string
     formula_part = re.sub(intercept_pattern, "", formula_part)
 
     # Clean up extra + signs and whitespace

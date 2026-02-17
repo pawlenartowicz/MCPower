@@ -8,10 +8,10 @@ providing a middle ground between the native C++ and pure Python backends.
 import numpy as np
 
 try:
-    from ..utils.data_generation import _USE_JIT as _DG_JIT
-    from ..utils.data_generation import NORM_CDF_TABLE, T3_PPF_TABLE, _generate_X_jit
-    from ..utils.ols import _USE_JIT as _OLS_JIT
-    from ..utils.ols import _generate_y_jit, _ols_jit
+    from ..stats.data_generation import _USE_JIT as _DG_JIT
+    from ..stats.data_generation import NORM_CDF_TABLE, T3_PPF_TABLE, _generate_X_jit
+    from ..stats.ols import _USE_JIT as _OLS_JIT
+    from ..stats.ols import _generate_y_jit, _ols_jit
 
     if not (_OLS_JIT and _DG_JIT):
         raise ImportError("Numba JIT compilation not available")
@@ -90,3 +90,33 @@ class JITBackend:
             upload_data,
             seed,
         )
+
+    def lme_analysis(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        cluster_ids: np.ndarray,
+        n_clusters: int,
+        target_indices: np.ndarray,
+        chi2_crit: float,
+        z_crit: float,
+        correction_z_crits: np.ndarray,
+        correction_method: int,
+        warm_lambda_sq: float = -1.0,
+    ) -> np.ndarray:
+        """Run LME analysis using JIT-compiled solver."""
+        from ..stats.lme_solver import lme_analysis_full
+
+        result = lme_analysis_full(
+            X,
+            y,
+            cluster_ids,
+            n_clusters,
+            target_indices,
+            chi2_crit,
+            z_crit,
+            correction_z_crits,
+            correction_method,
+            warm_lambda_sq,
+        )
+        return result if result is not None else np.empty(0)

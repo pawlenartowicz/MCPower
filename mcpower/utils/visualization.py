@@ -103,5 +103,13 @@ def _create_power_plot(
     tick_interval = max(10, (max(sample_sizes) - min(sample_sizes)) // 10)
     ax.set_xticks(range(min(sample_sizes), max(sample_sizes) + 1, tick_interval))
 
-    plt.tight_layout()
+    fig.text(
+        0.5,
+        0.01,
+        "made in MCPower \u2014 simple Monte Carlo power analysis for complex models",
+        ha="center",
+        fontsize=9,
+        color="#888888",
+    )
+    plt.tight_layout(rect=(0, 0.03, 1, 1))
     plt.show()

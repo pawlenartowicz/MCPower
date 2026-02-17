@@ -13,7 +13,7 @@ import pytest
 from mcpower import MCPower
 
 # Load test data
-TEST_DIR = Path(__file__).parent
+TEST_DIR = Path(__file__).parent.parent
 CARS_CSV = TEST_DIR / "cars.csv"
 
 
@@ -44,7 +44,7 @@ class TestAutoDetection:
     def test_factor_auto_detection(self, cars_data):
         """Test that 3-6 value columns are auto-detected as factor."""
         model = MCPower("mpg = cyl + gear")
-        model.upload_data(cars_data[["cyl", "gear"]])
+        model.upload_data(cars_data[["cyl", "gear"]], preserve_factor_level_names=False)
         model.set_effects("cyl[2]=0.3, cyl[3]=0.4, gear[2]=0.2, gear[3]=0.3")
         model.apply()
 
@@ -89,7 +89,7 @@ class TestAutoDetection:
     def test_mixed_types_auto_detection(self, cars_data):
         """Test auto-detection with mixed variable types."""
         model = MCPower("mpg = vs + cyl + hp")
-        model.upload_data(cars_data[["vs", "cyl", "hp"]])
+        model.upload_data(cars_data[["vs", "cyl", "hp"]], preserve_factor_level_names=False)
         model.set_effects("vs=0.3, cyl[2]=0.2, cyl[3]=0.4, hp=0.5")
         model.apply()
 
@@ -321,7 +321,11 @@ class TestPreserveCorrelationStrict:
     def test_strict_mode_with_factor(self, cars_data):
         """Test strict mode with factor variables."""
         model = MCPower("mpg = cyl + gear")
-        model.upload_data(cars_data[["cyl", "gear"]], preserve_correlation="strict")
+        model.upload_data(
+            cars_data[["cyl", "gear"]],
+            preserve_correlation="strict",
+            preserve_factor_level_names=False,
+        )
         model.set_effects("cyl[2]=0.3, cyl[3]=0.4, gear[2]=0.2, gear[3]=0.3")
         model.apply()
 
@@ -423,7 +427,7 @@ class TestMixedTypeDataFrames:
     def test_full_dataframe_with_mixed_var_types(self, cars_data):
         """Test full DataFrame with binary + factor + continuous auto-detection."""
         model = MCPower("mpg = vs + cyl + hp")
-        model.upload_data(cars_data)  # Full DataFrame
+        model.upload_data(cars_data, preserve_factor_level_names=False)  # Full DataFrame
         model.set_effects("vs=0.3, cyl[2]=0.2, cyl[3]=0.4, hp=0.5")
         model.apply()
 
@@ -446,8 +450,8 @@ class TestMixedTypeDataFrames:
         )
         assert result is not None
 
-    def test_non_numeric_matched_column_raises_error(self):
-        """Test clear error when a matched column contains non-numeric data."""
+    def test_string_matched_column_auto_detected_as_factor(self):
+        """Test that a matched column with string data is auto-detected as factor."""
         df = pd.DataFrame(
             {
                 "x": ["a", "b", "c"] * 10,  # String data matching model variable
@@ -456,8 +460,11 @@ class TestMixedTypeDataFrames:
         )
         model = MCPower("y = x")
         model.upload_data(df)
-        with pytest.raises(TypeError, match="non-numeric data"):
-            model.apply()
+        model.set_effects("x[b]=0.3, x[c]=0.4")
+        model.apply()
+        assert "x" in model._registry.factor_names
+        assert "x[b]" in model._registry.dummy_names
+        assert "x[c]" in model._registry.dummy_names
 
 
 class TestEdgeCases:
@@ -534,3 +541,238 @@ class TestEdgeCases:
         captured = capsys.readouterr()
         assert "Warning" in captured.out
         assert "more than 3x" in captured.out
+
+
+class TestStringColumns:
+    """Test string/categorical column support."""
+
+    def test_string_column_auto_detected_as_factor(self, cars_data):
+        model = MCPower("mpg = origin + hp")
+        model.upload_data(cars_data[["origin", "hp"]])
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.4, hp=0.5")
+        model.apply()
+        assert "origin" in model._registry.factor_names
+
+    def test_string_column_creates_named_dummies(self, cars_data):
+        model = MCPower("mpg = origin + hp")
+        model.upload_data(cars_data[["origin", "hp"]])
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.4, hp=0.5")
+        model.apply()
+        dummy_names = model._registry.dummy_names
+        assert "origin[Japan]" in dummy_names
+        assert "origin[USA]" in dummy_names
+        assert "origin[Europe]" not in dummy_names
+
+    def test_string_column_no_mode(self, cars_data):
+        model = MCPower("mpg = origin + hp")
+        model.upload_data(cars_data[["origin", "hp"]], preserve_correlation="no")
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.4, hp=0.5")
+        model.apply()
+        assert "origin" in model._registry.factor_names
+
+    def test_too_many_string_levels_raises(self):
+        df = pd.DataFrame(
+            {
+                "name": [f"person_{i}" for i in range(50)],
+                "x1": np.random.randn(50),
+            }
+        )
+        model = MCPower("y = name + x1")
+        with pytest.raises(ValueError, match="too many unique"):
+            model.upload_data(df[["name", "x1"]])
+            model.apply()
+
+
+class TestPreserveFactorLevelNames:
+    """Test preserve_factor_level_names parameter."""
+
+    def test_numeric_factor_uses_original_values(self, cars_data):
+        model = MCPower("mpg = cyl + hp")
+        model.upload_data(cars_data[["cyl", "hp"]])
+        model.set_effects("cyl[6]=0.3, cyl[8]=0.4, hp=0.5")
+        model.apply()
+        dummy_names = model._registry.dummy_names
+        assert "cyl[6]" in dummy_names
+        assert "cyl[8]" in dummy_names
+        assert "cyl[2]" not in dummy_names
+
+    def test_preserve_false_uses_integer_indices(self, cars_data):
+        model = MCPower("mpg = cyl + hp")
+        model.upload_data(cars_data[["cyl", "hp"]], preserve_factor_level_names=False)
+        model.set_effects("cyl[2]=0.3, cyl[3]=0.4, hp=0.5")
+        model.apply()
+        dummy_names = model._registry.dummy_names
+        assert "cyl[2]" in dummy_names
+        assert "cyl[3]" in dummy_names
+
+    def test_custom_reference_via_data_types_tuple(self, cars_data):
+        model = MCPower("mpg = cyl + hp")
+        model.upload_data(cars_data[["cyl", "hp"]], data_types={"cyl": ("factor", 6)})
+        model.set_effects("cyl[4]=0.3, cyl[8]=0.4, hp=0.5")
+        model.apply()
+        dummy_names = model._registry.dummy_names
+        assert "cyl[4]" in dummy_names
+        assert "cyl[8]" in dummy_names
+        assert "cyl[6]" not in dummy_names
+
+    def test_invalid_reference_level_raises(self, cars_data):
+        model = MCPower("mpg = cyl + hp")
+        with pytest.raises(ValueError, match="not found in"):
+            model.upload_data(cars_data[["cyl", "hp"]], data_types={"cyl": ("factor", 99)})
+            model.apply()
+
+    def test_string_custom_reference(self, cars_data):
+        model = MCPower("mpg = origin + hp")
+        model.upload_data(
+            cars_data[["origin", "hp"]], data_types={"origin": ("factor", "Japan")}
+        )
+        model.set_effects("origin[Europe]=0.3, origin[USA]=0.4, hp=0.5")
+        model.apply()
+        dummy_names = model._registry.dummy_names
+        assert "origin[Europe]" in dummy_names
+        assert "origin[USA]" in dummy_names
+        assert "origin[Japan]" not in dummy_names
+
+
+class TestPostHocNamedLevels:
+    """Post-hoc comparisons with named factor levels."""
+
+    def test_posthoc_with_named_numeric_levels(self, cars_data):
+        """Post-hoc with numeric named levels like cyl[4] vs cyl[6]."""
+        model = MCPower("mpg = cyl")
+        model.upload_data(cars_data[["cyl"]])
+        model.set_effects("cyl[6]=0.3, cyl[8]=0.5")
+        result = model.find_power(
+            sample_size=100,
+            target_test="cyl[4] vs cyl[6], cyl[4] vs cyl[8], cyl[6] vs cyl[8]",
+            correction="tukey",
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None
+
+    def test_posthoc_with_string_levels(self, cars_data):
+        """Post-hoc with string levels like origin[Europe] vs origin[Japan]."""
+        model = MCPower("mpg = origin")
+        model.upload_data(cars_data[["origin"]])
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.5")
+        result = model.find_power(
+            sample_size=100,
+            target_test="origin[Europe] vs origin[Japan], origin[Europe] vs origin[USA]",
+            correction="tukey",
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None
+
+    def test_all_posthoc_with_named_levels(self, cars_data):
+        """'all-posthoc' keyword expands with named levels."""
+        model = MCPower("mpg = cyl")
+        model.upload_data(cars_data[["cyl"]])
+        model.set_effects("cyl[6]=0.3, cyl[8]=0.5")
+        result = model.find_power(
+            sample_size=100,
+            target_test="all-posthoc",
+            correction="tukey",
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None
+
+    def test_posthoc_with_set_factor_levels(self):
+        """Post-hoc with manually set named factor levels."""
+        model = MCPower("y = treatment")
+        model.set_factor_levels("treatment=placebo,drug_a,drug_b")
+        model.set_effects("treatment[drug_a]=0.5, treatment[drug_b]=0.8")
+        result = model.find_power(
+            sample_size=100,
+            target_test="treatment[placebo] vs treatment[drug_a], treatment[placebo] vs treatment[drug_b]",
+            correction="tukey",
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None
+
+
+class TestCarsOriginColumn:
+    """Integration tests using the origin string column in cars.csv."""
+
+    def test_origin_as_factor(self, cars_data):
+        """origin column is auto-detected as 3-level string factor."""
+        model = MCPower("mpg = origin + hp")
+        model.upload_data(cars_data[["origin", "hp"]])
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, hp=0.4")
+        model.apply()
+
+        assert "origin" in model._registry.factor_names
+        assert "origin[Japan]" in model._registry.dummy_names
+        assert "origin[USA]" in model._registry.dummy_names
+        assert "origin[Europe]" not in model._registry.dummy_names
+
+    def test_origin_full_power_analysis(self, cars_data):
+        """Full power analysis with string factor."""
+        model = MCPower("mpg = origin + hp + wt")
+        model.upload_data(cars_data[["origin", "hp", "wt"]])
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, hp=0.4, wt=0.3")
+        result = model.find_power(
+            sample_size=100,
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None
+
+    def test_origin_with_cyl_mixed(self, cars_data):
+        """String + numeric factors together."""
+        model = MCPower("mpg = origin + cyl")
+        model.upload_data(cars_data[["origin", "cyl"]])
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, cyl[6]=0.2, cyl[8]=0.4")
+        model.apply()
+
+        assert "origin[Japan]" in model._registry.dummy_names
+        assert "cyl[6]" in model._registry.dummy_names
+
+    def test_origin_strict_mode_power(self, cars_data):
+        """String factor works in strict correlation mode with find_power."""
+        model = MCPower("mpg = origin")
+        model.upload_data(cars_data[["origin"]], preserve_correlation="strict")
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.5")
+        result = model.find_power(
+            sample_size=60,
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None
+
+    def test_origin_no_mode_power(self, cars_data):
+        """String factor works in no correlation mode with find_power."""
+        model = MCPower("mpg = origin + hp")
+        model.upload_data(cars_data[["origin", "hp"]], preserve_correlation="no")
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, hp=0.4")
+        result = model.find_power(
+            sample_size=100,
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None
+
+    def test_origin_posthoc(self, cars_data):
+        """Post-hoc comparisons with string factor levels."""
+        model = MCPower("mpg = origin")
+        model.upload_data(cars_data[["origin"]])
+        model.set_effects("origin[Japan]=0.3, origin[USA]=0.5")
+        result = model.find_power(
+            sample_size=100,
+            target_test="all-posthoc",
+            correction="tukey",
+            print_results=False,
+            return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None

@@ -105,7 +105,7 @@ class TestCheckForUpdates:
         from datetime import datetime
         from pathlib import Path
 
-        cache_path = Path(__file__).parent.parent / "mcpower" / ".mcpower_cache.json"
+        cache_path = Path(__file__).parent.parent.parent / "mcpower" / ".mcpower_cache.json"
         cache_path.parent.mkdir(exist_ok=True)
         cache_data = {
             "last_check": datetime.now().isoformat(),

@@ -176,7 +176,7 @@ def reset_lme_cache():
     This fixture ensures tests start with clean state.
     """
     try:
-        from mcpower.utils.mixed_models import reset_warm_start_cache
+        from mcpower.stats.mixed_models import reset_warm_start_cache
 
         reset_warm_start_cache()
     except ImportError:

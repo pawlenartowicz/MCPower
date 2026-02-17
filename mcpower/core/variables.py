@@ -6,8 +6,9 @@ It replaces the scattered state in the original base.py with a single
 source of truth for all variable-related information.
 """
 
+import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -29,6 +30,7 @@ class PredictorVar:
         factor_source: Original factor name (dummies only).
         factor_level: Categorical level this dummy represents (dummies only).
         column_index: Position in the raw design matrix ``X``.
+        level_labels: Original data labels for factor levels (factors/dummies only).
     """
 
     name: str
@@ -39,8 +41,9 @@ class PredictorVar:
     is_factor: bool = False
     is_dummy: bool = False
     factor_source: Optional[str] = None
-    factor_level: Optional[int] = None
+    factor_level: Optional[Union[int, str]] = None
     column_index: Optional[int] = None
+    level_labels: Optional[List[str]] = None
 
 
 @dataclass
@@ -65,23 +68,56 @@ class Effect:
     column_index: Optional[int] = None
     column_indices: List[int] = field(default_factory=list)
     factor_source: Optional[str] = None
-    factor_level: Optional[int] = None
+    factor_level: Optional[Union[int, str]] = None
+
+
+@dataclass
+class PostHocSpec:
+    """Specification for a single post-hoc pairwise comparison.
+
+    Attributes:
+        factor_name: Name of the factor variable.
+        level_a: 1-indexed user level for the first group.
+        level_b: 1-indexed user level for the second group.
+        col_idx_a: Column index in X_expanded (None = reference level).
+        col_idx_b: Column index in X_expanded (None = reference level).
+        n_levels: Total number of levels for this factor (needed for Tukey).
+        label: Display label, e.g. ``"group[1] vs group[2]"``.
+    """
+
+    factor_name: str
+    level_a: Union[int, str]
+    level_b: Union[int, str]
+    col_idx_a: Optional[int]
+    col_idx_b: Optional[int]
+    n_levels: int
+    label: str
 
 
 @dataclass
 class ClusterSpec:
-    """Specification for a cluster/grouping variable with a random intercept.
+    """Specification for a cluster/grouping variable with random effects.
+
+    Supports random intercepts, random slopes (with slope-intercept
+    correlation), and nested random intercepts.
 
     Attributes:
         grouping_var: Name of the grouping variable from the formula.
         n_clusters: Number of clusters (derived at analysis time if not set).
         cluster_size: Observations per cluster (derived if not set).
-        icc: Intraclass correlation coefficient.
-        tau_squared: Between-cluster variance, computed as
+        icc: Intraclass correlation coefficient for the intercept.
+        tau_squared: Between-cluster intercept variance, computed as
             ``ICC / (1 - ICC)`` (adjusted for fixed-effect variance in
             ``prepare_metadata``).
         id_effect_name: Name of the synthetic predictor that carries the
             random intercept values (e.g. ``"school_id_effect"``).
+        random_slope_vars: Names of slope variables (empty for intercept-only).
+        slope_variance: Variance of the random slope (tau^2_slope).
+        slope_intercept_corr: Correlation between random intercept and slope.
+        G_matrix: Full random-effects covariance matrix (q x q).
+        parent_var: Parent grouping variable for nested effects.
+        n_per_parent: Number of sub-groups per parent group (nested only).
+        q: Random effects dimension (1 for intercept-only, 1+len(slopes) for slopes).
     """
 
     grouping_var: str
@@ -90,6 +126,13 @@ class ClusterSpec:
     icc: float = 0.0
     tau_squared: float = 0.0
     id_effect_name: str = ""
+    random_slope_vars: List[str] = field(default_factory=list)
+    slope_variance: float = 0.0
+    slope_intercept_corr: float = 0.0
+    G_matrix: Optional[np.ndarray] = None
+    parent_var: Optional[str] = None
+    n_per_parent: Optional[int] = None
+    q: int = 1
 
 
 class VariableRegistry:
@@ -256,12 +299,18 @@ class VariableRegistry:
             pred.is_factor = True
             pred.n_levels = kwargs.get("n_levels", 2)
             pred.proportions = kwargs.get("proportions")
+            level_labels = kwargs.get("level_labels")
+            reference_level = kwargs.get("reference_level")
+
+            if level_labels is not None:
+                pred.level_labels = level_labels
 
             # Store factor info
             self._factors[name] = {
                 "n_levels": pred.n_levels,
                 "proportions": pred.proportions,
-                "reference_level": 1,
+                "level_labels": level_labels,
+                "reference_level": reference_level if reference_level is not None else (level_labels[0] if level_labels else 1),
             }
 
     def set_effect_size(self, name: str, value: float) -> None:
@@ -315,39 +364,79 @@ class VariableRegistry:
         # Create dummy variables and effects for each factor
         for factor_name, factor_info in self._factors.items():
             n_levels = factor_info["n_levels"]
+            level_labels = factor_info.get("level_labels")
+            reference_level = factor_info.get("reference_level", 1)
 
-            for level in range(2, n_levels + 1):
-                dummy_name = f"{factor_name}[{level}]"
+            if level_labels is not None:
+                # Named levels: skip the reference, create dummies for the rest
+                non_ref_labels = [lb for lb in level_labels if lb != str(reference_level)]
+                for label in non_ref_labels:
+                    dummy_name = f"{factor_name}[{label}]"
 
-                # Create dummy predictor
-                dummy_pred = PredictorVar(
-                    name=dummy_name,
-                    var_type="factor_dummy",
-                    is_dummy=True,
-                    factor_source=factor_name,
-                    factor_level=level,
-                    column_index=col_idx,
-                )
-                new_predictors[dummy_name] = dummy_pred
+                    # Create dummy predictor
+                    dummy_pred = PredictorVar(
+                        name=dummy_name,
+                        var_type="factor_dummy",
+                        is_dummy=True,
+                        factor_source=factor_name,
+                        factor_level=label,
+                        column_index=col_idx,
+                        level_labels=level_labels,
+                    )
+                    new_predictors[dummy_name] = dummy_pred
 
-                # Create main effect for dummy
-                dummy_eff = Effect(
-                    name=dummy_name,
-                    effect_type="main",
-                    var_names=[dummy_name],
-                    column_index=col_idx,
-                    factor_source=factor_name,
-                    factor_level=level,
-                )
-                new_effects[dummy_name] = dummy_eff
+                    # Create main effect for dummy
+                    dummy_eff = Effect(
+                        name=dummy_name,
+                        effect_type="main",
+                        var_names=[dummy_name],
+                        column_index=col_idx,
+                        factor_source=factor_name,
+                        factor_level=label,
+                    )
+                    new_effects[dummy_name] = dummy_eff
 
-                # Store dummy mapping
-                self._factor_dummies[dummy_name] = {
-                    "factor_name": factor_name,
-                    "level": level,
-                }
+                    # Store dummy mapping
+                    self._factor_dummies[dummy_name] = {
+                        "factor_name": factor_name,
+                        "level": label,
+                    }
 
-                col_idx += 1
+                    col_idx += 1
+            else:
+                # Original integer-indexed behavior
+                for level in range(2, n_levels + 1):
+                    dummy_name = f"{factor_name}[{level}]"
+
+                    # Create dummy predictor
+                    dummy_pred = PredictorVar(
+                        name=dummy_name,
+                        var_type="factor_dummy",
+                        is_dummy=True,
+                        factor_source=factor_name,
+                        factor_level=level,
+                        column_index=col_idx,
+                    )
+                    new_predictors[dummy_name] = dummy_pred
+
+                    # Create main effect for dummy
+                    dummy_eff = Effect(
+                        name=dummy_name,
+                        effect_type="main",
+                        var_names=[dummy_name],
+                        column_index=col_idx,
+                        factor_source=factor_name,
+                        factor_level=level,
+                    )
+                    new_effects[dummy_name] = dummy_eff
+
+                    # Store dummy mapping
+                    self._factor_dummies[dummy_name] = {
+                        "factor_name": factor_name,
+                        "level": level,
+                    }
+
+                    col_idx += 1
 
         # Handle interactions involving factors
         for _name, eff in original_effects.items():
@@ -356,22 +445,42 @@ class VariableRegistry:
 
                 if factor_vars:
                     for factor_var in factor_vars:
-                        n_levels = self._factors[factor_var]["n_levels"]
+                        factor_info = self._factors[factor_var]
+                        n_levels = factor_info["n_levels"]
+                        level_labels = factor_info.get("level_labels")
+                        reference_level = factor_info.get("reference_level", 1)
 
-                        for level in range(2, n_levels + 1):
-                            dummy_name = f"{factor_var}[{level}]"
+                        if level_labels is not None:
+                            non_ref_labels = [lb for lb in level_labels if lb != str(reference_level)]
+                            for label in non_ref_labels:
+                                dummy_name = f"{factor_var}[{label}]"
 
-                            # Replace factor name with dummy name
-                            new_var_names = [dummy_name if vn == factor_var else vn for vn in eff.var_names]
-                            new_interaction_name = ":".join(new_var_names)
+                                # Replace factor name with dummy name
+                                new_var_names = [dummy_name if vn == factor_var else vn for vn in eff.var_names]
+                                new_interaction_name = ":".join(new_var_names)
 
-                            new_eff = Effect(
-                                name=new_interaction_name,
-                                effect_type="interaction",
-                                var_names=new_var_names,
-                                column_indices=[],  # Updated later
-                            )
-                            new_effects[new_interaction_name] = new_eff
+                                new_eff = Effect(
+                                    name=new_interaction_name,
+                                    effect_type="interaction",
+                                    var_names=new_var_names,
+                                    column_indices=[],  # Updated later
+                                )
+                                new_effects[new_interaction_name] = new_eff
+                        else:
+                            for level in range(2, n_levels + 1):
+                                dummy_name = f"{factor_var}[{level}]"
+
+                                # Replace factor name with dummy name
+                                new_var_names = [dummy_name if vn == factor_var else vn for vn in eff.var_names]
+                                new_interaction_name = ":".join(new_var_names)
+
+                                new_eff = Effect(
+                                    name=new_interaction_name,
+                                    effect_type="interaction",
+                                    var_names=new_var_names,
+                                    column_indices=[],  # Updated later
+                                )
+                                new_effects[new_interaction_name] = new_eff
 
         # Update predictors and effects
         self._predictors = new_predictors
@@ -423,7 +532,14 @@ class VariableRegistry:
 
     def get_factor_specs(self) -> List[Dict[str, Any]]:
         """Get factor specifications for data generation."""
-        return [{"n_levels": info["n_levels"], "proportions": info["proportions"]} for info in self._factors.values()]
+        return [
+            {
+                "n_levels": info["n_levels"],
+                "proportions": info["proportions"],
+                "level_labels": info.get("level_labels"),
+            }
+            for info in self._factors.values()
+        ]
 
     def get_correlation_matrix(self) -> Optional[np.ndarray]:
         """Get correlation matrix for non-factor variables."""
@@ -487,12 +603,23 @@ class VariableRegistry:
         n_clusters: Optional[int],
         cluster_size: Optional[int],
         icc: float,
+        random_slopes: Optional[List[str]] = None,
+        slope_variance: float = 0.0,
+        slope_intercept_corr: float = 0.0,
+        parent_var: Optional[str] = None,
+        n_per_parent: Optional[int] = None,
     ) -> None:
-        """Register a cluster/grouping variable with a random intercept.
+        """Register a cluster/grouping variable with random effects.
 
         Creates a ``ClusterSpec``, adds a synthetic ``cluster_effect``
         predictor and a fixed-at-1.0 ``Effect`` entry, then re-indexes
         all predictor columns.
+
+        For random slopes, computes the G matrix from ICC, slope_variance,
+        and slope_intercept_corr.
+
+        For nested effects (parent_var set), derives n_clusters from the
+        parent's n_clusters and n_per_parent.
 
         Args:
             grouping_var: Name of the grouping variable.
@@ -500,13 +627,55 @@ class VariableRegistry:
                 *cluster_size* must be provided).
             cluster_size: Observations per cluster.
             icc: Intraclass correlation coefficient (0 <= ICC < 1).
+            random_slopes: List of slope variable names (must be in predictors).
+            slope_variance: Variance of the random slope.
+            slope_intercept_corr: Correlation between random intercept and slope.
+            parent_var: Parent grouping variable (for nested effects).
+            n_per_parent: Sub-groups per parent (for nested effects).
         """
         # Calculate tau_squared from ICC
-        # tau² = ICC / (1 - ICC), where sigma² = 1
         if icc == 0:
             tau_squared = 0.0
         else:
             tau_squared = icc / (1.0 - icc)
+
+        # Handle random slopes
+        slope_vars = random_slopes or []
+        q = 1 + len(slope_vars)
+        G_matrix = None
+
+        if slope_vars:
+            # Validate slope vars exist in predictors
+            for sv in slope_vars:
+                if sv not in self._predictors:
+                    raise ValueError(
+                        f"Slope variable '{sv}' not found in model predictors. Available: {', '.join(self._predictors.keys())}"
+                    )
+
+            # Build G matrix: [[tau_int^2, rho*tau_int*tau_slope], [rho*tau_int*tau_slope, tau_slope^2]]
+            tau_int = math.sqrt(tau_squared)
+            tau_slope = math.sqrt(slope_variance)
+            rho = slope_intercept_corr
+
+            G_matrix = np.zeros((q, q))
+            G_matrix[0, 0] = tau_squared  # intercept variance
+            for i in range(1, q):
+                G_matrix[i, i] = slope_variance  # slope variance
+                G_matrix[0, i] = rho * tau_int * tau_slope  # off-diagonal
+                G_matrix[i, 0] = rho * tau_int * tau_slope
+
+        # Handle nested effects
+        if parent_var is not None:
+            if parent_var not in self._cluster_specs:
+                raise ValueError(
+                    f"Parent grouping variable '{parent_var}' must be registered before "
+                    f"nested variable '{grouping_var}'. Call set_cluster('{parent_var}', ...) first."
+                )
+            parent_spec = self._cluster_specs[parent_var]
+            if n_per_parent is None:
+                raise ValueError(f"n_per_parent is required for nested grouping variable '{grouping_var}'.")
+            # Total child clusters = parent_clusters * n_per_parent
+            n_clusters = (parent_spec.n_clusters or 0) * n_per_parent
 
         # Create id_effect name
         id_effect_name = f"{grouping_var}_id_effect"
@@ -519,11 +688,17 @@ class VariableRegistry:
             icc=icc,
             tau_squared=tau_squared,
             id_effect_name=id_effect_name,
+            random_slope_vars=slope_vars,
+            slope_variance=slope_variance,
+            slope_intercept_corr=slope_intercept_corr,
+            G_matrix=G_matrix,
+            parent_var=parent_var,
+            n_per_parent=n_per_parent,
+            q=q,
         )
         self._cluster_specs[grouping_var] = spec
 
         # Add id_effect as a predictor
-        # Column index will be assigned after non_factor vars but before dummies
         n_non_factor = len([p for p in self._predictors.values() if not p.is_factor and not p.is_dummy and p.var_type != "cluster_effect"])
         n_existing_cluster = len([p for p in self._predictors.values() if p.var_type == "cluster_effect"])
 

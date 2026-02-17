@@ -240,12 +240,15 @@ def _validate_correction_method(correction: Optional[str]) -> _ValidationResult:
         return _ValidationResult(True, [], [])
 
     method = correction.lower().replace("-", "_").replace(" ", "_")
-    valid_methods = ["bonferroni", "benjamini_hochberg", "bh", "fdr", "holm"]
+    valid_methods = ["bonferroni", "benjamini_hochberg", "bh", "fdr", "holm", "tukey"]
 
     if method not in valid_methods:
         return _ValidationResult(
             False,
-            [f"Unknown correction method: {correction}. Valid options: 'Bonferroni', 'Benjamini-Hochberg' (or 'BH', 'FDR'), 'Holm'"],
+            [
+                f"Unknown correction method: {correction}. "
+                "Valid options: 'Bonferroni', 'Benjamini-Hochberg' (or 'BH', 'FDR'), 'Holm', 'Tukey'"
+            ],
             [],
         )
 
@@ -430,6 +433,7 @@ def _validate_cluster_config(
     n_clusters: Optional[int],
     cluster_size: Optional[int],
     parsed_grouping_vars: List[str],
+    nested_child: bool = False,
 ) -> _ValidationResult:
     """Validate cluster configuration parameters."""
     errors: List[str] = []
@@ -447,30 +451,31 @@ def _validate_cluster_config(
     elif icc < 0 or icc >= 1:
         errors.append(f"ICC must be between 0 and 1 (exclusive on upper end), got {icc}")
     elif icc != 0 and (icc < 0.1 or icc > 0.9):
-        # ICC must be exactly 0 (no random effects) OR in the stable range [0.1, 0.9]
         errors.append(
             f"ICC must be 0 (no clustering) or between 0.1 and 0.9 for numerical stability. "
             f"Got {icc}. Extreme ICC values (< 0.1 or > 0.9) cause convergence issues in mixed models."
         )
 
-    # Mutual exclusivity
-    if n_clusters is not None and cluster_size is not None:
-        errors.append("Specify either n_clusters OR cluster_size, not both")
-    elif n_clusters is None and cluster_size is None:
-        errors.append("Must specify either n_clusters or cluster_size")
+    # For nested child terms, n_clusters/cluster_size are derived from parent
+    if not nested_child:
+        # Mutual exclusivity
+        if n_clusters is not None and cluster_size is not None:
+            errors.append("Specify either n_clusters OR cluster_size, not both")
+        elif n_clusters is None and cluster_size is None:
+            errors.append("Must specify either n_clusters or cluster_size")
 
-    # n_clusters validation
-    if n_clusters is not None:
-        if not isinstance(n_clusters, int) or n_clusters < 2:
-            errors.append(f"n_clusters must be an integer >= 2, got {n_clusters}")
+        # n_clusters validation
+        if n_clusters is not None:
+            if not isinstance(n_clusters, int) or n_clusters < 2:
+                errors.append(f"n_clusters must be an integer >= 2, got {n_clusters}")
 
-    # cluster_size validation - minimum 15 observations per cluster for stability
-    if cluster_size is not None:
-        if not isinstance(cluster_size, int) or cluster_size < 15:
-            errors.append(
-                f"cluster_size must be an integer >= 15 for reliable mixed model estimation. "
-                f"Got {cluster_size}. Small cluster sizes cause convergence issues."
-            )
+        # cluster_size validation
+        if cluster_size is not None:
+            if not isinstance(cluster_size, int) or cluster_size < 15:
+                errors.append(
+                    f"cluster_size must be an integer >= 15 for reliable mixed model estimation. "
+                    f"Got {cluster_size}. Small cluster sizes cause convergence issues."
+                )
 
     return _ValidationResult(len(errors) == 0, errors, warnings)
 

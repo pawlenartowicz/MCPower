@@ -321,6 +321,12 @@ class TestValidateCorrectionMethod:
         result = _validate_correction_method("holm")
         assert result.is_valid
 
+    def test_tukey(self):
+        from mcpower.utils.validators import _validate_correction_method
+
+        result = _validate_correction_method("tukey")
+        assert result.is_valid
+
     def test_invalid_method(self):
         from mcpower.utils.validators import _validate_correction_method
 

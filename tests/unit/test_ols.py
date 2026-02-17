@@ -7,7 +7,7 @@ import numpy as np
 
 def _ols_analysis_helper(X, y, target_indices, correction_method=0, alpha=0.05):
     """Test helper: compute critical values and call OLS core function."""
-    from mcpower.utils.ols import _ols_jit, compute_critical_values
+    from mcpower.stats.ols import _ols_jit, compute_critical_values
 
     n, p = X.shape
     dof = n - p - 1
@@ -90,7 +90,7 @@ class TestGenerateY:
     """Test _generate_y_jit function."""
 
     def test_basic_generation(self):
-        from mcpower.utils.ols import _generate_y_jit
+        from mcpower.stats.ols import _generate_y_jit
 
         np.random.seed(42)
 
@@ -103,7 +103,7 @@ class TestGenerateY:
         assert y.shape == (n,)
 
     def test_reproducibility(self):
-        from mcpower.utils.ols import _generate_y_jit
+        from mcpower.stats.ols import _generate_y_jit
 
         n = 50
         X = np.random.randn(n, 2)
@@ -115,7 +115,7 @@ class TestGenerateY:
         assert np.allclose(y1, y2)
 
     def test_effect_sizes_matter(self):
-        from mcpower.utils.ols import _generate_y_jit
+        from mcpower.stats.ols import _generate_y_jit
 
         n = 1000
         np.random.seed(42)
@@ -131,7 +131,7 @@ class TestGenerateY:
         assert abs(corr_large) > abs(corr_small)
 
     def test_with_heterogeneity(self):
-        from mcpower.utils.ols import _generate_y_jit
+        from mcpower.stats.ols import _generate_y_jit
 
         n = 100
         np.random.seed(42)
@@ -145,7 +145,7 @@ class TestGenerateY:
         assert not np.any(np.isnan(y))
 
     def test_with_heteroskedasticity(self):
-        from mcpower.utils.ols import _generate_y_jit
+        from mcpower.stats.ols import _generate_y_jit
 
         n = 100
         np.random.seed(42)
@@ -208,7 +208,7 @@ class TestComputeCriticalValues:
     """Test compute_critical_values function."""
 
     def test_basic_critical_values(self):
-        from mcpower.utils.ols import compute_critical_values
+        from mcpower.stats.ols import compute_critical_values
 
         f_crit, t_crit, correction_t_crits = compute_critical_values(alpha=0.05, dfn=2, dfd=97, n_targets=2, correction_method=0)
 
@@ -221,7 +221,7 @@ class TestComputeCriticalValues:
         np.testing.assert_allclose(correction_t_crits, t_crit)
 
     def test_bonferroni_stricter(self):
-        from mcpower.utils.ols import compute_critical_values
+        from mcpower.stats.ols import compute_critical_values
 
         _, t_crit_none, crits_none = compute_critical_values(alpha=0.05, dfn=2, dfd=97, n_targets=3, correction_method=0)
         _, _, crits_bonf = compute_critical_values(alpha=0.05, dfn=2, dfd=97, n_targets=3, correction_method=1)
@@ -230,7 +230,7 @@ class TestComputeCriticalValues:
         assert np.all(crits_bonf > crits_none)
 
     def test_zero_dfd(self):
-        from mcpower.utils.ols import compute_critical_values
+        from mcpower.stats.ols import compute_critical_values
 
         f_crit, t_crit, correction_t_crits = compute_critical_values(alpha=0.05, dfn=2, dfd=0, n_targets=2, correction_method=0)
 
@@ -238,7 +238,7 @@ class TestComputeCriticalValues:
         assert t_crit == np.inf
 
     def test_zero_targets(self):
-        from mcpower.utils.ols import compute_critical_values
+        from mcpower.stats.ols import compute_critical_values
 
         f_crit, t_crit, correction_t_crits = compute_critical_values(alpha=0.05, dfn=2, dfd=97, n_targets=0, correction_method=0)
 

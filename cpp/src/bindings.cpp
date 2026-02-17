@@ -5,6 +5,7 @@
 
 #include "ols.hpp"
 #include "data_generation.hpp"
+#include "lme_solver.hpp"
 
 namespace py = pybind11;
 
@@ -208,6 +209,73 @@ py::array_t<double> generate_X_wrapper(
 }
 
 /**
+ * LME analysis wrapper for Python.
+ */
+py::array_t<double> lme_analysis(
+    py::array_t<double> X,
+    py::array_t<double> y,
+    py::array_t<int32_t> cluster_ids,
+    int n_clusters,
+    py::array_t<int32_t> target_indices,
+    double chi2_crit,
+    double z_crit,
+    py::array_t<double> correction_z_crits,
+    int correction_method,
+    double warm_lambda_sq
+) {
+    auto X_buf = X.request();
+    auto y_buf = y.request();
+    auto cid_buf = cluster_ids.request();
+    auto idx_buf = target_indices.request();
+    auto crits_buf = correction_z_crits.request();
+
+    const int n = static_cast<int>(X_buf.shape[0]);
+    const int p = static_cast<int>(X_buf.shape[1]);
+    const int n_obs = static_cast<int>(y_buf.size);
+    const int n_targets = static_cast<int>(idx_buf.size);
+    const int n_crits = static_cast<int>(crits_buf.size);
+
+    // Numpy arrays are row-major; convert X to column-major for Eigen
+    Eigen::Map<const RowMajorMatrixXd> X_row(
+        static_cast<double*>(X_buf.ptr), n, p
+    );
+    Eigen::MatrixXd X_map = X_row;
+
+    Eigen::Map<const Eigen::VectorXd> y_map(
+        static_cast<double*>(y_buf.ptr), n_obs
+    );
+    Eigen::Map<const Eigen::VectorXi> cid_map(
+        static_cast<int*>(cid_buf.ptr), n_obs
+    );
+    Eigen::Map<const Eigen::VectorXi> idx_map(
+        static_cast<int*>(idx_buf.ptr), n_targets
+    );
+    Eigen::Map<const Eigen::VectorXd> crits_map(
+        static_cast<double*>(crits_buf.ptr), n_crits
+    );
+
+    // Run LME analysis
+    LMESolver solver;
+    Eigen::VectorXd results = solver.analyze(
+        X_map, y_map, cid_map, n_clusters,
+        idx_map, chi2_crit, z_crit, crits_map,
+        correction_method, warm_lambda_sq
+    );
+
+    if (results.size() == 0) {
+        // Return empty array to signal failure
+        return py::array_t<double>(0);
+    }
+
+    // Convert result to numpy
+    py::array_t<double> result(results.size());
+    auto result_buf = result.request();
+    std::memcpy(result_buf.ptr, results.data(), results.size() * sizeof(double));
+
+    return result;
+}
+
+/**
  * Check if tables are initialized.
  */
 bool tables_initialized() {
@@ -250,6 +318,21 @@ PYBIND11_MODULE(mcpower_native, m) {
         py::arg("heteroskedasticity") = 0.0,
         py::arg("seed") = -1,
         "Generate dependent variable with heterogeneity and heteroskedasticity"
+    );
+
+    // LME analysis
+    m.def("lme_analysis", &mcpower::lme_analysis,
+        py::arg("X"),
+        py::arg("y"),
+        py::arg("cluster_ids"),
+        py::arg("n_clusters"),
+        py::arg("target_indices"),
+        py::arg("chi2_crit"),
+        py::arg("z_crit"),
+        py::arg("correction_z_crits"),
+        py::arg("correction_method") = 0,
+        py::arg("warm_lambda_sq") = -1.0,
+        "Run LME analysis with precomputed critical values (random intercept)"
     );
 
     // X generation

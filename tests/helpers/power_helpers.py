@@ -32,7 +32,7 @@ def get_power_corrected(result, test_name="overall"):
 
 def compute_crits(X, target_indices, alpha=DEFAULT_ALPHA, correction_method=0):
     """Helper to compute critical values for a given X matrix."""
-    from mcpower.utils.ols import compute_critical_values
+    from mcpower.stats.ols import compute_critical_values
 
     n, p = X.shape
     dof = n - p - 1

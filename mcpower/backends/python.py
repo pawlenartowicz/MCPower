@@ -7,8 +7,8 @@ extensions — neither C++ nor Numba JIT. Always available.
 
 import numpy as np
 
-from ..utils.data_generation import NORM_CDF_TABLE, T3_PPF_TABLE, _generate_X_core
-from ..utils.ols import _generate_y_core, _ols_core
+from ..stats.data_generation import NORM_CDF_TABLE, T3_PPF_TABLE, _generate_X_core
+from ..stats.ols import _generate_y_core, _ols_core
 
 
 class PythonBackend:
@@ -74,3 +74,33 @@ class PythonBackend:
             upload_data,
             seed if seed >= 0 else -1,
         )
+
+    def lme_analysis(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        cluster_ids: np.ndarray,
+        n_clusters: int,
+        target_indices: np.ndarray,
+        chi2_crit: float,
+        z_crit: float,
+        correction_z_crits: np.ndarray,
+        correction_method: int,
+        warm_lambda_sq: float = -1.0,
+    ) -> np.ndarray:
+        """Run LME analysis using pure Python solver."""
+        from ..stats.lme_solver import lme_analysis_full
+
+        result = lme_analysis_full(
+            X,
+            y,
+            cluster_ids,
+            n_clusters,
+            target_indices,
+            chi2_crit,
+            z_crit,
+            correction_z_crits,
+            correction_method,
+            warm_lambda_sq,
+        )
+        return result if result is not None else np.empty(0)

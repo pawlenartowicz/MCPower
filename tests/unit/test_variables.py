@@ -178,6 +178,125 @@ class TestVariableTypes:
         assert types[2] == 2  # right_skewed
 
 
+class TestNamedFactorLevels:
+    """Tests for named (string/numeric) factor level labels."""
+
+    def test_predictor_var_accepts_string_factor_level(self):
+        """PredictorVar.factor_level can be a string."""
+        from mcpower.core.variables import PredictorVar
+
+        p = PredictorVar(name="cyl[6]", factor_level="6", is_dummy=True, factor_source="cyl")
+        assert p.factor_level == "6"
+
+    def test_predictor_var_accepts_int_factor_level(self):
+        """PredictorVar.factor_level still accepts int (backward compat)."""
+        from mcpower.core.variables import PredictorVar
+
+        p = PredictorVar(name="cyl[2]", factor_level=2, is_dummy=True, factor_source="cyl")
+        assert p.factor_level == 2
+
+    def test_effect_accepts_string_factor_level(self):
+        """Effect.factor_level can be a string."""
+        from mcpower.core.variables import Effect
+
+        e = Effect(name="cyl[6]", effect_type="main", factor_level="6", factor_source="cyl")
+        assert e.factor_level == "6"
+
+    def test_posthoc_spec_accepts_string_levels(self):
+        """PostHocSpec.level_a/level_b can be strings."""
+        from mcpower.core.variables import PostHocSpec
+
+        spec = PostHocSpec(
+            factor_name="origin",
+            level_a="Europe",
+            level_b="Japan",
+            col_idx_a=None,
+            col_idx_b=0,
+            n_levels=3,
+            label="origin[Europe] vs origin[Japan]",
+        )
+        assert spec.level_a == "Europe"
+        assert spec.level_b == "Japan"
+
+    def test_expand_factors_with_labels(self):
+        """expand_factors uses level_labels for dummy names when present."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = cyl")
+        reg.set_variable_type("cyl", "factor", n_levels=3, level_labels=["4", "6", "8"])
+        reg.expand_factors()
+        assert "cyl[6]" in reg.dummy_names
+        assert "cyl[8]" in reg.dummy_names
+        assert "cyl[4]" not in reg.dummy_names  # reference level, dropped
+        assert "cyl[2]" not in reg.dummy_names
+        assert "cyl[3]" not in reg.dummy_names
+
+    def test_expand_factors_with_string_labels(self):
+        """expand_factors uses string level labels."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = origin")
+        reg.set_variable_type("origin", "factor", n_levels=3,
+                              level_labels=["Europe", "Japan", "USA"])
+        reg.expand_factors()
+        assert "origin[Japan]" in reg.dummy_names
+        assert "origin[USA]" in reg.dummy_names
+        assert "origin[Europe]" not in reg.dummy_names
+
+    def test_expand_factors_without_labels_uses_integers(self):
+        """expand_factors falls back to integer indices when no labels."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = group")
+        reg.set_variable_type("group", "factor", n_levels=3)
+        reg.expand_factors()
+        assert "group[2]" in reg.dummy_names
+        assert "group[3]" in reg.dummy_names
+
+    def test_expand_factors_with_custom_reference(self):
+        """expand_factors respects custom reference_level from level_labels."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = cyl")
+        reg.set_variable_type("cyl", "factor", n_levels=3,
+                              level_labels=["4", "6", "8"], reference_level="6")
+        reg.expand_factors()
+        assert "cyl[4]" in reg.dummy_names
+        assert "cyl[8]" in reg.dummy_names
+        assert "cyl[6]" not in reg.dummy_names
+
+    def test_expand_factors_interaction_with_labels(self):
+        """Interactions expand using level labels."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = origin + x1 + origin:x1")
+        reg.set_variable_type("origin", "factor", n_levels=3,
+                              level_labels=["Europe", "Japan", "USA"])
+        reg.expand_factors()
+        effect_names = reg.effect_names
+        assert "origin[Japan]:x1" in effect_names
+        assert "origin[USA]:x1" in effect_names
+
+    def test_get_factor_specs_includes_labels(self):
+        """get_factor_specs returns level_labels when present."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = cyl")
+        reg.set_variable_type("cyl", "factor", n_levels=3,
+                              level_labels=["4", "6", "8"])
+        specs = reg.get_factor_specs()
+        assert specs[0]["level_labels"] == ["4", "6", "8"]
+
+    def test_get_factor_specs_no_labels(self):
+        """get_factor_specs returns None for level_labels when not set."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = group")
+        reg.set_variable_type("group", "factor", n_levels=3)
+        specs = reg.get_factor_specs()
+        assert specs[0].get("level_labels") is None
+
+
 class TestIsDummyVariable:
     """Test dummy variable detection."""
 

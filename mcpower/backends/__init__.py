@@ -74,6 +74,27 @@ class ComputeBackend(Protocol):
         """
         ...
 
+    def lme_analysis(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        cluster_ids: np.ndarray,
+        n_clusters: int,
+        target_indices: np.ndarray,
+        chi2_crit: float,
+        z_crit: float,
+        correction_z_crits: np.ndarray,
+        correction_method: int,
+        warm_lambda_sq: float,
+    ) -> np.ndarray:
+        """Run LME analysis and return significance flags.
+
+        Returns:
+            1-D array ``[F_sig, uncorrected_1..n, corrected_1..n, wald_flag]``
+            or empty array on failure.
+        """
+        ...
+
 
 # Valid backend names for set_backend()
 _BACKEND_NAMES = {"default", "c++", "jit", "python"}

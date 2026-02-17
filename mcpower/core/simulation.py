@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import numpy as np
 
 from ..backends import get_backend
-from ..utils.data_generation import _generate_factors
+from ..stats.data_generation import _generate_factors
 
 
 def _generate_cluster_id_array(sample_size: int, cluster_specs: Dict) -> Optional[np.ndarray]:
@@ -126,16 +126,35 @@ class SimulationRunner:
         # This eliminates redundant computations in the simulation loop
 
         # Precompute cluster IDs (8-12% speedup)
-        if metadata.cluster_specs:
-            metadata.cluster_ids_template = _generate_cluster_id_array(sample_size, metadata.cluster_specs)  # type: ignore[assignment]
+        # For slopes/nested models, cluster IDs are generated per-simulation
+        # inside _generate_random_effects (they depend on the model type).
+        if metadata.cluster_specs and not metadata.has_random_slopes and not metadata.has_nested:
+            metadata.cluster_ids_template = _generate_cluster_id_array(sample_size, metadata.cluster_specs)
 
         # Precompute fixed effect mask (3-5% speedup)
         if metadata.cluster_effect_indices:
             all_indices = np.arange(len(metadata.effect_sizes))
-            metadata.fixed_effect_mask = ~np.isin(all_indices, metadata.cluster_effect_indices)  # type: ignore[assignment]
-            metadata.fixed_effect_sizes_cached = metadata.effect_sizes[metadata.fixed_effect_mask]  # type: ignore[assignment]
+            metadata.fixed_effect_mask = ~np.isin(all_indices, metadata.cluster_effect_indices)
+            metadata.fixed_effect_sizes_cached = metadata.effect_sizes[metadata.fixed_effect_mask]
         else:
-            metadata.fixed_effect_sizes_cached = metadata.effect_sizes  # type: ignore[assignment]
+            metadata.fixed_effect_sizes_cached = metadata.effect_sizes
+
+        # Precompute LME critical values (custom solver)
+        if metadata.cluster_specs:
+            from ..stats.lme_solver import compute_lme_critical_values
+
+            n_fixed = len(metadata.target_indices)
+            # n_fixed_effects = number of columns in X_expanded (excluding intercept)
+            # This equals the total effect count minus cluster effects
+            n_fixed_total = len(metadata.effect_sizes)
+            if metadata.cluster_effect_indices:
+                n_fixed_total -= len(metadata.cluster_effect_indices)
+            chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(
+                self.alpha, n_fixed_total, n_fixed, metadata.correction_method
+            )
+            metadata.lme_chi2_crit = chi2_crit  # type: ignore[assignment]
+            metadata.lme_z_crit = z_crit  # type: ignore[assignment]
+            metadata.lme_correction_z_crits = correction_z_crits  # type: ignore[assignment]
 
         for sim_id in range(self.n_simulations):
             if cancel_check is not None and cancel_check():
@@ -307,7 +326,7 @@ class SimulationRunner:
             # Check if strict mode with uploaded data
             if metadata.preserve_correlation == "strict" and metadata.uploaded_raw_data is not None:
                 # Strict mode: bootstrap uploaded data + generate created variables separately
-                from ..utils.data_generation import bootstrap_uploaded_data
+                from ..stats.data_generation import bootstrap_uploaded_data
 
                 # Bootstrap uploaded data (whole rows)
                 X_uploaded_non_factors, X_uploaded_factors = bootstrap_uploaded_data(
@@ -381,14 +400,27 @@ class SimulationRunner:
                 X_factors = _generate_factors(sample_size, metadata.factor_specs, sim_seed)
 
             # Generate cluster random effects (independent of upload mode)
+            re_result = None  # Phase 2: random effects result for slopes/nesting
             if metadata.cluster_specs:
-                from ..utils.data_generation import _generate_cluster_effects
+                if metadata.has_random_slopes or metadata.has_nested:
+                    from ..stats.data_generation import _generate_random_effects
 
-                X_cluster = _generate_cluster_effects(
-                    sample_size=sample_size,
-                    cluster_specs=metadata.cluster_specs,
-                    sim_seed=sim_seed,
-                )
+                    re_result = _generate_random_effects(
+                        sample_size=sample_size,
+                        cluster_specs=metadata.cluster_specs,
+                        X_non_factors=X_non_factors,
+                        non_factor_names=metadata.non_factor_names,
+                        sim_seed=sim_seed,
+                    )
+                    X_cluster = re_result.intercept_columns
+                else:
+                    from ..stats.data_generation import _generate_cluster_effects
+
+                    X_cluster = _generate_cluster_effects(
+                        sample_size=sample_size,
+                        cluster_specs=metadata.cluster_specs,
+                        sim_seed=sim_seed,
+                    )
             else:
                 X_cluster = np.empty((sample_size, 0), dtype=float)
 
@@ -430,13 +462,25 @@ class SimulationRunner:
                 cluster_contribution = X_cluster_effects @ cluster_effect_sizes
                 y = y + cluster_contribution
 
-            # Use precomputed cluster IDs (Phase 2 optimization)
-            cluster_ids = metadata.cluster_ids_template
+            # Phase 2: add random slope contributions to y
+            if re_result is not None and not np.allclose(re_result.slope_contribution, 0):
+                y = y + re_result.slope_contribution
+
+            # Determine cluster IDs for the solver
+            cluster_ids: Optional[np.ndarray]
+            if re_result is not None:
+                # Slopes/nested: use primary grouping var from re_result
+                # For nested, the wrapper will use the full cluster_ids_dict
+                first_gv = next(iter(re_result.cluster_ids_dict))
+                cluster_ids = re_result.cluster_ids_dict[first_gv]
+            else:
+                # Simple intercept: use precomputed template (Phase 2 optimization)
+                cluster_ids = metadata.cluster_ids_template
 
             # Route to correct analysis method
             if cluster_ids is not None:
                 # Mixed model path (LME)
-                from ..utils.mixed_models import _lme_analysis_wrapper
+                from ..stats.mixed_models import _lme_analysis_wrapper
 
                 lme_result = _lme_analysis_wrapper(
                     X_expanded,
@@ -446,7 +490,12 @@ class SimulationRunner:
                     metadata.cluster_column_indices,
                     metadata.correction_method,
                     self.alpha,
+                    backend="custom",
                     verbose=metadata.verbose,
+                    chi2_crit=getattr(metadata, "lme_chi2_crit", None),
+                    z_crit=getattr(metadata, "lme_z_crit", None),
+                    correction_z_crits=getattr(metadata, "lme_correction_z_crits", None),
+                    re_result=re_result,
                 )
 
                 # Check if LME convergence failed
@@ -491,6 +540,29 @@ class SimulationRunner:
             expected_len = 1 + 2 * n_targets
             if len(results) > expected_len:
                 wald_flag = bool(results[expected_len])
+
+            # Post-hoc pairwise contrasts (OLS path only)
+            if metadata.posthoc_specs and cluster_ids is None:
+                from ..stats.ols import compute_posthoc_contrasts
+
+                ph_uncorr, ph_corr, regular_override = compute_posthoc_contrasts(
+                    X_expanded,
+                    y,
+                    metadata.posthoc_specs,
+                    metadata.posthoc_method,
+                    metadata.posthoc_t_crit,
+                    metadata.posthoc_tukey_crits,
+                    target_indices=metadata.target_indices,
+                    correction_method=metadata.correction_method,
+                    correction_t_crits_combined=getattr(metadata, "posthoc_correction_t_crits_combined", None),
+                )
+
+                # If FDR/Holm combined correction was applied, override regular corrected
+                if regular_override is not None:
+                    corrected = regular_override
+
+                uncorrected = np.concatenate([uncorrected, ph_uncorr])
+                corrected = np.concatenate([corrected, ph_corr])
 
             # Add F-test to beginning
             sim_significant = np.concatenate([[f_significant], uncorrected])
@@ -614,9 +686,25 @@ class SimulationMetadata:
         self.verbose = verbose
 
         # Precomputed values for performance (Phase 2 optimizations)
-        self.cluster_ids_template = None  # Precomputed cluster ID array
-        self.fixed_effect_mask = None  # Precomputed boolean mask for fixed effects
-        self.fixed_effect_sizes_cached = None  # Precomputed fixed effect sizes
+        self.cluster_ids_template: Optional[np.ndarray] = None  # Precomputed cluster ID array
+        self.fixed_effect_mask: Optional[np.ndarray] = None  # Precomputed boolean mask for fixed effects
+        self.fixed_effect_sizes_cached: Optional[np.ndarray] = None  # Precomputed fixed effect sizes
+
+        # Precomputed LME critical values (custom solver)
+        self.lme_chi2_crit = None
+        self.lme_z_crit = None
+        self.lme_correction_z_crits = None
+
+        # Phase 2: random slopes and nesting metadata
+        self.has_random_slopes: bool = False
+        self.has_nested: bool = False
+        self.non_factor_names: List[str] = []
+
+        # Post-hoc comparison fields
+        self.posthoc_specs: List = []
+        self.posthoc_method: str = "t-test"
+        self.posthoc_tukey_crits: Dict[str, float] = {}
+        self.posthoc_t_crit: float = 0.0
 
 
 def _compute_fixed_effect_variance(registry) -> float:
@@ -753,6 +841,7 @@ def prepare_metadata(
 
     # Correction method encoding
     correction_method = 0
+    is_tukey_correction = False
     if correction:
         method = correction.lower().replace("-", "_").replace(" ", "_")
         if method == "bonferroni":
@@ -761,9 +850,14 @@ def prepare_metadata(
             correction_method = 2
         elif method == "holm":
             correction_method = 3
+        elif method == "tukey":
+            correction_method = 0  # No correction for regular effects
+            is_tukey_correction = True
 
-    # Extract cluster specifications
+    # Extract cluster specifications (including Phase 2 fields)
     cluster_specs = {}
+    has_random_slopes = False
+    has_nested = False
     for gv, spec in registry._cluster_specs.items():
         cluster_specs[gv] = {
             "grouping_var": spec.grouping_var,
@@ -772,7 +866,19 @@ def prepare_metadata(
             "tau_squared": spec.tau_squared,
             "icc": spec.icc,
             "id_effect_name": spec.id_effect_name,
+            "random_slope_vars": list(spec.random_slope_vars),
+            "slope_variance": spec.slope_variance,
+            "slope_intercept_corr": spec.slope_intercept_corr,
+            "G_matrix": spec.G_matrix.copy() if spec.G_matrix is not None else None,
+            "parent_var": spec.parent_var,
+            "n_per_parent": spec.n_per_parent,
+            "q": spec.q,
         }
+        if spec.q > 1:
+            has_random_slopes = True
+        if spec.parent_var is not None:
+            has_nested = True
+
     # Adjust τ² for fixed-effect variance contribution
     if cluster_specs:
         sigma_sq_fixed = _compute_fixed_effect_variance(registry)
@@ -780,7 +886,22 @@ def prepare_metadata(
         for gv, spec_dict in cluster_specs.items():
             original_icc = registry._cluster_specs[gv].icc
             if original_icc > 0:
-                spec_dict["tau_squared"] = (original_icc / (1.0 - original_icc)) * sigma_sq_within
+                adjusted_tau_sq = (original_icc / (1.0 - original_icc)) * sigma_sq_within
+                spec_dict["tau_squared"] = adjusted_tau_sq
+
+                # If G_matrix exists (slope model), rebuild with adjusted intercept variance
+                if spec_dict.get("G_matrix") is not None and spec_dict["q"] > 1:
+                    new_tau_int = np.sqrt(adjusted_tau_sq)
+                    tau_slope = np.sqrt(spec_dict["slope_variance"]) if spec_dict["slope_variance"] > 0 else 0.0
+                    rho = spec_dict["slope_intercept_corr"]
+                    q = spec_dict["q"]
+                    G = np.zeros((q, q))
+                    G[0, 0] = adjusted_tau_sq
+                    for i in range(1, q):
+                        G[i, i] = spec_dict["slope_variance"]
+                        G[0, i] = rho * new_tau_int * tau_slope
+                        G[i, 0] = rho * new_tau_int * tau_slope
+                    spec_dict["G_matrix"] = G
 
     n_cluster_effect_vars = len(registry.cluster_effect_names)
 
@@ -805,7 +926,7 @@ def prepare_metadata(
     # X_expanded now excludes cluster effects (see _create_X_extended),
     # so target_indices already reference the correct positions in X_expanded
 
-    return SimulationMetadata(
+    metadata = SimulationMetadata(
         target_indices=target_indices,
         n_non_factor_vars=n_non_factor_vars,
         correlation_matrix=correlation_matrix,
@@ -827,3 +948,15 @@ def prepare_metadata(
         cluster_effect_indices=cluster_effect_indices_in_effect_order,
         factor_names=list(registry.factor_names),
     )
+
+    # Phase 2: set slope/nesting flags and non-factor names
+    metadata.has_random_slopes = has_random_slopes
+    metadata.has_nested = has_nested
+    metadata.non_factor_names = list(non_factor_vars)
+
+    # Post-hoc specs from model
+    if hasattr(model, "_posthoc_specs") and model._posthoc_specs:
+        metadata.posthoc_specs = model._posthoc_specs
+        metadata.posthoc_method = "tukey" if is_tukey_correction else "t-test"
+
+    return metadata

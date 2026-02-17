@@ -37,7 +37,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pytest pytest-cov
-        pip install pandas joblib matplotlib statsmodels
+        pip install pandas joblib matplotlib
         pip install numba || echo "Numba not available for Python ${{ matrix.python-version }}, will use Python fallback"
         pip install -e .
 

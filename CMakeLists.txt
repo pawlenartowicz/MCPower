@@ -47,6 +47,7 @@ endif()
 set(MCPOWER_SOURCES
     cpp/src/ols.cpp
     cpp/src/data_generation.cpp
+    cpp/src/lme_solver.cpp
     cpp/src/bindings.cpp
 )
 

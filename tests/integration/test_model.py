@@ -279,3 +279,59 @@ class TestErrors:
     def test_upload_data_too_few_samples(self, simple_model):
         with pytest.raises(ValueError, match="at least 25 samples"):
             simple_model.upload_data({"x1": [1, 2, 3]})
+
+
+class TestSetFactorLevels:
+    """Tests for set_factor_levels() method."""
+
+    def test_basic_named_levels(self):
+        from mcpower import MCPower
+
+        model = MCPower("y = treatment + x1")
+        model.set_factor_levels("treatment=placebo,drug_a,drug_b")
+        model.set_effects("treatment[drug_a]=0.5, treatment[drug_b]=0.8, x1=0.3")
+        model.apply()
+        assert "treatment" in model._registry.factor_names
+        assert "treatment[drug_a]" in model._registry.dummy_names
+        assert "treatment[drug_b]" in model._registry.dummy_names
+        assert "treatment[placebo]" not in model._registry.dummy_names
+
+    def test_multiple_factors(self):
+        from mcpower import MCPower
+
+        model = MCPower("y = group + dose")
+        model.set_factor_levels("group=control,treatment; dose=low,medium,high")
+        model.set_effects("group[treatment]=0.5, dose[medium]=0.3, dose[high]=0.6")
+        model.apply()
+        assert "group[treatment]" in model._registry.dummy_names
+        assert "dose[medium]" in model._registry.dummy_names
+        assert "dose[high]" in model._registry.dummy_names
+
+    def test_unknown_variable_raises(self):
+        from mcpower import MCPower
+
+        model = MCPower("y = x1")
+        with pytest.raises(ValueError, match="not found"):
+            model.set_factor_levels("unknown=a,b,c")
+            model.apply()
+
+    def test_single_level_raises(self):
+        from mcpower import MCPower
+
+        model = MCPower("y = x1")
+        with pytest.raises(ValueError, match="at least 2"):
+            model.set_factor_levels("x1=only_one")
+            model.apply()
+
+    def test_find_power_with_named_levels(self):
+        """End-to-end: find_power works with set_factor_levels."""
+        from mcpower import MCPower
+
+        model = MCPower("y = treatment + x1")
+        model.set_factor_levels("treatment=placebo,drug_a,drug_b")
+        model.set_effects("treatment[drug_a]=0.5, treatment[drug_b]=0.8, x1=0.3")
+        result = model.find_power(
+            sample_size=100, print_results=False, return_results=True,
+            progress_callback=False,
+        )
+        assert result is not None

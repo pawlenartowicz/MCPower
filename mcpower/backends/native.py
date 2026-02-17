@@ -154,6 +154,57 @@ class NativeBackend:
             seed,
         )
 
+    def lme_analysis(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        cluster_ids: np.ndarray,
+        n_clusters: int,
+        target_indices: np.ndarray,
+        chi2_crit: float,
+        z_crit: float,
+        correction_z_crits: np.ndarray,
+        correction_method: int,
+        warm_lambda_sq: float = -1.0,
+    ) -> np.ndarray:
+        """
+        Run LME analysis with precomputed critical values.
+
+        Args:
+            X: Design matrix (n_samples, n_features), no intercept
+            y: Response vector (n_samples,)
+            cluster_ids: Cluster membership (n_samples,)
+            n_clusters: Number of clusters
+            target_indices: Indices of coefficients to test
+            chi2_crit: Precomputed chi-squared critical value
+            z_crit: Precomputed z critical value
+            correction_z_crits: Precomputed correction critical values
+            correction_method: 0=none, 1=Bonferroni, 2=FDR, 3=Holm
+            warm_lambda_sq: Warm start lambda^2 (-1 for cold start)
+
+        Returns:
+            Array: [f_sig, uncorrected..., corrected..., wald_flag]
+            or empty array on failure
+        """
+        X = np.ascontiguousarray(X, dtype=np.float64)
+        y = np.ascontiguousarray(y, dtype=np.float64)
+        cluster_ids = np.ascontiguousarray(cluster_ids, dtype=np.int32)
+        target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
+        correction_z_crits = np.ascontiguousarray(correction_z_crits, dtype=np.float64)
+
+        return mcpower_native.lme_analysis(  # type: ignore[no-any-return]
+            X,
+            y,
+            cluster_ids,
+            n_clusters,
+            target_indices,
+            chi2_crit,
+            z_crit,
+            correction_z_crits,
+            correction_method,
+            warm_lambda_sq,
+        )
+
 
 def is_native_available() -> bool:
     """Check if native backend is available."""

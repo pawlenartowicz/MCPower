@@ -2,7 +2,7 @@
 [![PyPI](https://img.shields.io/pypi/v/MCPower)](https://pypi.org/project/MCPower/)
 [![Python](https://img.shields.io/pypi/pyversions/mcpower)](https://pypi.org/project/MCPower/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16502734.svg)](https://doi.org/10.5281/zenodo.16502734)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.16502734-blue)](https://doi.org/10.5281/zenodo.16502734)
 
 ```
 ███╗   ███╗  ██████╗ ██████╗ 
@@ -23,14 +23,17 @@ It it Python package, prefer a graphical interface? **[MCPower GUI](https://gith
 
 ## Why MCPower?
 
-**Traditional power analysis breaks down** with interactions, correlated predictors, categorical variables, or non-normal data. MCPower uses simulation instead of formulas - it generates thousands of datasets exactly like yours, then sees how often your analysis finds real effects.
+**Traditional power analysis breaks down** with interactions, correlated predictors, categorical variables, or non-normal data. MCPower uses simulation instead of formulas — it generates thousands of datasets exactly like yours, then sees how often your analysis finds real effects.
 
-✅ **Works with complexity**: Interactions, correlations, factors, any distribution  
-✅ **R-style formulas**: `outcome = treatment + covariate + treatment*covariate`  
-✅ **Categorical variables**: Multi-level factors automatically handled  
-✅ **Two simple commands**: Find sample size or check power  
-✅ **Scenario analysis**: Test robustness under realistic conditions  
-✅ **Minimal math required**: Just specify your model and effects
+**Just write your formula.** Define your model the way you'd write it in R — `outcome = treatment + covariate + treatment*covariate`. MCPower parses the formula, sets up the simulation, and handles interactions, factor coding, and dummy variables automatically. You focus on the research question, not the mechanics. More model types (logistic regression, ANOVA) are on the way.
+
+**Test your assumptions with scenarios.** Real studies rarely match textbook conditions — effect sizes may be smaller than expected, distributions may be skewed, or variance may not be constant. Turn on `scenarios=True` and MCPower automatically tests your power under optimistic, realistic, and worst-case conditions. Instead of a single number, you get a range that shows how sensitive your design is to violated assumptions — so you plan for reality, not just the best case.
+
+**Use your own data.** Upload a CSV and MCPower auto-detects variable types (continuous, binary, or categorical), preserves real distributions, and handles correlations between predictors. No need to overthink whether your data is normal, skewed, or categorical — just upload it and MCPower samples from the empirical distribution. This is especially useful when you have pilot data or a related dataset and want your power analysis to reflect actual conditions rather than idealized ones.
+
+✅ **Works with complexity**: Interactions, correlations, multi-level factors, any distribution
+✅ **Two simple commands**: `find_sample_size()` or `find_power()` — that's the entire API
+✅ **Minimal math required**: Just specify your model formula and expected effect sizes
 
 ## Get Started in 2 Minutes
 
@@ -48,10 +51,10 @@ pip install --upgrade mcpower
 ```python
 
 # 0. Import installed package
-import mcpower
+from mcpower import MCPower
 
 # 1. Define your model (just like R)
-model = mcpower.MCPower("satisfaction = treatment + motivation")
+model = MCPower("satisfaction = treatment + motivation")
 
 # 2. Set effect sizes (how big you expect effects to be)
 model.set_effects("treatment=0.5, motivation=0.3")
@@ -132,10 +135,10 @@ model.set_effects("treatment=0.5, age=0.3, income=0.2")
 
 ### Randomized Controlled Trial
 ```python
-import mcpower
+from mcpower import MCPower
 
 # RCT with treatment + control variables
-model = mcpower.MCPower("outcome = treatment + age + baseline_score")
+model = MCPower("outcome = treatment + age + baseline_score")
 model.set_effects("treatment=0.6, age=0.2, baseline_score=0.8")
 model.set_variable_type("treatment=binary")  # 0/1 treatment
 
@@ -146,10 +149,10 @@ model.find_sample_size(target_test="treatment", from_size=100, to_size=500,
 
 ### A/B Test with Interaction
 ```python
-import mcpower
+from mcpower import MCPower
 
 # Test if treatment effect depends on user type
-model = mcpower.MCPower("conversion = treatment + user_type + treatment*user_type")
+model = MCPower("conversion = treatment + user_type + treatment*user_type")
 model.set_effects("treatment=0.4, user_type=0.3, treatment:user_type=0.5")
 model.set_variable_type("treatment=binary, user_type=binary")
 
@@ -159,10 +162,10 @@ model.find_power(sample_size=400, target_test="treatment:user_type", scenarios=T
 
 ### Multi-Group Study with Categorical Variables
 ```python
-import mcpower
+from mcpower import MCPower
 
 # Study with 3 treatment groups and 4 education levels
-model = mcpower.MCPower("wellbeing = treatment + education + age")
+model = MCPower("wellbeing = treatment + education + age")
 model.set_variable_type("treatment=(factor,3), education=(factor,4)")
 
 # Set effects for each factor level (vs. reference level 1)
@@ -174,10 +177,10 @@ model.find_sample_size(target_test="treatment[2], treatment[3]", scenarios=True)
 
 ### Survey with Correlated Predictors
 ```python
-import mcpower
+from mcpower import MCPower
 
 # Predictors are often correlated in real data
-model = mcpower.MCPower("wellbeing = income + education + social_support")
+model = MCPower("wellbeing = income + education + social_support")
 model.set_effects("income=0.4, education=0.3, social_support=0.6")
 model.set_correlations("corr(income, education)=0.5, corr(income, social_support)=0.3")
 
@@ -203,7 +206,7 @@ model.set_variable_type("condition=(factor,0.2,0.5,0.3)")
 ### Working with Factors (Categorical Variables)
 ```python
 # Factors automatically create dummy variables
-model = mcpower.MCPower("outcome = treatment + education")
+model = MCPower("outcome = treatment + education")
 model.set_variable_type("treatment=(factor,3), education=(factor,4)")
 
 # Set effects for specific levels (level 1 is always reference)
@@ -221,7 +224,7 @@ import pandas as pd
 data = pd.read_csv("my_data.csv")
 
 # Upload with automatic type detection
-model = mcpower.MCPower("mpg = hp + wt + cyl")
+model = MCPower("mpg = hp + wt + cyl")
 model.upload_data(data[["hp", "wt", "cyl"]])
 model.set_effects("hp=0.5, wt=0.3, cyl[2]=0.2, cyl[3]=0.4")
 model.find_power(sample_size=100)
@@ -265,10 +268,25 @@ model.upload_data(
 ```python
 # Testing multiple effects? Control false positives
 model.find_power(
-    sample_size=200, 
+    sample_size=200,
     target_test="treatment,covariate,treatment:covariate",
     correction="Benjamini-Hochberg",
     scenarios=True  # Test robustness too!
+)
+```
+
+### Post-Hoc Pairwise Comparisons (Tukey HSD)
+```python
+# Compare specific factor levels with Tukey correction
+model = MCPower("outcome = group + covariate")
+model.set_variable_type("group=(factor,3)")
+model.set_effects("group[2]=0.4, group[3]=0.6, covariate=0.3")
+
+# Use "vs" syntax for pairwise comparisons + correction="tukey"
+model.find_power(
+    sample_size=150,
+    target_test="group[0] vs group[1], group[0] vs group[2]",
+    correction="tukey"
 )
 ```
 
@@ -282,27 +300,37 @@ model.set_heteroskedasticity(0.15)  # Violation of equal variance assumption
 model.find_sample_size(target_test="treatment", scenarios=False)
 ```
 
-### Mixed-Effects Models (Random Intercept)
+### Mixed-Effects Models (Experimental)
 ```python
-import mcpower
+from mcpower import MCPower
 
-# Define a model with a random intercept for clustered data
-model = mcpower.MCPower("satisfaction ~ treatment + motivation + (1|school)")
+# Random intercept — clustered data
+model = MCPower("satisfaction ~ treatment + motivation + (1|school)")
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_effects("treatment=0.5, motivation=0.3")
 model.set_variable_type("treatment=binary")
+model.set_max_failed_simulations(0.10)
+model.find_power(sample_size=1000)  # 1000/20 = 50 per cluster
 
-# Allow some convergence failures (common with mixed models)
-model.set_max_failed_simulations(0.10)  # Up to 10% failures tolerated
-
-# Total sample_size is split across clusters: 1000 / 20 = 50 per cluster
+# Random slopes — effect varies across clusters
+model = MCPower("y ~ x1 + (1 + x1|school)")
+model.set_cluster("school", ICC=0.2, n_clusters=20,
+                   random_slopes=["x1"], slope_variance=0.1,
+                   slope_intercept_corr=0.3)
+model.set_effects("x1=0.5")
+model.set_max_failed_simulations(0.30)
 model.find_power(sample_size=1000)
+
+# Nested random effects — students in classrooms in schools
+model = MCPower("y ~ treatment + (1|school/classroom)")
+model.set_cluster("school", ICC=0.15, n_clusters=10)
+model.set_cluster("classroom", ICC=0.10, n_per_parent=3)  # 3 classrooms per school
+model.set_effects("treatment=0.5")
+model.set_max_failed_simulations(0.30)
+model.find_power(sample_size=1500)
 ```
 
-**Constraints:**
-- Only random intercepts `(1|group)` — random slopes are not yet supported
-- At least 25 observations per cluster and 10 observations per model parameter
-- ICC must be between 0.1 and 0.9 (or exactly 0)
+See the [Mixed-Effects Models wiki page](https://github.com/pawlenartowicz/MCPower/wiki/Mixed-Effects-Models) for detailed documentation on all model types, parameters, and design recommendations.
 
 ### More precision
 ```python
@@ -349,8 +377,11 @@ model.find_power(sample_size=200, progress_callback=False)
 | **Factor variables** | **`model.set_variable_type("var=(factor,3)")`** |
 | **Factor effects** | **`model.set_effects("var[2]=0.5, var[3]=0.7")`** |
 | Correlated predictors | `model.set_correlations("corr(var1, var2)=0.4")` |
-| Multiple testing correction | Add `correction="FDR"`, `"Holm"`, or `"Bonferroni"`|
-| Mixed model (random intercept) | `MCPower("y ~ x + (1\|group)")` + `model.set_cluster(...)` |
+| Multiple testing correction | Add `correction="FDR"`, `"Holm"`, `"Bonferroni"`, or `"Tukey"`|
+| Post-hoc pairwise comparison | `target_test="group[0] vs group[1]"` with `correction="tukey"` |
+| Mixed model (random intercept) | `MCPower("y ~ x + (1\|group)")` + `model.set_cluster(...)` (experimental) |
+| Random slopes | `MCPower("y ~ x + (1+x\|group)")` + `set_cluster(..., random_slopes=["x"], slope_variance=0.1)` (experimental) |
+| Nested random effects | `MCPower("y ~ x + (1\|A/B)")` + two `set_cluster()` calls (experimental) |
 | Reproducible results | `model.set_seed(42)` |
 | Get results as dict | Add `return_results=True` to either method |
 | Stricter significance | `model.set_alpha(0.01)` |
@@ -422,7 +453,7 @@ model.set_variable_type("""
 ### Factor Variables in Detail
 ```python
 # Factor variables are categorical with multiple levels
-model = mcpower.MCPower("outcome = treatment + education")
+model = MCPower("outcome = treatment + education")
 
 # Create factors
 model.set_variable_type("treatment=(factor,3), education=(factor,4)")
@@ -496,9 +527,22 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 - Python ≥ 3.10
 - NumPy, SciPy, matplotlib, Pandas, joblib
 - C++ compiler (automatically used during install for native backend; falls back to Python if unavailable)
-- statsmodels (optional, for mixed-effects models — install with `pip install mcpower[mixed]`)
+- statsmodels (optional, for mixed-effects models — install with `pip install mcpower[lme]`)
 - Numba (optional, for JIT compilation fallback — install with `pip install mcpower[JIT]`)
 
+
+## Documentation
+
+Full documentation is available on the **[MCPower Wiki](https://github.com/pawlenartowicz/MCPower/wiki)**, including:
+
+- [Quick Start](https://github.com/pawlenartowicz/MCPower/wiki/Quick-Start)
+- [Model Specification](https://github.com/pawlenartowicz/MCPower/wiki/Model-Specification)
+- [Variable Types](https://github.com/pawlenartowicz/MCPower/wiki/Variable-Types)
+- [Effect Sizes](https://github.com/pawlenartowicz/MCPower/wiki/Effect-Sizes)
+- [Mixed-Effects Models](https://github.com/pawlenartowicz/MCPower/wiki/Mixed-Effects-Models) (random intercepts, slopes, nested effects)
+- [ANOVA & Post-Hoc Tests](https://github.com/pawlenartowicz/MCPower/wiki/ANOVA-and-Post-Hoc-Tests)
+- [Scenario Analysis](https://github.com/pawlenartowicz/MCPower/wiki/Scenario-Analysis)
+- [API Reference](https://github.com/pawlenartowicz/MCPower/wiki/API-Reference)
 
 ## Need Help?
 
@@ -510,7 +554,7 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 - ✅ Scenarios, robustness analysis
 - ✅ Factor variables (categorical predictors)
 - ✅ C++ native backend (pybind11 + Eigen, 3x speedup)
-- 🚧 Mixed Effects Models (partly implemented — random intercept only)
+- ⚠️ Mixed Effects Models (random intercepts, random slopes, nested effects) — experimental
 - 🚧 Logistic Regression (coming soon)
 - 🚧 ANOVA (coming soon)
 - 🚧 Guide about methods, corrections (coming soon)
