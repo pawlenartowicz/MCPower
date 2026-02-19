@@ -15,7 +15,8 @@ value (rtol=1e-5) as a cross-implementation sanity check.
 Tolerance guide:
   - Boost.Math exact match:         rtol=1e-10
   - Boost vs scipy cross-check:     rtol=1e-5
-  - Studentized range (R port):     rtol=1e-3
+  - Studentized range same-impl:    rtol=1e-8
+  - Studentized range cross-check:  rtol=1e-3
   - Batch helpers:                  rtol=1e-6
 """
 
@@ -45,7 +46,8 @@ from mcpower.stats.distributions import (
 # ---------------------------------------------------------------------------
 BOOST_RTOL = 1e-10  # Boost.Math distributions (tight, same-implementation)
 CROSS_RTOL = 1e-5  # Cross-implementation (Boost vs scipy)
-TUKEY_RTOL = 1e-3  # Studentized range (R port)
+TUKEY_IMPL_RTOL = 1e-8  # Studentized range same-impl (quadrature varies across platforms)
+TUKEY_RTOL = 1e-3  # Studentized range (R port vs scipy cross-check)
 BATCH_RTOL = 1e-6  # Batch helpers (combine multiple operations)
 
 
@@ -232,28 +234,28 @@ class TestStudentizedRangePPF:
     def test_k3_df10(self):
         # Boost/R: 3.8767767491915652  |  scipy: ~3.8768
         result = studentized_range_ppf(0.95, 3, 10)
-        assert result == pytest.approx(3.8767767491915652, rel=BOOST_RTOL)
+        assert result == pytest.approx(3.8767767491915652, rel=TUKEY_IMPL_RTOL)
         # Cross-check against scipy
         assert result == pytest.approx(3.8768, rel=TUKEY_RTOL)
 
     def test_k5_df30(self):
         # Boost/R: 4.1020790196217005  |  scipy: ~4.1018
         result = studentized_range_ppf(0.95, 5, 30)
-        assert result == pytest.approx(4.1020790196217005, rel=BOOST_RTOL)
+        assert result == pytest.approx(4.1020790196217005, rel=TUKEY_IMPL_RTOL)
         # Cross-check against scipy
         assert result == pytest.approx(4.1018, rel=TUKEY_RTOL)
 
     def test_k4_df50(self):
         # Boost/R: 3.758394877140481  |  scipy: ~3.7633
         result = studentized_range_ppf(0.95, 4, 50)
-        assert result == pytest.approx(3.758394877140481, rel=BOOST_RTOL)
+        assert result == pytest.approx(3.758394877140481, rel=TUKEY_IMPL_RTOL)
         # Cross-check against scipy (slightly wider tolerance for this case)
         assert result == pytest.approx(3.7633, rel=2e-3)
 
     def test_k2_df120(self):
         # Boost/R: 2.8000444315499067  |  scipy: ~2.8000
         result = studentized_range_ppf(0.95, 2, 120)
-        assert result == pytest.approx(2.8000444315499067, rel=BOOST_RTOL)
+        assert result == pytest.approx(2.8000444315499067, rel=TUKEY_IMPL_RTOL)
         # Cross-check against scipy
         assert result == pytest.approx(2.8000, rel=TUKEY_RTOL)
 
