@@ -16,8 +16,8 @@ class LookupTableManager:
 
     Tables are lazily loaded from disk (``tables/data/*.npz``) on first
     access and generated from scipy if the cache files are missing.
-    Both the Python backend and the C++ native backend consume the
-    same tables to guarantee identical distribution transforms.
+    The C++ native backend consumes these tables for distribution
+    transforms.
 
     Class constants:
         DIST_RESOLUTION: Number of points in each table (2048).

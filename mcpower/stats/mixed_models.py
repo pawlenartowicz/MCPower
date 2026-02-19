@@ -1,12 +1,12 @@
 """Linear Mixed-Effects (LME) analysis for Monte Carlo power analysis.
 
-Fits random-intercept models via ``statsmodels.MixedLM`` with REML
-estimation.  Includes likelihood-ratio tests, t-tests, and
-multiple-comparison corrections (Bonferroni, Benjamini-Hochberg, Holm).
+Routes LME analysis to the C++ native backend (custom profiled-deviance
+solver) or statsmodels MixedLM (fallback).  Includes likelihood-ratio
+tests, Wald z-tests, and multiple-comparison corrections (Bonferroni,
+Benjamini-Hochberg, Holm).
 
-Performance optimisations: warm-start parameter caching (~30-50%
-speedup), direct parameter initialisation (~5-10% speedup), and
-optimised REML convergence settings.
+The C++ backend handles convergence efficiently internally.  The
+statsmodels fallback path uses warm-start parameter caching for speedup.
 """
 
 import threading
@@ -335,7 +335,7 @@ def _lme_analysis_statsmodels(
         # log-likelihood becomes unreliable (returns inf for .llf, and
         # model.loglike() can produce inconsistent values across models).
         # In this case, compute LRT using OLS log-likelihoods directly.
-        re_var = result.cov_re.iloc[0, 0] if hasattr(result.cov_re, "iloc") else float(result.cov_re)
+        re_var = result.cov_re.iloc[0, 0] if hasattr(result.cov_re, "iloc") else float(np.asarray(result.cov_re).flat[0])
         at_boundary = re_var < 1e-10
 
         if at_boundary:
@@ -542,241 +542,42 @@ def _lme_analysis_custom(
     correction_z_crits: Optional[np.ndarray] = None,
     verbose: bool = False,
 ) -> Optional[Union[np.ndarray, Dict]]:
-    """Custom LME solver using profiled deviance optimization.
-
-    Fast path for random-intercept models: 1D Brent optimization
-    over lambda^2, with all per-cluster operations being scalar.
+    """LME analysis for random-intercept models via C++ backend.
 
     Uses precomputed critical values (chi2_crit, z_crit) to avoid
     per-simulation scipy calls. Falls back to computing them if not provided.
-
-    Tries C++ native backend first for ~200x speedup, falls back to Python.
     """
-    from .lme_solver import lme_fit, lme_fit_ml_null
-
     n, p = X_expanded.shape
     n_targets = len(target_indices)
     K = int(cluster_ids.max()) + 1
 
-    # Compute critical values if not precomputed (needed for both native and Python paths)
     if z_crit is None or chi2_crit is None or correction_z_crits is None:
         from .lme_solver import compute_lme_critical_values
 
         chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(alpha, p, n_targets, correction_method)
 
-    # Try C++ native backend first
-    try:
-        from mcpower.backends.native import is_native_available
+    from mcpower.backends import mcpower_native as _native  # type: ignore[attr-defined]
 
-        if is_native_available():
-            import mcpower.backends.mcpower_native as _native
-
-            warm_lambda_sq = getattr(_lme_thread_local, "warm_lambda_sq_native", -1.0)
-            result = _native.lme_analysis(
-                np.ascontiguousarray(X_expanded, dtype=np.float64),
-                np.ascontiguousarray(y, dtype=np.float64),
-                np.ascontiguousarray(cluster_ids, dtype=np.int32),
-                K,
-                np.ascontiguousarray(target_indices, dtype=np.int32),
-                float(chi2_crit),
-                float(z_crit),
-                np.ascontiguousarray(correction_z_crits, dtype=np.float64),
-                int(correction_method),
-                float(warm_lambda_sq),
-            )
-            if len(result) > 0:
-                if verbose:
-                    return {"results": result, "diagnostics": {"solver": "native_q1"}}
-                return result  # type: ignore[no-any-return]
-    except ImportError:
-        pass
-    except Exception as e:
-        warnings.warn(
-            f"C++ native LME backend failed ({type(e).__name__}: {e}), falling back to Python solver.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-
-    # Fall back to Python solver
-
-    # Add intercept column
-    X_with_intercept = np.column_stack([np.ones(n), X_expanded])
-
-    # Get warm-start theta
-    warm_theta = getattr(_lme_thread_local, "warm_theta_custom", None)
-
-    # Fit REML model
-    try:
-        reml_result = lme_fit(X_with_intercept, y, cluster_ids, K, q=1, reml=True, warm_theta=warm_theta)
-    except Exception as e:
-        failure_reason = f"{type(e).__name__}: {str(e)}"
+    result = _native.lme_analysis(
+        np.ascontiguousarray(X_expanded, dtype=np.float64),
+        np.ascontiguousarray(y, dtype=np.float64),
+        np.ascontiguousarray(cluster_ids, dtype=np.int32),
+        K,
+        np.ascontiguousarray(target_indices, dtype=np.int32),
+        float(chi2_crit),
+        float(z_crit),
+        np.ascontiguousarray(correction_z_crits, dtype=np.float64),
+        int(correction_method),
+        float(-1.0),
+    )
+    if len(result) > 0:
         if verbose:
-            return {"results": None, "failure_reason": failure_reason}
-        return None
-
-    if not reml_result.converged:
-        if verbose:
-            return {"results": None, "failure_reason": "Custom solver did not converge"}
-        return None
-
-    # Update warm-start cache
-    _lme_thread_local.warm_theta_custom = reml_result.theta[0]
-
-    # Extract fixed effects (skip intercept)
-    beta = reml_result.beta[1:]  # (p,)
-    se = reml_result.se_beta[1:]  # (p,)
-
-    # Wald z-tests for individual effects
-    z_abs = np.zeros(p)
-    for i in range(p):
-        if se[i] > FLOAT_NEAR_ZERO:
-            z_abs[i] = abs(beta[i] / se[i])
-
-    # Uncorrected individual tests: compare |z| against z_crit
-    uncorrected = np.zeros(n_targets)
-    for idx_pos in range(n_targets):
-        coef_idx = target_indices[idx_pos]
-        if coef_idx < p:
-            uncorrected[idx_pos] = 1.0 if z_abs[coef_idx] > z_crit else 0.0
-
-    # Likelihood ratio test for overall significance
-    # Must use ML (not REML) for comparing models with different fixed effects
-    test_method = "likelihood_ratio"
-    f_significant = 0.0
-
-    try:
-        if reml_result.tau2 < 1e-10:
-            # Boundary case: tau2 ≈ 0, model is effectively OLS
-            # Use simple OLS log-likelihood comparison
-            Q, R = np.linalg.qr(X_with_intercept)
-            beta_full = np.linalg.solve(R, Q.T @ y)
-            resid_full = y - X_with_intercept @ beta_full
-            ss_full = resid_full @ resid_full
-            sigma2_full = ss_full / n
-            llf_full = -0.5 * n * (1.0 + np.log(2.0 * np.pi) + np.log(sigma2_full))
-
-            y_mean = np.mean(y)
-            ss_null = np.sum((y - y_mean) ** 2)
-            sigma2_null = ss_null / n
-            llf_null = -0.5 * n * (1.0 + np.log(2.0 * np.pi) + np.log(sigma2_null))
-
-            lr_stat = 2 * (llf_full - llf_null)
-        else:
-            full_ml = lme_fit(X_with_intercept, y, cluster_ids, K, q=1, reml=False, warm_theta=reml_result.theta[0])
-            null_ml = lme_fit_ml_null(y, cluster_ids, K, warm_theta=reml_result.theta[0])
-            lr_stat = 2 * (full_ml.log_likelihood - null_ml.log_likelihood)
-
-        if np.isnan(lr_stat) or lr_stat < 0 or not np.isfinite(lr_stat):
-            # Fallback: Wald test for overall significance
-            test_method = "wald_fallback"
-            f_significant = _wald_test_custom(beta, reml_result.cov_beta[1:, 1:], alpha)
-        else:
-            f_significant = 1.0 if lr_stat > chi2_crit else 0.0
-    except Exception:
-        test_method = "wald_fallback"
-        f_significant = _wald_test_custom(beta, reml_result.cov_beta[1:, 1:], alpha)
-
-    # Multiple comparison corrections using precomputed critical z-values
-    corrected = np.zeros(n_targets)
-
-    if correction_method == 0:
-        # No correction: same as uncorrected
-        corrected[:] = uncorrected
-
-    elif correction_method == 1:
-        # Bonferroni: all thresholds equal to bonf_crit
-        for idx_pos in range(n_targets):
-            coef_idx = target_indices[idx_pos]
-            if coef_idx < p:
-                corrected[idx_pos] = 1.0 if z_abs[coef_idx] > correction_z_crits[0] else 0.0
-
-    elif correction_method == 2:
-        # FDR (Benjamini-Hochberg): step-up on |z| vs decreasing crits
-        target_z = np.zeros(n_targets)
-        for idx_pos in range(n_targets):
-            coef_idx = target_indices[idx_pos]
-            if coef_idx < p:
-                target_z[idx_pos] = z_abs[coef_idx]
-
-        sorted_idx = np.argsort(-target_z)  # descending
-        sorted_z = target_z[sorted_idx]
-
-        last_sig = -1
-        for k in range(n_targets):
-            if sorted_z[k] > correction_z_crits[k]:
-                last_sig = k
-        if last_sig >= 0:
-            for k in range(last_sig + 1):
-                corrected[sorted_idx[k]] = 1.0
-
-    elif correction_method == 3:
-        # Holm: step-down on |z| vs increasing crits
-        target_z = np.zeros(n_targets)
-        for idx_pos in range(n_targets):
-            coef_idx = target_indices[idx_pos]
-            if coef_idx < p:
-                target_z[idx_pos] = z_abs[coef_idx]
-
-        sorted_idx = np.argsort(-target_z)  # descending
-        sorted_z = target_z[sorted_idx]
-
-        for k in range(n_targets):
-            if sorted_z[k] > correction_z_crits[k]:
-                corrected[sorted_idx[k]] = 1.0
-            else:
-                break
-
-    # Build results array (same format as statsmodels backend)
-    wald_flag = 1.0 if test_method == "wald_fallback" else 0.0
-    results_array = np.concatenate([[f_significant], uncorrected, corrected, [wald_flag]])
+            return {"results": result, "diagnostics": {"solver": "native_q1"}}
+        return result  # type: ignore[no-any-return]
 
     if verbose:
-        tau2 = reml_result.tau2
-        sigma2 = reml_result.sigma2
-        icc_estimated = tau2 / (tau2 + sigma2) if (tau2 + sigma2) > 0 else 0.0
-        diagnostics = {
-            "converged": True,
-            "convergence_level": 0,
-            "iterations": -1,
-            "test_method": test_method,
-            "log_likelihood": reml_result.log_likelihood,
-            "null_log_likelihood": np.nan,
-            "lr_statistic": lr_stat if "lr_stat" in dir() else np.nan,
-            "lr_stat_is_nan": False,
-            "ml_fit_success": True,
-            "fixed_effects": beta.copy(),
-            "fixed_effects_se": se.copy(),
-            "fixed_effects_pvalues": np.array([2 * (1 - _norm_cdf_approx(z)) for z in z_abs[:p]]),
-            "random_effects_variance": tau2,
-            "residual_variance": sigma2,
-            "icc_estimated": icc_estimated,
-        }
-        return {"results": results_array, "diagnostics": diagnostics}
-
-    return results_array
-
-
-FLOAT_NEAR_ZERO = 1e-15
-
-
-def _wald_test_custom(beta, cov_beta, alpha):
-    """Wald chi-squared test for overall significance of fixed effects."""
-    from mcpower.stats.distributions import chi2_cdf
-
-    try:
-        wald_stat = beta @ np.linalg.inv(cov_beta) @ beta
-        df = len(beta)
-        p_value = 1 - chi2_cdf(wald_stat, df)
-        return 1.0 if p_value < alpha else 0.0
-    except np.linalg.LinAlgError:
-        return 0.0  # Singular covariance matrix, conservative fallback
-
-
-def _norm_cdf_approx(z):
-    """Standard normal CDF approximation for p-value computation."""
-    from mcpower.stats.distributions import norm_cdf
-
-    return norm_cdf(z)
+        return {"results": None, "failure_reason": "C++ solver returned empty result"}
+    return None
 
 
 def _lme_analysis_custom_general(
@@ -792,16 +593,12 @@ def _lme_analysis_custom_general(
     correction_z_crits: Optional[np.ndarray] = None,
     verbose: bool = False,
 ) -> Optional[Union[np.ndarray, Dict]]:
-    """Custom LME solver for random slopes (q > 1).
-
-    Tries C++ native backend first, falls back to Python lme_solver.
-    """
-    from .lme_solver import compute_lme_critical_values, lme_analysis_general
+    """LME analysis for random slopes (q > 1) via C++ backend."""
+    from .lme_solver import compute_lme_critical_values
 
     n, p = X_expanded.shape
     n_targets = len(target_indices)
 
-    # Determine K and q from the re_result
     first_gv = next(iter(re_result.Z_matrices))
     Z = re_result.Z_matrices[first_gv]
     q = Z.shape[1]
@@ -810,74 +607,31 @@ def _lme_analysis_custom_general(
     if z_crit is None or chi2_crit is None or correction_z_crits is None:
         chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(alpha, p, n_targets, correction_method)
 
-    warm_theta = getattr(_lme_thread_local, "warm_theta_general", None)
+    from mcpower.backends import mcpower_native as _native  # type: ignore[attr-defined]
 
-    # Try C++ native backend first
-    try:
-        from mcpower.backends.native import is_native_available
-
-        if is_native_available():
-            import mcpower.backends.mcpower_native as _native
-
-            warm_theta_arr = np.ascontiguousarray(warm_theta, dtype=np.float64) if warm_theta is not None else np.empty(0, dtype=np.float64)
-            result = _native.lme_analysis_general(
-                np.ascontiguousarray(X_expanded, dtype=np.float64),
-                np.ascontiguousarray(y, dtype=np.float64),
-                np.ascontiguousarray(Z, dtype=np.float64),
-                np.ascontiguousarray(cluster_ids, dtype=np.int32),
-                K,
-                q,
-                np.ascontiguousarray(target_indices, dtype=np.int32),
-                float(chi2_crit),
-                float(z_crit),
-                np.ascontiguousarray(correction_z_crits, dtype=np.float64),
-                int(correction_method),
-                warm_theta_arr,
-            )
-            if len(result) > 0:
-                if verbose:
-                    return {"results": result, "diagnostics": {"solver": "native_general", "q": q}}
-                return result  # type: ignore[no-any-return]
-    except ImportError:
-        pass
-    except Exception as e:
-        warnings.warn(
-            f"C++ native general LME backend failed ({type(e).__name__}: {e}), falling back to Python solver.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-
-    # Fall back to Python solver
-    result = lme_analysis_general(
-        X_expanded,
-        y,
-        cluster_ids,
+    warm_theta_arr = np.empty(0, dtype=np.float64)
+    result = _native.lme_analysis_general(
+        np.ascontiguousarray(X_expanded, dtype=np.float64),
+        np.ascontiguousarray(y, dtype=np.float64),
+        np.ascontiguousarray(Z, dtype=np.float64),
+        np.ascontiguousarray(cluster_ids, dtype=np.int32),
         K,
         q,
-        Z,
-        target_indices,
-        chi2_crit,
-        z_crit,
-        correction_z_crits,
-        correction_method,
-        warm_theta=warm_theta,
+        np.ascontiguousarray(target_indices, dtype=np.int32),
+        float(chi2_crit),
+        float(z_crit),
+        np.ascontiguousarray(correction_z_crits, dtype=np.float64),
+        int(correction_method),
+        warm_theta_arr,
     )
-
-    if result is None:
+    if len(result) > 0:
         if verbose:
-            return {"results": None, "failure_reason": "General solver (q>1) failed"}
-        return None
-
-    # Update warm-start cache from the solver's last-fit theta
-    from .lme_solver import _lme_solver_local
-
-    cached_theta = getattr(_lme_solver_local, "last_theta_general", None)
-    if cached_theta is not None:
-        _lme_thread_local.warm_theta_general = cached_theta
+            return {"results": result, "diagnostics": {"solver": "native_general", "q": q}}
+        return result  # type: ignore[no-any-return]
 
     if verbose:
-        return {"results": result, "diagnostics": {"solver": "general_q>1", "q": q}}
-    return result
+        return {"results": None, "failure_reason": "C++ general solver returned empty result"}
+    return None
 
 
 def _lme_analysis_custom_nested(
@@ -892,11 +646,8 @@ def _lme_analysis_custom_nested(
     correction_z_crits: Optional[np.ndarray] = None,
     verbose: bool = False,
 ) -> Optional[Union[np.ndarray, Dict]]:
-    """Custom LME solver for nested random intercepts.
-
-    Tries C++ native backend first, falls back to Python lme_solver.
-    """
-    from .lme_solver import compute_lme_critical_values, lme_analysis_nested
+    """LME analysis for nested random intercepts via C++ backend."""
+    from .lme_solver import compute_lme_critical_values
 
     n, p = X_expanded.shape
     n_targets = len(target_indices)
@@ -910,76 +661,32 @@ def _lme_analysis_custom_nested(
     if z_crit is None or chi2_crit is None or correction_z_crits is None:
         chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(alpha, p, n_targets, correction_method)
 
-    warm_theta = getattr(_lme_thread_local, "warm_theta_nested", None)
+    from mcpower.backends import mcpower_native as _native  # type: ignore[attr-defined]
 
-    # Try C++ native backend first
-    try:
-        from mcpower.backends.native import is_native_available
-
-        if is_native_available():
-            import mcpower.backends.mcpower_native as _native
-
-            warm_theta_arr = np.ascontiguousarray(warm_theta, dtype=np.float64) if warm_theta is not None else np.empty(0, dtype=np.float64)
-            result = _native.lme_analysis_nested(
-                np.ascontiguousarray(X_expanded, dtype=np.float64),
-                np.ascontiguousarray(y, dtype=np.float64),
-                np.ascontiguousarray(parent_ids, dtype=np.int32),
-                np.ascontiguousarray(child_ids, dtype=np.int32),
-                K_parent,
-                K_child,
-                np.ascontiguousarray(child_to_parent, dtype=np.int32),
-                np.ascontiguousarray(target_indices, dtype=np.int32),
-                float(chi2_crit),
-                float(z_crit),
-                np.ascontiguousarray(correction_z_crits, dtype=np.float64),
-                int(correction_method),
-                warm_theta_arr,
-            )
-            if len(result) > 0:
-                if verbose:
-                    return {"results": result, "diagnostics": {"solver": "native_nested", "K_parent": K_parent, "K_child": K_child}}
-                return result  # type: ignore[no-any-return]
-    except ImportError:
-        pass
-    except Exception as e:
-        warnings.warn(
-            f"C++ native nested LME backend failed ({type(e).__name__}: {e}), falling back to Python solver.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-
-    # Fall back to Python solver
-    result = lme_analysis_nested(
-        X_expanded,
-        y,
-        parent_ids,
-        child_ids,
+    warm_theta_arr = np.empty(0, dtype=np.float64)
+    result = _native.lme_analysis_nested(
+        np.ascontiguousarray(X_expanded, dtype=np.float64),
+        np.ascontiguousarray(y, dtype=np.float64),
+        np.ascontiguousarray(parent_ids, dtype=np.int32),
+        np.ascontiguousarray(child_ids, dtype=np.int32),
         K_parent,
         K_child,
-        child_to_parent,
-        target_indices,
-        chi2_crit,
-        z_crit,
-        correction_z_crits,
-        correction_method,
-        warm_theta=warm_theta,
+        np.ascontiguousarray(child_to_parent, dtype=np.int32),
+        np.ascontiguousarray(target_indices, dtype=np.int32),
+        float(chi2_crit),
+        float(z_crit),
+        np.ascontiguousarray(correction_z_crits, dtype=np.float64),
+        int(correction_method),
+        warm_theta_arr,
     )
-
-    if result is None:
+    if len(result) > 0:
         if verbose:
-            return {"results": None, "failure_reason": "Nested solver failed"}
-        return None
-
-    # Update warm-start cache from the solver's last-fit theta
-    from .lme_solver import _lme_solver_local
-
-    cached_theta = getattr(_lme_solver_local, "last_theta_nested", None)
-    if cached_theta is not None:
-        _lme_thread_local.warm_theta_nested = cached_theta
+            return {"results": result, "diagnostics": {"solver": "native_nested", "K_parent": K_parent, "K_child": K_child}}
+        return result  # type: ignore[no-any-return]
 
     if verbose:
-        return {"results": result, "diagnostics": {"solver": "nested", "K_parent": K_parent, "K_child": K_child}}
-    return result
+        return {"results": None, "failure_reason": "C++ nested solver returned empty result"}
+    return None
 
 
 def reset_warm_start_cache():
@@ -987,8 +694,7 @@ def reset_warm_start_cache():
     Reset the warm start parameter cache.
 
     Useful for testing or when switching to a very different model structure.
+    Only the statsmodels fallback path uses warm-start; the C++ backend
+    handles convergence internally.
     """
     _lme_thread_local.warm_start_params = None
-    _lme_thread_local.warm_theta_custom = None
-    _lme_thread_local.warm_theta_general = None
-    _lme_thread_local.warm_theta_nested = None

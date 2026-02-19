@@ -21,7 +21,7 @@ class NativeBackend:
     """
     C++ compute backend using pybind11 bindings.
 
-    Provides ~10-50x speedup over Python/Numba implementations.
+    Provides high-performance implementations of the core algorithms.
     """
 
     def __init__(self):

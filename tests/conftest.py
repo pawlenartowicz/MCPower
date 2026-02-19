@@ -75,40 +75,13 @@ def sample_data():
 
 
 @pytest.fixture
-def native_python_backends():
-    """Return (NativeBackend, PythonBackend) pair; skip if native unavailable."""
-    try:
-        from mcpower.backends.native import NativeBackend
-
-        native = NativeBackend()
-    except (ImportError, Exception):
-        pytest.skip("Native C++ backend not available")
-    from mcpower.backends.python import PythonBackend
-
-    return native, PythonBackend()
-
-
-@pytest.fixture
 def suppress_output(capsys):
     """Suppress print output during tests by capturing it."""
-    # Using capsys instead of monkeypatching print to avoid conflicts with numba
     yield
     # Output is automatically captured by capsys
 
 
-def _native_available():
-    """Check if native C++ backend is available."""
-    try:
-        from mcpower.backends.native import NativeBackend
-
-        NativeBackend()
-        return True
-    except (ImportError, Exception):
-        return False
-
-
-# C++ is the primary backend; fall back to Python only when native is not compiled
-BACKENDS = ["c++"] if _native_available() else ["python"]
+BACKENDS = ["c++"]
 
 
 @pytest.fixture(params=BACKENDS)

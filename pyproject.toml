@@ -8,7 +8,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "MCPower"
-version = "0.4.3"
+version = "0.5.0"
 description = "Monte Carlo Power Analysis for Statistical Models"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
@@ -37,7 +37,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-JIT = ["numba>=0.61.0"]
 lme = ["statsmodels>=0.14.0"]
 pandas = ["pandas>=2.0.0"]
 dev = [
@@ -53,7 +52,6 @@ dev = [
 ]
 all = [
     "pandas>=2.0.0",
-    "numba>=0.61.0",
     "statsmodels>=0.14.0",
     "scipy>=1.11.0",
 ]

@@ -539,10 +539,9 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 
 - Python ≥ 3.10
 - NumPy, matplotlib, joblib
-- C++ compiler (automatically used during install for native backend; falls back to Python if unavailable)
+- C++ compiler (required for building the native backend during install)
 - pandas (optional, for DataFrame input — install with `pip install mcpower[pandas]`)
 - statsmodels (optional, for mixed-effects models — install with `pip install mcpower[lme]`)
-- Numba (optional, for JIT compilation fallback — install with `pip install mcpower[JIT]`)
 
 
 ## Documentation

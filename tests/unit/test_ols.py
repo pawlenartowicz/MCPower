@@ -6,17 +6,19 @@ import numpy as np
 
 
 def _ols_analysis_helper(X, y, target_indices, correction_method=0, alpha=0.05):
-    """Test helper: compute critical values and call OLS core function."""
-    from mcpower.stats.ols import _ols_jit, compute_critical_values
+    """Test helper: compute critical values and call NativeBackend OLS."""
+    from mcpower.backends.native import NativeBackend
+    from mcpower.stats.ols import compute_critical_values
 
     n, p = X.shape
     dof = n - p - 1
     f_crit, t_crit, correction_t_crits = compute_critical_values(alpha, p, dof, len(target_indices), correction_method)
-    return _ols_jit(X, y, target_indices, f_crit, t_crit, correction_t_crits, correction_method)
+    backend = NativeBackend()
+    return backend.ols_analysis(X, y, target_indices, f_crit, t_crit, correction_t_crits, correction_method)
 
 
 class TestOLSAnalysis:
-    """Test OLS analysis via core function with precomputed critical values."""
+    """Test OLS analysis via NativeBackend with precomputed critical values."""
 
     def test_basic_ols(self):
         np.random.seed(42)
@@ -25,7 +27,7 @@ class TestOLSAnalysis:
         X = np.random.randn(n, 2)
         y = 0.5 * X[:, 0] + 0.3 * X[:, 1] + np.random.randn(n) * 0.5
 
-        target_indices = np.array([0, 1], dtype=np.int64)
+        target_indices = np.array([0, 1], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=0, alpha=0.05)
 
         # Result should contain: f_sig, uncorr_0, uncorr_1, corr_0, corr_1
@@ -38,7 +40,7 @@ class TestOLSAnalysis:
         X = np.random.randn(n, 1)
         y = 2.0 * X[:, 0] + np.random.randn(n) * 0.5  # Strong effect
 
-        target_indices = np.array([0], dtype=np.int64)
+        target_indices = np.array([0], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=0, alpha=0.05)
 
         # Should detect significance
@@ -52,7 +54,7 @@ class TestOLSAnalysis:
         X = np.random.randn(n, 1)
         y = np.random.randn(n)  # No relationship
 
-        target_indices = np.array([0], dtype=np.int64)
+        target_indices = np.array([0], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=0, alpha=0.05)
 
         # Usually should not detect significance (but not guaranteed)
@@ -66,7 +68,7 @@ class TestOLSAnalysis:
         X = np.random.randn(n, 3)
         y = 0.5 * X[:, 0] + 0.3 * X[:, 1] + 0.1 * X[:, 2] + np.random.randn(n) * 0.5
 
-        target_indices = np.array([0, 1, 2], dtype=np.int64)
+        target_indices = np.array([0, 1, 2], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=0, alpha=0.05)
 
         # f_sig + 3 uncorrected + 3 corrected
@@ -79,7 +81,7 @@ class TestOLSAnalysis:
         X = np.random.randn(n, 2)
         y = 0.3 * X[:, 0] + 0.2 * X[:, 1] + np.random.randn(n) * 0.5
 
-        target_indices = np.array([0, 1], dtype=np.int64)
+        target_indices = np.array([0, 1], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=1, alpha=0.05)
 
         # Bonferroni should be more conservative
@@ -87,10 +89,10 @@ class TestOLSAnalysis:
 
 
 class TestGenerateY:
-    """Test _generate_y_jit function."""
+    """Test NativeBackend.generate_y function."""
 
     def test_basic_generation(self):
-        from mcpower.stats.ols import _generate_y_jit
+        from mcpower.backends.native import NativeBackend
 
         np.random.seed(42)
 
@@ -98,31 +100,34 @@ class TestGenerateY:
         X = np.random.randn(n, 2)
         effects = np.array([0.5, 0.3])
 
-        y = _generate_y_jit(X, effects, 0.0, 0.0, 42)
+        backend = NativeBackend()
+        y = backend.generate_y(X, effects, 0.0, 0.0, 42)
 
         assert y.shape == (n,)
 
     def test_reproducibility(self):
-        from mcpower.stats.ols import _generate_y_jit
+        from mcpower.backends.native import NativeBackend
 
         n = 50
         X = np.random.randn(n, 2)
         effects = np.array([0.5, 0.3])
 
-        y1 = _generate_y_jit(X, effects, 0.0, 0.0, 42)
-        y2 = _generate_y_jit(X, effects, 0.0, 0.0, 42)
+        backend = NativeBackend()
+        y1 = backend.generate_y(X, effects, 0.0, 0.0, 42)
+        y2 = backend.generate_y(X, effects, 0.0, 0.0, 42)
 
         assert np.allclose(y1, y2)
 
     def test_effect_sizes_matter(self):
-        from mcpower.stats.ols import _generate_y_jit
+        from mcpower.backends.native import NativeBackend
 
         n = 1000
         np.random.seed(42)
         X = np.random.randn(n, 1)
 
-        y_small = _generate_y_jit(X, np.array([0.1]), 0.0, 0.0, 42)
-        y_large = _generate_y_jit(X, np.array([1.0]), 0.0, 0.0, 42)
+        backend = NativeBackend()
+        y_small = backend.generate_y(X, np.array([0.1]), 0.0, 0.0, 42)
+        y_large = backend.generate_y(X, np.array([1.0]), 0.0, 0.0, 42)
 
         # Larger effect should produce higher correlation with X
         corr_small = np.corrcoef(X.flatten(), y_small)[0, 1]
@@ -131,28 +136,30 @@ class TestGenerateY:
         assert abs(corr_large) > abs(corr_small)
 
     def test_with_heterogeneity(self):
-        from mcpower.stats.ols import _generate_y_jit
+        from mcpower.backends.native import NativeBackend
 
         n = 100
         np.random.seed(42)
         X = np.random.randn(n, 2)
         effects = np.array([0.5, 0.3])
 
-        y = _generate_y_jit(X, effects, 0.1, 0.0, 42)
+        backend = NativeBackend()
+        y = backend.generate_y(X, effects, 0.1, 0.0, 42)
 
         # Should still produce valid output
         assert y.shape == (n,)
         assert not np.any(np.isnan(y))
 
     def test_with_heteroskedasticity(self):
-        from mcpower.stats.ols import _generate_y_jit
+        from mcpower.backends.native import NativeBackend
 
         n = 100
         np.random.seed(42)
         X = np.random.randn(n, 2)
         effects = np.array([0.5, 0.3])
 
-        y = _generate_y_jit(X, effects, 0.0, 0.3, 42)
+        backend = NativeBackend()
+        y = backend.generate_y(X, effects, 0.0, 0.3, 42)
 
         # Should still produce valid output
         assert y.shape == (n,)
@@ -169,7 +176,7 @@ class TestOLSCorrections:
         X = np.random.randn(n, 3)
         y = 0.5 * X[:, 0] + np.random.randn(n)
 
-        target_indices = np.array([0, 1, 2], dtype=np.int64)
+        target_indices = np.array([0, 1, 2], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=0, alpha=0.05)
 
         # With no correction, uncorrected == corrected
@@ -184,7 +191,7 @@ class TestOLSCorrections:
         X = np.random.randn(n, 2)
         y = 0.3 * X[:, 0] + 0.2 * X[:, 1] + np.random.randn(n) * 0.5
 
-        target_indices = np.array([0, 1], dtype=np.int64)
+        target_indices = np.array([0, 1], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=3, alpha=0.05)
 
         # Should run without error
@@ -197,7 +204,7 @@ class TestOLSCorrections:
         X = np.random.randn(n, 2)
         y = 0.3 * X[:, 0] + 0.2 * X[:, 1] + np.random.randn(n) * 0.5
 
-        target_indices = np.array([0, 1], dtype=np.int64)
+        target_indices = np.array([0, 1], dtype=np.int32)
         result = _ols_analysis_helper(X, y, target_indices, correction_method=2, alpha=0.05)
 
         # Should run without error

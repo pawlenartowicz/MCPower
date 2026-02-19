@@ -84,8 +84,9 @@ def generate_nested_data(K_parent=10, K_child=30, n=1500, p=2, seed=42):
 
 
 def bench_single_call_q1(n_reps=100):
-    """Benchmark q=1 single analysis call."""
-    from mcpower.stats.lme_solver import compute_lme_critical_values, lme_analysis_full
+    """Benchmark q=1 single analysis call via C++ backend."""
+    from mcpower.backends.native import NativeBackend
+    from mcpower.stats.lme_solver import compute_lme_critical_values
 
     X, y, cluster_ids, K = generate_q1_data()
     p = X.shape[1]
@@ -93,14 +94,16 @@ def bench_single_call_q1(n_reps=100):
     target_indices = np.arange(n_targets, dtype=np.int32)
     chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(0.05, p, n_targets, 0)
 
+    backend = NativeBackend()
+
     # Warmup
     for _ in range(5):
-        lme_analysis_full(X, y, cluster_ids, K, target_indices, chi2_crit, z_crit, correction_z_crits, 0)
+        backend.lme_analysis(X, y, cluster_ids, K, target_indices, chi2_crit, z_crit, correction_z_crits, 0, -1.0)
 
     times = []
     for _ in range(n_reps):
         t0 = time.perf_counter()
-        lme_analysis_full(X, y, cluster_ids, K, target_indices, chi2_crit, z_crit, correction_z_crits, 0)
+        backend.lme_analysis(X, y, cluster_ids, K, target_indices, chi2_crit, z_crit, correction_z_crits, 0, -1.0)
         times.append(time.perf_counter() - t0)
 
     return {
@@ -115,8 +118,9 @@ def bench_single_call_q1(n_reps=100):
 
 
 def bench_single_call_general(n_reps=100):
-    """Benchmark q>1 single analysis call."""
-    from mcpower.stats.lme_solver import compute_lme_critical_values, lme_analysis_general
+    """Benchmark q>1 single analysis call via C++ backend."""
+    from mcpower.backends.native import NativeBackend
+    from mcpower.stats.lme_solver import compute_lme_critical_values
 
     X, y, Z, cluster_ids, K, q = generate_general_data()
     p = X.shape[1]
@@ -124,14 +128,17 @@ def bench_single_call_general(n_reps=100):
     target_indices = np.arange(n_targets, dtype=np.int32)
     chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(0.05, p, n_targets, 0)
 
+    backend = NativeBackend()
+    warm_theta = np.empty(0, dtype=np.float64)
+
     # Warmup
     for _ in range(3):
-        lme_analysis_general(X, y, cluster_ids, K, q, Z, target_indices, chi2_crit, z_crit, correction_z_crits, 0)
+        backend.lme_analysis_general(X, y, Z, cluster_ids, K, q, target_indices, chi2_crit, z_crit, correction_z_crits, 0, warm_theta)
 
     times = []
     for _ in range(n_reps):
         t0 = time.perf_counter()
-        lme_analysis_general(X, y, cluster_ids, K, q, Z, target_indices, chi2_crit, z_crit, correction_z_crits, 0)
+        backend.lme_analysis_general(X, y, Z, cluster_ids, K, q, target_indices, chi2_crit, z_crit, correction_z_crits, 0, warm_theta)
         times.append(time.perf_counter() - t0)
 
     return {
@@ -146,8 +153,9 @@ def bench_single_call_general(n_reps=100):
 
 
 def bench_single_call_nested(n_reps=100):
-    """Benchmark nested single analysis call."""
-    from mcpower.stats.lme_solver import compute_lme_critical_values, lme_analysis_nested
+    """Benchmark nested single analysis call via C++ backend."""
+    from mcpower.backends.native import NativeBackend
+    from mcpower.stats.lme_solver import compute_lme_critical_values
 
     X, y, parent_ids, child_ids, K_parent, K_child, child_to_parent = generate_nested_data()
     p = X.shape[1]
@@ -155,19 +163,22 @@ def bench_single_call_nested(n_reps=100):
     target_indices = np.arange(n_targets, dtype=np.int32)
     chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(0.05, p, n_targets, 0)
 
+    backend = NativeBackend()
+    warm_theta = np.empty(0, dtype=np.float64)
+
     # Warmup
     for _ in range(3):
-        lme_analysis_nested(
+        backend.lme_analysis_nested(
             X, y, parent_ids, child_ids, K_parent, K_child, child_to_parent,
-            target_indices, chi2_crit, z_crit, correction_z_crits, 0,
+            target_indices, chi2_crit, z_crit, correction_z_crits, 0, warm_theta,
         )
 
     times = []
     for _ in range(n_reps):
         t0 = time.perf_counter()
-        lme_analysis_nested(
+        backend.lme_analysis_nested(
             X, y, parent_ids, child_ids, K_parent, K_child, child_to_parent,
-            target_indices, chi2_crit, z_crit, correction_z_crits, 0,
+            target_indices, chi2_crit, z_crit, correction_z_crits, 0, warm_theta,
         )
         times.append(time.perf_counter() - t0)
 
