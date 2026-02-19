@@ -1,17 +1,38 @@
-name: Test Release (TestPyPI)
+name: CI
 
 on:
-  push:
-    tags:
-      - 'v*rc*'
-      - 'v*dev*'
-      - 'v*a*'
-      - 'v*b*'
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ruff mypy
+        pip install numpy pandas joblib
+        pip install -e .
+
+    - name: Ruff check
+      run: ruff check mcpower/
+
+    - name: Ruff format check
+      run: ruff format --check mcpower/
+
+    - name: Mypy type check
+      run: mypy mcpower/
+
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}
+    name: Build & test wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,7 +55,7 @@ jobs:
         CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
         CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
         CIBW_TEST_REQUIRES: "pytest numpy pandas matplotlib scipy statsmodels"
-        CIBW_TEST_COMMAND: "pytest {project}/tests -v -x --ignore={project}/tests/backend/ -m \"not slow and not lme\""
+        CIBW_TEST_COMMAND: "pytest {project}/tests -v -x"
 
     - name: Verify native extension in wheels
       shell: bash
@@ -75,6 +96,40 @@ jobs:
         name: sdist
         path: dist/*.tar.gz
 
+  test-performance:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pandas joblib numpy scipy matplotlib
+        pip install -e .
+
+    - name: Run performance tests
+      run: |
+        python -c "
+        import time
+        import mcpower
+
+        start = time.time()
+        m = mcpower.MCPower('y = x1 + x2')
+        m.set_effects('x1=0.5, x2=0.3')
+        m.set_simulations(100)
+        result = m.find_power(sample_size=50, print_results=False, return_results=True)
+        elapsed = time.time() - start
+
+        print(f'Performance test completed in {elapsed:.2f}s')
+        assert elapsed < 30, f'Performance regression: took {elapsed:.2f}s (should be < 30s)'
+        print('Performance test passed')
+        "
+
   publish-testpypi:
     name: Publish to TestPyPI
     needs: [build_wheels, build_sdist]
@@ -101,6 +156,7 @@ jobs:
       with:
         repository-url: https://test.pypi.org/legacy/
         packages-dir: dist-flat/
+        skip-existing: true
 
     - uses: actions/checkout@v4
 
@@ -119,6 +175,14 @@ jobs:
         print(match.group(1))
         ")
         echo "Waiting for TestPyPI to index version $PKG_VERSION..."
-        sleep 30
-        pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "MCPower==$PKG_VERSION"
-        python -c "import mcpower; print(f'TestPyPI install OK: {mcpower.__version__}')"
+        for i in 1 2 3 4 5; do
+          sleep 30
+          echo "Attempt $i: installing MCPower==$PKG_VERSION from TestPyPI..."
+          if pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "MCPower==$PKG_VERSION"; then
+            python -c "import mcpower; print(f'TestPyPI install OK: {mcpower.__version__}')"
+            exit 0
+          fi
+          echo "Not yet available, retrying..."
+        done
+        echo "::error::MCPower==$PKG_VERSION not found on TestPyPI after 5 attempts"
+        exit 1

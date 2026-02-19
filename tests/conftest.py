@@ -8,8 +8,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Make 'tests' importable as a package (for `from tests.config import ...`).
+# APPEND so installed packages in site-packages take precedence over the source
+# tree — prevents the source mcpower/ from shadowing a wheel-installed build.
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.append(_project_root)
+
 
 
 @pytest.fixture
@@ -75,42 +80,13 @@ def sample_data():
 
 
 @pytest.fixture
-def native_python_backends():
-    """Return (NativeBackend, PythonBackend) pair; skip if native unavailable."""
-    try:
-        from mcpower.backends.native import NativeBackend
-
-        native = NativeBackend()
-    except (ImportError, Exception):
-        pytest.skip("Native C++ backend not available")
-    from mcpower.backends.python import PythonBackend
-
-    return native, PythonBackend()
-
-
-@pytest.fixture
 def suppress_output(capsys):
     """Suppress print output during tests by capturing it."""
-    # Using capsys instead of monkeypatching print to avoid conflicts with numba
     yield
     # Output is automatically captured by capsys
 
 
-def _native_available():
-    """Check if native C++ backend is available."""
-    try:
-        from mcpower.backends.native import NativeBackend
-
-        NativeBackend()
-        return True
-    except (ImportError, Exception):
-        return False
-
-
-# Available backends for parametrization
-BACKENDS = ["python"]
-if _native_available():
-    BACKENDS.append("c++")
+BACKENDS = ["c++"]
 
 
 @pytest.fixture(params=BACKENDS)
@@ -118,7 +94,7 @@ def backend(request):
     """
     Force MCPower to run on a specific backend.
 
-    Parametrizes tests across all available backends (Python + C++ if available).
+    Parametrizes tests against C++ (primary backend).
     Automatically resets backend after each test.
     """
     from mcpower.backends import reset_backend, set_backend

@@ -19,7 +19,7 @@
 
 ## Desktop Application
 
-It it Python package, prefer a graphical interface? **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone desktop app — no Python installation required. Download ready-to-run executables for Windows, Linux, and macOS from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest).
+It's a Python package, but prefer a graphical interface? **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone desktop app — no Python installation required. Download ready-to-run executables for Windows, Linux, and macOS from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest).
 
 ## Why MCPower?
 
@@ -29,9 +29,12 @@ It it Python package, prefer a graphical interface? **[MCPower GUI](https://gith
 
 **Test your assumptions with scenarios.** Real studies rarely match textbook conditions — effect sizes may be smaller than expected, distributions may be skewed, or variance may not be constant. Turn on `scenarios=True` and MCPower automatically tests your power under optimistic, realistic, and worst-case conditions. Instead of a single number, you get a range that shows how sensitive your design is to violated assumptions — so you plan for reality, not just the best case.
 
+**Track power for all your hypotheses at once.** Most studies test more than one effect. By default, MCPower evaluates power for every effect in your model simultaneously. You can also narrow it down with `target_test="effect1, effect2"`. Built-in multiple comparison corrections (Bonferroni, FDR, Holm, Tukey) keep false positive rates under control, so you see exactly which effects your study can reliably detect and which need more participants.
+
 **Use your own data.** Upload a CSV and MCPower auto-detects variable types (continuous, binary, or categorical), preserves real distributions, and handles correlations between predictors. No need to overthink whether your data is normal, skewed, or categorical — just upload it and MCPower samples from the empirical distribution. This is especially useful when you have pilot data or a related dataset and want your power analysis to reflect actual conditions rather than idealized ones.
 
 ✅ **Works with complexity**: Interactions, correlations, multi-level factors, any distribution
+✅ **Multiple hypotheses**: Test all effects at once with built-in multiple comparison corrections
 ✅ **Two simple commands**: `find_sample_size()` or `find_power()` — that's the entire API
 ✅ **Minimal math required**: Just specify your model formula and expected effect sizes
 
@@ -218,16 +221,27 @@ model.set_effects("treatment[2]=0.5, treatment[3]=0.7, education[2]=0.3, educati
 Use `upload_data()` to preserve real-world distribution shapes and relationships:
 
 ```python
-import pandas as pd
+import csv
 
-# Load your data
-data = pd.read_csv("my_data.csv")
+# Load your data (no extra dependencies needed)
+with open("my_data.csv") as f:
+    reader = csv.DictReader(f)
+    rows = list(reader)
+data = {col: [float(r[col]) for r in rows] for col in ["hp", "wt", "cyl"]}
 
 # Upload with automatic type detection
 model = MCPower("mpg = hp + wt + cyl")
-model.upload_data(data[["hp", "wt", "cyl"]])
+model.upload_data(data)
 model.set_effects("hp=0.5, wt=0.3, cyl[2]=0.2, cyl[3]=0.4")
 model.find_power(sample_size=100)
+```
+
+Or with pandas (optional: `pip install pandas`):
+
+```python
+import pandas as pd
+data = pd.read_csv("my_data.csv")
+model.upload_data(data[["hp", "wt", "cyl"]])
 ```
 
 **Auto-Detection**
@@ -290,14 +304,14 @@ model.find_power(
 )
 ```
 
-### Test the single violation of assumptions.
+### Test Individual Assumption Violations
 ```python
-# Customize how much "messiness" to add in scenarios
+# Manually add specific violations (without full scenario analysis)
 model.set_heterogeneity(0.2)        # Effect sizes vary between people
 model.set_heteroskedasticity(0.15)  # Violation of equal variance assumption
 
-# Then run scenario analysis
-model.find_sample_size(target_test="treatment", scenarios=False)
+# Run with your manual settings (no automatic scenario variations)
+model.find_sample_size(target_test="treatment")
 ```
 
 ### Mixed-Effects Models (Experimental)
@@ -427,8 +441,7 @@ model.find_power(sample_size=200, progress_callback=False)
 - Assumption violations
 
 This gives you a **range of realistic outcomes** instead of a single optimistic estimate.
-⚠️ **Important**: Scenario analysis is rule of thumb recognition of condition, and could
- not be accurate in all settings, as it tries to cover many diffrent fields reality.
+⚠️ **Important**: Scenario analysis uses rule-of-thumb adjustments and may not be accurate in all settings, as it attempts to cover a wide range of real-world conditions across different fields.
 
 <details>
 <summary><strong>📚 Advanced Features (Click to expand)</strong></summary>
@@ -525,10 +538,10 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 ## Requirements
 
 - Python ≥ 3.10
-- NumPy, SciPy, matplotlib, Pandas, joblib
-- C++ compiler (automatically used during install for native backend; falls back to Python if unavailable)
+- NumPy, matplotlib, joblib
+- C++ compiler (required for building the native backend during install)
+- pandas (optional, for DataFrame input — install with `pip install mcpower[pandas]`)
 - statsmodels (optional, for mixed-effects models — install with `pip install mcpower[lme]`)
-- Numba (optional, for JIT compilation fallback — install with `pip install mcpower[JIT]`)
 
 
 ## Documentation
@@ -549,7 +562,7 @@ Full documentation is available on the **[MCPower Wiki](https://github.com/pawle
 - **Issues**: [GitHub Issues](https://github.com/pawlenartowicz/MCPower/issues)
 - **Questions**: pawellenartowicz@europe.com
 
-## Aim for future (waiting for suggestions)
+## Roadmap
 - ✅ Linear Regression
 - ✅ Scenarios, robustness analysis
 - ✅ Factor variables (categorical predictors)

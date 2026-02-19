@@ -6,8 +6,8 @@ and decrease with predictor correlation (VIF).
 
 Follows the exact pattern of test_monotonicity.py for OLS models.
 
-Design constraint: LME requires >=50 obs/cluster (10 per parameter, 5 params),
-so n_total >= 1000 with K=20. To get mid-range power we use small effects
+Design choice: we use K=20 clusters with 50 obs/cluster (n_total=1000) to get
+stable estimation. To get mid-range power we use small effects
 (beta ~ 0.05-0.15).
 
 Note: ICC has negligible effect on fixed-effect power when predictors are
@@ -39,7 +39,6 @@ def _quiet():
         yield
 
 
-@pytest.mark.slow
 class TestLMEPowerMonotonicity:
     """Power must increase with effect size, sample size, and alpha."""
 

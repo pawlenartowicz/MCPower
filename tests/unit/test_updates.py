@@ -101,11 +101,13 @@ class TestCheckForUpdates:
         """Show warning when PyPI version is newer."""
         monkeypatch.delenv("_MCPOWER_UPDATE_CHECKED", raising=False)
 
-        # Write a cache file that has a recent check with a newer version
+        # Write a cache file at the path the installed module actually reads from
         from datetime import datetime
+
+        import mcpower.utils.updates as upd_mod
         from pathlib import Path
 
-        cache_path = Path(__file__).parent.parent.parent / "mcpower" / ".mcpower_cache.json"
+        cache_path = Path(upd_mod.__file__).parent.parent / ".mcpower_cache.json"
         cache_path.parent.mkdir(exist_ok=True)
         cache_data = {
             "last_check": datetime.now().isoformat(),

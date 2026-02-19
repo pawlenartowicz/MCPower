@@ -1,0 +1,58 @@
+name: Auto-tag on merge
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  auto-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get version from pyproject.toml
+      id: version
+      run: |
+        VERSION=$(python -c "
+        import re
+        with open('pyproject.toml') as f:
+            content = f.read()
+        match = re.search(r'version\s*=\s*\"([^\"]+)\"', content)
+        print(match.group(1))
+        ")
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Check if tag already exists
+      id: check
+      run: |
+        if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "Tag ${{ steps.version.outputs.tag }} already exists, skipping."
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check if pre-release
+      id: prerelease
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        if echo "$VERSION" | grep -qE '(rc|dev|a|b)[0-9]*$'; then
+          echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          echo "Version $VERSION is a pre-release, skipping tag."
+        else
+          echo "is_prerelease=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create and push tag
+      if: steps.check.outputs.exists == 'false' && steps.prerelease.outputs.is_prerelease == 'false'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag "${{ steps.version.outputs.tag }}"
+        git push origin "${{ steps.version.outputs.tag }}"
+        echo "Created and pushed tag ${{ steps.version.outputs.tag }}"

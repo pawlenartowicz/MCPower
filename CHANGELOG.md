@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-02-19
+
+### Breaking changes
+- **C++ backend required**: Removed JIT (Numba) and pure-Python fallback backends — a compiled C++ extension is now required to use MCPower
+- **scipy removed from core dependencies**: `scipy` is no longer required at runtime; moved to optional `[dev]` and `[all]` extras
+- **pandas removed from core dependencies**: `pandas` moved to optional `[pandas]` and `[all]` extras
+- Removed `@pytest.mark.slow` marker — all tests run by default
+
+### Major changes
+- **C++ distributions module**: All distribution functions (F, t, chi2, normal, studentized range) now use Boost.Math via C++ native backend, replacing scipy
+- **C++ optimizers module**: L-BFGS-B (via LBFGSPP) and Brent's method implemented in C++, replacing scipy.optimize
+- **Full C++ LME solvers for all model types**: Random slopes (q>1) and nested intercepts now have complete C++ solvers, matching the q=1 path — previously experimental Python implementations
+- **Named factor levels**: Factor dummies use original data values (e.g. `cyl[6]` instead of `cyl[2]`); string columns auto-detected as factors; user-selectable reference level via `data_types` parameter
+- **`set_factor_levels()` method**: Define named factor levels without uploading data (e.g. `set_factor_levels("group=control,drug_a,drug_b")`)
+
+### Minor changes
+- New `distributions.py` module as single import point for all distribution functions (C++ native with scipy shim fallback)
+- `preserve_factor_level_names` parameter on `upload_data()` (default `True`)
+- Expanded `pyproject.toml` keywords for better discoverability
+- Fixed C++ vs Python precision boundary bug in LME solver
+- `upload_data()` `data_types` supports tuple syntax for reference level selection: `{"cyl": ("factor", 8)}`
+
+### Technical
+- Removed `mcpower/backends/python.py` and `mcpower/backends/jit.py` — single `NativeBackend` only
+- Removed `mcpower/utils/data_generation.py` and `mcpower/utils/ols.py` re-export stubs
+- `lme_solver.py` reduced from ~350 lines to ~30 lines (thin wrapper for critical value precomputation)
+- `mixed_models.py` simplified: removed unused Python-side warm-start code for C++ solver paths
+- New C++ source files: `distributions.cpp/hpp`, `optimizers.cpp/hpp`; expanded `lme_solver.cpp/hpp` and `bindings.cpp`
+- CMake FetchContent for Boost.Math (v1.87.0) and LBFGSPP (v0.3.0) header-only libraries
+- CI workflows: removed stale `--ignore=tests/backend/` flag, renamed `test-release.yml` → `ci.yml`, added `auto-tag.yml`
+- Test suite overhaul: removed backend parity tests (no longer applicable), old Python LME solver/slopes/nested/vs_statsmodels tests; added comprehensive distributions tests (668 lines), C++ LME general/nested tests, precision boundary tests, LME scenario tests
+- Deleted empty `tests/backend/` directory
+
 ## [0.4.2] - 2026-02-17
 
 ### Major changes

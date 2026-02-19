@@ -2,26 +2,65 @@
 Comprehensive tests for upload_data() functionality.
 
 Tests auto-detection, data_types override, and all three preserve_correlation modes.
+Uses dict-based data loading (no pandas required) with a few DataFrame-specific tests.
 """
 
+import csv
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from mcpower import MCPower
+
+try:
+    import pandas as pd
+
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
 
 # Load test data
 TEST_DIR = Path(__file__).parent.parent
 CARS_CSV = TEST_DIR / "cars.csv"
 
 
+def _load_csv(path) -> dict[str, list]:
+    """Load a CSV file into a dict of lists, auto-converting numeric columns."""
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    if not rows:
+        return {}
+    result: dict[str, list] = {}
+    for col in rows[0]:
+        if col == "":
+            continue  # skip unnamed index column
+        raw = [r[col] for r in rows]
+        # Try to convert to float
+        try:
+            result[col] = [float(v) for v in raw]
+        except (ValueError, TypeError):
+            result[col] = raw
+    return result
+
+
+def _select(data: dict[str, list], cols: list[str]) -> dict[str, list]:
+    """Select subset of columns from a dict-of-lists dataset."""
+    return {k: data[k] for k in cols}
+
+
+def _copy_with(data: dict[str, list], **extra) -> dict[str, list]:
+    """Copy data dict and add extra columns."""
+    out = {k: list(v) for k, v in data.items()}
+    out.update(extra)
+    return out
+
+
 @pytest.fixture
 def cars_data():
-    """Load cars.csv dataset."""
-    df = pd.read_csv(CARS_CSV, index_col=0)
-    return df
+    """Load cars.csv dataset as dict of lists."""
+    return _load_csv(CARS_CSV)
 
 
 class TestAutoDetection:
@@ -30,7 +69,7 @@ class TestAutoDetection:
     def test_binary_auto_detection(self, cars_data):
         """Test that 2-value columns are auto-detected as binary."""
         model = MCPower("mpg = vs + am")
-        model.upload_data(cars_data[["vs", "am"]])
+        model.upload_data(_select(cars_data, ["vs", "am"]))
         model.set_effects("vs=0.3, am=0.4")
         model.apply()
 
@@ -44,7 +83,7 @@ class TestAutoDetection:
     def test_factor_auto_detection(self, cars_data):
         """Test that 3-6 value columns are auto-detected as factor."""
         model = MCPower("mpg = cyl + gear")
-        model.upload_data(cars_data[["cyl", "gear"]], preserve_factor_level_names=False)
+        model.upload_data(_select(cars_data, ["cyl", "gear"]), preserve_factor_level_names=False)
         model.set_effects("cyl[2]=0.3, cyl[3]=0.4, gear[2]=0.2, gear[3]=0.3")
         model.apply()
 
@@ -62,7 +101,7 @@ class TestAutoDetection:
     def test_continuous_auto_detection(self, cars_data):
         """Test that 7+ value columns are auto-detected as continuous."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]])
+        model.upload_data(_select(cars_data, ["hp", "wt"]))
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -76,20 +115,19 @@ class TestAutoDetection:
     def test_constant_column_dropped(self, cars_data):
         """Test that columns with 1 unique value are dropped with warning."""
         # Add a constant column
-        data_with_constant = cars_data[["mpg", "hp"]].copy()
-        data_with_constant["constant"] = 1.0
+        data = _copy_with(_select(cars_data, ["mpg", "hp"]), constant=[1.0] * len(cars_data["mpg"]))
 
         model = MCPower("mpg = hp + constant")
 
         # Should raise error because 'constant' will be dropped
         with pytest.raises(ValueError, match="All uploaded columns were dropped"):
-            model.upload_data(data_with_constant[["constant"]])
+            model.upload_data(_select(data, ["constant"]))
             model.apply()
 
     def test_mixed_types_auto_detection(self, cars_data):
         """Test auto-detection with mixed variable types."""
         model = MCPower("mpg = vs + cyl + hp")
-        model.upload_data(cars_data[["vs", "cyl", "hp"]], preserve_factor_level_names=False)
+        model.upload_data(_select(cars_data, ["vs", "cyl", "hp"]), preserve_factor_level_names=False)
         model.set_effects("vs=0.3, cyl[2]=0.2, cyl[3]=0.4, hp=0.5")
         model.apply()
 
@@ -107,7 +145,7 @@ class TestDataTypesOverride:
     def test_override_to_continuous(self, cars_data):
         """Test forcing a factor-like column to be continuous."""
         model = MCPower("mpg = cyl + hp")
-        model.upload_data(cars_data[["cyl", "hp"]], data_types={"cyl": "continuous"})
+        model.upload_data(_select(cars_data, ["cyl", "hp"]), data_types={"cyl": "continuous"})
         model.set_effects("cyl=0.4, hp=0.5")
         model.apply()
 
@@ -118,7 +156,7 @@ class TestDataTypesOverride:
     def test_override_to_factor(self, cars_data):
         """Test forcing a continuous column to be factor."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]], data_types={"hp": "factor"})
+        model.upload_data(_select(cars_data, ["hp", "wt"]), data_types={"hp": "factor"})
         # hp will become a factor with many levels (22 levels)
         # Just apply data to check it's detected as factor
         model._apply_data()  # Apply just the data part
@@ -128,11 +166,17 @@ class TestDataTypesOverride:
     def test_override_to_binary(self, cars_data):
         """Test forcing a continuous column to be binary."""
         # Use median split for hp
-        data = cars_data[["hp", "wt"]].copy()
-        data["hp_binary"] = (data["hp"] > data["hp"].median()).astype(int)
+        hp_vals = cars_data["hp"]
+        median_hp = sorted(hp_vals)[len(hp_vals) // 2]
+        hp_binary = [int(v > median_hp) for v in hp_vals]
+
+        data = {
+            "hp_binary": hp_binary,
+            "wt": list(cars_data["wt"]),
+        }
 
         model_binary = MCPower("mpg = hp_binary + wt")
-        model_binary.upload_data(data[["hp_binary", "wt"]], data_types={"hp_binary": "binary"})
+        model_binary.upload_data(data, data_types={"hp_binary": "binary"})
         model_binary.set_effects("hp_binary=0.4, wt=0.3")
         model_binary.apply()
 
@@ -144,14 +188,14 @@ class TestDataTypesOverride:
         model = MCPower("mpg = hp + wt")
 
         with pytest.raises(ValueError, match="Invalid type 'invalid'"):
-            model.upload_data(cars_data[["hp", "wt"]], data_types={"hp": "invalid"})
+            model.upload_data(_select(cars_data, ["hp", "wt"]), data_types={"hp": "invalid"})
 
     def test_unknown_column_in_data_types_raises_error(self, cars_data):
         """Test that unknown column name in data_types raises error."""
         model = MCPower("mpg = hp + wt")
 
         with pytest.raises(ValueError, match="Variable 'unknown' in data_types not found"):
-            model.upload_data(cars_data[["hp", "wt"]], data_types={"unknown": "continuous"})
+            model.upload_data(_select(cars_data, ["hp", "wt"]), data_types={"unknown": "continuous"})
 
 
 class TestPreserveCorrelationNo:
@@ -160,7 +204,7 @@ class TestPreserveCorrelationNo:
     def test_no_correlation_from_data(self, cars_data):
         """Test that mode='no' does not compute correlations from data."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="no")
+        model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="no")
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -173,7 +217,7 @@ class TestPreserveCorrelationNo:
     def test_binary_uses_standard_generation(self, cars_data):
         """Test that binary variables use standard generation in 'no' mode."""
         model = MCPower("mpg = vs + am")
-        model.upload_data(cars_data[["vs", "am"]], preserve_correlation="no")
+        model.upload_data(_select(cars_data, ["vs", "am"]), preserve_correlation="no")
         model.set_effects("vs=0.3, am=0.4")
         model.apply()
 
@@ -185,7 +229,7 @@ class TestPreserveCorrelationNo:
     def test_continuous_uses_lookup_tables(self, cars_data):
         """Test that continuous variables use lookup tables in 'no' mode."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="no")
+        model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="no")
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -200,7 +244,7 @@ class TestPreserveCorrelationPartial:
     def test_strict_is_default(self, cars_data):
         """Test that 'strict' is the default mode."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]])
+        model.upload_data(_select(cars_data, ["hp", "wt"]))
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -209,12 +253,14 @@ class TestPreserveCorrelationPartial:
     def test_correlations_computed_from_data(self, cars_data):
         """Test that correlations are computed from uploaded data."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="partial")
+        model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="partial")
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
         # Correlation should match data correlation
-        data_corr = np.corrcoef(cars_data[["hp", "wt"]].values, rowvar=False)
+        hp_arr = np.array(cars_data["hp"])
+        wt_arr = np.array(cars_data["wt"])
+        data_corr = np.corrcoef(np.column_stack([hp_arr, wt_arr]), rowvar=False)
         model_corr = model.correlation_matrix
 
         # Should be approximately equal (hp-wt correlation)
@@ -225,7 +271,7 @@ class TestPreserveCorrelationPartial:
         model = MCPower("mpg = hp + wt + vs")
 
         # Upload data first
-        model.upload_data(cars_data[["hp", "wt", "vs"]], preserve_correlation="partial")
+        model.upload_data(_select(cars_data, ["hp", "wt", "vs"]), preserve_correlation="partial")
         model.set_effects("hp=0.5, wt=0.3, vs=0.2")
 
         # Set custom correlation (will be applied in apply())
@@ -244,7 +290,7 @@ class TestPreserveCorrelationStrict:
     def test_strict_mode_sets_metadata(self, cars_data):
         """Test that strict mode stores raw data for bootstrap."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="strict")
+        model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="strict")
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -255,7 +301,7 @@ class TestPreserveCorrelationStrict:
     def test_strict_mode_warns_cross_correlations(self, cars_data, capsys):
         """Test that strict mode warns about cross-correlations."""
         model = MCPower("mpg = hp + wt + x1")  # x1 is created, hp/wt uploaded
-        model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="strict")
+        model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="strict")
         model.set_effects("hp=0.5, wt=0.3, x1=0.4")
         model.apply()
 
@@ -266,7 +312,7 @@ class TestPreserveCorrelationStrict:
     def test_strict_mode_bootstrap_preserves_relationships(self, cars_data):
         """Test that strict mode uses bootstrap (can run simulation)."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="strict")
+        model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="strict")
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -278,7 +324,7 @@ class TestPreserveCorrelationStrict:
     def test_strict_mode_mixed_uploaded_and_created(self, cars_data):
         """Test strict mode with both uploaded and created (non-uploaded) variables."""
         model = MCPower("mpg = hp + wt + x1")  # x1 is created, hp/wt uploaded
-        model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="strict")
+        model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="strict")
         model.set_effects("hp=0.5, wt=0.3, x1=0.4")
         result = model.find_power(sample_size=100, return_results=True, print_results=False)
         assert result is not None
@@ -287,7 +333,7 @@ class TestPreserveCorrelationStrict:
     def test_strict_mode_mixed_find_power_target_all(self, cars_data):
         """Test find_power target_test='all' with mixed uploaded/created vars."""
         model = MCPower("mpg = hp + x1")
-        model.upload_data(cars_data[["hp"]], preserve_correlation="strict")
+        model.upload_data(_select(cars_data, ["hp"]), preserve_correlation="strict")
         model.set_effects("hp=0.5, x1=0.3")
         result = model.find_power(
             sample_size=200,
@@ -297,10 +343,10 @@ class TestPreserveCorrelationStrict:
         )
         assert result is not None
 
-    def test_strict_mode_full_dataframe_mixed(self, cars_data):
-        """Test strict mode with full DataFrame where only some vars match model."""
+    def test_strict_mode_full_dict_mixed(self, cars_data):
+        """Test strict mode with full dict where only some vars match model."""
         model = MCPower("mpg = hp + x1")
-        model.upload_data(cars_data)  # Full DataFrame, only hp matches
+        model.upload_data(cars_data)  # Full dict, only hp matches
         model.set_effects("hp=0.5, x1=0.3")
         result = model.find_power(sample_size=100, return_results=True, print_results=False)
         assert result is not None
@@ -308,7 +354,7 @@ class TestPreserveCorrelationStrict:
     def test_strict_mode_with_binary(self, cars_data):
         """Test strict mode with binary variables."""
         model = MCPower("mpg = vs + am")
-        model.upload_data(cars_data[["vs", "am"]], preserve_correlation="strict")
+        model.upload_data(_select(cars_data, ["vs", "am"]), preserve_correlation="strict")
         model.set_effects("vs=0.3, am=0.4")
         model.apply()
 
@@ -322,7 +368,7 @@ class TestPreserveCorrelationStrict:
         """Test strict mode with factor variables."""
         model = MCPower("mpg = cyl + gear")
         model.upload_data(
-            cars_data[["cyl", "gear"]],
+            _select(cars_data, ["cyl", "gear"]),
             preserve_correlation="strict",
             preserve_factor_level_names=False,
         )
@@ -342,7 +388,7 @@ class TestWarnings:
     def test_warning_for_unmatched_columns(self, cars_data, capsys):
         """Test warning when data columns don't match model variables."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt", "vs"]])  # vs not in model
+        model.upload_data(_select(cars_data, ["hp", "wt", "vs"]))  # vs not in model
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -353,7 +399,7 @@ class TestWarnings:
     def test_warning_for_large_sample_size(self, cars_data, capsys):
         """Test warning when sample_size > 3x uploaded data size."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]])
+        model.upload_data(_select(cars_data, ["hp", "wt"]))
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -366,11 +412,10 @@ class TestWarnings:
 
     def test_warning_for_dropped_constant_columns(self, cars_data, capsys):
         """Test warning when constant columns are dropped."""
-        data_with_constant = cars_data[["hp", "wt"]].copy()
-        data_with_constant["constant"] = 1.0
+        data = _copy_with(_select(cars_data, ["hp", "wt"]), constant=[1.0] * len(cars_data["hp"]))
 
         model = MCPower("mpg = hp + wt + constant")  # Include constant in model
-        model.upload_data(data_with_constant)
+        model.upload_data(data)
         model.set_effects("hp=0.5, wt=0.3")
 
         # Clear output before apply
@@ -389,13 +434,13 @@ class TestWarnings:
         assert "constant" in captured.out
 
 
-class TestMixedTypeDataFrames:
-    """Test uploading full DataFrames with mixed types (non-numeric columns)."""
+class TestMixedTypeData:
+    """Test uploading data with mixed types (non-numeric columns)."""
 
-    def test_full_dataframe_with_unmatched_columns(self, cars_data):
-        """Test uploading full DataFrame where unmatched columns are non-numeric."""
+    def test_full_dict_with_unmatched_columns(self, cars_data):
+        """Test uploading full dict where unmatched columns are non-numeric."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data)  # Full DataFrame, not pre-filtered
+        model.upload_data(cars_data)  # Full dict, not pre-filtered
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -404,19 +449,8 @@ class TestMixedTypeDataFrames:
         assert hp_pred.var_type == "uploaded_data"
         assert wt_pred.var_type == "uploaded_data"
 
-    def test_dataframe_with_string_index_column(self):
-        """Test DataFrame read without index_col (has 'Unnamed: 0' string column)."""
-        df = pd.read_csv(CARS_CSV)  # No index_col=0 -> 'Unnamed: 0' is strings
-        model = MCPower("mpg = hp + wt")
-        model.upload_data(df)
-        model.set_effects("hp=0.5, wt=0.3")
-        model.apply()
-
-        hp_pred = model._registry.get_predictor("hp")
-        assert hp_pred.var_type == "uploaded_data"
-
-    def test_full_dataframe_find_power(self, cars_data):
-        """Test find_power works end-to-end with full DataFrame upload."""
+    def test_full_dict_find_power(self, cars_data):
+        """Test find_power works end-to-end with full dict upload."""
         model = MCPower("mpg = hp + wt")
         model.upload_data(cars_data)
         model.set_effects("hp=0.5, wt=0.3")
@@ -424,10 +458,10 @@ class TestMixedTypeDataFrames:
         assert result is not None
         assert "results" in result
 
-    def test_full_dataframe_with_mixed_var_types(self, cars_data):
-        """Test full DataFrame with binary + factor + continuous auto-detection."""
+    def test_full_dict_with_mixed_var_types(self, cars_data):
+        """Test full dict with binary + factor + continuous auto-detection."""
         model = MCPower("mpg = vs + cyl + hp")
-        model.upload_data(cars_data, preserve_factor_level_names=False)  # Full DataFrame
+        model.upload_data(cars_data, preserve_factor_level_names=False)  # Full dict
         model.set_effects("vs=0.3, cyl[2]=0.2, cyl[3]=0.4, hp=0.5")
         model.apply()
 
@@ -437,8 +471,8 @@ class TestMixedTypeDataFrames:
         assert "cyl" in model._registry.factor_names
         assert hp_pred.var_type == "uploaded_data"
 
-    def test_full_dataframe_find_power_target_all(self, cars_data):
-        """Test find_power with target_test='all' on full DataFrame upload."""
+    def test_full_dict_find_power_target_all(self, cars_data):
+        """Test find_power with target_test='all' on full dict upload."""
         model = MCPower("mpg = hp + wt")
         model.upload_data(cars_data)
         model.set_effects("hp=0.5, wt=0.3")
@@ -452,14 +486,12 @@ class TestMixedTypeDataFrames:
 
     def test_string_matched_column_auto_detected_as_factor(self):
         """Test that a matched column with string data is auto-detected as factor."""
-        df = pd.DataFrame(
-            {
-                "x": ["a", "b", "c"] * 10,  # String data matching model variable
-                "y": range(30),
-            }
-        )
+        data = {
+            "x": ["a", "b", "c"] * 10,
+            "y": list(range(30)),
+        }
         model = MCPower("y = x")
-        model.upload_data(df)
+        model.upload_data(data)
         model.set_effects("x[b]=0.3, x[c]=0.4")
         model.apply()
         assert "x" in model._registry.factor_names
@@ -473,7 +505,7 @@ class TestEdgeCases:
     def test_no_matching_columns_ignores_data(self, cars_data, capsys):
         """Test that zero matching columns prints warning and ignores data."""
         model = MCPower("mpg = x1 + x2")
-        model.upload_data(cars_data[["hp", "wt"]])
+        model.upload_data(_select(cars_data, ["hp", "wt"]))
         model.set_effects("x1=0.3, x2=0.4")
         model.apply()
 
@@ -481,11 +513,10 @@ class TestEdgeCases:
         assert "uploaded data ignored" in captured.out.lower()
         assert model._pending_data is None
 
-    def test_no_matching_columns_find_power(self, capsys):
+    def test_no_matching_columns_find_power(self, cars_data, capsys):
         """Test find_power works when uploaded data has no matching columns."""
-        df = pd.read_csv(CARS_CSV)
         model = MCPower("y ~ x")
-        model.upload_data(df)
+        model.upload_data(cars_data)
         model.set_effects("x=0.3")
         result = model.find_power(sample_size=200, return_results=True, print_results=False)
         assert result is not None
@@ -505,12 +536,14 @@ class TestEdgeCases:
         model = MCPower("mpg = hp + wt")
 
         with pytest.raises(ValueError, match="preserve_correlation must be one of"):
-            model.upload_data(cars_data[["hp", "wt"]], preserve_correlation="invalid")
+            model.upload_data(_select(cars_data, ["hp", "wt"]), preserve_correlation="invalid")
 
     def test_numpy_array_auto_columns(self, cars_data):
         """Test that numpy array without columns auto-generates column names."""
         model = MCPower("mpg = hp + wt")
-        data_array = cars_data[["hp", "wt"]].values
+        hp_arr = np.array(cars_data["hp"])
+        wt_arr = np.array(cars_data["wt"])
+        data_array = np.column_stack([hp_arr, wt_arr])
 
         model.upload_data(data_array)
         assert model._pending_data["columns"] == ["column_1", "column_2"]
@@ -519,8 +552,8 @@ class TestEdgeCases:
         """Test uploading data as dict."""
         model = MCPower("mpg = hp + wt")
         data_dict = {
-            "hp": cars_data["hp"].values,
-            "wt": cars_data["wt"].values,
+            "hp": cars_data["hp"],
+            "wt": cars_data["wt"],
         }
         model.upload_data(data_dict)
         model.set_effects("hp=0.5, wt=0.3")
@@ -531,7 +564,7 @@ class TestEdgeCases:
     def test_sample_size_warning_in_find_sample_size(self, cars_data, capsys):
         """Test warning in find_sample_size when max size > 3x data."""
         model = MCPower("mpg = hp + wt")
-        model.upload_data(cars_data[["hp", "wt"]])
+        model.upload_data(_select(cars_data, ["hp", "wt"]))
         model.set_effects("hp=0.5, wt=0.3")
         model.apply()
 
@@ -548,14 +581,14 @@ class TestStringColumns:
 
     def test_string_column_auto_detected_as_factor(self, cars_data):
         model = MCPower("mpg = origin + hp")
-        model.upload_data(cars_data[["origin", "hp"]])
+        model.upload_data(_select(cars_data, ["origin", "hp"]))
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.4, hp=0.5")
         model.apply()
         assert "origin" in model._registry.factor_names
 
     def test_string_column_creates_named_dummies(self, cars_data):
         model = MCPower("mpg = origin + hp")
-        model.upload_data(cars_data[["origin", "hp"]])
+        model.upload_data(_select(cars_data, ["origin", "hp"]))
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.4, hp=0.5")
         model.apply()
         dummy_names = model._registry.dummy_names
@@ -565,21 +598,19 @@ class TestStringColumns:
 
     def test_string_column_no_mode(self, cars_data):
         model = MCPower("mpg = origin + hp")
-        model.upload_data(cars_data[["origin", "hp"]], preserve_correlation="no")
+        model.upload_data(_select(cars_data, ["origin", "hp"]), preserve_correlation="no")
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.4, hp=0.5")
         model.apply()
         assert "origin" in model._registry.factor_names
 
     def test_too_many_string_levels_raises(self):
-        df = pd.DataFrame(
-            {
-                "name": [f"person_{i}" for i in range(50)],
-                "x1": np.random.randn(50),
-            }
-        )
+        data = {
+            "name": [f"person_{i}" for i in range(50)],
+            "x1": list(np.random.randn(50)),
+        }
         model = MCPower("y = name + x1")
         with pytest.raises(ValueError, match="too many unique"):
-            model.upload_data(df[["name", "x1"]])
+            model.upload_data(_select(data, ["name", "x1"]))
             model.apply()
 
 
@@ -588,7 +619,7 @@ class TestPreserveFactorLevelNames:
 
     def test_numeric_factor_uses_original_values(self, cars_data):
         model = MCPower("mpg = cyl + hp")
-        model.upload_data(cars_data[["cyl", "hp"]])
+        model.upload_data(_select(cars_data, ["cyl", "hp"]))
         model.set_effects("cyl[6]=0.3, cyl[8]=0.4, hp=0.5")
         model.apply()
         dummy_names = model._registry.dummy_names
@@ -598,7 +629,7 @@ class TestPreserveFactorLevelNames:
 
     def test_preserve_false_uses_integer_indices(self, cars_data):
         model = MCPower("mpg = cyl + hp")
-        model.upload_data(cars_data[["cyl", "hp"]], preserve_factor_level_names=False)
+        model.upload_data(_select(cars_data, ["cyl", "hp"]), preserve_factor_level_names=False)
         model.set_effects("cyl[2]=0.3, cyl[3]=0.4, hp=0.5")
         model.apply()
         dummy_names = model._registry.dummy_names
@@ -607,7 +638,7 @@ class TestPreserveFactorLevelNames:
 
     def test_custom_reference_via_data_types_tuple(self, cars_data):
         model = MCPower("mpg = cyl + hp")
-        model.upload_data(cars_data[["cyl", "hp"]], data_types={"cyl": ("factor", 6)})
+        model.upload_data(_select(cars_data, ["cyl", "hp"]), data_types={"cyl": ("factor", 6)})
         model.set_effects("cyl[4]=0.3, cyl[8]=0.4, hp=0.5")
         model.apply()
         dummy_names = model._registry.dummy_names
@@ -618,13 +649,13 @@ class TestPreserveFactorLevelNames:
     def test_invalid_reference_level_raises(self, cars_data):
         model = MCPower("mpg = cyl + hp")
         with pytest.raises(ValueError, match="not found in"):
-            model.upload_data(cars_data[["cyl", "hp"]], data_types={"cyl": ("factor", 99)})
+            model.upload_data(_select(cars_data, ["cyl", "hp"]), data_types={"cyl": ("factor", 99)})
             model.apply()
 
     def test_string_custom_reference(self, cars_data):
         model = MCPower("mpg = origin + hp")
         model.upload_data(
-            cars_data[["origin", "hp"]], data_types={"origin": ("factor", "Japan")}
+            _select(cars_data, ["origin", "hp"]), data_types={"origin": ("factor", "Japan")}
         )
         model.set_effects("origin[Europe]=0.3, origin[USA]=0.4, hp=0.5")
         model.apply()
@@ -640,7 +671,7 @@ class TestPostHocNamedLevels:
     def test_posthoc_with_named_numeric_levels(self, cars_data):
         """Post-hoc with numeric named levels like cyl[4] vs cyl[6]."""
         model = MCPower("mpg = cyl")
-        model.upload_data(cars_data[["cyl"]])
+        model.upload_data(_select(cars_data, ["cyl"]))
         model.set_effects("cyl[6]=0.3, cyl[8]=0.5")
         result = model.find_power(
             sample_size=100,
@@ -655,7 +686,7 @@ class TestPostHocNamedLevels:
     def test_posthoc_with_string_levels(self, cars_data):
         """Post-hoc with string levels like origin[Europe] vs origin[Japan]."""
         model = MCPower("mpg = origin")
-        model.upload_data(cars_data[["origin"]])
+        model.upload_data(_select(cars_data, ["origin"]))
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.5")
         result = model.find_power(
             sample_size=100,
@@ -670,7 +701,7 @@ class TestPostHocNamedLevels:
     def test_all_posthoc_with_named_levels(self, cars_data):
         """'all-posthoc' keyword expands with named levels."""
         model = MCPower("mpg = cyl")
-        model.upload_data(cars_data[["cyl"]])
+        model.upload_data(_select(cars_data, ["cyl"]))
         model.set_effects("cyl[6]=0.3, cyl[8]=0.5")
         result = model.find_power(
             sample_size=100,
@@ -704,7 +735,7 @@ class TestCarsOriginColumn:
     def test_origin_as_factor(self, cars_data):
         """origin column is auto-detected as 3-level string factor."""
         model = MCPower("mpg = origin + hp")
-        model.upload_data(cars_data[["origin", "hp"]])
+        model.upload_data(_select(cars_data, ["origin", "hp"]))
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, hp=0.4")
         model.apply()
 
@@ -716,7 +747,7 @@ class TestCarsOriginColumn:
     def test_origin_full_power_analysis(self, cars_data):
         """Full power analysis with string factor."""
         model = MCPower("mpg = origin + hp + wt")
-        model.upload_data(cars_data[["origin", "hp", "wt"]])
+        model.upload_data(_select(cars_data, ["origin", "hp", "wt"]))
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, hp=0.4, wt=0.3")
         result = model.find_power(
             sample_size=100,
@@ -729,7 +760,7 @@ class TestCarsOriginColumn:
     def test_origin_with_cyl_mixed(self, cars_data):
         """String + numeric factors together."""
         model = MCPower("mpg = origin + cyl")
-        model.upload_data(cars_data[["origin", "cyl"]])
+        model.upload_data(_select(cars_data, ["origin", "cyl"]))
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, cyl[6]=0.2, cyl[8]=0.4")
         model.apply()
 
@@ -739,7 +770,7 @@ class TestCarsOriginColumn:
     def test_origin_strict_mode_power(self, cars_data):
         """String factor works in strict correlation mode with find_power."""
         model = MCPower("mpg = origin")
-        model.upload_data(cars_data[["origin"]], preserve_correlation="strict")
+        model.upload_data(_select(cars_data, ["origin"]), preserve_correlation="strict")
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.5")
         result = model.find_power(
             sample_size=60,
@@ -752,7 +783,7 @@ class TestCarsOriginColumn:
     def test_origin_no_mode_power(self, cars_data):
         """String factor works in no correlation mode with find_power."""
         model = MCPower("mpg = origin + hp")
-        model.upload_data(cars_data[["origin", "hp"]], preserve_correlation="no")
+        model.upload_data(_select(cars_data, ["origin", "hp"]), preserve_correlation="no")
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.5, hp=0.4")
         result = model.find_power(
             sample_size=100,
@@ -765,7 +796,7 @@ class TestCarsOriginColumn:
     def test_origin_posthoc(self, cars_data):
         """Post-hoc comparisons with string factor levels."""
         model = MCPower("mpg = origin")
-        model.upload_data(cars_data[["origin"]])
+        model.upload_data(_select(cars_data, ["origin"]))
         model.set_effects("origin[Japan]=0.3, origin[USA]=0.5")
         result = model.find_power(
             sample_size=100,
@@ -776,3 +807,43 @@ class TestCarsOriginColumn:
             progress_callback=False,
         )
         assert result is not None
+
+
+# ── DataFrame-specific tests (require pandas) ──────────────────────────
+
+
+@pytest.mark.skipif(not HAS_PANDAS, reason="requires pandas")
+class TestPandasDataFrame:
+    """Tests specifically for pandas DataFrame input."""
+
+    def test_dataframe_upload(self):
+        """Test that DataFrame input works correctly."""
+        df = pd.read_csv(CARS_CSV, index_col=0)
+        model = MCPower("mpg = hp + wt")
+        model.upload_data(df[["hp", "wt"]])
+        model.set_effects("hp=0.5, wt=0.3")
+        model.apply()
+
+        hp_pred = model._registry.get_predictor("hp")
+        assert hp_pred.var_type == "uploaded_data"
+
+    def test_dataframe_with_string_index_column(self):
+        """Test DataFrame read without index_col (has 'Unnamed: 0' string column)."""
+        df = pd.read_csv(CARS_CSV)  # No index_col=0 -> 'Unnamed: 0' is strings
+        model = MCPower("mpg = hp + wt")
+        model.upload_data(df)
+        model.set_effects("hp=0.5, wt=0.3")
+        model.apply()
+
+        hp_pred = model._registry.get_predictor("hp")
+        assert hp_pred.var_type == "uploaded_data"
+
+    def test_dataframe_find_power(self):
+        """Test find_power works end-to-end with DataFrame upload."""
+        df = pd.read_csv(CARS_CSV, index_col=0)
+        model = MCPower("mpg = hp + wt")
+        model.upload_data(df)
+        model.set_effects("hp=0.5, wt=0.3")
+        result = model.find_power(sample_size=100, return_results=True, print_results=False)
+        assert result is not None
+        assert "results" in result

@@ -16,8 +16,8 @@ class LookupTableManager:
 
     Tables are lazily loaded from disk (``tables/data/*.npz``) on first
     access and generated from scipy if the cache files are missing.
-    Both the Python backend and the C++ native backend consume the
-    same tables to guarantee identical distribution transforms.
+    The C++ native backend consumes these tables for distribution
+    transforms.
 
     Class constants:
         DIST_RESOLUTION: Number of points in each table (2048).
@@ -102,10 +102,10 @@ class LookupTableManager:
 
     def _generate_norm_cdf_table(self) -> None:
         """Generate normal CDF table for distribution transforms."""
-        from scipy.stats import norm
+        from mcpower.stats.distributions import generate_norm_cdf_table
 
+        norm_cdf = generate_norm_cdf_table(self.NORM_RANGE[0], self.NORM_RANGE[1], self.DIST_RESOLUTION)
         x_norm = np.linspace(*self.NORM_RANGE, self.DIST_RESOLUTION)
-        norm_cdf = norm.cdf(x_norm).astype(np.float64)
 
         self._tables["norm_cdf"] = norm_cdf
 
@@ -117,11 +117,10 @@ class LookupTableManager:
 
     def _generate_t3_ppf_table(self) -> None:
         """Generate t(3) PPF table for heavy-tailed transforms."""
-        from scipy.stats import t
+        from mcpower.stats.distributions import generate_t3_ppf_table
 
-        sqrt3 = np.sqrt(3)
         percentile_points = np.linspace(*self.PERCENTILE_RANGE, self.DIST_RESOLUTION)
-        t3_ppf = (t.ppf(percentile_points, 3) / sqrt3).astype(np.float64)
+        t3_ppf = generate_t3_ppf_table(self.PERCENTILE_RANGE[0], self.PERCENTILE_RANGE[1], self.DIST_RESOLUTION)
 
         self._tables["t3_ppf"] = t3_ppf
 

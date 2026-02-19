@@ -13,7 +13,7 @@ Usage:
 import argparse
 import numpy as np
 from pathlib import Path
-from scipy.stats import t as t_dist, norm
+from mcpower.stats.distributions import generate_norm_cdf_table, generate_t3_ppf_table
 
 
 def generate_norm_tables(resolution: int = 4096) -> tuple:
@@ -30,12 +30,11 @@ def generate_norm_tables(resolution: int = 4096) -> tuple:
 
     # CDF table
     x_range = np.linspace(-6, 6, resolution)
-    cdf_table = norm.cdf(x_range).astype(np.float64)
+    cdf_table = generate_norm_cdf_table(-6, 6, resolution)
 
     # t(3) PPF table for heavy-tailed transforms
-    sqrt3 = np.sqrt(3)
     percentile_range = np.linspace(0.001, 0.999, resolution)
-    t3_ppf_table = (t_dist.ppf(percentile_range, 3) / sqrt3).astype(np.float64)
+    t3_ppf_table = generate_t3_ppf_table(0.001, 0.999, resolution)
 
     return cdf_table, t3_ppf_table, x_range, percentile_range
 

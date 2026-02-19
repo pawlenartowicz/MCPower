@@ -275,7 +275,7 @@ class TestDataGenerationValidation:
         print(f"Large effect: power={power:.1f}%, {n_failed} failed")
 
     def test_small_effect_low_power(self):
-        """Small effect size should yield low power with minimum viable sample (5 params → 50 obs/cluster × 5 clusters)."""
+        """Small effect size should yield low power with small sample (50 obs/cluster × 5 clusters)."""
         model = MCPower("y ~ x + (1|cluster)")
         model.set_cluster("cluster", ICC=ICC_MODERATE, n_clusters=N_CLUSTERS_FEW)
         model.set_effects(f"x={EFFECT_SMALL}")  # Small effect

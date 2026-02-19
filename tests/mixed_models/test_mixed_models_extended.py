@@ -48,7 +48,6 @@ class TestExtremeICCValues:
         assert n_failed <= 1
         print(f"ICC=0.1: power={result['results']['individual_powers']['overall']:.1f}%, {n_failed} failed")
 
-    @pytest.mark.slow
     def test_very_high_icc(self):
         """ICC near 1 indicates almost all variance between clusters."""
         model = MCPower("y ~ x + (1|cluster)")
@@ -222,7 +221,6 @@ class TestBoundaryConditions:
 class TestEffectSizeVariations:
     """Test various effect size configurations."""
 
-    @pytest.mark.slow
     def test_zero_effect_null_hypothesis(self):
         """Test with zero effect (null hypothesis)."""
         model = MCPower("y ~ x + (1|cluster)")

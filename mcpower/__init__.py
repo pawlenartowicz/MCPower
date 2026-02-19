@@ -18,7 +18,7 @@ from importlib.metadata import version as _get_version
 
 from .backends import get_backend_info, set_backend
 from .model import MCPower
-from .progress import PrintReporter, ProgressReporter, TqdmReporter
+from .progress import PrintReporter, ProgressReporter, SimulationCancelled, TqdmReporter
 
 __version__ = _get_version("MCPower")
 __author__ = "Pawel Lenartowicz"
@@ -26,6 +26,7 @@ __email__ = "pawellenartowicz@europe.com"
 
 __all__ = [
     "MCPower",
+    "SimulationCancelled",
     "set_backend",
     "get_backend_info",
     "ProgressReporter",

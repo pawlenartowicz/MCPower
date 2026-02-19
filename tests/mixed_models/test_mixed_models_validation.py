@@ -160,7 +160,6 @@ class TestFixedEffectRecovery:
         print(f"True effect: {true_effect:.3f}, Estimated: {estimated_effect:.3f}")
 
 
-@pytest.mark.slow
 class TestTypeIErrorControl:
     """Verify Type I error rate (false positive rate) under null hypothesis."""
 
@@ -226,7 +225,6 @@ class TestPowerVsTheoretical:
         assert abs(empirical - theoretical) < THEORETICAL_POWER_TOLERANCE
         print(f"Theoretical: {theoretical:.1f}%, Empirical: {empirical:.1f}%")
 
-    @pytest.mark.slow
     def test_power_matches_theoretical_medium_icc(self):
         """Power should match theoretical calculation (ICC=0.3, 5 params → 50 obs/cluster × 30 clusters)."""
         effect = EFFECT_MEDIUM
@@ -297,7 +295,6 @@ class TestConvergenceDiagnostics:
 class TestPositiveControls:
     """Positive controls that SHOULD have high power."""
 
-    @pytest.mark.slow
     def test_large_effect_many_clusters_low_icc(self):
         """Ideal design: large effect, many clusters, low ICC."""
         model = MCPower("y ~ x + (1|cluster)")

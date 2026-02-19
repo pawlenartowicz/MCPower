@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = []
 
+# Unicode-aware identifier pattern: letter or underscore, then word characters
+_IDENT = r"[^\W\d]\w*"
+
 
 class _AssignmentParser:
     """Parses comma-separated ``name=value`` assignment strings.
@@ -335,7 +338,7 @@ def _parse_equation(equation: str) -> Tuple[str, str, List[Dict]]:
     seen_grouping_vars: set = set()
 
     # 1. Extract nested random intercepts: (1|A/B)
-    nested_pattern = r"\(\s*1\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*/\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
+    nested_pattern = rf"\(\s*1\s*\|\s*({_IDENT})\s*/\s*({_IDENT})\s*\)"
     for match in re.finditer(nested_pattern, formula_part):
         parent_var = match.group(1)
         child_var = match.group(2)
@@ -361,7 +364,7 @@ def _parse_equation(equation: str) -> Tuple[str, str, List[Dict]]:
     formula_part = re.sub(nested_pattern, "", formula_part)
 
     # 2. Extract random slopes: (1 + var1 + var2 | group)
-    slope_pattern = r"\(\s*1\s*\+\s*([^|]+?)\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
+    slope_pattern = rf"\(\s*1\s*\+\s*([^|]+?)\s*\|\s*({_IDENT})\s*\)"
     for match in re.finditer(slope_pattern, formula_part):
         slope_vars_str = match.group(1)
         grouping_var = match.group(2)
@@ -385,7 +388,7 @@ def _parse_equation(equation: str) -> Tuple[str, str, List[Dict]]:
     formula_part = re.sub(slope_pattern, "", formula_part)
 
     # 3. Extract random intercepts: (1|var)
-    intercept_pattern = r"\(\s*1\s*\|\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\)"
+    intercept_pattern = rf"\(\s*1\s*\|\s*({_IDENT})\s*\)"
     for match in re.finditer(intercept_pattern, formula_part):
         grouping_var = match.group(1)
         if grouping_var in seen_grouping_vars:
@@ -436,7 +439,7 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
             continue
 
         if "*" in term or ":" in term:
-            interaction_vars = re.findall(r"[a-zA-Z][a-zA-Z0-9_]*", term)
+            interaction_vars = re.findall(_IDENT, term)
 
             # Add individual variables
             for var in interaction_vars:
@@ -483,7 +486,7 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
                     effect_counter += 1
         else:
             # Main effect term
-            variables_in_term = re.findall(r"[a-zA-Z][a-zA-Z0-9_]*", term)
+            variables_in_term = re.findall(_IDENT, term)
 
             for var in variables_in_term:
                 if var not in seen_variables:

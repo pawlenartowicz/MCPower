@@ -18,7 +18,6 @@ pytestmark = pytest.mark.skipif(not _joblib_available(), reason="joblib not inst
 class TestParallelExecution:
     """Test parallel execution for find_sample_size."""
 
-    @pytest.mark.slow
     def test_parallel_results_match_sequential(self, suppress_output):
         """Parallel and sequential find_sample_size produce identical power values."""
         from mcpower import MCPower

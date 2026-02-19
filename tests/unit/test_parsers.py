@@ -74,6 +74,33 @@ class TestParseEquation:
         with pytest.raises(ValueError, match="Duplicate random effect"):
             _parse_equation("y ~ x + (1|school) + (1|school)")
 
+    def test_unicode_variable_names(self):
+        from mcpower.utils.parsers import _parse_equation
+
+        dep, formula, random_effects = _parse_equation("résultat ~ données + âge")
+        assert dep == "résultat"
+        assert "données" in formula
+        assert "âge" in formula
+        assert random_effects == []
+
+    def test_unicode_random_effect(self):
+        from mcpower.utils.parsers import _parse_equation
+
+        dep, formula, random_effects = _parse_equation("y ~ x + (1|école)")
+        assert dep == "y"
+        assert len(random_effects) == 1
+        assert random_effects[0]["grouping_var"] == "école"
+
+    def test_unicode_interaction(self):
+        from mcpower.utils.parsers import _parse_equation, _parse_independent_variables
+
+        dep, formula, _ = _parse_equation("y = données * âge")
+        variables, effects = _parse_independent_variables(formula)
+        effect_names = [e["name"] for e in effects.values()]
+        assert "données" in effect_names
+        assert "âge" in effect_names
+        assert "données:âge" in effect_names
+
 
 class TestParseIndependentVariables:
     """Test _parse_independent_variables function."""
@@ -130,6 +157,21 @@ class TestParseIndependentVariables:
                 assert e["type"] == "main"
             else:
                 assert e["type"] == "interaction"
+
+    def test_unicode_main_effects(self):
+        from mcpower.utils.parsers import _parse_independent_variables
+
+        variables, effects = _parse_independent_variables("données + âge")
+        var_names = [v["name"] for v in variables.values()]
+        assert "données" in var_names
+        assert "âge" in var_names
+
+    def test_unicode_interaction(self):
+        from mcpower.utils.parsers import _parse_independent_variables
+
+        variables, effects = _parse_independent_variables("données:âge")
+        effect_names = [e["name"] for e in effects.values()]
+        assert "données:âge" in effect_names
 
 
 class TestAssignmentParser:

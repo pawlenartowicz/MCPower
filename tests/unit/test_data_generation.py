@@ -5,85 +5,92 @@ Tests for data generation utilities.
 import numpy as np
 
 
+def _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed):
+    """Helper: call NativeBackend.generate_X with proper dtypes."""
+    from mcpower.backends.native import NativeBackend
+
+    backend = NativeBackend()
+    return backend.generate_X(
+        n_samples,
+        n_vars,
+        np.ascontiguousarray(corr, dtype=np.float64),
+        np.ascontiguousarray(var_types, dtype=np.int32),
+        np.ascontiguousarray(var_params, dtype=np.float64),
+        np.ascontiguousarray(upload_normal, dtype=np.float64),
+        np.ascontiguousarray(upload_data, dtype=np.float64),
+        seed,
+    )
+
+
 class TestGenerateX:
-    """Test _generate_X function."""
+    """Test generate_X via NativeBackend."""
 
     def test_basic_generation(self):
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 100
         n_vars = 3
         corr = np.eye(n_vars)
-        var_types = np.zeros(n_vars, dtype=np.int64)
+        var_types = np.zeros(n_vars, dtype=np.int32)
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         assert X.shape == (n_samples, n_vars)
 
     def test_reproducibility_with_seed(self):
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 50
         n_vars = 2
         corr = np.eye(n_vars)
-        var_types = np.zeros(n_vars, dtype=np.int64)
+        var_types = np.zeros(n_vars, dtype=np.int32)
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X1 = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
-        X2 = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X1 = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X2 = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         assert np.allclose(X1, X2)
 
     def test_different_seeds(self):
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 50
         n_vars = 2
         corr = np.eye(n_vars)
-        var_types = np.zeros(n_vars, dtype=np.int64)
+        var_types = np.zeros(n_vars, dtype=np.int32)
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X1 = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
-        X2 = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=123)
+        X1 = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X2 = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=123)
 
         assert not np.allclose(X1, X2)
 
     def test_correlation_structure(self):
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 5000  # Large sample for correlation estimation
         n_vars = 2
         target_corr = np.array([[1.0, 0.7], [0.7, 1.0]])
-        var_types = np.zeros(n_vars, dtype=np.int64)
+        var_types = np.zeros(n_vars, dtype=np.int32)
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, target_corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, target_corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         # Empirical correlation should be close to target
         empirical_corr = np.corrcoef(X.T)
         assert abs(empirical_corr[0, 1] - 0.7) < 0.05
 
     def test_binary_variable(self):
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 1000
         n_vars = 1
         corr = np.eye(n_vars)
-        var_types = np.array([1], dtype=np.int64)  # binary
+        var_types = np.array([1], dtype=np.int32)  # binary
         var_params = np.array([0.3], dtype=np.float64)  # 30% proportion
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         # Binary variables are standardized, so check for exactly 2 unique values
         unique_vals = np.unique(X)
@@ -201,20 +208,18 @@ class TestCreateUploadedLookupTables:
 
 
 class TestDistributionTypes:
-    """Test different distribution types."""
+    """Test different distribution types via NativeBackend."""
 
     def test_normal_distribution(self):
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 5000
         n_vars = 1
         corr = np.eye(n_vars)
-        var_types = np.array([0], dtype=np.int64)  # normal
+        var_types = np.array([0], dtype=np.int32)  # normal
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         # Should be approximately standard normal
         assert abs(np.mean(X)) < 0.1
@@ -223,33 +228,29 @@ class TestDistributionTypes:
     def test_right_skewed_distribution(self):
         from scipy.stats import skew
 
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 5000
         n_vars = 1
         corr = np.eye(n_vars)
-        var_types = np.array([2], dtype=np.int64)  # right_skewed
+        var_types = np.array([2], dtype=np.int32)  # right_skewed
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         # Should have positive skewness
         assert skew(X.flatten()) > 0.5
 
     def test_uniform_distribution(self):
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 5000
         n_vars = 1
         corr = np.eye(n_vars)
-        var_types = np.array([5], dtype=np.int64)  # uniform
+        var_types = np.array([5], dtype=np.int32)  # uniform
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         # Uniform should have values roughly evenly distributed
         # Skewness should be near zero
@@ -260,17 +261,15 @@ class TestDistributionTypes:
     def test_left_skewed_distribution(self):
         from scipy.stats import skew
 
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 5000
         n_vars = 1
         corr = np.eye(n_vars)
-        var_types = np.array([3], dtype=np.int64)  # left_skewed
+        var_types = np.array([3], dtype=np.int32)  # left_skewed
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         # Should have negative skewness
         assert skew(X.flatten()) < -0.5
@@ -278,23 +277,21 @@ class TestDistributionTypes:
     def test_high_kurtosis_distribution(self):
         from scipy.stats import kurtosis
 
-        from mcpower.stats.data_generation import _generate_X
-
         n_samples = 5000
         n_vars = 1
         corr = np.eye(n_vars)
-        var_types = np.array([4], dtype=np.int64)  # high_kurtosis (t(3))
+        var_types = np.array([4], dtype=np.int32)  # high_kurtosis (t(3))
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
 
         # t(3)/sqrt(3) should have higher kurtosis than normal (excess kurtosis > 0)
         assert kurtosis(X.flatten()) > 1.0
 
     def test_uploaded_data_distribution(self):
-        from mcpower.stats.data_generation import _generate_X, create_uploaded_lookup_tables
+        from mcpower.stats.data_generation import create_uploaded_lookup_tables
 
         np.random.seed(42)
         # Create uploaded data with known shape
@@ -304,30 +301,14 @@ class TestDistributionTypes:
         n_samples = 500
         n_vars = 1
         corr = np.eye(n_vars)
-        var_types = np.array([99], dtype=np.int64)  # uploaded_data
+        var_types = np.array([99], dtype=np.int32)  # uploaded_data
         var_params = np.zeros(n_vars, dtype=np.float64)
 
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, normal_vals, uploaded_vals, seed=42)
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, normal_vals, uploaded_vals, seed=42)
 
         assert X.shape == (n_samples, n_vars)
         # Values should not all be identical
         assert np.std(X) > 0
-
-    def test_unknown_distribution_type_returns_copy(self):
-        from mcpower.stats.data_generation import _generate_X
-
-        n_samples = 100
-        n_vars = 1
-        corr = np.eye(n_vars)
-        var_types = np.array([77], dtype=np.int64)  # unknown type
-        var_params = np.zeros(n_vars, dtype=np.float64)
-        upload_normal = np.zeros((2, 2))
-        upload_data = np.zeros((2, 2))
-
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
-
-        # Should still return data (falls through to default copy)
-        assert X.shape == (n_samples, n_vars)
 
 
 class TestGenerateClusterEffects:
@@ -388,41 +369,18 @@ class TestGenerateClusterEffects:
 
 
 class TestCholeskyEdgeCases:
-    """Test Cholesky decomposition fallback in _generate_X_core."""
+    """Test Cholesky edge cases in C++ generate_X."""
 
-    def test_near_singular_matrix_fallback(self):
-        from mcpower.stats.data_generation import _generate_X
-
+    def test_near_singular_matrix(self):
         # Near-singular correlation matrix
         corr = np.array([[1.0, 0.999], [0.999, 1.0]])
         n_samples = 100
         n_vars = 2
-        var_types = np.zeros(n_vars, dtype=np.int64)
+        var_types = np.zeros(n_vars, dtype=np.int32)
         var_params = np.zeros(n_vars, dtype=np.float64)
         upload_normal = np.zeros((2, 2))
         upload_data = np.zeros((2, 2))
 
-        # Should not raise — uses eigenvalue repair fallback
-        X = _generate_X(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
+        # Should not raise
+        X = _generate_X_via_backend(n_samples, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
         assert X.shape == (n_samples, n_vars)
-
-    def test_negative_eigenvalue_repair(self):
-        from mcpower.stats.data_generation import _generate_X
-
-        # Construct a matrix that is NOT positive semi-definite
-        corr = np.array(
-            [
-                [1.0, 0.9, 0.9],
-                [0.9, 1.0, -0.9],
-                [0.9, -0.9, 1.0],
-            ]
-        )
-        n_vars = 3
-        var_types = np.zeros(n_vars, dtype=np.int64)
-        var_params = np.zeros(n_vars, dtype=np.float64)
-        upload_normal = np.zeros((2, 2))
-        upload_data = np.zeros((2, 2))
-
-        # The eigenvalue fallback should handle this
-        X = _generate_X(100, n_vars, corr, var_types, var_params, upload_normal, upload_data, seed=42)
-        assert X.shape == (100, n_vars)

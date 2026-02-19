@@ -42,7 +42,6 @@ def _make_null_lme(equation, n_clusters, icc, n_sims=LME_N_SIMS_BENCHMARK, alpha
     return m
 
 
-@pytest.mark.slow
 class TestLMETypeIErrorControl:
     """Under H0 (all fixed effects = 0), rejection rate must equal alpha."""
 
@@ -110,7 +109,6 @@ class TestLMETypeIErrorControl:
         )
 
 
-@pytest.mark.slow
 class TestLMEAlphaCalibration:
     """Rejection rate tracks the nominal alpha across levels."""
 

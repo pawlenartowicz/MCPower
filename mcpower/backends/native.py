@@ -21,7 +21,7 @@ class NativeBackend:
     """
     C++ compute backend using pybind11 bindings.
 
-    Provides ~10-50x speedup over Python/Numba implementations.
+    Provides high-performance implementations of the core algorithms.
     """
 
     def __init__(self):
@@ -203,6 +203,128 @@ class NativeBackend:
             correction_z_crits,
             correction_method,
             warm_lambda_sq,
+        )
+
+    def lme_analysis_general(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        Z: np.ndarray,
+        cluster_ids: np.ndarray,
+        n_clusters: int,
+        q: int,
+        target_indices: np.ndarray,
+        chi2_crit: float,
+        z_crit: float,
+        correction_z_crits: np.ndarray,
+        correction_method: int,
+        warm_theta: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Run LME analysis for random slopes (q>1).
+
+        Args:
+            X: Design matrix (n_samples, n_features), no intercept
+            y: Response vector (n_samples,)
+            Z: Random effects design matrix (n_samples, q)
+            cluster_ids: Cluster membership (n_samples,)
+            n_clusters: Number of clusters
+            q: Random effects dimension
+            target_indices: Indices of coefficients to test
+            chi2_crit: Precomputed chi-squared critical value
+            z_crit: Precomputed z critical value
+            correction_z_crits: Precomputed correction critical values
+            correction_method: 0=none, 1=Bonferroni, 2=FDR, 3=Holm
+            warm_theta: Warm start theta (empty for cold start)
+
+        Returns:
+            Array: [f_sig, uncorrected..., corrected..., wald_flag]
+            or empty array on failure
+        """
+        X = np.ascontiguousarray(X, dtype=np.float64)
+        y = np.ascontiguousarray(y, dtype=np.float64)
+        Z = np.ascontiguousarray(Z, dtype=np.float64)
+        cluster_ids = np.ascontiguousarray(cluster_ids, dtype=np.int32)
+        target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
+        correction_z_crits = np.ascontiguousarray(correction_z_crits, dtype=np.float64)
+        warm_theta = np.ascontiguousarray(warm_theta, dtype=np.float64)
+
+        return mcpower_native.lme_analysis_general(  # type: ignore[no-any-return]
+            X,
+            y,
+            Z,
+            cluster_ids,
+            n_clusters,
+            q,
+            target_indices,
+            chi2_crit,
+            z_crit,
+            correction_z_crits,
+            correction_method,
+            warm_theta,
+        )
+
+    def lme_analysis_nested(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        parent_ids: np.ndarray,
+        child_ids: np.ndarray,
+        K_parent: int,
+        K_child: int,
+        child_to_parent: np.ndarray,
+        target_indices: np.ndarray,
+        chi2_crit: float,
+        z_crit: float,
+        correction_z_crits: np.ndarray,
+        correction_method: int,
+        warm_theta: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Run LME analysis for nested random intercepts.
+
+        Args:
+            X: Design matrix (n_samples, n_features), no intercept
+            y: Response vector (n_samples,)
+            parent_ids: Parent cluster membership (n_samples,)
+            child_ids: Child cluster membership (n_samples,)
+            K_parent: Number of parent clusters
+            K_child: Number of child clusters
+            child_to_parent: Mapping child -> parent (K_child,)
+            target_indices: Indices of coefficients to test
+            chi2_crit: Precomputed chi-squared critical value
+            z_crit: Precomputed z critical value
+            correction_z_crits: Precomputed correction critical values
+            correction_method: 0=none, 1=Bonferroni, 2=FDR, 3=Holm
+            warm_theta: Warm start [theta_parent, theta_child] (empty for cold start)
+
+        Returns:
+            Array: [f_sig, uncorrected..., corrected..., wald_flag]
+            or empty array on failure
+        """
+        X = np.ascontiguousarray(X, dtype=np.float64)
+        y = np.ascontiguousarray(y, dtype=np.float64)
+        parent_ids = np.ascontiguousarray(parent_ids, dtype=np.int32)
+        child_ids = np.ascontiguousarray(child_ids, dtype=np.int32)
+        child_to_parent = np.ascontiguousarray(child_to_parent, dtype=np.int32)
+        target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
+        correction_z_crits = np.ascontiguousarray(correction_z_crits, dtype=np.float64)
+        warm_theta = np.ascontiguousarray(warm_theta, dtype=np.float64)
+
+        return mcpower_native.lme_analysis_nested(  # type: ignore[no-any-return]
+            X,
+            y,
+            parent_ids,
+            child_ids,
+            K_parent,
+            K_child,
+            child_to_parent,
+            target_indices,
+            chi2_crit,
+            z_crit,
+            correction_z_crits,
+            correction_method,
+            warm_theta,
         )
 
 

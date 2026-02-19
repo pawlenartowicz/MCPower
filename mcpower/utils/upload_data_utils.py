@@ -52,6 +52,11 @@ def normalize_upload_input(
     if isinstance(data, dict):
         col_names = list(data.keys())
         arrays = [np.asarray(data[col]) for col in col_names]
+        # Cast to object dtype when any column contains strings, so that
+        # downstream code (which checks for object dtype) can detect and
+        # encode string columns.  This matches pandas DataFrame.values behavior.
+        if any(arr.dtype.kind in ("U", "S", "O") for arr in arrays):
+            arrays = [arr.astype(object) for arr in arrays]
         return np.column_stack(arrays), col_names
 
     # --- list / numpy array -------------------------------------------------

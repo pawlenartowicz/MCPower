@@ -345,9 +345,10 @@ def _validate_test_formula(test_formula: str, available_variables: List[str]) ->
         return _ValidationResult(False, errors, [])
 
     try:
-        # Extract all variable names from formula
-        # Matches: word characters (letters, digits, underscore)
-        variables_in_formula = set(re.findall(r"[a-zA-Z][a-zA-Z0-9_]*", test_formula))
+        # Extract all variable names from formula (Unicode-aware)
+        from mcpower.utils.parsers import _IDENT
+
+        variables_in_formula = set(re.findall(_IDENT, test_formula))
 
         if not variables_in_formula:
             errors.append(f"No variables found in test_formula: '{test_formula}'")
@@ -471,11 +472,8 @@ def _validate_cluster_config(
 
         # cluster_size validation
         if cluster_size is not None:
-            if not isinstance(cluster_size, int) or cluster_size < 15:
-                errors.append(
-                    f"cluster_size must be an integer >= 15 for reliable mixed model estimation. "
-                    f"Got {cluster_size}. Small cluster sizes cause convergence issues."
-                )
+            if not isinstance(cluster_size, int) or cluster_size < 5:
+                errors.append(f"cluster_size must be an integer >= 5 for reliable mixed model estimation. Got {cluster_size}.")
 
     return _ValidationResult(len(errors) == 0, errors, warnings)
 
@@ -494,7 +492,7 @@ def _validate_cluster_sample_size(
         cluster_size: Size per cluster (if fixed), or None (computed from sample_size)
 
     Returns:
-        ValidationResult with errors if observations per cluster < 15
+        ValidationResult with errors if observations per cluster < 5
     """
     errors: List[str] = []
     warnings: List[str] = []
@@ -506,72 +504,17 @@ def _validate_cluster_sample_size(
         effective_cluster_size = sample_size // n_clusters
 
     # Check minimum observations per cluster
-    if effective_cluster_size < 25:
+    if effective_cluster_size < 5:
         errors.append(
             f"Insufficient observations per cluster: {effective_cluster_size} (sample_size={sample_size}, "
-            f"n_clusters={n_clusters}). Need at least 25 observations per cluster for reliable "
-            f"mixed model estimation. Either increase sample_size to {n_clusters * 25} or reduce n_clusters to {sample_size // 25}."
+            f"n_clusters={n_clusters}). Need at least 5 observations per cluster for reliable "
+            f"mixed model estimation. Either increase sample_size to {n_clusters * 5} or reduce n_clusters to {sample_size // 5}."
         )
-
-    return _ValidationResult(len(errors) == 0, errors, warnings)
-
-
-def _validate_lme_model_complexity(
-    sample_size: int,
-    n_clusters: int,
-    n_fixed_effects: int,
-    cluster_size: Optional[int] = None,
-) -> _ValidationResult:
-    """
-    Validate cluster configuration provides sufficient data for model complexity.
-
-    Linear Mixed-Effects models require adequate observations per cluster relative
-    to parameters being estimated. Conservative guideline: 10 observations per parameter.
-
-    Parameters estimated:
-    - Fixed effects (including intercept)
-    - Random effect variance (1 per random intercept)
-    - Residual variance
-
-    Args:
-        sample_size: Total number of observations
-        n_clusters: Number of clusters
-        n_fixed_effects: Number of fixed effects (excluding intercept)
-        cluster_size: Size per cluster (if fixed), computed if None
-
-    Returns:
-        ValidationResult with warnings or errors
-    """
-    errors = []
-    warnings = []
-
-    # Compute effective cluster size
-    if cluster_size is not None:
-        effective_cluster_size = cluster_size
-    else:
-        effective_cluster_size = sample_size // n_clusters
-
-    # Estimate total parameters: intercept + fixed effects + random variance + residual variance
-    n_total_params = 1 + n_fixed_effects + 2
-
-    # Compute observations per parameter ratio
-    obs_per_param = effective_cluster_size / n_total_params
-
-    # Conservative threshold: 10 observations per parameter
-    # Warning threshold: 7 observations per parameter
-    if obs_per_param < 7:
-        errors.append(
-            f"Insufficient observations per parameter for mixed model: {obs_per_param:.1f} "
-            f"(cluster_size={effective_cluster_size}, parameters={n_total_params}). "
-            f"Need at least {10 * n_total_params} observations per cluster (10 per parameter). "
-            f"Either increase sample_size to {n_clusters * 10 * n_total_params} or reduce model complexity."
-        )
-    elif obs_per_param < 10:
+    elif effective_cluster_size < 10:
         warnings.append(
-            f"Low observations per parameter ratio: {obs_per_param:.1f} "
-            f"(cluster_size={effective_cluster_size}, parameters={n_total_params}). "
-            f"Recommended: at least {10 * n_total_params} observations per cluster for reliable estimation. "
-            f"This may cause convergence issues in mixed models."
+            f"Low observations per cluster: {effective_cluster_size} (sample_size={sample_size}, "
+            f"n_clusters={n_clusters}). Recommended: at least 10 observations per cluster. "
+            f"Small cluster sizes may cause convergence issues or biased variance estimates."
         )
 
     return _ValidationResult(len(errors) == 0, errors, warnings)

@@ -1,28 +1,20 @@
 """
 Backend abstraction for MCPower framework.
 
-This module provides a unified interface for compute backends,
-allowing seamless switching between Python, JIT, and C++ implementations.
+This module provides a unified interface for compute backends.
+The only supported backend is native C++ (compiled via pybind11).
 
-The automatic backend selection follows priority order:
-1. Native (C++) - fastest, requires compiled extensions
-2. JIT (Numba) - middle ground, requires numba
-3. Python - slowest, always available
-
-Users can override the selection via set_backend('c++' | 'jit' | 'python' | 'default').
+Users can override via set_backend('c++' | 'default') or pass a ComputeBackend instance.
 """
 
-from typing import Protocol, Union, runtime_checkable
+from typing import Optional, Protocol, Union, runtime_checkable
 
 import numpy as np
 
 
 @runtime_checkable
 class ComputeBackend(Protocol):
-    """Protocol defining the compute backend interface.
-
-    All backends (Python, JIT, C++) must implement these three methods.
-    """
+    """Protocol defining the compute backend interface."""
 
     def ols_analysis(
         self,
@@ -97,78 +89,31 @@ class ComputeBackend(Protocol):
 
 
 # Valid backend names for set_backend()
-_BACKEND_NAMES = {"default", "c++", "jit", "python"}
+_BACKEND_NAMES = {"default", "c++"}
 
 # Global backend instance
-_backend_instance = None
+_backend_instance: Optional[ComputeBackend] = None
 _backend_forced = False
-_warn_on_fallback = True
-
-
-def _create_backend(name: str) -> ComputeBackend:
-    """
-    Instantiate a backend by name.
-
-    Args:
-        name: 'c++', 'jit', or 'python'
-
-    Raises:
-        ImportError: If the requested backend is not available.
-    """
-    if name == "c++":
-        from .native import NativeBackend
-
-        return NativeBackend()
-
-    if name == "jit":
-        from .jit import JITBackend
-
-        return JITBackend()
-
-    if name == "python":
-        from .python import PythonBackend
-
-        return PythonBackend()
-
-    raise ValueError(f"Unknown backend: {name!r}")
-
-
-def _auto_select() -> ComputeBackend:
-    """Auto-select the best available backend: C++ > JIT > Python."""
-    for name in ("c++", "jit", "python"):
-        try:
-            backend = _create_backend(name)
-            if name == "python" and _warn_on_fallback:
-                import warnings
-
-                warnings.warn(
-                    "No native C++ or Numba backend found — using pure Python (slower). "
-                    "Install Numba for better performance: pip install MCPower[JIT]",
-                    stacklevel=3,
-                )
-            return backend
-        except ImportError:
-            continue
-
-    # Should never reach here — PythonBackend is always available
-    from .python import PythonBackend
-
-    return PythonBackend()
 
 
 def get_backend() -> ComputeBackend:
     """
     Get the active compute backend.
 
-    On first call, auto-selects the best available backend (C++ > JIT > Python).
+    On first call, instantiates the C++ native backend.
     Subsequent calls return the cached instance unless reset_backend() is called.
+
+    Raises:
+        ImportError: If the C++ extension is not compiled/installed.
     """
     global _backend_instance
 
     if _backend_instance is not None:
         return _backend_instance
 
-    _backend_instance = _auto_select()
+    from .native import NativeBackend
+
+    _backend_instance = NativeBackend()
     return _backend_instance
 
 
@@ -178,14 +123,12 @@ def set_backend(backend: Union[str, ComputeBackend]) -> None:
 
     Args:
         backend: One of:
-            - 'default' — auto-select best available (C++ > JIT > Python)
-            - 'c++'     — force native C++ backend
-            - 'jit'     — force Numba JIT backend
-            - 'python'  — force pure Python backend
+            - 'default' -- use native C++ backend
+            - 'c++'     -- force native C++ backend
             - A ComputeBackend instance
 
     Raises:
-        ImportError: If the requested backend is not available.
+        ImportError: If the C++ backend is not available.
         ValueError: If the string is not recognized.
     """
     global _backend_instance, _backend_forced
@@ -194,12 +137,11 @@ def set_backend(backend: Union[str, ComputeBackend]) -> None:
         name = backend.lower().strip()
         if name not in _BACKEND_NAMES:
             raise ValueError(f"Unknown backend {backend!r}. Choose from: {', '.join(sorted(_BACKEND_NAMES))}")
-        if name == "default":
-            _backend_instance = _auto_select()
-            _backend_forced = False
-        else:
-            _backend_instance = _create_backend(name)
-            _backend_forced = True
+
+        from .native import NativeBackend
+
+        _backend_instance = NativeBackend()
+        _backend_forced = name != "default"
     else:
         _backend_instance = backend
         _backend_forced = True
@@ -210,12 +152,6 @@ def reset_backend() -> None:
     global _backend_instance, _backend_forced
     _backend_instance = None
     _backend_forced = False
-
-
-def set_fallback_warning(enabled: bool = True) -> None:
-    """Enable or disable the warning emitted when falling back to pure Python."""
-    global _warn_on_fallback
-    _warn_on_fallback = enabled
 
 
 def get_backend_info() -> dict:
@@ -230,7 +166,6 @@ def get_backend_info() -> dict:
     return {
         "name": name,
         "is_native": name == "NativeBackend",
-        "is_jit": name == "JITBackend",
         "module": type(backend).__module__,
         "forced": _backend_forced,
     }
@@ -242,5 +177,4 @@ __all__ = [
     "set_backend",
     "reset_backend",
     "get_backend_info",
-    "set_fallback_warning",
 ]

@@ -186,6 +186,7 @@ class SimulationRunner:
                 analyze_func=analyze_func,
                 create_X_extended_func=create_X_extended_func,
                 sim_seed=sim_seed,
+                scenario_config=scenario_config,
             )
 
             if result is not None:
@@ -298,6 +299,7 @@ class SimulationRunner:
         analyze_func: Callable,
         create_X_extended_func: Callable,
         sim_seed: Optional[int] = None,
+        scenario_config: Optional[Dict] = None,
     ) -> Any:
         """
         Execute a single Monte Carlo simulation.
@@ -312,6 +314,7 @@ class SimulationRunner:
             analyze_func: Statistical analysis function
             create_X_extended_func: Design matrix extension function
             sim_seed: Random seed for this simulation
+            scenario_config: Optional scenario config for LME perturbations
 
         Returns:
             Tuple of (uncorrected_significant, corrected_significant) arrays,
@@ -399,6 +402,13 @@ class SimulationRunner:
                 # Generate factor variables (as dummy variables)
                 X_factors = _generate_factors(sample_size, metadata.factor_specs, sim_seed)
 
+            # Compute LME perturbations (ICC jitter, non-normal RE dist)
+            lme_perturbations = None
+            if metadata.cluster_specs and scenario_config is not None:
+                from ..core.scenarios import apply_lme_perturbations
+
+                lme_perturbations = apply_lme_perturbations(metadata.cluster_specs, scenario_config, sim_seed)
+
             # Generate cluster random effects (independent of upload mode)
             re_result = None  # Phase 2: random effects result for slopes/nesting
             if metadata.cluster_specs:
@@ -411,6 +421,7 @@ class SimulationRunner:
                         X_non_factors=X_non_factors,
                         non_factor_names=metadata.non_factor_names,
                         sim_seed=sim_seed,
+                        lme_perturbations=lme_perturbations,
                     )
                     X_cluster = re_result.intercept_columns
                 else:
@@ -420,6 +431,7 @@ class SimulationRunner:
                         sample_size=sample_size,
                         cluster_specs=metadata.cluster_specs,
                         sim_seed=sim_seed,
+                        lme_perturbations=lme_perturbations,
                     )
             else:
                 X_cluster = np.empty((sample_size, 0), dtype=float)
@@ -465,6 +477,12 @@ class SimulationRunner:
             # Phase 2: add random slope contributions to y
             if re_result is not None and not np.allclose(re_result.slope_contribution, 0):
                 y = y + re_result.slope_contribution
+
+            # Apply LME residual perturbations (non-normal residuals)
+            if metadata.cluster_specs and scenario_config is not None:
+                from ..core.scenarios import apply_lme_residual_perturbations
+
+                y = apply_lme_residual_perturbations(y, scenario_config, sim_seed)
 
             # Determine cluster IDs for the solver
             cluster_ids: Optional[np.ndarray]
@@ -578,6 +596,8 @@ class SimulationRunner:
             else:
                 return sim_significant, sim_significant_corrected, wald_flag
 
+        except ImportError:
+            raise  # Don't swallow missing-backend errors
         except Exception as e:
             if metadata.verbose:
                 return {"failed": True, "failure_reason": f"{type(e).__name__}: {str(e)}", "error_type": type(e).__name__, "sim_id": sim_id}
@@ -684,6 +704,9 @@ class SimulationMetadata:
         self.cluster_effect_indices = cluster_effect_indices or []
         self.factor_names = factor_names or []
         self.verbose = verbose
+
+        # LME scenario config (stored when scenario mode + cluster_specs)
+        self.lme_scenario_config: Optional[Dict] = None
 
         # Precomputed values for performance (Phase 2 optimizations)
         self.cluster_ids_template: Optional[np.ndarray] = None  # Precomputed cluster ID array
