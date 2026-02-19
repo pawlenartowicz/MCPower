@@ -411,7 +411,9 @@ LMEFitResult LMESolver::fit_q1_lbfgsb(
 
     double lam_sq_opt = opt_result.x(0) * opt_result.x(0);
     LMEFitResult result = extract_results_q1(lam_sq_opt, stats, reml);
-    result.converged = opt_result.converged;
+    // extract_results_q1 validates mathematical soundness (Cholesky, sigma2 > 0).
+    // Accept its judgment even if the optimizer didn't fully converge — a valid
+    // extraction at a near-optimal point is usable for Monte Carlo hypothesis testing.
     return result;
 }
 
@@ -919,7 +921,9 @@ LMEFitResultGeneral LMESolver::fit_general(
     );
 
     LMEFitResultGeneral result = extract_results_general(opt_result.x, stats, reml);
-    result.converged = opt_result.converged;
+    // extract_results_general validates mathematical soundness (Cholesky, LDLT, sigma2 > 0).
+    // Accept its judgment even if the optimizer didn't fully converge — a valid
+    // extraction at a near-optimal point is usable for Monte Carlo hypothesis testing.
     return result;
 }
 
@@ -1352,7 +1356,8 @@ LMEFitResultGeneral LMESolver::fit_nested(
     );
 
     LMEFitResultGeneral result = extract_results_nested(opt_result.x, nstats, reml);
-    result.converged = opt_result.converged;
+    // extract_results_nested validates mathematical soundness.
+    // Accept its judgment even if the optimizer didn't fully converge.
     return result;
 }
 

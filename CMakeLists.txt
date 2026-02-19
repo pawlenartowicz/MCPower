@@ -67,6 +67,12 @@ endif()
 # Fetch Boost.Math (header-only, for statistical distributions)
 # Only need headers — skip building Boost.Math's own targets
 include(FetchContent)
+
+# Allow FetchContent_Populate for header-only deps (avoid add_subdirectory)
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif()
+
 FetchContent_Declare(
     boost_math
     GIT_REPOSITORY https://github.com/boostorg/math.git
@@ -117,7 +123,8 @@ target_include_directories(mcpower_native PRIVATE
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(mcpower_native PRIVATE
         -O3
-        -ffast-math
+        -fno-math-errno
+        -fno-trapping-math
         -DNDEBUG
     )
     # Only use -march=native for local builds, not CI/cross-compilation
@@ -127,7 +134,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 elseif(MSVC)
     target_compile_options(mcpower_native PRIVATE
         /O2
-        /fp:fast
+        /fp:precise
         /DNDEBUG
     )
     target_compile_definitions(mcpower_native PRIVATE _USE_MATH_DEFINES)
