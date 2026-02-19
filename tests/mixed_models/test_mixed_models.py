@@ -80,7 +80,6 @@ class TestMixedModelsBasic:
 class TestMixedModelsConvergence:
     """Test convergence and retry strategy."""
 
-    @pytest.mark.slow
     def test_lme_convergence_with_small_clusters(self):
         """Test convergence with challenging scenario (5 params → 50 obs/cluster × 30 clusters)."""
         model = MCPower("y ~ x + (1|cluster)")
@@ -124,7 +123,7 @@ class TestMixedModelsVsOLS:
         model_ols.set_simulations(LME_N_SIMS_STANDARD)
         result_ols = model_ols.find_power(sample_size=100, return_results=True)
 
-        # LME path (proper clustering - conservative, 5 params → 50 obs/cluster × 5 clusters)
+        # LME path (proper clustering - 50 obs/cluster × 5 clusters)
         model_lme = MCPower("y ~ x + (1|cluster)")
         model_lme.set_cluster("cluster", ICC=ICC_MODERATE, n_clusters=N_CLUSTERS_FEW)
         model_lme.set_effects(f"x={EFFECT_MEDIUM}")
@@ -163,7 +162,6 @@ class TestMixedModelsIntegration:
         # With effect=0.5, n=600, 30 clusters, should have good power
         assert result["results"]["individual_powers"]["overall"] > 50
 
-    @pytest.mark.slow
     def test_mixed_model_with_correction_methods(self):
         """Test LME with different multiple comparison corrections."""
         corrections = [None, "bonferroni", "benjamini-hochberg", "holm"]
@@ -184,7 +182,6 @@ class TestMixedModelsIntegration:
             assert "results" in result
             assert result["results"]["individual_powers"]["overall"] >= 0
 
-    @pytest.mark.slow
     def test_mixed_model_find_sample_size(self):
         """Test find_sample_size with mixed models (5 params → 50 obs/cluster × 15 clusters)."""
         model = MCPower("y ~ x + (1|cluster)")
@@ -369,7 +366,6 @@ class TestMixedModelsCorrectionMethods:
             if test in powers_corr:
                 assert powers_corr[test] <= powers[test] + 5
 
-    @pytest.mark.slow
     def test_bonferroni_most_conservative(self):
         """Bonferroni should be more conservative than FDR."""
         model = MCPower("y ~ x1 + x2 + x3 + (1|cluster)")

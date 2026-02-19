@@ -28,7 +28,6 @@ def _quiet():
         yield
 
 
-@pytest.mark.slow
 class TestLMEAccuracyVsAnalytical:
     """
     Compare MC power estimates against exact analytical power for LME models.

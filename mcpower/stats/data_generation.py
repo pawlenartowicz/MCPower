@@ -100,7 +100,7 @@ def create_uploaded_lookup_tables(
         normal_values: (n_vars, n_samples) normal quantiles
         uploaded_values: (n_vars, n_samples) sorted empirical values
     """
-    from scipy.stats import norm
+    from mcpower.stats.distributions import norm_ppf_array
 
     n_samples, n_vars = data_matrix.shape
     normal_values = np.zeros((n_vars, n_samples))
@@ -112,7 +112,7 @@ def create_uploaded_lookup_tables(
         sorted_uploaded = np.sort(normalized)
 
         percentiles = np.linspace(1 / (n_samples + 1), n_samples / (n_samples + 1), n_samples)
-        normal_quantiles = norm.ppf(percentiles)
+        normal_quantiles = norm_ppf_array(percentiles)
 
         normal_values[var_idx] = normal_quantiles
         uploaded_values[var_idx] = sorted_uploaded
@@ -438,10 +438,47 @@ def bootstrap_uploaded_data(
     return X_non_factors, X_factors
 
 
+def _generate_non_normal_intercepts(
+    n_clusters: int,
+    tau: float,
+    dist: str,
+    df: int,
+    rng_state: Optional[np.random.RandomState] = None,
+) -> np.ndarray:
+    """Generate non-normal random intercepts for LME scenario perturbations.
+
+    Args:
+        n_clusters: Number of clusters.
+        tau: Standard deviation of the random intercept distribution.
+        dist: Distribution type (``"normal"``, ``"heavy_tailed"``, ``"skewed"``).
+        df: Degrees of freedom for t or chi-squared distribution.
+        rng_state: Optional ``RandomState`` for reproducibility. When ``None``,
+            uses the global numpy random state.
+
+    Returns:
+        1-D array of random intercepts with mean ≈ 0 and SD ≈ tau.
+    """
+    gen = rng_state if rng_state is not None else np.random
+
+    if dist == "heavy_tailed":
+        df = max(df, 3)
+        # t(df) has variance df/(df-2); scale so SD = tau
+        scale = tau / np.sqrt(df / (df - 2))
+        return np.asarray(gen.standard_t(df, size=n_clusters) * scale)
+    elif dist == "skewed":
+        df = max(df, 3)
+        # Shifted chi-squared: mean=0, SD=tau
+        raw = (gen.chisquare(df, size=n_clusters) - df) / np.sqrt(2 * df)
+        return np.asarray(raw * tau)
+    else:
+        return gen.normal(0, tau, size=n_clusters)
+
+
 def _generate_cluster_effects(
     sample_size: int,
     cluster_specs: Dict[str, Dict],
     sim_seed: Optional[int] = None,
+    lme_perturbations: Optional[Dict] = None,
 ) -> np.ndarray:
     """
     Generate cluster random effect columns for mixed model data.
@@ -451,10 +488,14 @@ def _generate_cluster_effects(
     2. Generate random intercepts b_i ~ N(0, tau²) for each cluster
     3. Create id_effect column where each observation gets its cluster's b_i
 
+    When *lme_perturbations* is provided, tau² is jittered and the random
+    effect distribution may be non-normal.
+
     Args:
         sample_size: Total number of observations (n_clusters * cluster_size)
         cluster_specs: Dict of {grouping_var: {n_clusters, cluster_size, tau_squared, ...}}
         sim_seed: Random seed
+        lme_perturbations: Optional dict from ``apply_lme_perturbations()``
 
     Returns:
         X_cluster: (sample_size, n_cluster_vars) array of random effect columns
@@ -465,7 +506,7 @@ def _generate_cluster_effects(
 
     columns = []
 
-    for _gv, spec in cluster_specs.items():
+    for gv, spec in cluster_specs.items():
         n_clusters = spec["n_clusters"]
         cluster_size = spec["cluster_size"]
         tau_sq = spec["tau_squared"]
@@ -474,9 +515,20 @@ def _generate_cluster_effects(
         if cluster_size is None:
             cluster_size = sample_size // n_clusters
 
-        # Generate random intercepts for each cluster
+        # Apply LME perturbations if present
+        if lme_perturbations is not None:
+            multiplier = lme_perturbations["tau_squared_multipliers"].get(gv, 1.0)
+            tau_sq = tau_sq * multiplier
+
         tau = np.sqrt(tau_sq)
-        random_intercepts = np.random.normal(0, tau, size=n_clusters)
+
+        # Generate random intercepts (possibly non-normal)
+        if lme_perturbations is not None:
+            re_dist = lme_perturbations.get("random_effect_dist", "normal")
+            re_df = lme_perturbations.get("random_effect_df", 5)
+            random_intercepts = _generate_non_normal_intercepts(n_clusters, tau, re_dist, re_df)
+        else:
+            random_intercepts = np.random.normal(0, tau, size=n_clusters)
 
         # Create id_effect column: repeat each cluster's intercept
         # cluster_id assignment: [0,0,...,0, 1,1,...,1, ..., K-1,K-1,...,K-1]
@@ -541,6 +593,7 @@ def _generate_random_effects(
     X_non_factors: np.ndarray,
     non_factor_names: List[str],
     sim_seed: Optional[int] = None,
+    lme_perturbations: Optional[Dict] = None,
 ) -> RandomEffectsResult:
     """Generate random effects for all grouping factors.
 
@@ -567,6 +620,8 @@ def _generate_random_effects(
             to locate slope variable columns in *X_non_factors*).
         sim_seed: Random seed (a derived seed ``sim_seed + 3`` is used
             to avoid collision with X generation).
+        lme_perturbations: Optional dict from ``apply_lme_perturbations()``
+            with ICC jitter multipliers and non-normal RE distribution params.
 
     Returns:
         A :class:`RandomEffectsResult` with intercept columns, slope
@@ -617,20 +672,57 @@ def _generate_random_effects(
         cluster_ids = _trim_or_pad(raw_ids, sample_size)
         cluster_ids_dict[gv] = cluster_ids
 
+        # Apply LME perturbations: ICC jitter on tau_squared
+        tau_sq = spec["tau_squared"]
+        if lme_perturbations is not None:
+            multiplier = lme_perturbations["tau_squared_multipliers"].get(gv, 1.0)
+            tau_sq = tau_sq * multiplier
+
         if q == 1:
             # --- Random intercept only ---
-            tau = np.sqrt(spec["tau_squared"])
-            random_intercepts = np.random.normal(0, tau, size=n_clusters)
+            tau = np.sqrt(tau_sq)
+            if lme_perturbations is not None:
+                re_dist = lme_perturbations.get("random_effect_dist", "normal")
+                re_df = lme_perturbations.get("random_effect_df", 5)
+                random_intercepts = _generate_non_normal_intercepts(n_clusters, tau, re_dist, re_df)
+            else:
+                random_intercepts = np.random.normal(0, tau, size=n_clusters)
             id_effect = _trim_or_pad(np.repeat(random_intercepts, cluster_size), sample_size)
             intercept_cols.append(id_effect)
 
         else:
             # --- Random slopes (q > 1) ---
-            G_matrix = spec["G_matrix"]
+            G_matrix = spec["G_matrix"].copy()
             slope_vars = spec.get("random_slope_vars", [])
 
+            # Apply ICC jitter to G_matrix intercept variance
+            if lme_perturbations is not None:
+                ratio = tau_sq / spec["tau_squared"] if spec["tau_squared"] > 0 else 1.0
+                # Scale intercept row/column of G by sqrt(ratio)
+                sqrt_ratio = np.sqrt(ratio)
+                G_matrix[0, :] *= sqrt_ratio
+                G_matrix[:, 0] *= sqrt_ratio
+
             # Draw correlated [b_int, b_slope1, ...] per cluster
-            b = np.random.multivariate_normal(np.zeros(q), G_matrix, size=n_clusters)
+            re_dist = lme_perturbations.get("random_effect_dist", "normal") if lme_perturbations else "normal"
+            re_df = lme_perturbations.get("random_effect_df", 5) if lme_perturbations else 5
+
+            if re_dist == "heavy_tailed" and lme_perturbations is not None:
+                # Multivariate t: MVN(0, G * (df-2)/df) × sqrt(df / chi2(df))
+                df = max(re_df, 3)
+                G_scaled = G_matrix * ((df - 2.0) / df)
+                b_normal = np.random.multivariate_normal(np.zeros(q), G_scaled, size=n_clusters)
+                chi2_samples = np.random.chisquare(df, size=n_clusters)
+                mixing = np.sqrt(df / chi2_samples)
+                b = b_normal * mixing[:, np.newaxis]
+            elif re_dist == "skewed" and lme_perturbations is not None:
+                # Independent skewed marginals via shifted chi-squared, scaled by Cholesky
+                df = max(re_df, 3)
+                L = np.linalg.cholesky(G_matrix)
+                raw = (np.random.chisquare(df, size=(n_clusters, q)) - df) / np.sqrt(2 * df)
+                b = raw @ L.T
+            else:
+                b = np.random.multivariate_normal(np.zeros(q), G_matrix, size=n_clusters)
 
             # Intercept component
             intercept_effect = _trim_or_pad(np.repeat(b[:, 0], cluster_size), sample_size)
@@ -668,11 +760,24 @@ def _generate_random_effects(
         if child_cluster_size is None:
             child_cluster_size = sample_size // K_child
 
-        tau_parent = np.sqrt(p_spec["tau_squared"])
-        tau_child = np.sqrt(c_spec["tau_squared"])
+        tau_sq_parent = p_spec["tau_squared"]
+        tau_sq_child = c_spec["tau_squared"]
 
-        b_parent = np.random.normal(0, tau_parent, size=K_parent)
-        b_child = np.random.normal(0, tau_child, size=K_child)
+        if lme_perturbations is not None:
+            tau_sq_parent *= lme_perturbations["tau_squared_multipliers"].get(p_gv, 1.0)
+            tau_sq_child *= lme_perturbations["tau_squared_multipliers"].get(c_gv, 1.0)
+
+        tau_parent = np.sqrt(tau_sq_parent)
+        tau_child = np.sqrt(tau_sq_child)
+
+        if lme_perturbations is not None:
+            re_dist = lme_perturbations.get("random_effect_dist", "normal")
+            re_df = lme_perturbations.get("random_effect_df", 5)
+            b_parent = _generate_non_normal_intercepts(K_parent, tau_parent, re_dist, re_df)
+            b_child = _generate_non_normal_intercepts(K_child, tau_child, re_dist, re_df)
+        else:
+            b_parent = np.random.normal(0, tau_parent, size=K_parent)
+            b_child = np.random.normal(0, tau_child, size=K_child)
 
         # IDs: parent_ids assigns each observation to a parent cluster,
         # child_ids assigns each observation to a child cluster.

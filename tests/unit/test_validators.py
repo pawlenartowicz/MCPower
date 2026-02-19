@@ -524,24 +524,41 @@ class TestValidateClusterSampleSize:
     def test_sufficient_cluster_size(self):
         from mcpower.utils.validators import _validate_cluster_sample_size
 
-        # 1000 / 10 = 100 obs per cluster >= 25
+        # 1000 / 10 = 100 obs per cluster >= 10
         result = _validate_cluster_sample_size(1000, 10, None)
         assert result.is_valid
+        assert len(result.warnings) == 0
 
     def test_insufficient_cluster_size(self):
         from mcpower.utils.validators import _validate_cluster_sample_size
 
-        # 100 / 10 = 10 obs per cluster < 25
-        result = _validate_cluster_sample_size(100, 10, None)
+        # 40 / 10 = 4 obs per cluster < 5
+        result = _validate_cluster_sample_size(40, 10, None)
         assert not result.is_valid
-        assert "25" in result.errors[0]
+        assert "5" in result.errors[0]
 
-    def test_boundary_exact_25(self):
+    def test_warning_cluster_size(self):
         from mcpower.utils.validators import _validate_cluster_sample_size
 
-        # 250 / 10 = 25 — exactly at threshold
-        result = _validate_cluster_sample_size(250, 10, None)
+        # 70 / 10 = 7 obs per cluster — warning band (5-10)
+        result = _validate_cluster_sample_size(70, 10, None)
         assert result.is_valid
+        assert len(result.warnings) > 0
+
+    def test_boundary_exact_5(self):
+        from mcpower.utils.validators import _validate_cluster_sample_size
+
+        # 50 / 10 = 5 — exactly at error threshold
+        result = _validate_cluster_sample_size(50, 10, None)
+        assert result.is_valid
+
+    def test_boundary_exact_10_no_warning(self):
+        from mcpower.utils.validators import _validate_cluster_sample_size
+
+        # 100 / 10 = 10 — at warning upper bound, no warning
+        result = _validate_cluster_sample_size(100, 10, None)
+        assert result.is_valid
+        assert len(result.warnings) == 0
 
     def test_fixed_cluster_size(self):
         from mcpower.utils.validators import _validate_cluster_sample_size
@@ -553,46 +570,5 @@ class TestValidateClusterSampleSize:
     def test_fixed_cluster_size_insufficient(self):
         from mcpower.utils.validators import _validate_cluster_sample_size
 
-        result = _validate_cluster_sample_size(300, 10, 20)
+        result = _validate_cluster_sample_size(300, 10, 4)
         assert not result.is_valid
-
-
-class TestValidateLmeModelComplexity:
-    """Test _validate_lme_model_complexity function."""
-
-    def test_sufficient_obs_per_param(self):
-        from mcpower.utils.validators import _validate_lme_model_complexity
-
-        # 2 fixed effects → params = 1 + 2 + 2 = 5; cluster_size = 1000/10 = 100; 100/5 = 20 > 10
-        result = _validate_lme_model_complexity(1000, 10, 2)
-        assert result.is_valid
-        assert len(result.warnings) == 0
-
-    def test_warning_zone(self):
-        from mcpower.utils.validators import _validate_lme_model_complexity
-
-        # 2 fixed effects → params = 5; cluster_size = 40; 40/5 = 8 → warning (7 < 8 < 10)
-        result = _validate_lme_model_complexity(400, 10, 2)
-        assert result.is_valid  # is_valid but has warnings
-        assert len(result.warnings) > 0
-
-    def test_error_zone(self):
-        from mcpower.utils.validators import _validate_lme_model_complexity
-
-        # 2 fixed effects → params = 5; cluster_size = 30; 30/5 = 6 < 7 → error
-        result = _validate_lme_model_complexity(300, 10, 2)
-        assert not result.is_valid
-
-    def test_many_fixed_effects(self):
-        from mcpower.utils.validators import _validate_lme_model_complexity
-
-        # 10 fixed effects → params = 1 + 10 + 2 = 13; cluster_size = 200/10 = 20; 20/13 ≈ 1.5 < 7
-        result = _validate_lme_model_complexity(200, 10, 10)
-        assert not result.is_valid
-
-    def test_with_explicit_cluster_size(self):
-        from mcpower.utils.validators import _validate_lme_model_complexity
-
-        # Explicit cluster_size=100, 2 fixed → 5 params, 100/5 = 20 > 10
-        result = _validate_lme_model_complexity(500, 5, 2, cluster_size=100)
-        assert result.is_valid

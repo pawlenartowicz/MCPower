@@ -39,14 +39,9 @@ jobs:
         fi
         echo "Versions match."
 
-  test:
-    name: Run test suite
-    needs: [version-check]
-    uses: ./.github/workflows/tests.yml
-
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}
-    needs: [test]
+    name: Build & test wheels on ${{ matrix.os }}
+    needs: [version-check]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -91,7 +86,7 @@ jobs:
 
   build_sdist:
     name: Build source distribution
-    needs: [test]
+    needs: [version-check]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -142,9 +137,17 @@ jobs:
       run: |
         TAG_VERSION="${GITHUB_REF#refs/tags/v}"
         echo "Waiting for TestPyPI to index version $TAG_VERSION..."
-        sleep 30
-        python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "MCPower==$TAG_VERSION"
-        python -c "import mcpower; print(f'TestPyPI install OK: {mcpower.__version__}')"
+        for i in 1 2 3 4 5; do
+          sleep 30
+          echo "Attempt $i: installing MCPower==$TAG_VERSION from TestPyPI..."
+          if python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "MCPower==$TAG_VERSION"; then
+            python -c "import mcpower; print(f'TestPyPI install OK: {mcpower.__version__}')"
+            exit 0
+          fi
+          echo "Not yet available, retrying..."
+        done
+        echo "::error::MCPower==$TAG_VERSION not found on TestPyPI after 5 attempts"
+        exit 1
 
   publish-pypi:
     name: Publish to PyPI

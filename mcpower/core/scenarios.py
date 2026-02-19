@@ -23,6 +23,13 @@ DEFAULT_SCENARIO_CONFIG = {
         "correlation_noise_sd": 0.2,
         "distribution_change_prob": 0.3,
         "new_distributions": ["right_skewed", "left_skewed", "uniform"],
+        # LME-specific keys (only consumed when cluster_specs present)
+        "random_effect_dist": "heavy_tailed",
+        "random_effect_df": 5,
+        "icc_noise_sd": 0.15,
+        "residual_dist": "heavy_tailed",
+        "residual_change_prob": 0.3,
+        "residual_df": 10,
     },
     "doomer": {
         "heterogeneity": 0.4,
@@ -30,6 +37,13 @@ DEFAULT_SCENARIO_CONFIG = {
         "correlation_noise_sd": 0.4,
         "distribution_change_prob": 0.6,
         "new_distributions": ["right_skewed", "left_skewed", "uniform"],
+        # LME-specific keys (only consumed when cluster_specs present)
+        "random_effect_dist": "heavy_tailed",
+        "random_effect_df": 3,
+        "icc_noise_sd": 0.30,
+        "residual_dist": "heavy_tailed",
+        "residual_change_prob": 0.8,
+        "residual_df": 5,
     },
 }
 
@@ -237,6 +251,123 @@ class ScenarioRunner:
                     )
 
 
+def apply_lme_perturbations(
+    cluster_specs: Dict,
+    scenario_config: Dict,
+    sim_seed: Optional[int],
+) -> Optional[Dict]:
+    """Compute per-simulation LME perturbations.
+
+    Returns a dict consumed by ``_generate_cluster_effects`` /
+    ``_generate_random_effects``, or ``None`` when no LME keys are present.
+
+    The returned dict contains:
+
+    - ``tau_squared_multipliers``: ``{grouping_var: float}`` — multiplicative
+      jitter on τ² via ``exp(N(0, icc_noise_sd))``.
+    - ``random_effect_dist`` / ``random_effect_df``: passthrough from config.
+
+    Args:
+        cluster_specs: Dict of cluster specifications.
+        scenario_config: Scenario parameters with LME keys.
+        sim_seed: Random seed for reproducibility.
+
+    Returns:
+        Perturbation dict or ``None`` if no LME keys are active.
+    """
+    if not cluster_specs:
+        return None
+
+    icc_noise_sd = scenario_config.get("icc_noise_sd", 0.0)
+    re_dist = scenario_config.get("random_effect_dist", "normal")
+    re_df = scenario_config.get("random_effect_df", 5)
+
+    # If all LME perturbations are effectively off, return None
+    if icc_noise_sd == 0.0 and re_dist == "normal":
+        return None
+
+    rng = np.random.RandomState(sim_seed + 5000 if sim_seed is not None else None)
+
+    # ICC jitter: multiplicative noise on tau_squared per grouping variable
+    tau_squared_multipliers: Dict[str, float] = {}
+    if icc_noise_sd > 0:
+        for gv in cluster_specs:
+            tau_squared_multipliers[gv] = float(np.exp(rng.normal(0, icc_noise_sd)))
+    else:
+        for gv in cluster_specs:
+            tau_squared_multipliers[gv] = 1.0
+
+    return {
+        "tau_squared_multipliers": tau_squared_multipliers,
+        "random_effect_dist": re_dist,
+        "random_effect_df": re_df,
+    }
+
+
+def apply_lme_residual_perturbations(
+    y: np.ndarray,
+    scenario_config: Dict,
+    sim_seed: Optional[int],
+) -> np.ndarray:
+    """Replace normal residuals with non-normal if coin flip succeeds.
+
+    For each simulation, independently flips a coin (probability
+    ``residual_change_prob``) to decide whether residuals are replaced.
+    If activated, reproduces the original N(0,1) errors via the known
+    seed, generates replacements from t(df) or shifted χ², and applies
+    the correction ``y += (new_error - original_error)``.
+
+    Args:
+        y: Dependent variable array (modified in-place).
+        scenario_config: Scenario parameters with residual keys.
+        sim_seed: Random seed for reproducibility.
+
+    Returns:
+        The (possibly modified) dependent variable array.
+    """
+    residual_dist = scenario_config.get("residual_dist", "normal")
+    residual_change_prob = scenario_config.get("residual_change_prob", 0.0)
+    residual_df = scenario_config.get("residual_df", 10)
+
+    if residual_dist == "normal" or residual_change_prob <= 0.0:
+        return y
+
+    rng = np.random.RandomState(sim_seed + 6000 if sim_seed is not None else None)
+
+    # Coin flip: should this simulation have non-normal residuals?
+    if rng.random() > residual_change_prob:
+        return y
+
+    n = len(y)
+
+    # Reproduce the original N(0,1) errors using the same seed as generate_y
+    # generate_y uses sim_seed + 2 for error generation
+    original_rng = np.random.RandomState(sim_seed + 2 if sim_seed is not None else None)
+    original_errors = original_rng.standard_normal(n)
+
+    # Generate replacement errors
+    replacement_rng = np.random.RandomState(sim_seed + 6001 if sim_seed is not None else None)
+
+    if residual_dist == "heavy_tailed":
+        # t(df) scaled to have variance 1
+        df = max(residual_df, 3)
+        raw = replacement_rng.standard_t(df, size=n)
+        # t(df) has variance df/(df-2), scale to unit variance
+        scale = 1.0 / np.sqrt(df / (df - 2))
+        new_errors = raw * scale
+    elif residual_dist == "skewed":
+        # Shifted chi-squared: mean=0, variance=1
+        df = max(residual_df, 3)
+        raw = replacement_rng.chisquare(df, size=n)
+        new_errors = (raw - df) / np.sqrt(2 * df)
+    else:
+        return y
+
+    # Apply correction: swap out original errors for new ones
+    y = y + (new_errors - original_errors)
+    return y
+
+
 def apply_per_simulation_perturbations(
     correlation_matrix: np.ndarray,
     var_types: np.ndarray,
@@ -262,17 +393,27 @@ def apply_per_simulation_perturbations(
     if scenario_config is None:
         return correlation_matrix, var_types
 
-    np.random.seed(sim_seed)
+    rng = np.random.RandomState(sim_seed)
 
     # Perturb correlation matrix
     perturbed_corr = correlation_matrix
     if correlation_matrix is not None and scenario_config["correlation_noise_sd"] > 0:
         perturbed_corr = correlation_matrix.copy()
-        noise = np.random.normal(0, scenario_config["correlation_noise_sd"], correlation_matrix.shape)
+        noise = rng.normal(0, scenario_config["correlation_noise_sd"], correlation_matrix.shape)
         noise = (noise + noise.T) / 2  # Keep symmetric
         perturbed_corr += noise
         perturbed_corr = np.clip(perturbed_corr, -0.8, 0.8)
         np.fill_diagonal(perturbed_corr, 1.0)
+
+        # Ensure positive semi-definiteness via eigenvalue clipping
+        eigvals, eigvecs = np.linalg.eigh(perturbed_corr)
+        if np.any(eigvals < 0):
+            eigvals = np.maximum(eigvals, 0.0)
+            perturbed_corr = eigvecs @ np.diag(eigvals) @ eigvecs.T
+            # Re-normalize to unit diagonal
+            d = np.sqrt(np.diag(perturbed_corr))
+            perturbed_corr = perturbed_corr / np.outer(d, d)
+            np.fill_diagonal(perturbed_corr, 1.0)
 
     # Perturb variable types
     perturbed_var_types = var_types.copy()
@@ -281,7 +422,7 @@ def apply_per_simulation_perturbations(
         new_type_codes = [type_mapping[distribution] for distribution in scenario_config["new_distributions"]]
 
         for i in range(len(var_types)):
-            if var_types[i] == 0 and np.random.random() < scenario_config["distribution_change_prob"]:
-                perturbed_var_types[i] = np.random.choice(new_type_codes)
+            if var_types[i] == 0 and rng.random() < scenario_config["distribution_change_prob"]:
+                perturbed_var_types[i] = rng.choice(new_type_codes)
 
     return perturbed_corr, perturbed_var_types

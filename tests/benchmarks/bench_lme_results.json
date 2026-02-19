@@ -1,0 +1,78 @@
+{
+  "timestamp": "2026-02-17T22:03:40",
+  "benchmarks": [
+    {
+      "name": "q1_single_call",
+      "params": {
+        "K": 20,
+        "n": 1000,
+        "p": 3
+      },
+      "n_reps": 50,
+      "mean_ms": 12.585065639141249,
+      "median_ms": 12.50566999806324,
+      "std_ms": 0.255423297727101,
+      "min_ms": 12.198962998809293
+    },
+    {
+      "name": "general_single_call",
+      "params": {
+        "K": 30,
+        "n": 1500,
+        "p": 2,
+        "q": 2
+      },
+      "n_reps": 50,
+      "mean_ms": 112.17507950015715,
+      "median_ms": 102.61623699989286,
+      "std_ms": 28.33948353203065,
+      "min_ms": 97.93555299984291
+    },
+    {
+      "name": "nested_single_call",
+      "params": {
+        "K_parent": 10,
+        "K_child": 30,
+        "n": 1500,
+        "p": 2
+      },
+      "n_reps": 50,
+      "mean_ms": 50.48584699994535,
+      "median_ms": 50.061287998687476,
+      "std_ms": 2.1636700848454136,
+      "min_ms": 49.25018900394207
+    },
+    {
+      "name": "q1_pipeline",
+      "params": {
+        "n_sims": 20,
+        "sample_size": 1200,
+        "K": 20
+      },
+      "total_seconds": 0.00626650000049267,
+      "per_sim_ms": 0.3133250000246335
+    },
+    {
+      "name": "general_pipeline",
+      "params": {
+        "n_sims": 20,
+        "sample_size": 1500,
+        "K": 30,
+        "q": 2
+      },
+      "total_seconds": 0.024364495002373587,
+      "per_sim_ms": 1.2182247501186794
+    },
+    {
+      "name": "nested_pipeline",
+      "params": {
+        "n_sims": 20,
+        "sample_size": 1500,
+        "K_parent": 10,
+        "K_child": 30
+      },
+      "total_seconds": 0.005912647997320164,
+      "per_sim_ms": 0.2956323998660082
+    }
+  ]
+}

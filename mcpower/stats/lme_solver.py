@@ -17,12 +17,16 @@ Performance: core deviance functions are JIT-compiled via numba
 when available, following the same pattern as ols.py.
 """
 
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 
 FLOAT_NEAR_ZERO = 1e-15
+
+# Thread-local cache for last-fit theta (used by mixed_models.py for warm-start)
+_lme_solver_local = threading.local()
 
 
 # ---------------------------------------------------------------------------
@@ -86,28 +90,9 @@ def compute_lme_critical_values(alpha, n_fixed, n_targets, correction_method):
     Returns:
         Tuple of (chi2_crit, z_crit, correction_z_crits).
     """
-    from scipy.stats import chi2, norm
+    from mcpower.stats.distributions import compute_critical_values_lme
 
-    chi2_crit = chi2.ppf(1 - alpha, n_fixed) if n_fixed > 0 else np.inf
-    z_crit = norm.ppf(1 - alpha / 2)
-
-    m = n_targets
-    if m == 0:
-        return chi2_crit, z_crit, np.empty(0)
-
-    if correction_method == 0:  # None
-        correction_z_crits = np.full(m, z_crit)
-    elif correction_method == 1:  # Bonferroni
-        bonf_crit = norm.ppf(1 - alpha / (2 * m))
-        correction_z_crits = np.full(m, bonf_crit)
-    elif correction_method == 2:  # FDR (Benjamini-Hochberg)
-        correction_z_crits = np.array([norm.ppf(1 - (k + 1) / m * alpha / 2) for k in range(m)])
-    elif correction_method == 3:  # Holm
-        correction_z_crits = np.array([norm.ppf(1 - alpha / (2 * (m - k))) for k in range(m)])
-    else:
-        correction_z_crits = np.full(m, z_crit)
-
-    return chi2_crit, z_crit, correction_z_crits
+    return compute_critical_values_lme(alpha, n_fixed, n_targets, correction_method)
 
 
 # ---------------------------------------------------------------------------
@@ -562,7 +547,7 @@ def _extract_results_general(theta_opt, stats, reml):
 
 def _fit_general(stats, reml, warm_theta=None):
     """Fit general q>1 model via L-BFGS-B over theta."""
-    from scipy.optimize import minimize
+    from mcpower.stats.distributions import minimize_lbfgsb
 
     q = stats.q
     n_theta = q * (q + 1) // 2
@@ -594,13 +579,7 @@ def _fit_general(stats, reml, warm_theta=None):
                     x0[idx] = 1.0
                 idx += 1
 
-    result = minimize(
-        objective,
-        x0,
-        method="L-BFGS-B",
-        bounds=bounds,
-        options={"maxiter": 200, "ftol": 1e-10, "gtol": 1e-6},
-    )
+    result = minimize_lbfgsb(objective, x0, bounds, maxiter=200, ftol=1e-10, gtol=1e-6)
 
     return _extract_results_general(result.x, stats, reml)
 
@@ -867,7 +846,7 @@ def _extract_results_nested(theta_opt, nstats, reml):
 
 def _fit_nested(nstats, reml, warm_theta=None):
     """Fit nested random intercepts via L-BFGS-B over [theta_parent, theta_child]."""
-    from scipy.optimize import minimize
+    from mcpower.stats.distributions import minimize_lbfgsb
 
     reml_int = 1 if reml else 0
 
@@ -880,13 +859,7 @@ def _fit_nested(nstats, reml, warm_theta=None):
         x0 = np.array([1.0, 1.0])
 
     bounds = [(0.0, 1e3), (0.0, 1e3)]
-    result = minimize(
-        objective,
-        x0,
-        method="L-BFGS-B",
-        bounds=bounds,
-        options={"maxiter": 200, "ftol": 1e-10, "gtol": 1e-6},
-    )
+    result = minimize_lbfgsb(objective, x0, bounds, maxiter=200, ftol=1e-10, gtol=1e-6)
 
     return _extract_results_nested(result.x, nstats, reml)
 
@@ -945,7 +918,7 @@ def lme_fit_nested(X, y, parent_ids, child_ids, K_parent, K_child, child_to_pare
 
 def _fit_q1(stats, reml, warm_theta=None):
     """Fit random intercept model via Brent's method on lambda^2."""
-    from scipy.optimize import minimize_scalar
+    from mcpower.stats.distributions import minimize_scalar_brent
 
     reml_int = 1 if reml else 0
 
@@ -973,15 +946,15 @@ def _fit_q1(stats, reml, warm_theta=None):
         # Search in [warm/10, warm*10] first, then fall back to full range
         lo = max(0.0, warm_lam_sq * 0.01)
         hi = min(1e6, warm_lam_sq * 100.0)
-        result = minimize_scalar(objective, bounds=(lo, hi), method="bounded", options={"xatol": 1e-8, "maxiter": 100})
+        result = minimize_scalar_brent(objective, bounds=(lo, hi), tol=1e-8, maxiter=100)
         # Verify we didn't get stuck at a boundary
         if result.x <= lo * 1.01 or result.x >= hi * 0.99:
             # Boundary hit, try full range
-            result2 = minimize_scalar(objective, bounds=(0.0, 1e6), method="bounded", options={"xatol": 1e-8, "maxiter": 150})
+            result2 = minimize_scalar_brent(objective, bounds=(0.0, 1e6), tol=1e-8, maxiter=150)
             if result2.fun < result.fun:
                 result = result2
     else:
-        result = minimize_scalar(objective, bounds=(0.0, 1e6), method="bounded", options={"xatol": 1e-8, "maxiter": 150})
+        result = minimize_scalar_brent(objective, bounds=(0.0, 1e6), tol=1e-8, maxiter=150)
 
     lam_sq_opt = result.x
     return _extract_results_q1(lam_sq_opt, stats, reml)
@@ -1199,6 +1172,9 @@ def lme_analysis_general(
     if not reml_result.converged:
         return None
 
+    # Cache theta for warm-start on next call
+    _lme_solver_local.last_theta_general = reml_result.theta.copy()
+
     beta = reml_result.beta[1:]
     se = reml_result.se_beta[1:]
 
@@ -1323,6 +1299,9 @@ def lme_analysis_nested(
 
     if not reml_result.converged:
         return None
+
+    # Cache theta for warm-start on next call
+    _lme_solver_local.last_theta_nested = reml_result.theta.copy()
 
     beta = reml_result.beta[1:]
     se = reml_result.se_beta[1:]

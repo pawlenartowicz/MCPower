@@ -64,11 +64,39 @@ if(NOT Eigen3_FOUND)
     message(STATUS "Eigen3 not found, fetching from source")
 endif()
 
+# Fetch Boost.Math (header-only, for statistical distributions)
+# Only need headers — skip building Boost.Math's own targets
+include(FetchContent)
+FetchContent_Declare(
+    boost_math
+    GIT_REPOSITORY https://github.com/boostorg/math.git
+    GIT_TAG boost-1.87.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(boost_math)
+if(NOT boost_math_POPULATED)
+    FetchContent_Populate(boost_math)
+endif()
+
+# Fetch LBFGSPP (header-only, for L-BFGS-B optimization)
+FetchContent_Declare(
+    lbfgspp
+    GIT_REPOSITORY https://github.com/yixuan/LBFGSpp.git
+    GIT_TAG v0.3.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(lbfgspp)
+if(NOT lbfgspp_POPULATED)
+    FetchContent_Populate(lbfgspp)
+endif()
+
 # Source files
 set(MCPOWER_SOURCES
     cpp/src/ols.cpp
     cpp/src/data_generation.cpp
     cpp/src/lme_solver.cpp
+    cpp/src/optimizers.cpp
+    cpp/src/distributions.cpp
     cpp/src/bindings.cpp
 )
 
@@ -81,6 +109,8 @@ target_link_libraries(mcpower_native PRIVATE Eigen3::Eigen)
 # Include directories
 target_include_directories(mcpower_native PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src
+    ${boost_math_SOURCE_DIR}/include
+    ${lbfgspp_SOURCE_DIR}/include
 )
 
 # Compiler optimizations

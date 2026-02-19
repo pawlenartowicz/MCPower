@@ -128,7 +128,6 @@ class TestExtremeICCValues:
             assert 0 <= power <= 100
 
     @pytest.mark.lme
-    @pytest.mark.slow
     def test_high_icc(self):
         """ICC=0.5 should substantially reduce power compared to OLS."""
         model = MCPower("y ~ x1 + (1|group)")
@@ -139,8 +138,7 @@ class TestExtremeICCValues:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             result = model.find_power(
-                # 20 clusters, need >=50 obs/cluster (10 per parameter) → need >=1000
-                sample_size=1000,
+                sample_size=1000,  # 20 clusters × 50 obs/cluster
                 print_results=False,
                 return_results=True,
                 progress_callback=False,

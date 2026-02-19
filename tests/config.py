@@ -93,20 +93,11 @@ EFFECT_VERY_LARGE = 1.5
 """Very large effect size - should have near-perfect power."""
 
 # Minimum observations per cluster (from validators)
-MIN_OBS_PER_CLUSTER = 25
-"""Minimum observations per cluster for stable LME estimation."""
+MIN_OBS_PER_CLUSTER = 5
+"""Minimum observations per cluster for LME estimation (hard error below this)."""
 
-# LME model complexity guidelines
-MIN_OBS_PER_PARAM_LME = 10
-"""Minimum observations per parameter for stable LME estimation (conservative)."""
-
-MIN_OBS_PER_PARAM_LME_WARNING = 7
-"""Warning threshold - below this, error; between 7-10, warn."""
-
-# Note: LME models estimate more parameters than OLS (fixed effects + variance components)
-# and require higher observations-per-parameter ratios for stable convergence.
-# Total parameters = intercept + fixed_effects + random_variance + residual_variance
-# Conservative requirement: 10 observations per parameter + minimum 25 per cluster
+MIN_OBS_PER_CLUSTER_WARNING = 10
+"""Warning threshold — between 5 and 10 triggers a warning."""
 
 # ICC recovery tolerances (for validation tests comparing estimated vs target ICC)
 ICC_RECOVERY_TOLERANCE_LOW = 0.03

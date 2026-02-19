@@ -186,7 +186,6 @@ class TestFitGeneral:
         assert len(result) == 1 + 2 * 1 + 1  # f_sig + 2*n_targets + wald_flag
 
 
-@pytest.mark.slow
 class TestSlopesVsStatsmodels:
     """Cross-validate random slope solver against statsmodels."""
 

@@ -59,7 +59,7 @@ class MCPower:
         power: Target power level in percent (default: 80.0).
         alpha: Significance level (default: 0.05).
         n_simulations: Number of Monte Carlo simulations for OLS (default: 1600).
-        n_simulations_mixed_model: Simulations for mixed models (default: 400).
+        n_simulations_mixed_model: Simulations for mixed models (default: 800).
         parallel: Parallel processing mode (default: ``"mixedmodels"``).
         n_cores: Number of CPU cores for parallel execution.
         max_failed_simulations: Maximum acceptable failure rate (default: 0.03).
@@ -102,7 +102,7 @@ class MCPower:
         self.power = 80.0
         self.alpha = 0.05
         self.n_simulations = 1600
-        self.n_simulations_mixed_model = 400
+        self.n_simulations_mixed_model = 800
 
         # Parallel processing
         import multiprocessing as mp
@@ -308,7 +308,7 @@ class MCPower:
         """Set the number of Monte Carlo simulations.
 
         More simulations yield more precise power estimates at the cost of
-        longer runtime. The default is 1600 for OLS and 400 for mixed models.
+        longer runtime. The default is 1600 for OLS and 800 for mixed models.
 
         Args:
             n_simulations: Number of simulations (positive integer).
@@ -696,10 +696,10 @@ class MCPower:
 
         Args:
             data: Empirical data as:
-                - pandas DataFrame - column names used automatically
                 - dict of {var_name: array} - keys are variable names
                 - numpy array (n_samples, n_vars) or (n_samples,) for single variable
                 - list (1D or 2D)
+                - pandas DataFrame - column names used automatically (requires pandas)
                 When columns is not provided for array/list input, variables are
                 auto-named column_1, column_2, etc.
             columns: Variable names for numpy/list columns (optional; auto-generated if omitted)
@@ -716,10 +716,13 @@ class MCPower:
                 When False, uses integer indices (e.g., cyl[2], cyl[3]).
 
         Example:
-            >>> # Using pandas DataFrame with default partial correlation preservation
-            >>> import pandas as pd
-            >>> df = pd.read_csv("my_data.csv")
-            >>> model.upload_data(df[["x1", "x2"]])
+            >>> # Using dict (no extra dependencies needed)
+            >>> import csv
+            >>> with open("my_data.csv") as f:
+            ...     reader = csv.DictReader(f)
+            ...     raw = list(reader)
+            >>> data = {col: [float(r[col]) for r in raw] for col in ["x1", "x2"]}
+            >>> model.upload_data(data)
 
             >>> # Using numpy array with strict correlation preservation
             >>> model.upload_data(
@@ -728,8 +731,13 @@ class MCPower:
             ...     preserve_correlation="strict"
             ... )
 
+            >>> # Using pandas DataFrame (requires: pip install pandas)
+            >>> import pandas as pd
+            >>> df = pd.read_csv("my_data.csv")
+            >>> model.upload_data(df[["x1", "x2"]])
+
             >>> # Override auto-detection
-            >>> model.upload_data(df, data_types={"cyl": "factor", "hp": "continuous"})
+            >>> model.upload_data(data, data_types={"cyl": "factor", "hp": "continuous"})
         """
         # Validate preserve_correlation
         valid_modes = ["no", "partial", "strict"]
@@ -1568,29 +1576,6 @@ class MCPower:
         # Validate and adjust cluster sample sizes
         self._validate_cluster_sample_size(sample_size)
 
-        # Validate model complexity for mixed models
-        if self._registry._random_effects_parsed and self._registry._cluster_specs:
-            from .utils.validators import _validate_lme_model_complexity
-
-            # Get first cluster spec (currently only support single clustering variable)
-            cluster_spec = list(self._registry._cluster_specs.values())[0]
-            n_fixed_effects = len(self._registry.effect_names)
-
-            assert cluster_spec.n_clusters is not None
-            complexity_result = _validate_lme_model_complexity(
-                sample_size=sample_size,
-                n_clusters=cluster_spec.n_clusters,
-                n_fixed_effects=n_fixed_effects,
-                cluster_size=cluster_spec.cluster_size,
-            )
-
-            # Print warnings (don't fail on warnings, only errors)
-            for warning in complexity_result.warnings:
-                print(f"Warning: {warning}")
-
-            # Fail on errors (ratio < 7)
-            complexity_result.raise_if_invalid()
-
         # Warn if sample size is much larger than uploaded data
         if self._uploaded_data_n > 0 and sample_size > 3 * self._uploaded_data_n:
             print(
@@ -2150,6 +2135,8 @@ class MCPower:
         if scenario_config:
             metadata.heterogeneity = scenario_config["heterogeneity"]
             metadata.heteroskedasticity = scenario_config["heteroskedasticity"]
+            if metadata.cluster_specs:
+                metadata.lme_scenario_config = scenario_config
 
         runner = SimulationRunner(
             n_simulations=self._effective_n_simulations,

@@ -107,10 +107,8 @@ def _native_available():
         return False
 
 
-# Available backends for parametrization
-BACKENDS = ["python"]
-if _native_available():
-    BACKENDS.append("c++")
+# C++ is the primary backend; fall back to Python only when native is not compiled
+BACKENDS = ["c++"] if _native_available() else ["python"]
 
 
 @pytest.fixture(params=BACKENDS)
@@ -118,7 +116,7 @@ def backend(request):
     """
     Force MCPower to run on a specific backend.
 
-    Parametrizes tests across all available backends (Python + C++ if available).
+    Parametrizes tests against C++ (primary backend).
     Automatically resets backend after each test.
     """
     from mcpower.backends import reset_backend, set_backend

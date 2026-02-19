@@ -57,7 +57,7 @@ class TestComputeTukeyCriticalValue:
         expected = studentized_range.ppf(1 - alpha, n_levels, dfd) / np.sqrt(2)
         actual = compute_tukey_critical_value(alpha, n_levels, dfd)
 
-        np.testing.assert_allclose(actual, expected, rtol=1e-10)
+        np.testing.assert_allclose(actual, expected, rtol=1e-8)
 
 
 class TestComputePosthocContrasts:

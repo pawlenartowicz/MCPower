@@ -31,32 +31,9 @@ def compute_critical_values(alpha, dfn, dfd, n_targets, correction_method):
         *correction_t_crits* is an array of length *n_targets* with
         the per-rank critical t-values for the chosen correction.
     """
-    from scipy.stats import f as f_dist
-    from scipy.stats import t as t_dist
+    from mcpower.stats.distributions import compute_critical_values_ols
 
-    if dfd <= 0:
-        return np.inf, np.inf, np.full(max(n_targets, 1), np.inf)
-
-    f_crit = f_dist.ppf(1 - alpha, dfn, dfd) if dfn > 0 else np.inf
-    t_crit = t_dist.ppf(1 - alpha / 2, dfd)
-
-    m = n_targets
-    if m == 0:
-        return f_crit, t_crit, np.empty(0)
-
-    if correction_method == 0:  # None
-        correction_t_crits = np.full(m, t_crit)
-    elif correction_method == 1:  # Bonferroni
-        bonf_crit = t_dist.ppf(1 - alpha / (2 * m), dfd)
-        correction_t_crits = np.full(m, bonf_crit)
-    elif correction_method == 2:  # FDR (Benjamini-Hochberg)
-        correction_t_crits = np.array([t_dist.ppf(1 - (k + 1) / m * alpha / 2, dfd) for k in range(m)])
-    elif correction_method == 3:  # Holm
-        correction_t_crits = np.array([t_dist.ppf(1 - alpha / (2 * (m - k)), dfd) for k in range(m)])
-    else:
-        correction_t_crits = np.full(m, t_crit)
-
-    return f_crit, t_crit, correction_t_crits
+    return compute_critical_values_ols(alpha, dfn, dfd, n_targets, correction_method)
 
 
 def _ols_core(
@@ -279,12 +256,9 @@ def compute_tukey_critical_value(alpha, n_levels, dfd):
     Returns:
         Tukey critical t-value threshold.
     """
-    from scipy.stats import studentized_range
+    from mcpower.stats.distributions import compute_tukey_critical_value as _compute_tukey
 
-    if dfd <= 0:
-        return np.inf
-    q_crit = studentized_range.ppf(1 - alpha, n_levels, dfd)
-    return q_crit / np.sqrt(2)
+    return _compute_tukey(alpha, n_levels, dfd)
 
 
 def compute_posthoc_contrasts(
