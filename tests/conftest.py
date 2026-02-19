@@ -8,8 +8,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Make 'tests' importable as a package (for `from tests.config import ...`).
+# APPEND so installed packages in site-packages take precedence over the source
+# tree — prevents the source mcpower/ from shadowing a wheel-installed build.
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.append(_project_root)
+
 
 
 @pytest.fixture

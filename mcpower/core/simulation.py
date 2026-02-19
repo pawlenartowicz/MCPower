@@ -596,6 +596,8 @@ class SimulationRunner:
             else:
                 return sim_significant, sim_significant_corrected, wald_flag
 
+        except ImportError:
+            raise  # Don't swallow missing-backend errors
         except Exception as e:
             if metadata.verbose:
                 return {"failed": True, "failure_reason": f"{type(e).__name__}: {str(e)}", "error_type": type(e).__name__, "sim_id": sim_id}
