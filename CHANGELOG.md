@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-02-20
+
+### Documentation
+
+- Rewrote "Why MCPower?" section — replaced dense paragraphs with bullet points; added mixed models entry
+- Removed inaccurate "logistic regression and ANOVA are on the way" note from feature description
+
 ## [0.5.0] - 2026-02-19
 
 ### Breaking changes
