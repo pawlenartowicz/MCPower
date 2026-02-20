@@ -6,7 +6,7 @@ This example shows how to handle correlated predictors in power analysis.
 Real-world predictors are often correlated, which affects statistical power.
 """
 
-import mcpower
+from mcpower import MCPower
 import numpy as np
 
 # Example: Social science study with correlated predictors
@@ -17,9 +17,7 @@ print("CORRELATED PREDICTORS EXAMPLE")
 print("=" * 60)
 
 # 1. Define model with multiple predictors
-model = mcpower.LinearRegression(
-    "life_satisfaction = income + education + social_support + health"
-)
+model = MCPower("life_satisfaction = income + education + social_support + health")
 
 # 2. Set effect sizes
 model.set_effects("income=0.3, education=0.25, social_support=0.4, health=0.5")
@@ -63,7 +61,7 @@ print("MATRIX-BASED CORRELATIONS")
 print("=" * 60)
 
 # Create new model for matrix example
-matrix_model = mcpower.LinearRegression("wellbeing = stress + exercise + sleep")
+matrix_model = MCPower("wellbeing = stress + exercise + sleep")
 matrix_model.set_effects("stress=-0.4, exercise=0.3, sleep=0.5")
 
 # Define full correlation matrix
@@ -98,7 +96,7 @@ print("CORRELATION IMPACT COMPARISON")
 print("=" * 60)
 
 # Model without correlations
-uncorr_model = mcpower.LinearRegression("outcome = x1 + x2 + x3")
+uncorr_model = MCPower("outcome = x1 + x2 + x3")
 uncorr_model.set_effects("x1=0.4, x2=0.3, x3=0.5")
 # No correlation specification = independent predictors
 
@@ -108,7 +106,7 @@ uncorr_power = uncorr_model.find_power(
 )
 
 # Same model with strong correlations
-corr_model = mcpower.LinearRegression("outcome = x1 + x2 + x3")
+corr_model = MCPower("outcome = x1 + x2 + x3")
 corr_model.set_effects("x1=0.4, x2=0.3, x3=0.5")
 corr_model.set_correlations("corr(x1,x2)=0.7, corr(x1,x3)=0.6, corr(x2,x3)=0.8")
 

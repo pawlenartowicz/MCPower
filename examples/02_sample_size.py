@@ -6,7 +6,7 @@ This example shows how to find the minimum sample size needed to detect
 your expected effects with adequate statistical power.
 """
 
-import mcpower
+from mcpower import MCPower
 
 # Example: Educational intervention study
 # Research question: What sample size do we need to detect the intervention effect?
@@ -16,9 +16,7 @@ print("SAMPLE SIZE CALCULATION EXAMPLE")
 print("=" * 60)
 
 # 1. Define your study model
-model = mcpower.LinearRegression(
-    "test_score = intervention + prior_knowledge + motivation"
-)
+model = MCPower("test_score = intervention + prior_knowledge + motivation")
 
 # 2. Set expected effect sizes based on literature/pilot data
 # intervention = 0.4 means a medium-sized improvement from the intervention

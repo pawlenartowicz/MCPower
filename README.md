@@ -229,7 +229,7 @@ data = {col: [float(r[col]) for r in rows] for col in ["hp", "wt", "cyl"]}
 # Upload with automatic type detection
 model = MCPower("mpg = hp + wt + cyl")
 model.upload_data(data)
-model.set_effects("hp=0.5, wt=0.3, cyl[2]=0.2, cyl[3]=0.4")
+model.set_effects("hp=0.5, wt=0.3, cyl[6]=0.2, cyl[8]=0.4")
 model.find_power(sample_size=100)
 ```
 
@@ -538,7 +538,7 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 - NumPy, matplotlib, joblib
 - C++ compiler (required for building the native backend during install)
 - pandas (optional, for DataFrame input — install with `pip install mcpower[pandas]`)
-- statsmodels (optional, for mixed-effects models — install with `pip install mcpower[lme]`)
+- statsmodels (optional, for mixed-effects models — install with `pip install mcpower[all]`)
 
 
 ## Documentation
