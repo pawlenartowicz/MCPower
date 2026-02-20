@@ -6,7 +6,7 @@ This example demonstrates basic power calculation for a simple treatment study.
 Shows how to check if your planned sample size provides enough statistical power.
 """
 
-import mcpower
+from mcpower import MCPower
 
 # Example: Clinical trial testing new therapy vs control
 # Research question: Does the new therapy improve patient outcomes?
@@ -16,7 +16,7 @@ print("BASIC POWER ANALYSIS EXAMPLE")
 print("=" * 60)
 
 # 1. Define your model using R-style formula
-model = mcpower.LinearRegression("patient_outcome = treatment + baseline_score")
+model = MCPower("patient_outcome = treatment + baseline_score")
 
 # 2. Set expected effect sizes
 # treatment = 0.5 means therapy improves outcomes by 0.5 standard deviations

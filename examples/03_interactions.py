@@ -6,7 +6,7 @@ This example demonstrates how to analyze interaction effects - when the effect
 of one variable depends on the level of another variable.
 """
 
-import mcpower
+from mcpower import MCPower
 
 # Example: Marketing study with interaction
 # Research question: Does the effect of advertising depend on customer age?
@@ -16,8 +16,8 @@ print("INTERACTION EFFECTS EXAMPLE")
 print("=" * 60)
 
 # 1. Define model with interaction term
-# advertising*age creates: advertising + age + advertising:age
-model = mcpower.LinearRegression("sales = advertising + age + advertising*age")
+# advertising*age expands to: advertising + age + advertising:age
+model = MCPower("sales = advertising * age")
 
 # 2. Set effect sizes for all terms
 # advertising:age = 0.3 means the advertising effect varies by age
@@ -78,9 +78,7 @@ print("THREE-WAY INTERACTION EXAMPLE")
 print("=" * 60)
 
 # More complex model with three-way interaction
-complex_model = mcpower.LinearRegression(
-    "outcome = treatment + gender + age + treatment*gender*age"
-)
+complex_model = MCPower("outcome = treatment * gender * age")
 
 # Set effects (three-way interactions need large samples)
 complex_model.set_effects(
@@ -129,6 +127,6 @@ Key insights about interactions:
       loss in overall power is small at worst
       
 5. ATTENTION!
-   - Most variablity in power for replication is from correlation (next example)
+   - Most variability in power for replication is from correlation (next example)
 """
 )

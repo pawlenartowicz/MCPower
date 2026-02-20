@@ -2,10 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+
+
+## [0.5.2] - 2026-02-20
+
+### Documentation
+- Fixed incorrect dummy variable names in README upload-data example (`cyl[2]` → `cyl[6]`, `cyl[3]` → `cyl[8]`)
+- Fixed dependencies section in README
+- Removed scipy from `[all]` optional dependencies (unused since C++ backend became required in v0.5.0)
+- Updated all example scripts to use current `from mcpower import MCPower` API
+
+### Fixed
+
+- Auto-tag workflow now uses `RELEASE_TOKEN` for downstream workflow triggering
+
 ## [0.5.1] - 2026-02-20
 
 ### Documentation
-
 - Rewrote "Why MCPower?" section — replaced dense paragraphs with bullet points; added mixed models entry
 - Removed inaccurate "logistic regression and ANOVA are on the way" note from feature description
 

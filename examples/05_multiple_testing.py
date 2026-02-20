@@ -6,7 +6,7 @@ This example demonstrates how to control Type I error when testing multiple
 hypotheses simultaneously. Essential for studies with many variables.
 """
 
-import mcpower
+from mcpower import MCPower
 
 # Example: Medical study testing multiple biomarkers
 # Research question: Which biomarkers predict treatment response?
@@ -16,7 +16,7 @@ print("MULTIPLE TESTING CORRECTION EXAMPLE")
 print("=" * 60)
 
 # 1. Define model with multiple predictors to test
-model = mcpower.LinearRegression(
+model = MCPower(
     "treatment_response = biomarker1 + biomarker2 + biomarker3 + biomarker4 + age"
 )
 
