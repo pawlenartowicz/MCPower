@@ -23,20 +23,17 @@ It's a Python package, but prefer a graphical interface? **[MCPower GUI](https:/
 
 ## Why MCPower?
 
-**Traditional power analysis breaks down** with interactions, correlated predictors, categorical variables, or non-normal data. MCPower uses simulation instead of formulas — it generates thousands of datasets exactly like yours, then sees how often your analysis finds real effects.
+Traditional power formulas break down with interactions, correlated predictors, categorical variables, or non-normal data. MCPower simulates instead — generates thousands of datasets like yours, fits your model, and counts how often the effects are detected.
 
-**Just write your formula.** Define your model the way you'd write it in R — `outcome = treatment + covariate + treatment*covariate`. MCPower parses the formula, sets up the simulation, and handles interactions, factor coding, and dummy variables automatically. You focus on the research question, not the mechanics. More model types (logistic regression, ANOVA) are on the way.
+- **Write your formula.** Define your model the way you'd write it in R — `outcome = treatment + covariate + treatment*covariate`. MCPower parses it, sets up the simulation, and handles dummy coding, interactions, and factor variables automatically. You focus on the research question, not the mechanics.
 
-**Test your assumptions with scenarios.** Real studies rarely match textbook conditions — effect sizes may be smaller than expected, distributions may be skewed, or variance may not be constant. Turn on `scenarios=True` and MCPower automatically tests your power under optimistic, realistic, and worst-case conditions. Instead of a single number, you get a range that shows how sensitive your design is to violated assumptions — so you plan for reality, not just the best case.
+- **Test your assumptions.** Real studies rarely match textbook conditions — effect sizes may be smaller than expected, distributions may be skewed, variance may not be constant. Add `scenarios=True` and MCPower runs your analysis under optimistic, realistic, and worst-case conditions, giving you a range instead of a single number you can't trust.
 
-**Track power for all your hypotheses at once.** Most studies test more than one effect. By default, MCPower evaluates power for every effect in your model simultaneously. You can also narrow it down with `target_test="effect1, effect2"`. Built-in multiple comparison corrections (Bonferroni, FDR, Holm, Tukey) keep false positive rates under control, so you see exactly which effects your study can reliably detect and which need more participants.
+- **All hypotheses at once.** MCPower evaluates power for every effect in your model by default. Narrow it down with `target_test="effect1, effect2"` when needed. Built-in corrections (Bonferroni, FDR, Holm, Tukey) keep false positive rates under control across multiple comparisons.
 
-**Use your own data.** Upload a CSV and MCPower auto-detects variable types (continuous, binary, or categorical), preserves real distributions, and handles correlations between predictors. No need to overthink whether your data is normal, skewed, or categorical — just upload it and MCPower samples from the empirical distribution. This is especially useful when you have pilot data or a related dataset and want your power analysis to reflect actual conditions rather than idealized ones.
+- **Use your own data.** Upload a CSV and MCPower auto-detects variable types (continuous, binary, categorical), preserves real distributions, and handles correlations between predictors. Especially useful when you have pilot data and want your power analysis to reflect actual conditions rather than idealized ones.
 
-✅ **Works with complexity**: Interactions, correlations, multi-level factors, any distribution
-✅ **Multiple hypotheses**: Test all effects at once with built-in multiple comparison corrections
-✅ **Two simple commands**: `find_sample_size()` or `find_power()` — that's the entire API
-✅ **Minimal math required**: Just specify your model formula and expected effect sizes
+- **Mixed models.** Clustered and longitudinal data are supported via standard R random-effects syntax — `(1|group)` for random intercepts, `(1 + x|group)` for random slopes, and nested structures like `(1|school/classroom)`.
 
 ## Get Started in 2 Minutes
 
