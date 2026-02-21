@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3] - 2026-02-21
 
+### Technical
+- Added `lint.yml` GitHub Actions workflow — runs ruff check, ruff format check, and mypy on every push to `dev`
+- Updated cibuildwheel from v2.22 to v3.3.1 — enables Python 3.14 wheel builds in CI
+
+### Fixed
+
+- **Factor:factor interaction expansion** — `expand_factors()` now produces Cartesian product of non-reference dummy levels (e.g. `a[2]:b[2]`, `a[3]:b[2]`) instead of incorrect partial expansion (`a:b[2]`, `a[2]:b`). Affects any model with interactions between two or more factor variables
+- Factor:factor interactions with named level labels now expand correctly (e.g. `origin[Japan]:cyl[6]` instead of `origin:cyl[6]`)
 
 ## [0.5.2] - 2026-02-20
 

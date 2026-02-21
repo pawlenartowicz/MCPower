@@ -277,6 +277,44 @@ class TestNamedFactorLevels:
         assert "origin[Japan]:x1" in effect_names
         assert "origin[USA]:x1" in effect_names
 
+    def test_expand_factors_factor_factor_interaction(self):
+        """Factor:factor interaction produces Cartesian product of non-ref levels."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = a + b + a:b")
+        reg.set_variable_type("a", "factor", n_levels=3)
+        reg.set_variable_type("b", "factor", n_levels=2)
+        reg.expand_factors()
+        effect_names = reg.effect_names
+        # (3-1) * (2-1) = 2 interaction effects
+        assert "a[2]:b[2]" in effect_names
+        assert "a[3]:b[2]" in effect_names
+        # No bare factor names in interaction terms
+        assert "a[2]:b" not in effect_names
+        assert "a:b[2]" not in effect_names
+
+    def test_expand_factors_factor_factor_with_labels(self):
+        """Factor:factor with level_labels uses label names in cross-product."""
+        from mcpower.core.variables import VariableRegistry
+
+        reg = VariableRegistry("y = origin + cyl + origin:cyl")
+        reg.set_variable_type("origin", "factor", n_levels=3,
+                              level_labels=["Europe", "Japan", "USA"])
+        reg.set_variable_type("cyl", "factor", n_levels=3,
+                              level_labels=["4", "6", "8"])
+        reg.expand_factors()
+        effect_names = reg.effect_names
+        # (3-1) * (3-1) = 4 interaction effects
+        expected = [
+            "origin[Japan]:cyl[6]", "origin[Japan]:cyl[8]",
+            "origin[USA]:cyl[6]", "origin[USA]:cyl[8]",
+        ]
+        for name in expected:
+            assert name in effect_names, f"{name} missing from {effect_names}"
+        # No bare factor names
+        assert "origin:cyl[6]" not in effect_names
+        assert "origin[Japan]:cyl" not in effect_names
+
     def test_get_factor_specs_includes_labels(self):
         """get_factor_specs returns level_labels when present."""
         from mcpower.core.variables import VariableRegistry
