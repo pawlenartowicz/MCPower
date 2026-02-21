@@ -457,16 +457,9 @@ class VariableRegistry:
                             reference_level = factor_info.get("reference_level", 1)
 
                             if level_labels is not None:
-                                non_ref = [
-                                    f"{vn}[{lb}]"
-                                    for lb in level_labels
-                                    if lb != str(reference_level)
-                                ]
+                                non_ref = [f"{vn}[{lb}]" for lb in level_labels if lb != str(reference_level)]
                             else:
-                                non_ref = [
-                                    f"{vn}[{lvl}]"
-                                    for lvl in range(2, n_levels + 1)
-                                ]
+                                non_ref = [f"{vn}[{lvl}]" for lvl in range(2, n_levels + 1)]
                             level_options.append(non_ref)
                         else:
                             level_options.append([vn])
