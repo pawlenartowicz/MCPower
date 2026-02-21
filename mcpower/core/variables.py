@@ -438,49 +438,49 @@ class VariableRegistry:
 
                     col_idx += 1
 
-        # Handle interactions involving factors
+        # Handle interactions involving factors — Cartesian product of
+        # non-reference dummy levels across all factor components.
+        from itertools import product as cartesian_product
+
         for _name, eff in original_effects.items():
             if eff.effect_type == "interaction":
                 factor_vars = [vn for vn in eff.var_names if vn in self._factors]
 
                 if factor_vars:
-                    for factor_var in factor_vars:
-                        factor_info = self._factors[factor_var]
-                        n_levels = factor_info["n_levels"]
-                        level_labels = factor_info.get("level_labels")
-                        reference_level = factor_info.get("reference_level", 1)
+                    # Build per-component level options
+                    level_options: list[list[str]] = []
+                    for vn in eff.var_names:
+                        if vn in self._factors:
+                            factor_info = self._factors[vn]
+                            n_levels = factor_info["n_levels"]
+                            level_labels = factor_info.get("level_labels")
+                            reference_level = factor_info.get("reference_level", 1)
 
-                        if level_labels is not None:
-                            non_ref_labels = [lb for lb in level_labels if lb != str(reference_level)]
-                            for label in non_ref_labels:
-                                dummy_name = f"{factor_var}[{label}]"
-
-                                # Replace factor name with dummy name
-                                new_var_names = [dummy_name if vn == factor_var else vn for vn in eff.var_names]
-                                new_interaction_name = ":".join(new_var_names)
-
-                                new_eff = Effect(
-                                    name=new_interaction_name,
-                                    effect_type="interaction",
-                                    var_names=new_var_names,
-                                    column_indices=[],  # Updated later
-                                )
-                                new_effects[new_interaction_name] = new_eff
+                            if level_labels is not None:
+                                non_ref = [
+                                    f"{vn}[{lb}]"
+                                    for lb in level_labels
+                                    if lb != str(reference_level)
+                                ]
+                            else:
+                                non_ref = [
+                                    f"{vn}[{lvl}]"
+                                    for lvl in range(2, n_levels + 1)
+                                ]
+                            level_options.append(non_ref)
                         else:
-                            for level in range(2, n_levels + 1):
-                                dummy_name = f"{factor_var}[{level}]"
+                            level_options.append([vn])
 
-                                # Replace factor name with dummy name
-                                new_var_names = [dummy_name if vn == factor_var else vn for vn in eff.var_names]
-                                new_interaction_name = ":".join(new_var_names)
-
-                                new_eff = Effect(
-                                    name=new_interaction_name,
-                                    effect_type="interaction",
-                                    var_names=new_var_names,
-                                    column_indices=[],  # Updated later
-                                )
-                                new_effects[new_interaction_name] = new_eff
+                    for combo in cartesian_product(*level_options):
+                        new_var_names = list(combo)
+                        new_interaction_name = ":".join(new_var_names)
+                        new_eff = Effect(
+                            name=new_interaction_name,
+                            effect_type="interaction",
+                            var_names=new_var_names,
+                            column_indices=[],  # Updated later
+                        )
+                        new_effects[new_interaction_name] = new_eff
 
         # Update predictors and effects
         self._predictors = new_predictors
