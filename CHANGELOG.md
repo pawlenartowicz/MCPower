@@ -2,9 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-
-
 ## [0.5.3] - 2026-02-21
+
+### Technical
+- Added `lint.yml` GitHub Actions workflow — runs ruff check, ruff format check, and mypy on every push to `dev`
+- Updated cibuildwheel from v2.22 to v3 — enables Python 3.14 wheel builds in CI
 
 ### Fixed
 
