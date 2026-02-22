@@ -5,7 +5,6 @@ This module provides the main MCPower class for conducting power analysis
 using Monte Carlo simulations.
 """
 
-import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -132,12 +131,6 @@ class MCPower:
         # Detect mixed model formula
         if self._registry._random_effects_parsed:
             self._generation_method = "mixed_model"
-            warnings.warn(
-                "Mixed-effects models are experimental and still under active development. "
-                "Results may be unreliable. Use at your own risk.",
-                UserWarning,
-                stacklevel=2,
-            )
 
         # Applied state
         self._applied = False
@@ -157,14 +150,6 @@ class MCPower:
 
         # Phase 2 Optimization: Effect plan cache for _create_X_extended
         self._effect_plan_cache: Optional[List[Tuple[str, Any]]] = None
-
-        # Print summary
-        predictor_names = self._registry.predictor_names
-        if predictor_names:
-            print(f"Variables: {self._registry.dependent} (dependent), {', '.join(predictor_names)} (predictors)")
-            print(f"Found {len(predictor_names)} predictor variables")
-            if len(predictor_names) == 1:
-                print("Single predictor - no correlation matrix needed")
 
     # =========================================================================
     # Formula properties
@@ -2104,12 +2089,6 @@ class MCPower:
 
         if random_effects:
             self._test_method = "mixed_model"
-            warnings.warn(
-                "Mixed-effects models are experimental and still under active development. "
-                "Results may be unreliable. Use at your own risk.",
-                UserWarning,
-                stacklevel=2,
-            )
         else:
             self._test_method = "linear_regression"
 

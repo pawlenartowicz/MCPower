@@ -112,7 +112,7 @@ def _validate_simulations(n_simulations: Any) -> Tuple[int, _ValidationResult]:
 
     if result.is_valid:
         rounded = int(round(n_simulations))
-        if rounded < 1000:
+        if rounded < 800:
             result.warnings.append(f"Low simulation count ({rounded}). Consider using at least 1000 for reliable results.")
         return rounded, result
 

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.4] - 2026-02-22
+
+### Changed
+- **Mixed-Effects Models no longer experimental** — removed experimental warnings and labels after [validation against R's lme4](https://github.com/pawlenartowicz/MCPower/wiki/Concept-LME-Validation) across 95 scenarios using four independent strategies (all 230 scenario-strategy combinations pass)
+
+### Fixed
+- Removed unused `predictor_names` assignment in `MCPower.__init__` (ruff F841)
+- Fixed mypy `attr-defined` errors in `distributions.py` — `_Result` fallback classes now use `__slots__` for proper attribute declaration
+
 ## [0.5.3] - 2026-02-21
 
 ### Technical

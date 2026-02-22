@@ -992,16 +992,20 @@ Eigen::VectorXd LMESolver::analyze_general(
     if (!full_ml.converged) {
         wald_fallback = true;
     } else {
-        // Null ML fit (q=1 intercept only, using existing q=1 solver)
+        // Null ML fit (intercept-only fixed effects, same random slopes structure)
         MatrixXd X_null = MatrixXd::Ones(n, 1);
-        SufficientStatsQ1 null_stats = compute_sufficient_stats(X_null, y, cluster_ids, K);
-        LMEFitResult null_ml = fit_q1(null_stats, false);
+        SufficientStatsGeneral null_stats = compute_sufficient_stats_general(X_null, y, Z, cluster_ids, K, q);
+        LMEFitResultGeneral null_ml = fit_general(null_stats, false, full_ml.theta);
 
-        double lr_stat = 2.0 * (full_ml.log_likelihood - null_ml.log_likelihood);
-        if (std::isnan(lr_stat) || lr_stat < 0.0 || !std::isfinite(lr_stat)) {
+        if (!null_ml.converged) {
             wald_fallback = true;
         } else {
-            f_significant = (lr_stat > chi2_crit) ? 1.0 : 0.0;
+            double lr_stat = 2.0 * (full_ml.log_likelihood - null_ml.log_likelihood);
+            if (std::isnan(lr_stat) || lr_stat < 0.0 || !std::isfinite(lr_stat)) {
+                wald_fallback = true;
+            } else {
+                f_significant = (lr_stat > chi2_crit) ? 1.0 : 0.0;
+            }
         }
     }
 
