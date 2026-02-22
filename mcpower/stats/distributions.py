@@ -249,7 +249,7 @@ def minimize_lbfgsb(objective, x0, bounds, maxiter=200, ftol=1e-10, gtol=1e-6):
     )
 
     class _Result:
-        pass
+        __slots__ = ("x", "fun", "converged")
 
     r = _Result()
     r.x = result.x
@@ -303,7 +303,7 @@ def minimize_scalar_brent(objective, bounds, tol=1e-8, maxiter=150):
     )
 
     class _Result:
-        pass
+        __slots__ = ("x", "fun", "converged")
 
     r = _Result()
     r.x = result.x

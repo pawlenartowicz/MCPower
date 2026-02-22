@@ -244,6 +244,7 @@ model.upload_data(data[["hp", "wt", "cyl"]])
 **Auto-Detection**
 
 Variables are automatically classified based on unique values:
+
 - **1 unique value**: Dropped (constant)
 - **2 unique values**: Binary variable
 - **3-6 unique values**: Factor/categorical variable
@@ -311,7 +312,7 @@ model.set_heteroskedasticity(0.15)  # Violation of equal variance assumption
 model.find_sample_size(target_test="treatment")
 ```
 
-### Mixed-Effects Models (Experimental)
+### Mixed-Effects Models
 ```python
 from mcpower import MCPower
 
@@ -342,6 +343,8 @@ model.find_power(sample_size=1500)
 ```
 
 See the [Mixed-Effects Models wiki page](https://github.com/pawlenartowicz/MCPower/wiki/Mixed-Effects-Models) for detailed documentation on all model types, parameters, and design recommendations.
+
+MCPower's mixed-effects solver is [validated against R's lme4](https://github.com/pawlenartowicz/MCPower/wiki/Concept-LME-Validation) across 95 scenarios using four independent strategies — all 230 scenario-strategy combinations pass.
 
 ### More precision
 ```python
@@ -390,9 +393,9 @@ model.find_power(sample_size=200, progress_callback=False)
 | Correlated predictors | `model.set_correlations("corr(var1, var2)=0.4")` |
 | Multiple testing correction | Add `correction="FDR"`, `"Holm"`, `"Bonferroni"`, or `"Tukey"`|
 | Post-hoc pairwise comparison | `target_test="group[0] vs group[1]"` with `correction="tukey"` |
-| Mixed model (random intercept) | `MCPower("y ~ x + (1\|group)")` + `model.set_cluster(...)` (experimental) |
-| Random slopes | `MCPower("y ~ x + (1+x\|group)")` + `set_cluster(..., random_slopes=["x"], slope_variance=0.1)` (experimental) |
-| Nested random effects | `MCPower("y ~ x + (1\|A/B)")` + two `set_cluster()` calls (experimental) |
+| Mixed model (random intercept) | `MCPower("y ~ x + (1\|group)")` + `model.set_cluster(...)` |
+| Random slopes | `MCPower("y ~ x + (1+x\|group)")` + `set_cluster(..., random_slopes=["x"], slope_variance=0.1)` |
+| Nested random effects | `MCPower("y ~ x + (1\|A/B)")` + two `set_cluster()` calls |
 | Reproducible results | `model.set_seed(42)` |
 | Get results as dict | Add `return_results=True` to either method |
 | Stricter significance | `model.set_alpha(0.01)` |
@@ -563,7 +566,7 @@ Full documentation is available on the **[MCPower Wiki](https://github.com/pawle
 - ✅ Scenarios, robustness analysis
 - ✅ Factor variables (categorical predictors)
 - ✅ C++ native backend (pybind11 + Eigen, 3x speedup)
-- ⚠️ Mixed Effects Models (random intercepts, random slopes, nested effects) — experimental
+- ✅ Mixed Effects Models (random intercepts, random slopes, nested effects) — [validated against lme4](https://github.com/pawlenartowicz/MCPower/wiki/Concept-LME-Validation)
 - 🚧 Logistic Regression (coming soon)
 - 🚧 ANOVA (coming soon)
 - 🚧 Guide about methods, corrections (coming soon)
