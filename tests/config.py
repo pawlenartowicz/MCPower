@@ -5,9 +5,21 @@ All test files should import from this module to ensure consistency
 across the test suite.
 """
 
-# Monte Carlo simulation parameters
-N_SIMS = 5000
-"""Number of Monte Carlo simulations for power analysis tests."""
+# Monte Carlo simulation parameters — 4-tier ladder
+N_SIMS_CHECK = 50
+"""Smoke tests — just verify no crash, structure, API contract."""
+
+N_SIMS_ORDERING = 1000
+"""Ordering tests — monotonicity, correction hierarchy, A < B checks."""
+
+N_SIMS_STANDARD = 1600
+"""Standard tests — null calibration, Type I error, general validation."""
+
+N_SIMS_ACCURACY = 5000
+"""Accuracy tests — comparison against analytical power formulas."""
+
+N_SIMS = N_SIMS_ACCURACY
+"""Backward-compat alias for accuracy-level simulations."""
 
 SEED = 2137
 """Default random seed for reproducibility."""

@@ -105,6 +105,8 @@ class _AssignmentParser:
                     paren_count += 1
                 elif char == ")":
                     paren_count -= 1
+                    if paren_count < 0:
+                        raise ValueError("Unbalanced parentheses: unexpected ')'")
                 current.append(char)
 
         if current:
@@ -424,7 +426,11 @@ def _parse_independent_variables(formula: str) -> Tuple[Dict, Dict]:
     """
     from itertools import combinations
 
-    terms = re.split(r"[+\-]", formula)
+    # Check for minus sign (term removal) which is not supported
+    if re.search(r"(?<!\()\s*-\s*(?!\d)", formula):
+        raise ValueError("Term removal with '-' is not supported in MCPower formulas. Use '+' to add predictors.")
+
+    terms = re.split(r"[+]", formula)
 
     variables = {}
     effects = {}

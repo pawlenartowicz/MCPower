@@ -18,6 +18,7 @@ def _create_power_plot(
     target_tests: List[str],
     target_power: float,
     title: str,
+    show: bool = True,
 ):
     """Create a sample-size vs. power line plot with achievement markers.
 
@@ -58,7 +59,7 @@ def _create_power_plot(
         )
 
         # Mark achievement point
-        if first_achieved[test] > 0:
+        if first_achieved[test] > 0 and first_achieved[test] in sample_sizes:
             achieved_idx = sample_sizes.index(first_achieved[test])
             achieved_power = powers[achieved_idx]
             ax.plot(
@@ -112,4 +113,6 @@ def _create_power_plot(
         color="#888888",
     )
     plt.tight_layout(rect=(0, 0.03, 1, 1))
-    plt.show()
+    if show:
+        plt.show()
+    return fig

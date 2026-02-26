@@ -16,7 +16,6 @@ Example:
 
 from importlib.metadata import version as _get_version
 
-from .backends import get_backend_info, set_backend
 from .model import MCPower
 from .progress import PrintReporter, ProgressReporter, SimulationCancelled, TqdmReporter
 
@@ -27,14 +26,14 @@ __email__ = "pawellenartowicz@europe.com"
 __all__ = [
     "MCPower",
     "SimulationCancelled",
-    "set_backend",
-    "get_backend_info",
     "ProgressReporter",
     "PrintReporter",
     "TqdmReporter",
 ]
 
 
+import threading as _threading
+
 from .utils.updates import _check_for_updates
 
-_check_for_updates(__version__)
+_threading.Thread(target=_check_for_updates, args=(__version__,), daemon=True).start()

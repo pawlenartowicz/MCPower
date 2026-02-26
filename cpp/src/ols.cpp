@@ -151,19 +151,14 @@ Eigen::VectorXd generate_y(
     const Eigen::Ref<const Eigen::VectorXd>& effects,
     double heterogeneity,
     double heteroskedasticity,
-    int seed
+    int seed,
+    int residual_dist,
+    double residual_df
 ) {
     const int n = static_cast<int>(X.rows());
     const int p = static_cast<int>(X.cols());
 
-    // Set up random generator
     std::mt19937 gen;
-    if (seed >= 0) {
-        gen.seed(static_cast<unsigned int>(seed));
-    } else {
-        std::random_device rd;
-        gen.seed(rd());
-    }
     std::normal_distribution<double> normal(0.0, 1.0);
 
     // Linear predictor with heterogeneity
@@ -176,9 +171,12 @@ Eigen::VectorXd generate_y(
         // Heterogeneity: vary effect sizes per observation
         linear_pred.setZero();
 
-        // Change seed for heterogeneity noise
+        // Seed at offset +1 for heterogeneity noise
         if (seed >= 0) {
             gen.seed(static_cast<unsigned int>(seed + 1));
+        } else {
+            std::random_device rd;
+            gen.seed(rd());
         }
 
         for (int j = 0; j < p; ++j) {
@@ -192,14 +190,43 @@ Eigen::VectorXd generate_y(
         }
     }
 
-    // Generate errors
+    // Generate errors — seed at offset +2
     if (seed >= 0) {
         gen.seed(static_cast<unsigned int>(seed + 2));
+    } else {
+        std::random_device rd;
+        gen.seed(rd());
     }
 
     Eigen::VectorXd error(n);
-    for (int i = 0; i < n; ++i) {
-        error(i) = normal(gen);
+
+    if (residual_dist == 1) {
+        // Heavy-tailed: Student's t distribution
+        double df = std::max(residual_df, 3.0);
+        std::student_t_distribution<double> t_dist(df);
+        double theoretical_scale = 1.0 / std::sqrt(df / (df - 2.0));
+        for (int i = 0; i < n; ++i) {
+            error(i) = t_dist(gen) * theoretical_scale;
+        }
+    } else if (residual_dist == 2) {
+        // Skewed: chi-squared, centered and scaled
+        double df = std::max(residual_df, 3.0);
+        std::chi_squared_distribution<double> chi2_dist(df);
+        double scale = 1.0 / std::sqrt(2.0 * df);
+        for (int i = 0; i < n; ++i) {
+            error(i) = (chi2_dist(gen) - df) * scale;
+        }
+    } else {
+        // Normal (default)
+        for (int i = 0; i < n; ++i) {
+            error(i) = normal(gen);
+        }
+    }
+
+    // Empirical re-standardization to SD = 1
+    double empirical_sd = std::sqrt(error.array().square().mean());
+    if (empirical_sd > FLOAT_NEAR_ZERO) {
+        error /= empirical_sd;
     }
 
     // Apply heteroskedasticity

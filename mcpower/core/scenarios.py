@@ -13,35 +13,51 @@ from ..utils.formatters import _format_results
 from ..utils.visualization import _create_power_plot
 
 # Default scenario configurations.
+# "optimistic" is the zero-perturbation baseline — also used as the default
+# scenario_config when scenarios=False and as a template for custom scenarios
+# (ensures all required keys exist).
 # "realistic" introduces moderate assumption violations; "doomer" introduces
 # severe violations. Each simulation iteration draws random perturbations
 # from these parameters (correlation noise, distribution swaps, etc.).
 DEFAULT_SCENARIO_CONFIG = {
+    "optimistic": {
+        "heterogeneity": 0.0,
+        "heteroskedasticity": 0.0,
+        "correlation_noise_sd": 0.0,
+        "distribution_change_prob": 0.0,
+        "new_distributions": ["right_skewed", "left_skewed", "uniform"],
+        # Mixed model perturbations (only consumed when cluster_specs present)
+        "random_effect_dist": "normal",
+        "random_effect_df": 5,
+        "icc_noise_sd": 0.0,
+        # Residual distribution perturbations (all model types)
+        "residual_dists": ["heavy_tailed", "skewed"],
+        "residual_change_prob": 0.0,
+        "residual_df": 10,
+    },
     "realistic": {
         "heterogeneity": 0.2,
-        "heteroskedasticity": 0.1,
-        "correlation_noise_sd": 0.2,
-        "distribution_change_prob": 0.3,
+        "heteroskedasticity": 0.15,
+        "correlation_noise_sd": 0.15,
+        "distribution_change_prob": 0.5,
         "new_distributions": ["right_skewed", "left_skewed", "uniform"],
-        # LME-specific keys (only consumed when cluster_specs present)
         "random_effect_dist": "heavy_tailed",
-        "random_effect_df": 5,
+        "random_effect_df": 10,
         "icc_noise_sd": 0.15,
-        "residual_dist": "heavy_tailed",
-        "residual_change_prob": 0.3,
-        "residual_df": 10,
+        "residual_dists": ["heavy_tailed", "skewed"],
+        "residual_change_prob": 0.5,
+        "residual_df": 8,
     },
     "doomer": {
         "heterogeneity": 0.4,
-        "heteroskedasticity": 0.2,
-        "correlation_noise_sd": 0.4,
-        "distribution_change_prob": 0.6,
+        "heteroskedasticity": 0.35,
+        "correlation_noise_sd": 0.30,
+        "distribution_change_prob": 0.8,
         "new_distributions": ["right_skewed", "left_skewed", "uniform"],
-        # LME-specific keys (only consumed when cluster_specs present)
         "random_effect_dist": "heavy_tailed",
-        "random_effect_df": 3,
+        "random_effect_df": 5,
         "icc_noise_sd": 0.30,
-        "residual_dist": "heavy_tailed",
+        "residual_dists": ["heavy_tailed", "skewed"],
         "residual_change_prob": 0.8,
         "residual_df": 5,
     },
@@ -111,15 +127,7 @@ class ScenarioRunner:
         if progress is not None:
             progress.start()
 
-        # Optimistic (user's original settings)
-        results["optimistic"] = run_find_power_func(
-            sample_size=sample_size,
-            target_tests=target_tests,
-            correction=correction,
-            scenario_config=None,
-        )
-
-        # Realistic & Doomer scenarios
+        # Run all scenarios (optimistic is always present as zero-perturbation baseline)
         for scenario_name, config in self.configs.items():
             results[scenario_name] = run_find_power_func(
                 sample_size=sample_size,
@@ -175,15 +183,7 @@ class ScenarioRunner:
         if progress is not None:
             progress.start()
 
-        # Optimistic
-        results["optimistic"] = run_sample_size_func(
-            sample_sizes=sample_sizes,
-            target_tests=target_tests,
-            correction=correction,
-            scenario_config=None,
-        )
-
-        # Other scenarios
+        # Run all scenarios (optimistic is always present as zero-perturbation baseline)
         for scenario_name, config in self.configs.items():
             results[scenario_name] = run_sample_size_func(
                 sample_sizes=sample_sizes,
@@ -209,8 +209,9 @@ class ScenarioRunner:
     def _create_scenario_plots(self, results: Dict) -> None:
         """Create visualizations for scenario analysis."""
         scenarios = results["scenarios"]
-        scenario_names = ["optimistic", "realistic", "doomer"]
-        scenario_labels = ["Optimistic", "Realistic", "Doomer"]
+        # Derive scenario order from results: optimistic first, then config keys
+        scenario_names = ["optimistic"] + [k for k in scenarios if k != "optimistic"]
+        scenario_labels = [name.title() for name in scenario_names]
 
         first_scenario = scenarios.get("optimistic", {})
         if "results" not in first_scenario or "sample_sizes_tested" not in first_scenario["results"]:
@@ -286,7 +287,7 @@ def apply_lme_perturbations(
     if icc_noise_sd == 0.0 and re_dist == "normal":
         return None
 
-    rng = np.random.RandomState(sim_seed + 5000 if sim_seed is not None else None)
+    rng = np.random.RandomState(sim_seed + 6 if sim_seed is not None else None)
 
     # ICC jitter: multiplicative noise on tau_squared per grouping variable
     tau_squared_multipliers: Dict[str, float] = {}
@@ -302,70 +303,6 @@ def apply_lme_perturbations(
         "random_effect_dist": re_dist,
         "random_effect_df": re_df,
     }
-
-
-def apply_lme_residual_perturbations(
-    y: np.ndarray,
-    scenario_config: Dict,
-    sim_seed: Optional[int],
-) -> np.ndarray:
-    """Replace normal residuals with non-normal if coin flip succeeds.
-
-    For each simulation, independently flips a coin (probability
-    ``residual_change_prob``) to decide whether residuals are replaced.
-    If activated, reproduces the original N(0,1) errors via the known
-    seed, generates replacements from t(df) or shifted χ², and applies
-    the correction ``y += (new_error - original_error)``.
-
-    Args:
-        y: Dependent variable array (modified in-place).
-        scenario_config: Scenario parameters with residual keys.
-        sim_seed: Random seed for reproducibility.
-
-    Returns:
-        The (possibly modified) dependent variable array.
-    """
-    residual_dist = scenario_config.get("residual_dist", "normal")
-    residual_change_prob = scenario_config.get("residual_change_prob", 0.0)
-    residual_df = scenario_config.get("residual_df", 10)
-
-    if residual_dist == "normal" or residual_change_prob <= 0.0:
-        return y
-
-    rng = np.random.RandomState(sim_seed + 6000 if sim_seed is not None else None)
-
-    # Coin flip: should this simulation have non-normal residuals?
-    if rng.random() > residual_change_prob:
-        return y
-
-    n = len(y)
-
-    # Reproduce the original N(0,1) errors using the same seed as generate_y
-    # generate_y uses sim_seed + 2 for error generation
-    original_rng = np.random.RandomState(sim_seed + 2 if sim_seed is not None else None)
-    original_errors = original_rng.standard_normal(n)
-
-    # Generate replacement errors
-    replacement_rng = np.random.RandomState(sim_seed + 6001 if sim_seed is not None else None)
-
-    if residual_dist == "heavy_tailed":
-        # t(df) scaled to have variance 1
-        df = max(residual_df, 3)
-        raw = replacement_rng.standard_t(df, size=n)
-        # t(df) has variance df/(df-2), scale to unit variance
-        scale = 1.0 / np.sqrt(df / (df - 2))
-        new_errors = raw * scale
-    elif residual_dist == "skewed":
-        # Shifted chi-squared: mean=0, variance=1
-        df = max(residual_df, 3)
-        raw = replacement_rng.chisquare(df, size=n)
-        new_errors = (raw - df) / np.sqrt(2 * df)
-    else:
-        return y
-
-    # Apply correction: swap out original errors for new ones
-    y = y + (new_errors - original_errors)
-    return y
 
 
 def apply_per_simulation_perturbations(
@@ -393,19 +330,22 @@ def apply_per_simulation_perturbations(
     if scenario_config is None:
         return correlation_matrix, var_types
 
-    rng = np.random.RandomState(sim_seed)
+    rng = np.random.RandomState(sim_seed + 5 if sim_seed is not None else None)
 
     # Perturb correlation matrix
     perturbed_corr = correlation_matrix
-    if correlation_matrix is not None and scenario_config["correlation_noise_sd"] > 0:
+    if correlation_matrix is not None and scenario_config.get("correlation_noise_sd", 0) > 0:
         perturbed_corr = correlation_matrix.copy()
         noise = rng.normal(0, scenario_config["correlation_noise_sd"], correlation_matrix.shape)
         noise = (noise + noise.T) / 2  # Keep symmetric
         perturbed_corr += noise
+        # Clip off-diagonal correlations to [-0.8, 0.8] to prevent near-singular
+        # matrices that cause Cholesky decomposition failures in data generation.
         perturbed_corr = np.clip(perturbed_corr, -0.8, 0.8)
         np.fill_diagonal(perturbed_corr, 1.0)
 
-        # Ensure positive semi-definiteness via eigenvalue clipping
+        # Nearest correlation matrix repair via spectral clipping: set negative
+        # eigenvalues to zero and reconstruct, then re-normalize to unit diagonal.
         eigvals, eigvecs = np.linalg.eigh(perturbed_corr)
         if np.any(eigvals < 0):
             eigvals = np.maximum(eigvals, 0.0)
@@ -417,7 +357,7 @@ def apply_per_simulation_perturbations(
 
     # Perturb variable types
     perturbed_var_types = var_types.copy()
-    if scenario_config["distribution_change_prob"] > 0:
+    if scenario_config.get("distribution_change_prob", 0) > 0:
         type_mapping = {"right_skewed": 2, "left_skewed": 3, "uniform": 5}
         new_type_codes = [type_mapping[distribution] for distribution in scenario_config["new_distributions"]]
 

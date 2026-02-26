@@ -24,7 +24,6 @@ import numpy as np
 import pytest
 
 from mcpower.stats.distributions import (
-    _BACKEND,
     chi2_cdf,
     chi2_ppf,
     compute_critical_values_lme,
@@ -587,29 +586,6 @@ class TestEdgeCases:
 
 # ===========================================================================
 # 15. Backend detection
-# ===========================================================================
-class TestBackendDetection:
-    """Verify the distribution backend is correctly detected."""
-
-    def test_backend_is_set(self):
-        assert _BACKEND is not None
-
-    def test_backend_is_string(self):
-        assert isinstance(_BACKEND, str)
-
-    def test_backend_is_known_value(self):
-        assert _BACKEND in ("native", "scipy")
-
-    def test_native_backend_when_compiled(self):
-        """When the C++ extension is compiled, backend should be 'native'."""
-        try:
-            import mcpower.backends.mcpower_native  # noqa: F401
-
-            assert _BACKEND == "native"
-        except ImportError:
-            pytest.skip("C++ native backend not compiled")
-
-
 # ===========================================================================
 # Cross-consistency checks
 # ===========================================================================

@@ -222,14 +222,14 @@ class TestTargetTests:
 
 
 class TestHeterogeneity:
-    """Test heterogeneity settings."""
+    """Test heterogeneity via scenario configs."""
 
     def test_with_heterogeneity(self, suppress_output):
         from mcpower import MCPower
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.3, x2=0.2")
-        model.set_heterogeneity(0.1)
+        model.set_scenario_configs({"het": {"heterogeneity": 0.1}})
         result = model.find_power(100, print_results=False, return_results=True)
 
         assert result is not None
@@ -239,7 +239,7 @@ class TestHeterogeneity:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.3, x2=0.2")
-        model.set_heteroskedasticity(0.2)
+        model.set_scenario_configs({"hsked": {"heteroskedasticity": 0.2}})
         result = model.find_power(100, print_results=False, return_results=True)
 
         assert result is not None
@@ -249,8 +249,7 @@ class TestHeterogeneity:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.3, x2=0.2")
-        model.set_heterogeneity(0.1)
-        model.set_heteroskedasticity(0.2)
+        model.set_scenario_configs({"combo": {"heterogeneity": 0.1, "heteroskedasticity": 0.2}})
         result = model.find_power(100, print_results=False, return_results=True)
 
         assert result is not None
@@ -330,7 +329,7 @@ class TestComplexModels:
         model.upload_data({"x1": np.random.exponential(2, 100)})
         model.set_correlations("(x1,x2)=0.3")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2, x2=0.15, x1:x2=0.1")
-        model.set_heterogeneity(0.05)
+        model.set_scenario_configs({"test": {"heterogeneity": 0.05}})
         result = model.find_power(200, print_results=False, return_results=True)
 
         assert result is not None

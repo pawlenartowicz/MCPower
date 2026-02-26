@@ -61,7 +61,7 @@ class SimulationRunner:
         Args:
             n_simulations: Number of Monte Carlo iterations.
             seed: Base random seed. Each iteration uses
-                ``seed + 4 * sim_id``.
+                ``seed + 12 * sim_id``.
             alpha: Significance level for hypothesis tests.
             parallel: Parallel processing mode (unused inside the
                 runner itself; parallelism is handled at the
@@ -143,12 +143,19 @@ class SimulationRunner:
         if metadata.cluster_specs:
             from ..stats.lme_solver import compute_lme_critical_values
 
-            n_fixed = len(metadata.target_indices)
-            # n_fixed_effects = number of columns in X_expanded (excluding intercept)
-            # This equals the total effect count minus cluster effects
-            n_fixed_total = len(metadata.effect_sizes)
-            if metadata.cluster_effect_indices:
-                n_fixed_total -= len(metadata.cluster_effect_indices)
+            # Use test formula dimensions when subsetting with random effects
+            if metadata.test_column_indices is not None and metadata.test_has_random_effects:
+                if metadata.test_target_indices is None:
+                    raise RuntimeError("test_target_indices must be set when test_column_indices is present")
+                n_fixed = len(metadata.test_target_indices)
+                n_fixed_total = metadata.test_effect_count
+            else:
+                n_fixed = len(metadata.target_indices)
+                # n_fixed_effects = number of columns in X_expanded (excluding intercept)
+                # This equals the total effect count minus cluster effects
+                n_fixed_total = len(metadata.effect_sizes)
+                if metadata.cluster_effect_indices:
+                    n_fixed_total -= len(metadata.cluster_effect_indices)
             chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(
                 self.alpha, n_fixed_total, n_fixed, metadata.correction_method
             )
@@ -162,19 +169,18 @@ class SimulationRunner:
 
                 raise SimulationCancelled("Simulation cancelled by user")
 
-            sim_seed = self.seed + 4 * sim_id if self.seed is not None else None
+            sim_seed = self.seed + 12 * sim_id if self.seed is not None else None
 
-            # Apply perturbations if in scenario mode
-            if scenario_config is not None and apply_perturbations_func is not None:
-                perturbed_corr, perturbed_types = apply_perturbations_func(
-                    metadata.correlation_matrix,
-                    metadata.var_types,
-                    scenario_config,
-                    sim_seed,
-                )
-            else:
-                perturbed_corr = metadata.correlation_matrix
-                perturbed_types = metadata.var_types
+            # Apply per-simulation perturbations (correlation noise, distribution swaps)
+            # Zero-valued params in optimistic scenario are no-ops
+            if apply_perturbations_func is None:
+                raise RuntimeError("apply_perturbations_func must be provided")
+            perturbed_corr, perturbed_types = apply_perturbations_func(
+                metadata.correlation_matrix,
+                metadata.var_types,
+                scenario_config,
+                sim_seed,
+            )
 
             result = self._single_simulation(
                 sim_id=sim_id,
@@ -326,7 +332,9 @@ class SimulationRunner:
                 first_spec = next(iter(metadata.cluster_specs.values()))
                 sample_size = first_spec["n_clusters"] * first_spec["cluster_size"]
 
-            # Check if strict mode with uploaded data
+            # Strict-mode bootstrap: resample whole rows from uploaded data to
+            # preserve exact inter-variable relationships, then generate y from
+            # the bootstrapped X. This bypasses the normal X-generation pipeline.
             if metadata.preserve_correlation == "strict" and metadata.uploaded_raw_data is not None:
                 # Strict mode: bootstrap uploaded data + generate created variables separately
                 from ..stats.data_generation import bootstrap_uploaded_data
@@ -336,7 +344,7 @@ class SimulationRunner:
                     sample_size,
                     metadata.uploaded_raw_data,
                     metadata.uploaded_var_metadata,
-                    sim_seed,
+                    sim_seed + 3 if sim_seed is not None else None,
                 )
 
                 # Merge uploaded and created non-factor variables
@@ -367,7 +375,7 @@ class SimulationRunner:
                     X_factors = X_uploaded_factors
                 else:
                     # Mixed: generate all factors, replace uploaded factor columns
-                    X_factors = _generate_factors(sample_size, metadata.factor_specs, sim_seed)
+                    X_factors = _generate_factors(sample_size, metadata.factor_specs, sim_seed + 3 if sim_seed is not None else None)
                     # Overwrite uploaded factor dummy columns with bootstrapped data
                     if X_uploaded_factors.shape[1] > 0:
                         col_offset = 0
@@ -400,14 +408,14 @@ class SimulationRunner:
                     X_non_factors = np.empty((sample_size, 0), dtype=float)
 
                 # Generate factor variables (as dummy variables)
-                X_factors = _generate_factors(sample_size, metadata.factor_specs, sim_seed)
+                X_factors = _generate_factors(sample_size, metadata.factor_specs, sim_seed + 3 if sim_seed is not None else None)
 
             # Compute LME perturbations (ICC jitter, non-normal RE dist)
             lme_perturbations = None
-            if metadata.cluster_specs and scenario_config is not None:
+            if metadata.cluster_specs:
                 from ..core.scenarios import apply_lme_perturbations
 
-                lme_perturbations = apply_lme_perturbations(metadata.cluster_specs, scenario_config, sim_seed)
+                lme_perturbations = apply_lme_perturbations(metadata.cluster_specs, scenario_config or {}, sim_seed)
 
             # Generate cluster random effects (independent of upload mode)
             re_result = None  # Phase 2: random effects result for slopes/nesting
@@ -448,6 +456,16 @@ class SimulationRunner:
             # Create extended design matrix with interactions (excludes cluster effects)
             X_expanded = create_X_extended_func(X)
 
+            # Test formula column subsetting: use reduced design matrix for analysis
+            if metadata.test_column_indices is not None:
+                X_test = X_expanded[:, metadata.test_column_indices]
+                if metadata.test_target_indices is None:
+                    raise RuntimeError("test_target_indices must be set when test_column_indices is present")
+                test_target_indices = metadata.test_target_indices
+            else:
+                X_test = X_expanded
+                test_target_indices = metadata.target_indices
+
             # Split effect sizes: fixed effects vs cluster effects
             # Use precomputed values (Phase 2 optimization)
             if metadata.cluster_effect_indices:
@@ -457,6 +475,21 @@ class SimulationRunner:
                 fixed_effect_sizes = metadata.fixed_effect_sizes_cached
                 cluster_effect_sizes = None
 
+            # Residual coin flip: decide whether this simulation uses non-normal errors
+            residual_dist = 0  # normal
+            residual_df = 10.0
+            residual_change_prob = scenario_config.get("residual_change_prob", 0.0) if scenario_config else 0.0
+            if residual_change_prob > 0:
+                if scenario_config is None:
+                    raise RuntimeError("scenario_config must be provided when residual_change_prob > 0")
+                coin_rng = np.random.RandomState(sim_seed + 7 if sim_seed is not None else None)
+                if coin_rng.random() < residual_change_prob:
+                    residual_dists = scenario_config.get("residual_dists", ["heavy_tailed", "skewed"])
+                    picked = coin_rng.choice(residual_dists)
+                    dist_map = {"heavy_tailed": 1, "skewed": 2}
+                    residual_dist = dist_map.get(picked, 0)
+                    residual_df = float(scenario_config.get("residual_df", 10))
+
             # Generate dependent variable with fixed effects only
             y = generate_y_func(
                 X_expanded=X_expanded,
@@ -464,6 +497,8 @@ class SimulationRunner:
                 heterogeneity=metadata.heterogeneity,
                 heteroskedasticity=metadata.heteroskedasticity,
                 sim_seed=sim_seed,
+                residual_dist=residual_dist,
+                residual_df=residual_df,
             )
 
             # Add cluster random effects contribution
@@ -478,12 +513,6 @@ class SimulationRunner:
             if re_result is not None and not np.allclose(re_result.slope_contribution, 0):
                 y = y + re_result.slope_contribution
 
-            # Apply LME residual perturbations (non-normal residuals)
-            if metadata.cluster_specs and scenario_config is not None:
-                from ..core.scenarios import apply_lme_residual_perturbations
-
-                y = apply_lme_residual_perturbations(y, scenario_config, sim_seed)
-
             # Determine cluster IDs for the solver
             cluster_ids: Optional[np.ndarray]
             if re_result is not None:
@@ -496,23 +525,25 @@ class SimulationRunner:
                 cluster_ids = metadata.cluster_ids_template
 
             # Route to correct analysis method
-            if cluster_ids is not None:
+            # When test_formula specifies no random effects, use OLS even if generation has clusters
+            use_lme = cluster_ids is not None and not (metadata.test_column_indices is not None and not metadata.test_has_random_effects)
+            if use_lme:
                 # Mixed model path (LME)
                 from ..stats.mixed_models import _lme_analysis_wrapper
 
+                assert cluster_ids is not None  # narrowed by use_lme guard above
                 lme_result = _lme_analysis_wrapper(
-                    X_expanded,
+                    X_test,
                     y,
-                    metadata.target_indices,
+                    test_target_indices,
                     cluster_ids,
-                    metadata.cluster_column_indices,
                     metadata.correction_method,
                     self.alpha,
                     backend="custom",
                     verbose=metadata.verbose,
-                    chi2_crit=getattr(metadata, "lme_chi2_crit", None),
-                    z_crit=getattr(metadata, "lme_z_crit", None),
-                    correction_z_crits=getattr(metadata, "lme_correction_z_crits", None),
+                    chi2_crit=metadata.lme_chi2_crit,
+                    z_crit=metadata.lme_z_crit,
+                    correction_z_crits=metadata.lme_correction_z_crits,
                     re_result=re_result,
                 )
 
@@ -539,16 +570,20 @@ class SimulationRunner:
             else:
                 # Standard OLS path
                 results = analyze_func(
-                    X_expanded,
+                    X_test,
                     y,
-                    metadata.target_indices,
+                    test_target_indices,
                     self.alpha,
                     metadata.correction_method,
                 )
                 diagnostics = None
 
-            # Extract results: [f_sig, uncorr..., corr..., (wald_flag)]
-            n_targets = len(metadata.target_indices)
+            # Result array layout: [F_sig, uncorrected[n_targets], corrected[n_targets], wald_flag?]
+            # - F_sig (index 0): overall model F-test significance (1.0 or 0.0)
+            # - uncorrected[1..n]: per-target t-test significance without correction
+            # - corrected[n+1..2n]: per-target significance with multiple-comparison correction
+            # - wald_flag (optional, LME only): 1.0 if Wald test was used instead of LRT
+            n_targets = len(test_target_indices)
             f_significant = bool(results[0])
             uncorrected = results[1 : 1 + n_targets].astype(bool)
             corrected = results[1 + n_targets : 1 + 2 * n_targets].astype(bool)
@@ -560,19 +595,19 @@ class SimulationRunner:
                 wald_flag = bool(results[expected_len])
 
             # Post-hoc pairwise contrasts (OLS path only)
-            if metadata.posthoc_specs and cluster_ids is None:
+            if metadata.posthoc_specs and not use_lme:
                 from ..stats.ols import compute_posthoc_contrasts
 
                 ph_uncorr, ph_corr, regular_override = compute_posthoc_contrasts(
-                    X_expanded,
+                    X_test,
                     y,
                     metadata.posthoc_specs,
                     metadata.posthoc_method,
                     metadata.posthoc_t_crit,
                     metadata.posthoc_tukey_crits,
-                    target_indices=metadata.target_indices,
+                    target_indices=test_target_indices,
                     correction_method=metadata.correction_method,
-                    correction_t_crits_combined=getattr(metadata, "posthoc_correction_t_crits_combined", None),
+                    correction_t_crits_combined=metadata.posthoc_correction_t_crits_combined,
                 )
 
                 # If FDR/Holm combined correction was applied, override regular corrected
@@ -645,7 +680,7 @@ class SimulationMetadata:
         correction_method: Encoded multiple-comparison correction
             (0=none, 1=Bonferroni, 2=BH, 3=Holm).
         heterogeneity: SD of random effect-size multiplier.
-        heteroskedasticity: Correlation between first predictor and error SD.
+        heteroskedasticity: Correlation between predicted values and error SD.
         preserve_correlation: Upload correlation mode
             (``"no"``/``"partial"``/``"strict"``).
         uploaded_raw_data: Normalised raw data for strict-mode bootstrap.
@@ -728,6 +763,13 @@ class SimulationMetadata:
         self.posthoc_method: str = "t-test"
         self.posthoc_tukey_crits: Dict[str, float] = {}
         self.posthoc_t_crit: float = 0.0
+        self.posthoc_correction_t_crits_combined: Optional[np.ndarray] = None
+
+        # Test formula fields (for model misspecification testing)
+        self.test_column_indices: Optional[np.ndarray] = None
+        self.test_target_indices: Optional[np.ndarray] = None
+        self.test_effect_count: Optional[int] = None  # p for critical value computation
+        self.test_has_random_effects: bool = False  # Whether test formula has (1|group) etc.
 
 
 def _compute_fixed_effect_variance(registry) -> float:
@@ -779,8 +821,13 @@ def _compute_fixed_effect_variance(registry) -> float:
         factor_info = registry._factors[factor_name]
         proportions = factor_info.get("proportions")
         if proportions is not None:
-            # level is 1-indexed; proportions list is 0-indexed
-            p_k = proportions[level - 1]
+            level_labels = factor_info.get("level_labels")
+            if level_labels is not None:
+                # String level labels — look up position by label
+                p_k = proportions[level_labels.index(str(level))]
+            else:
+                # Integer levels are 1-indexed; proportions list is 0-indexed
+                p_k = proportions[level - 1]
         else:
             # Equal proportions (default)
             n_levels = factor_info["n_levels"]
@@ -814,6 +861,7 @@ def prepare_metadata(
     model,
     target_tests: List[str],
     correction: Optional[str] = None,
+    test_formula_effects: Optional[List[str]] = None,
 ) -> SimulationMetadata:
     """
     Prepare simulation metadata from model state.
@@ -825,6 +873,9 @@ def prepare_metadata(
         model: MCPowerModel instance
         target_tests: List of effects to test
         correction: Multiple comparison correction method
+        test_formula_effects: Optional list of effect names from a test
+            formula.  When provided, the metadata will include column
+            indices for subsetting X_expanded to the test model.
 
     Returns:
         SimulationMetadata instance
@@ -960,8 +1011,6 @@ def prepare_metadata(
         upload_data_values=model.upload_data_values if model.upload_data_values is not None else np.zeros((2, 2), dtype=np.float64),
         effect_sizes=effect_sizes,
         correction_method=correction_method,
-        heterogeneity=model.heterogeneity,
-        heteroskedasticity=model.heteroskedasticity,
         preserve_correlation=model._preserve_correlation,
         uploaded_raw_data=model._uploaded_raw_data,
         uploaded_var_metadata=model._uploaded_var_metadata,
@@ -981,5 +1030,21 @@ def prepare_metadata(
     if hasattr(model, "_posthoc_specs") and model._posthoc_specs:
         metadata.posthoc_specs = model._posthoc_specs
         metadata.posthoc_method = "tukey" if is_tukey_correction else "t-test"
+
+    # Test formula column subsetting
+    if test_formula_effects is not None:
+        from ..utils.test_formula_utils import _compute_test_column_indices, _remap_target_indices
+
+        # Get all non-cluster effect names in registry order
+        all_effect_names = [name for name in registry._effects if name not in registry.cluster_effect_names]
+
+        test_col_indices = _compute_test_column_indices(all_effect_names, test_formula_effects)
+        metadata.test_column_indices = test_col_indices
+        metadata.test_effect_count = len(test_col_indices)
+
+        # Remap target indices to X_test space
+        # Only remap targets that exist in the test formula
+        valid_targets = np.array([idx for idx in target_indices if idx in test_col_indices], dtype=np.int64)
+        metadata.test_target_indices = _remap_target_indices(valid_targets, test_col_indices)
 
     return metadata

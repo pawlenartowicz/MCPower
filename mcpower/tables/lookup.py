@@ -15,7 +15,7 @@ class LookupTableManager:
     """Manages pre-computed lookup tables for data-generation transforms.
 
     Tables are lazily loaded from disk (``tables/data/*.npz``) on first
-    access and generated from scipy if the cache files are missing.
+    access and generated via the C++ native backend if the cache files are missing.
     The C++ native backend consumes these tables for distribution
     transforms.
 
@@ -47,47 +47,37 @@ class LookupTableManager:
         """Ensure data directory exists."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_norm_cdf_table(self) -> np.ndarray:
-        """Load (or generate and cache) the normal CDF lookup table.
+    def _load_table(self, key: str, generate_fn) -> np.ndarray:
+        """Load a table from cache, disk, or generate it on the fly.
+
+        Args:
+            key: Cache key and npz array name (e.g. ``"norm_cdf"``).
+            generate_fn: Bound method to generate and cache the table.
 
         Returns:
             1-D float64 array of length ``DIST_RESOLUTION``.
         """
-        if "norm_cdf" in self._tables:
-            return self._tables["norm_cdf"]
+        if key in self._tables:
+            return self._tables[key]
 
-        cache_file = self.data_dir / "norm_cdf.npz"
-
+        cache_file = self.data_dir / f"{key}.npz"
         try:
             data = np.load(cache_file)
-            self._tables["norm_cdf"] = data["norm_cdf"]
-            return self._tables["norm_cdf"]
+            self._tables[key] = data[key]
+            return self._tables[key]
         except (FileNotFoundError, KeyError):
             pass
 
-        self._generate_norm_cdf_table()
-        return self._tables["norm_cdf"]
+        generate_fn()
+        return self._tables[key]
+
+    def load_norm_cdf_table(self) -> np.ndarray:
+        """Load (or generate and cache) the normal CDF lookup table."""
+        return self._load_table("norm_cdf", self._generate_norm_cdf_table)
 
     def load_t3_ppf_table(self) -> np.ndarray:
-        """Load (or generate and cache) the t(df=3) PPF lookup table.
-
-        Returns:
-            1-D float64 array of length ``DIST_RESOLUTION``.
-        """
-        if "t3_ppf" in self._tables:
-            return self._tables["t3_ppf"]
-
-        cache_file = self.data_dir / "t3_ppf.npz"
-
-        try:
-            data = np.load(cache_file)
-            self._tables["t3_ppf"] = data["t3_ppf"]
-            return self._tables["t3_ppf"]
-        except (FileNotFoundError, KeyError):
-            pass
-
-        self._generate_t3_ppf_table()
-        return self._tables["t3_ppf"]
+        """Load (or generate and cache) the t(df=3) PPF lookup table."""
+        return self._load_table("t3_ppf", self._generate_t3_ppf_table)
 
     def load_all_generation_tables(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -110,6 +100,8 @@ class LookupTableManager:
         self._tables["norm_cdf"] = norm_cdf
 
         self.ensure_data_dir()
+        # Silently ignore cache write failures (e.g. read-only filesystem,
+        # permission denied). Tables are still usable from memory.
         try:
             np.savez_compressed(self.data_dir / "norm_cdf.npz", norm_cdf=norm_cdf, x_range=x_norm)
         except Exception:
@@ -125,6 +117,8 @@ class LookupTableManager:
         self._tables["t3_ppf"] = t3_ppf
 
         self.ensure_data_dir()
+        # Silently ignore cache write failures (e.g. read-only filesystem,
+        # permission denied). Tables are still usable from memory.
         try:
             np.savez_compressed(
                 self.data_dir / "t3_ppf.npz",

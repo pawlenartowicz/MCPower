@@ -1,9 +1,8 @@
 """
-Power accuracy tests — backend-agnostic.
+Power accuracy tests.
 
 Compare MC power estimates against exact analytical power from
 non-central t / F distributions.
-Tests run on ALL available backends via the backend fixture.
 """
 
 import contextlib
@@ -42,7 +41,7 @@ class TestAccuracyVsAnalytical:
             (0.5, 150),
         ],
     )
-    def test_single_predictor_t_test(self, backend, beta, n):
+    def test_single_predictor_t_test(self, beta, n):
         """t-test power matches analytical non-central t."""
         from mcpower import MCPower
 
@@ -60,7 +59,7 @@ class TestAccuracyVsAnalytical:
         exact_power = analytical_t_power(beta, n, p=1, sigma_eps=1.0, vif_j=1.0)
         margin = mc_accuracy_margin(exact_power, N_SIMS)
         assert abs(mc_power - exact_power) < margin, (
-            f"[{backend}] β={beta}, n={n}: MC={mc_power:.2f}%, analytical={exact_power:.2f}% ± {margin:.2f}%"
+            f"β={beta}, n={n}: MC={mc_power:.2f}%, analytical={exact_power:.2f}% ± {margin:.2f}%"
         )
 
     @pytest.mark.parametrize(
@@ -71,7 +70,7 @@ class TestAccuracyVsAnalytical:
             (0.2, 0.2, 200),
         ],
     )
-    def test_two_predictors_uncorrelated(self, backend, b1, b2, n):
+    def test_two_predictors_uncorrelated(self, b1, b2, n):
         """Each t-test and F-test with Σ = I."""
         from mcpower import MCPower
 
@@ -91,12 +90,12 @@ class TestAccuracyVsAnalytical:
             mc_power = get_power(result, var)
             exact = analytical_t_power(beta, n, p=2, sigma_eps=1.0, vif_j=1.0)
             margin = mc_accuracy_margin(exact, N_SIMS)
-            assert abs(mc_power - exact) < margin, f"[{backend}] {var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
+            assert abs(mc_power - exact) < margin, f"{var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
 
         mc_f = get_power(result, "overall")
         exact_f = analytical_f_power([b1, b2], n, Sigma, sigma_eps=1.0)
         margin_f = mc_accuracy_margin(exact_f, N_SIMS)
-        assert abs(mc_f - exact_f) < margin_f, f"[{backend}] F-test: MC={mc_f:.2f}%, analytical={exact_f:.2f}% ± {margin_f:.2f}%"
+        assert abs(mc_f - exact_f) < margin_f, f"F-test: MC={mc_f:.2f}%, analytical={exact_f:.2f}% ± {margin_f:.2f}%"
 
     @pytest.mark.parametrize(
         "b1,b2,rho,n",
@@ -107,7 +106,7 @@ class TestAccuracyVsAnalytical:
             (0.5, 0.3, 0.5, 80),
         ],
     )
-    def test_two_predictors_correlated_t_tests(self, backend, b1, b2, rho, n):
+    def test_two_predictors_correlated_t_tests(self, b1, b2, rho, n):
         """Individual t-tests with correlated predictors: VIF matters."""
         from mcpower import MCPower
 
@@ -132,5 +131,5 @@ class TestAccuracyVsAnalytical:
             exact = analytical_t_power(beta, n, p=2, sigma_eps=1.0, vif_j=vif)
             margin = mc_accuracy_margin(exact, N_SIMS)
             assert abs(mc_power - exact) < margin, (
-                f"[{backend}] rho={rho}, {var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
+                f"rho={rho}, {var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
             )

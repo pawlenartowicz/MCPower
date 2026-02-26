@@ -3,11 +3,9 @@ Backend abstraction for MCPower framework.
 
 This module provides a unified interface for compute backends.
 The only supported backend is native C++ (compiled via pybind11).
-
-Users can override via set_backend('c++' | 'default') or pass a ComputeBackend instance.
 """
 
-from typing import Optional, Protocol, Union, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -24,6 +22,7 @@ class ComputeBackend(Protocol):
         f_crit: float,
         t_crit: float,
         correction_t_crits: np.ndarray,
+        # correction_method encoding: 0=none, 1=Bonferroni, 2=FDR (BH), 3=Holm
         correction_method: int,
     ) -> np.ndarray:
         """Run OLS regression and return significance flags.
@@ -40,8 +39,14 @@ class ComputeBackend(Protocol):
         heterogeneity: float,
         heteroskedasticity: float,
         seed: int,
+        residual_dist: int = 0,
+        residual_df: float = 10.0,
     ) -> np.ndarray:
         """Generate the dependent variable ``y = X @ effects + error``.
+
+        Args:
+            residual_dist: Error distribution (0=normal, 1=heavy_tailed, 2=skewed).
+            residual_df: Degrees of freedom for non-normal residuals.
 
         Returns:
             1-D array of length ``n_samples``.
@@ -88,12 +93,8 @@ class ComputeBackend(Protocol):
         ...
 
 
-# Valid backend names for set_backend()
-_BACKEND_NAMES = {"default", "c++"}
-
 # Global backend instance
 _backend_instance: Optional[ComputeBackend] = None
-_backend_forced = False
 
 
 def get_backend() -> ComputeBackend:
@@ -101,7 +102,7 @@ def get_backend() -> ComputeBackend:
     Get the active compute backend.
 
     On first call, instantiates the C++ native backend.
-    Subsequent calls return the cached instance unless reset_backend() is called.
+    Subsequent calls return the cached instance.
 
     Raises:
         ImportError: If the C++ extension is not compiled/installed.
@@ -117,64 +118,7 @@ def get_backend() -> ComputeBackend:
     return _backend_instance
 
 
-def set_backend(backend: Union[str, ComputeBackend]) -> None:
-    """
-    Set the compute backend.
-
-    Args:
-        backend: One of:
-            - 'default' -- use native C++ backend
-            - 'c++'     -- force native C++ backend
-            - A ComputeBackend instance
-
-    Raises:
-        ImportError: If the C++ backend is not available.
-        ValueError: If the string is not recognized.
-    """
-    global _backend_instance, _backend_forced
-
-    if isinstance(backend, str):
-        name = backend.lower().strip()
-        if name not in _BACKEND_NAMES:
-            raise ValueError(f"Unknown backend {backend!r}. Choose from: {', '.join(sorted(_BACKEND_NAMES))}")
-
-        from .native import NativeBackend
-
-        _backend_instance = NativeBackend()
-        _backend_forced = name != "default"
-    else:
-        _backend_instance = backend
-        _backend_forced = True
-
-
-def reset_backend() -> None:
-    """Reset backend to automatic selection."""
-    global _backend_instance, _backend_forced
-    _backend_instance = None
-    _backend_forced = False
-
-
-def get_backend_info() -> dict:
-    """
-    Get information about the current backend.
-
-    Returns:
-        Dictionary with backend name, type, and whether it was forced.
-    """
-    backend = get_backend()
-    name = type(backend).__name__
-    return {
-        "name": name,
-        "is_native": name == "NativeBackend",
-        "module": type(backend).__module__,
-        "forced": _backend_forced,
-    }
-
-
 __all__ = [
     "ComputeBackend",
     "get_backend",
-    "set_backend",
-    "reset_backend",
-    "get_backend_info",
 ]

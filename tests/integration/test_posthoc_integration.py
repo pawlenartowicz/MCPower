@@ -15,7 +15,7 @@ class TestPostHocParsing:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("group[1] vs group[2]")
         assert "group[1] vs group[2]" in tests
@@ -27,7 +27,7 @@ class TestPostHocParsing:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("group[1] vs group[2], group[2] vs group[3]")
         assert "group[1] vs group[2]" in tests
@@ -40,7 +40,7 @@ class TestPostHocParsing:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("overall, group[1] vs group[2]")
         assert "overall" in tests
@@ -52,7 +52,7 @@ class TestPostHocParsing:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("all")
         # "all" should NOT include any post-hoc comparisons
@@ -66,7 +66,7 @@ class TestPostHocParsing:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="Factor.*not found"):
             model._parse_target_tests("notafactor[1] vs notafactor[2]")
@@ -77,7 +77,7 @@ class TestPostHocParsing:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="out of range"):
             model._parse_target_tests("group[0] vs group[5]")
@@ -88,7 +88,7 @@ class TestPostHocParsing:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="Cannot compare a level to itself"):
             model._parse_target_tests("group[2] vs group[2]")
@@ -99,7 +99,7 @@ class TestPostHocParsing:
         model = MCPower("y = a + b")
         model.set_variable_type("a=(factor,3), b=(factor,2)")
         model.set_effects("a[2]=0.3, a[3]=0.2, b[2]=0.1")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="same factor"):
             model._parse_target_tests("a[1] vs b[1]")
@@ -396,7 +396,7 @@ class TestKeywordExpansion:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("all-posthoc")
         # 3-level factor → C(3,2) = 3 pairs
@@ -415,7 +415,7 @@ class TestKeywordExpansion:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("all, all-posthoc")
         # "all" → overall + group[2] + group[3] + x1 = 4
@@ -434,7 +434,7 @@ class TestKeywordExpansion:
         model = MCPower("y = a + b")
         model.set_variable_type("a=(factor,3), b=(factor,2)")
         model.set_effects("a[2]=0.3, a[3]=0.2, b[2]=0.1")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("all-posthoc")
         # a: C(3,2)=3, b: C(2,2)=1 → 4 total
@@ -448,7 +448,7 @@ class TestKeywordExpansion:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.5, x2=0.3")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("all, all-posthoc")
         assert "overall" in tests
@@ -461,7 +461,7 @@ class TestKeywordExpansion:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.5, x2=0.3")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="no factor variables"):
             model._parse_target_tests("all-posthoc")
@@ -472,7 +472,7 @@ class TestKeywordExpansion:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.5, x2=0.3")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("all, -overall")
         assert "overall" not in tests
@@ -486,7 +486,7 @@ class TestKeywordExpansion:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
 
         tests = model._parse_target_tests("all-posthoc, -group[1] vs group[2]")
         assert "group[1] vs group[2]" not in tests
@@ -500,7 +500,7 @@ class TestKeywordExpansion:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.5, x2=0.3")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="does not match"):
             model._parse_target_tests("all, -nonexistent")
@@ -511,7 +511,7 @@ class TestKeywordExpansion:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.5, x2=0.3")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="nothing left"):
             model._parse_target_tests("all, -overall, -x1, -x2")
@@ -522,7 +522,7 @@ class TestKeywordExpansion:
 
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.5, x2=0.3")
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError, match="Duplicate"):
             model._parse_target_tests("all, x1")

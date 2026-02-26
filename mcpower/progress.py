@@ -87,10 +87,7 @@ class TqdmReporter:
         self._bar = None
 
     def __call__(self, current: int, total: int):
-        try:
-            from tqdm import tqdm
-        except ImportError:
-            raise ImportError("tqdm is required for TqdmReporter. Install with: pip install tqdm") from None
+        from tqdm import tqdm
 
         if self._bar is None:
             self._bar = tqdm(total=total, unit="sim", **self._tqdm_kwargs)

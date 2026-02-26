@@ -367,76 +367,42 @@ class VariableRegistry:
             level_labels = factor_info.get("level_labels")
             reference_level = factor_info.get("reference_level", 1)
 
+            # Compute non-reference levels once
             if level_labels is not None:
-                # Named levels: skip the reference, create dummies for the rest
-                non_ref_labels = [lb for lb in level_labels if lb != str(reference_level)]
-                for label in non_ref_labels:
-                    dummy_name = f"{factor_name}[{label}]"
-
-                    # Create dummy predictor
-                    dummy_pred = PredictorVar(
-                        name=dummy_name,
-                        var_type="factor_dummy",
-                        is_dummy=True,
-                        factor_source=factor_name,
-                        factor_level=label,
-                        column_index=col_idx,
-                        level_labels=level_labels,
-                    )
-                    new_predictors[dummy_name] = dummy_pred
-
-                    # Create main effect for dummy
-                    dummy_eff = Effect(
-                        name=dummy_name,
-                        effect_type="main",
-                        var_names=[dummy_name],
-                        column_index=col_idx,
-                        factor_source=factor_name,
-                        factor_level=label,
-                    )
-                    new_effects[dummy_name] = dummy_eff
-
-                    # Store dummy mapping
-                    self._factor_dummies[dummy_name] = {
-                        "factor_name": factor_name,
-                        "level": label,
-                    }
-
-                    col_idx += 1
+                non_ref = [lb for lb in level_labels if lb != str(reference_level)]
             else:
-                # Original integer-indexed behavior
-                for level in range(2, n_levels + 1):
-                    dummy_name = f"{factor_name}[{level}]"
+                non_ref = list(range(2, n_levels + 1))
 
-                    # Create dummy predictor
-                    dummy_pred = PredictorVar(
-                        name=dummy_name,
-                        var_type="factor_dummy",
-                        is_dummy=True,
-                        factor_source=factor_name,
-                        factor_level=level,
-                        column_index=col_idx,
-                    )
-                    new_predictors[dummy_name] = dummy_pred
+            for level in non_ref:
+                dummy_name = f"{factor_name}[{level}]"
 
-                    # Create main effect for dummy
-                    dummy_eff = Effect(
-                        name=dummy_name,
-                        effect_type="main",
-                        var_names=[dummy_name],
-                        column_index=col_idx,
-                        factor_source=factor_name,
-                        factor_level=level,
-                    )
-                    new_effects[dummy_name] = dummy_eff
+                dummy_pred = PredictorVar(
+                    name=dummy_name,
+                    var_type="factor_dummy",
+                    is_dummy=True,
+                    factor_source=factor_name,
+                    factor_level=level,
+                    column_index=col_idx,
+                    level_labels=level_labels if level_labels is not None else None,
+                )
+                new_predictors[dummy_name] = dummy_pred
 
-                    # Store dummy mapping
-                    self._factor_dummies[dummy_name] = {
-                        "factor_name": factor_name,
-                        "level": level,
-                    }
+                dummy_eff = Effect(
+                    name=dummy_name,
+                    effect_type="main",
+                    var_names=[dummy_name],
+                    column_index=col_idx,
+                    factor_source=factor_name,
+                    factor_level=level,
+                )
+                new_effects[dummy_name] = dummy_eff
 
-                    col_idx += 1
+                self._factor_dummies[dummy_name] = {
+                    "factor_name": factor_name,
+                    "level": level,
+                }
+
+                col_idx += 1
 
         # Handle interactions involving factors — Cartesian product of
         # non-reference dummy levels across all factor components.
@@ -503,6 +469,13 @@ class VariableRegistry:
 
     def get_var_types(self) -> np.ndarray:
         """Get variable types as numpy array (for data generation)."""
+        # Type codes: 0-5 are parametric distributions generated from scratch.
+        # 97/98/99 are sentinel codes for uploaded-data variables whose values
+        # come from bootstrapped/quantile-matched empirical data rather than
+        # parametric generation:
+        #   97 = uploaded_factor  (factor from uploaded data)
+        #   98 = uploaded_binary  (binary from uploaded data)
+        #   99 = uploaded_data    (continuous from uploaded data)
         type_mapping = {
             "normal": 0,
             "binary": 1,
@@ -717,28 +690,20 @@ class VariableRegistry:
 
     def _reindex_predictors(self) -> None:
         """Reindex all predictors to maintain order: non_factor | cluster_effect | dummies."""
-        col_idx = 0
+        non_factor = []
+        cluster = []
+        dummies = []
 
-        # Non-factor predictors first
-        for name in sorted(self._predictors.keys(), key=lambda x: self._predictors[x].column_index or 0):
-            pred = self._predictors[name]
-            if not pred.is_factor and not pred.is_dummy and pred.var_type != "cluster_effect":
-                pred.column_index = col_idx
-                col_idx += 1
-
-        # Cluster effect predictors second
-        for name in sorted(self._predictors.keys(), key=lambda x: self._predictors[x].column_index or 0):
-            pred = self._predictors[name]
-            if pred.var_type == "cluster_effect":
-                pred.column_index = col_idx
-                col_idx += 1
-
-        # Factor dummies last
         for name in sorted(self._predictors.keys(), key=lambda x: self._predictors[x].column_index or 0):
             pred = self._predictors[name]
             if pred.is_dummy:
-                pred.column_index = col_idx
-                col_idx += 1
+                dummies.append(pred)
+            elif pred.var_type == "cluster_effect":
+                cluster.append(pred)
+            elif not pred.is_factor:
+                non_factor.append(pred)
 
-        # Update effect indices
+        for col_idx, pred in enumerate(non_factor + cluster + dummies):
+            pred.column_index = col_idx
+
         self._update_effect_indices()

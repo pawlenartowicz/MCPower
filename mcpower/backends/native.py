@@ -17,6 +17,11 @@ except ImportError:
     mcpower_native = None
 
 
+def _prep(arr: np.ndarray, dtype=np.float64) -> np.ndarray:
+    """Ensure array is contiguous with the expected dtype for C++ interop."""
+    return np.ascontiguousarray(arr, dtype=dtype)
+
+
 class NativeBackend:
     """
     C++ compute backend using pybind11 bindings.
@@ -46,8 +51,8 @@ class NativeBackend:
         t3_ppf = manager.load_t3_ppf_table()
 
         # Ensure correct dtypes
-        norm_cdf = np.ascontiguousarray(norm_cdf.astype(np.float64))
-        t3_ppf = np.ascontiguousarray(t3_ppf.astype(np.float64))
+        norm_cdf = _prep(norm_cdf)
+        t3_ppf = _prep(t3_ppf)
 
         # Initialize C++ tables (generation tables only)
         mcpower_native.init_tables(norm_cdf, t3_ppf)
@@ -77,10 +82,10 @@ class NativeBackend:
         Returns:
             Array: [f_sig, uncorrected..., corrected...]
         """
-        X = np.ascontiguousarray(X, dtype=np.float64)
-        y = np.ascontiguousarray(y, dtype=np.float64)
-        target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
-        correction_t_crits = np.ascontiguousarray(correction_t_crits, dtype=np.float64)
+        X = _prep(X)
+        y = _prep(y)
+        target_indices = _prep(target_indices, np.int32)
+        correction_t_crits = _prep(correction_t_crits)
 
         return mcpower_native.ols_analysis(X, y, target_indices, f_crit, t_crit, correction_t_crits, correction_method)  # type: ignore[no-any-return]
 
@@ -91,6 +96,8 @@ class NativeBackend:
         heterogeneity: float,
         heteroskedasticity: float,
         seed: int,
+        residual_dist: int = 0,
+        residual_df: float = 10.0,
     ) -> np.ndarray:
         """
         Generate dependent variable.
@@ -101,14 +108,16 @@ class NativeBackend:
             heterogeneity: Effect size variation SD
             heteroskedasticity: Error-predictor correlation
             seed: Random seed (-1 for random)
+            residual_dist: Error distribution (0=normal, 1=heavy_tailed, 2=skewed)
+            residual_df: Degrees of freedom for non-normal residuals
 
         Returns:
             Response vector (n_samples,)
         """
-        X = np.ascontiguousarray(X, dtype=np.float64)
-        effects = np.ascontiguousarray(effects, dtype=np.float64)
+        X = _prep(X)
+        effects = _prep(effects)
 
-        return mcpower_native.generate_y(X, effects, heterogeneity, heteroskedasticity, seed)  # type: ignore[no-any-return]
+        return mcpower_native.generate_y(X, effects, heterogeneity, heteroskedasticity, seed, residual_dist, residual_df)  # type: ignore[no-any-return]
 
     def generate_X(
         self,
@@ -137,11 +146,11 @@ class NativeBackend:
         Returns:
             Design matrix (n_samples, n_vars)
         """
-        correlation_matrix = np.ascontiguousarray(correlation_matrix, dtype=np.float64)
-        var_types = np.ascontiguousarray(var_types, dtype=np.int32)
-        var_params = np.ascontiguousarray(var_params, dtype=np.float64)
-        upload_normal = np.ascontiguousarray(upload_normal, dtype=np.float64)
-        upload_data = np.ascontiguousarray(upload_data, dtype=np.float64)
+        correlation_matrix = _prep(correlation_matrix)
+        var_types = _prep(var_types, np.int32)
+        var_params = _prep(var_params)
+        upload_normal = _prep(upload_normal)
+        upload_data = _prep(upload_data)
 
         return mcpower_native.generate_X(  # type: ignore[no-any-return]
             n_samples,
@@ -185,12 +194,15 @@ class NativeBackend:
         Returns:
             Array: [f_sig, uncorrected..., corrected..., wald_flag]
             or empty array on failure
+
+            wald_flag: 1.0 if the Wald test was used as fallback for the overall
+            significance test (instead of the likelihood ratio test), 0.0 otherwise.
         """
-        X = np.ascontiguousarray(X, dtype=np.float64)
-        y = np.ascontiguousarray(y, dtype=np.float64)
-        cluster_ids = np.ascontiguousarray(cluster_ids, dtype=np.int32)
-        target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
-        correction_z_crits = np.ascontiguousarray(correction_z_crits, dtype=np.float64)
+        X = _prep(X)
+        y = _prep(y)
+        cluster_ids = _prep(cluster_ids, np.int32)
+        target_indices = _prep(target_indices, np.int32)
+        correction_z_crits = _prep(correction_z_crits)
 
         return mcpower_native.lme_analysis(  # type: ignore[no-any-return]
             X,
@@ -240,14 +252,17 @@ class NativeBackend:
         Returns:
             Array: [f_sig, uncorrected..., corrected..., wald_flag]
             or empty array on failure
+
+            wald_flag: 1.0 if the Wald test was used as fallback for the overall
+            significance test (instead of the likelihood ratio test), 0.0 otherwise.
         """
-        X = np.ascontiguousarray(X, dtype=np.float64)
-        y = np.ascontiguousarray(y, dtype=np.float64)
-        Z = np.ascontiguousarray(Z, dtype=np.float64)
-        cluster_ids = np.ascontiguousarray(cluster_ids, dtype=np.int32)
-        target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
-        correction_z_crits = np.ascontiguousarray(correction_z_crits, dtype=np.float64)
-        warm_theta = np.ascontiguousarray(warm_theta, dtype=np.float64)
+        X = _prep(X)
+        y = _prep(y)
+        Z = _prep(Z)
+        cluster_ids = _prep(cluster_ids, np.int32)
+        target_indices = _prep(target_indices, np.int32)
+        correction_z_crits = _prep(correction_z_crits)
+        warm_theta = _prep(warm_theta)
 
         return mcpower_native.lme_analysis_general(  # type: ignore[no-any-return]
             X,
@@ -301,15 +316,18 @@ class NativeBackend:
         Returns:
             Array: [f_sig, uncorrected..., corrected..., wald_flag]
             or empty array on failure
+
+            wald_flag: 1.0 if the Wald test was used as fallback for the overall
+            significance test (instead of the likelihood ratio test), 0.0 otherwise.
         """
-        X = np.ascontiguousarray(X, dtype=np.float64)
-        y = np.ascontiguousarray(y, dtype=np.float64)
-        parent_ids = np.ascontiguousarray(parent_ids, dtype=np.int32)
-        child_ids = np.ascontiguousarray(child_ids, dtype=np.int32)
-        child_to_parent = np.ascontiguousarray(child_to_parent, dtype=np.int32)
-        target_indices = np.ascontiguousarray(target_indices, dtype=np.int32)
-        correction_z_crits = np.ascontiguousarray(correction_z_crits, dtype=np.float64)
-        warm_theta = np.ascontiguousarray(warm_theta, dtype=np.float64)
+        X = _prep(X)
+        y = _prep(y)
+        parent_ids = _prep(parent_ids, np.int32)
+        child_ids = _prep(child_ids, np.int32)
+        child_to_parent = _prep(child_to_parent, np.int32)
+        target_indices = _prep(target_indices, np.int32)
+        correction_z_crits = _prep(correction_z_crits)
+        warm_theta = _prep(warm_theta)
 
         return mcpower_native.lme_analysis_nested(  # type: ignore[no-any-return]
             X,

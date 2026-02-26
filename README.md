@@ -21,6 +21,10 @@
 
 It's a Python package, but prefer a graphical interface? **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone desktop app — no Python installation required. Download ready-to-run executables for Windows, Linux, and macOS from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest).
 
+| Model setup | Results |
+|:---:|:---:|
+| <img src="https://raw.githubusercontent.com/pawlenartowicz/MCPower/main/docs/screenshots/gui-model-setup.png" alt="MCPower GUI — model setup" width="400"> | <img src="https://raw.githubusercontent.com/pawlenartowicz/MCPower/main/docs/screenshots/gui-results.png" alt="MCPower GUI — results" width="400"> |
+
 ## Why MCPower?
 
 Traditional power formulas break down with interactions, correlated predictors, categorical variables, or non-normal data. MCPower simulates instead — generates thousands of datasets like yours, fits your model, and counts how often the effects are detected.
@@ -297,19 +301,20 @@ model.set_effects("group[2]=0.4, group[3]=0.6, covariate=0.3")
 # Use "vs" syntax for pairwise comparisons + correction="tukey"
 model.find_power(
     sample_size=150,
-    target_test="group[0] vs group[1], group[0] vs group[2]",
+    target_test="group[1] vs group[2], group[1] vs group[3]",
     correction="tukey"
 )
 ```
 
 ### Test Individual Assumption Violations
 ```python
-# Manually add specific violations (without full scenario analysis)
-model.set_heterogeneity(0.2)        # Effect sizes vary between people
-model.set_heteroskedasticity(0.15)  # Violation of equal variance assumption
+# Add specific violations via custom scenario configs
+model.set_scenario_configs({
+    "my_test": {"heterogeneity": 0.2, "heteroskedasticity": 0.15}
+})
 
-# Run with your manual settings (no automatic scenario variations)
-model.find_sample_size(target_test="treatment")
+# Run with scenario variations
+model.find_sample_size(target_test="treatment", scenarios=True)
 ```
 
 ### Mixed-Effects Models
@@ -392,7 +397,7 @@ model.find_power(sample_size=200, progress_callback=False)
 | **Factor effects** | **`model.set_effects("var[2]=0.5, var[3]=0.7")`** |
 | Correlated predictors | `model.set_correlations("corr(var1, var2)=0.4")` |
 | Multiple testing correction | Add `correction="FDR"`, `"Holm"`, `"Bonferroni"`, or `"Tukey"`|
-| Post-hoc pairwise comparison | `target_test="group[0] vs group[1]"` with `correction="tukey"` |
+| Post-hoc pairwise comparison | `target_test="group[1] vs group[2]"` with `correction="tukey"` |
 | Mixed model (random intercept) | `MCPower("y ~ x + (1\|group)")` + `model.set_cluster(...)` |
 | Random slopes | `MCPower("y ~ x + (1+x\|group)")` + `set_cluster(..., random_slopes=["x"], slope_variance=0.1)` |
 | Nested random effects | `MCPower("y ~ x + (1\|A/B)")` + two `set_cluster()` calls |
@@ -424,7 +429,7 @@ model.find_power(sample_size=200, progress_callback=False)
 - For simple models where all assumptions are clearly met.
 - For large analyses with tens of thousands of observations, tiny effects, or very low alpha levels.
 
-## What Makes Scenarios Different? (Be careful, unvalidated, preliminary scenarios)
+## What Makes Scenarios Different? (Rule-of-thumb scenarios)
 
 **Traditional power analysis assumes perfect conditions.** MCPower's scenarios add realistic "messiness":
 
@@ -478,8 +483,8 @@ model.set_variable_type("treatment=(factor,3), education=(factor,4)")
 # Set effects for specific levels
 model.set_effects("treatment[2]=0.5, treatment[3]=0.7, education[2]=0.3")
 
-# Or set same effect for all levels of a factor
-model.set_effects("treatment=0.5")  # Applies to treatment[2] and treatment[3]
+# Each non-reference level needs its own effect
+model.set_effects("treatment[2]=0.5, treatment[3]=0.7")
 
 # Important: Factors cannot be used in correlations
 # This will error: model.set_correlations("corr(treatment, education)=0.3")
@@ -508,12 +513,31 @@ model.set_alpha(0.01)         # Stricter significance (p < 0.01)
 model.set_simulations(10000)  # High precision (slower)
 ```
 
+### Model Misspecification Testing
+
+Use `test_formula` to generate data with one model but test with a simpler one -- useful for evaluating the power impact of omitting variables:
+
+```python
+# Generate with 3 predictors, test with 2 (omitting x3)
+model = MCPower("y = x1 + x2 + x3")
+model.set_effects("x1=0.5, x2=0.3, x3=0.2")
+model.find_power(100, test_formula="y = x1 + x2")
+
+# Generate with clusters, test without (ignoring clustering)
+model = MCPower("y ~ treatment + (1|school)")
+model.set_cluster("school", ICC=0.2, n_clusters=20)
+model.set_effects("treatment=0.5")
+model.find_power(1000, test_formula="y ~ treatment")
+```
+
+See the [Test Formula Tutorial](https://github.com/pawlenartowicz/MCPower/wiki/Tutorial-Test-Formula) for details.
+
 ### Formula Syntax
 ```python
 # These are equivalent:
-"y = x1 + x2 + x1*x2"        # Assignment style
-"y ~ x1 + x2 + x1*x2"        # R-style formula  
-"x1 + x2 + x1*x2"            # Predictors only
+"y = x1 + x2 + x1:x2"        # Assignment style
+"y ~ x1 + x2 + x1:x2"        # R-style formula
+"x1 + x2 + x1:x2"            # Predictors only
 
 # Interactions:
 "x1*x2"         # Main effects + interaction (x1 + x2 + x1:x2)
@@ -538,9 +562,8 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 ## Requirements
 
 - Python ≥ 3.10
-- NumPy, matplotlib, joblib
+- NumPy (≥1.26.0), matplotlib, joblib, tqdm
 - pandas (optional, for DataFrame input — install with `pip install mcpower[pandas]`)
-- statsmodels (optional, for mixed-effects models — install with `pip install mcpower[all]`)
 
 
 ## Documentation
@@ -549,11 +572,11 @@ Full documentation is available on the **[MCPower Wiki](https://github.com/pawle
 
 - [Quick Start](https://github.com/pawlenartowicz/MCPower/wiki/Quick-Start)
 - [Model Specification](https://github.com/pawlenartowicz/MCPower/wiki/Model-Specification)
-- [Variable Types](https://github.com/pawlenartowicz/MCPower/wiki/Variable-Types)
-- [Effect Sizes](https://github.com/pawlenartowicz/MCPower/wiki/Effect-Sizes)
-- [Mixed-Effects Models](https://github.com/pawlenartowicz/MCPower/wiki/Mixed-Effects-Models) (random intercepts, slopes, nested effects)
-- [ANOVA & Post-Hoc Tests](https://github.com/pawlenartowicz/MCPower/wiki/ANOVA-and-Post-Hoc-Tests)
-- [Scenario Analysis](https://github.com/pawlenartowicz/MCPower/wiki/Scenario-Analysis)
+- [Variable Types](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Variable-Types)
+- [Effect Sizes](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Effect-Sizes)
+- [Mixed-Effects Models](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Mixed-Effects) (random intercepts, slopes, nested effects)
+- [ANOVA & Post-Hoc Tests](https://github.com/pawlenartowicz/MCPower/wiki/Tutorial-ANOVA-PostHoc)
+- [Scenario Analysis](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Scenario-Analysis)
 - [API Reference](https://github.com/pawlenartowicz/MCPower/wiki/API-Reference)
 
 ## Need Help?
@@ -568,8 +591,8 @@ Full documentation is available on the **[MCPower Wiki](https://github.com/pawle
 - ✅ C++ native backend (pybind11 + Eigen, 3x speedup)
 - ✅ Mixed Effects Models (random intercepts, random slopes, nested effects) — [validated against lme4](https://github.com/pawlenartowicz/MCPower/wiki/Concept-LME-Validation)
 - 🚧 Logistic Regression (coming soon)
-- 🚧 ANOVA (coming soon)
-- 🚧 Guide about methods, corrections (coming soon)
+- ✅ ANOVA (factor variables as ANOVA, post-hoc pairwise comparisons)
+- ✅ Guide about methods, corrections
 - 📋 2 groups comparison with alternative tests
 - 📋 Robust regression methods
 
@@ -578,16 +601,18 @@ Full documentation is available on the **[MCPower Wiki](https://github.com/pawle
 
 GPL v3. If you use MCPower in research, please cite:
 
-Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Statistical Models. Zenodo. DOI: 10.5281/zenodo.16502734
+Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Complex Statistical Models (Version <your version>) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.16502734
+
+*Replace `<your version>` with the version you used — check with `import mcpower; print(mcpower.__version__)`.*
 
 ```bibtex
 @software{mcpower2025,
-  author = {Pawel Lenartowicz},
-  title = {MCPower: Monte Carlo Power Analysis for Statistical Models},
-  year = {2025},
+  author    = {Lenartowicz, Pawe{\l}},
+  title     = {{MCPower}: Monte Carlo Power Analysis for Complex Statistical Models},
+  year      = {2025},
   publisher = {Zenodo},
-  doi = {10.5281/zenodo.16502734},
-  url = {https://doi.org/10.5281/zenodo.16502734}
+  doi       = {10.5281/zenodo.16502734},
+  url       = {https://doi.org/10.5281/zenodo.16502734}
 }
 ```
 

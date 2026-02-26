@@ -65,6 +65,8 @@ public:
  * @param heterogeneity SD of effect size variation
  * @param heteroskedasticity Correlation between predictor and error variance
  * @param seed Random seed (-1 for random)
+ * @param residual_dist Error distribution: 0=normal, 1=heavy_tailed (t), 2=skewed (chi2)
+ * @param residual_df Degrees of freedom for non-normal residuals (min clamped to 3)
  * @return Response vector (n_samples,)
  */
 Eigen::VectorXd generate_y(
@@ -72,7 +74,9 @@ Eigen::VectorXd generate_y(
     const Eigen::Ref<const Eigen::VectorXd>& effects,
     double heterogeneity,
     double heteroskedasticity,
-    int seed
+    int seed,
+    int residual_dist = 0,
+    double residual_df = 10.0
 );
 
 }  // namespace mcpower

@@ -11,9 +11,11 @@ statsmodels fallback path uses warm-start parameter caching for speedup.
 
 import threading
 import warnings
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
+
+from ..backends.native import _prep
 
 # Suppress statsmodels convergence warnings (expected with small samples/low ICC).
 # Module-level filterwarnings with module= is unreliable for statsmodels internals,
@@ -30,7 +32,6 @@ def _lme_analysis_wrapper(
     y: np.ndarray,
     target_indices: np.ndarray,
     cluster_ids: np.ndarray,
-    cluster_column_indices: List[int],
     correction_method: int,
     alpha: float,
     backend: str = "custom",
@@ -51,7 +52,6 @@ def _lme_analysis_wrapper(
         y: (n,) response vector
         target_indices: Coefficient indices to test (fixed effects only)
         cluster_ids: (n,) cluster membership array [0,0,0, 1,1,1, ...]
-        cluster_column_indices: Indices of cluster effect columns (unused)
         correction_method: 0=none, 1=Bonferroni, 2=FDR, 3=Holm
         alpha: Significance level
         backend: "custom" (default) or "statsmodels" (fallback)
@@ -118,9 +118,7 @@ def _lme_analysis_wrapper(
                 verbose=verbose,
             )
     elif backend == "statsmodels":
-        return _lme_analysis_statsmodels(
-            X_expanded, y, target_indices, cluster_ids, cluster_column_indices, correction_method, alpha, verbose
-        )
+        return _lme_analysis_statsmodels(X_expanded, y, target_indices, cluster_ids, correction_method, alpha, verbose)
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
@@ -130,7 +128,6 @@ def _lme_analysis_statsmodels(
     y: np.ndarray,
     target_indices: np.ndarray,
     cluster_ids: np.ndarray,
-    cluster_column_indices: List[int],
     correction_method: int,
     alpha: float,
     verbose: bool = False,
@@ -145,11 +142,10 @@ def _lme_analysis_statsmodels(
     - Convergence retry strategy (allows ≤3% failures)
 
     Args:
-        X_expanded: (n, p) design matrix (includes cluster effect columns)
+        X_expanded: (n, p) design matrix (excludes cluster effect columns)
         y: (n,) response vector
         target_indices: Coefficient indices to test (fixed effects only)
         cluster_ids: (n,) cluster membership array
-        cluster_column_indices: Indices of cluster effect columns to remove
         correction_method: 0=none, 1=Bonferroni, 2=FDR, 3=Holm
         alpha: Significance level
         verbose: Return detailed diagnostics
@@ -172,8 +168,6 @@ def _lme_analysis_statsmodels(
     n, p = X_expanded.shape
     n_targets = len(target_indices)
 
-    # Note: X_expanded already excludes cluster effects (they're not in the design matrix)
-    # cluster_column_indices is now unused in this function but kept for API compatibility
     X_fixed = X_expanded
 
     # Step 1: Add intercept to fixed effects
@@ -530,6 +524,29 @@ def _lme_analysis_statsmodels(
         return results_array
 
 
+def _ensure_lme_crits(alpha, p, n_targets, correction_method, chi2_crit, z_crit, correction_z_crits):
+    """Compute LME critical values on-the-fly if not precomputed."""
+    if z_crit is None or chi2_crit is None or correction_z_crits is None:
+        from .lme_solver import compute_lme_critical_values
+
+        return compute_lme_critical_values(alpha, p, n_targets, correction_method)
+    return chi2_crit, z_crit, correction_z_crits
+
+
+def _wrap_native_result(result, verbose, solver_name, extra_diag=None) -> Optional[Union[np.ndarray, Dict]]:
+    """Wrap C++ solver result with optional verbose diagnostics."""
+    if len(result) > 0:
+        if verbose:
+            diag = {"solver": solver_name}
+            if extra_diag:
+                diag.update(extra_diag)
+            return {"results": result, "diagnostics": diag}
+        return np.asarray(result)
+    if verbose:
+        return {"results": None, "failure_reason": f"C++ {solver_name} returned empty result"}
+    return None
+
+
 def _lme_analysis_custom(
     X_expanded: np.ndarray,
     y: np.ndarray,
@@ -545,39 +562,29 @@ def _lme_analysis_custom(
     """LME analysis for random-intercept models via C++ backend.
 
     Uses precomputed critical values (chi2_crit, z_crit) to avoid
-    per-simulation scipy calls. Falls back to computing them if not provided.
+    per-simulation distribution calls. Falls back to computing them if not provided.
     """
     n, p = X_expanded.shape
     n_targets = len(target_indices)
     K = int(cluster_ids.max()) + 1
 
-    if z_crit is None or chi2_crit is None or correction_z_crits is None:
-        from .lme_solver import compute_lme_critical_values
-
-        chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(alpha, p, n_targets, correction_method)
+    chi2_crit, z_crit, correction_z_crits = _ensure_lme_crits(alpha, p, n_targets, correction_method, chi2_crit, z_crit, correction_z_crits)
 
     from mcpower.backends import mcpower_native as _native  # type: ignore[attr-defined]
 
     result = _native.lme_analysis(
-        np.ascontiguousarray(X_expanded, dtype=np.float64),
-        np.ascontiguousarray(y, dtype=np.float64),
-        np.ascontiguousarray(cluster_ids, dtype=np.int32),
+        _prep(X_expanded),
+        _prep(y),
+        _prep(cluster_ids, np.int32),
         K,
-        np.ascontiguousarray(target_indices, dtype=np.int32),
+        _prep(target_indices, np.int32),
         float(chi2_crit),
         float(z_crit),
-        np.ascontiguousarray(correction_z_crits, dtype=np.float64),
+        _prep(correction_z_crits),
         int(correction_method),
         float(-1.0),
     )
-    if len(result) > 0:
-        if verbose:
-            return {"results": result, "diagnostics": {"solver": "native_q1"}}
-        return result  # type: ignore[no-any-return]
-
-    if verbose:
-        return {"results": None, "failure_reason": "C++ solver returned empty result"}
-    return None
+    return _wrap_native_result(result, verbose, "native_q1")
 
 
 def _lme_analysis_custom_general(
@@ -594,8 +601,6 @@ def _lme_analysis_custom_general(
     verbose: bool = False,
 ) -> Optional[Union[np.ndarray, Dict]]:
     """LME analysis for random slopes (q > 1) via C++ backend."""
-    from .lme_solver import compute_lme_critical_values
-
     n, p = X_expanded.shape
     n_targets = len(target_indices)
 
@@ -604,34 +609,26 @@ def _lme_analysis_custom_general(
     q = Z.shape[1]
     K = int(cluster_ids.max()) + 1
 
-    if z_crit is None or chi2_crit is None or correction_z_crits is None:
-        chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(alpha, p, n_targets, correction_method)
+    chi2_crit, z_crit, correction_z_crits = _ensure_lme_crits(alpha, p, n_targets, correction_method, chi2_crit, z_crit, correction_z_crits)
 
     from mcpower.backends import mcpower_native as _native  # type: ignore[attr-defined]
 
     warm_theta_arr = np.empty(0, dtype=np.float64)
     result = _native.lme_analysis_general(
-        np.ascontiguousarray(X_expanded, dtype=np.float64),
-        np.ascontiguousarray(y, dtype=np.float64),
-        np.ascontiguousarray(Z, dtype=np.float64),
-        np.ascontiguousarray(cluster_ids, dtype=np.int32),
+        _prep(X_expanded),
+        _prep(y),
+        _prep(Z),
+        _prep(cluster_ids, np.int32),
         K,
         q,
-        np.ascontiguousarray(target_indices, dtype=np.int32),
+        _prep(target_indices, np.int32),
         float(chi2_crit),
         float(z_crit),
-        np.ascontiguousarray(correction_z_crits, dtype=np.float64),
+        _prep(correction_z_crits),
         int(correction_method),
         warm_theta_arr,
     )
-    if len(result) > 0:
-        if verbose:
-            return {"results": result, "diagnostics": {"solver": "native_general", "q": q}}
-        return result  # type: ignore[no-any-return]
-
-    if verbose:
-        return {"results": None, "failure_reason": "C++ general solver returned empty result"}
-    return None
+    return _wrap_native_result(result, verbose, "native_general", extra_diag={"q": q})
 
 
 def _lme_analysis_custom_nested(
@@ -647,8 +644,6 @@ def _lme_analysis_custom_nested(
     verbose: bool = False,
 ) -> Optional[Union[np.ndarray, Dict]]:
     """LME analysis for nested random intercepts via C++ backend."""
-    from .lme_solver import compute_lme_critical_values
-
     n, p = X_expanded.shape
     n_targets = len(target_indices)
 
@@ -658,35 +653,27 @@ def _lme_analysis_custom_nested(
     K_child = re_result.K_child
     child_to_parent = re_result.child_to_parent
 
-    if z_crit is None or chi2_crit is None or correction_z_crits is None:
-        chi2_crit, z_crit, correction_z_crits = compute_lme_critical_values(alpha, p, n_targets, correction_method)
+    chi2_crit, z_crit, correction_z_crits = _ensure_lme_crits(alpha, p, n_targets, correction_method, chi2_crit, z_crit, correction_z_crits)
 
     from mcpower.backends import mcpower_native as _native  # type: ignore[attr-defined]
 
     warm_theta_arr = np.empty(0, dtype=np.float64)
     result = _native.lme_analysis_nested(
-        np.ascontiguousarray(X_expanded, dtype=np.float64),
-        np.ascontiguousarray(y, dtype=np.float64),
-        np.ascontiguousarray(parent_ids, dtype=np.int32),
-        np.ascontiguousarray(child_ids, dtype=np.int32),
+        _prep(X_expanded),
+        _prep(y),
+        _prep(parent_ids, np.int32),
+        _prep(child_ids, np.int32),
         K_parent,
         K_child,
-        np.ascontiguousarray(child_to_parent, dtype=np.int32),
-        np.ascontiguousarray(target_indices, dtype=np.int32),
+        _prep(child_to_parent, np.int32),
+        _prep(target_indices, np.int32),
         float(chi2_crit),
         float(z_crit),
-        np.ascontiguousarray(correction_z_crits, dtype=np.float64),
+        _prep(correction_z_crits),
         int(correction_method),
         warm_theta_arr,
     )
-    if len(result) > 0:
-        if verbose:
-            return {"results": result, "diagnostics": {"solver": "native_nested", "K_parent": K_parent, "K_child": K_child}}
-        return result  # type: ignore[no-any-return]
-
-    if verbose:
-        return {"results": None, "failure_reason": "C++ nested solver returned empty result"}
-    return None
+    return _wrap_native_result(result, verbose, "native_nested", extra_diag={"K_parent": K_parent, "K_child": K_child})
 
 
 def reset_warm_start_cache():

@@ -1,9 +1,8 @@
 """
-Non-default alpha level tests — backend-agnostic.
+Non-default alpha level tests.
 
 Validates that the full alpha pipeline (power accuracy, corrections,
 null calibration) works correctly at alpha != 0.05.
-Tests run on ALL available backends via the backend fixture.
 """
 
 import contextlib
@@ -12,7 +11,7 @@ import io
 import numpy as np
 import pytest
 
-from tests.config import N_SIMS, SEED
+from tests.config import N_SIMS, N_SIMS_ORDERING, N_SIMS_STANDARD, SEED
 from tests.helpers.analytical import analytical_f_power, analytical_t_power
 from tests.helpers.mc_margins import mc_accuracy_margin, mc_margin
 from tests.helpers.power_helpers import get_power, get_power_corrected, make_null_model
@@ -44,7 +43,7 @@ class TestAlphaAccuracyVsAnalytical:
             (0.5, 100),
         ],
     )
-    def test_single_predictor_t_test_alpha(self, backend, alpha, beta, n):
+    def test_single_predictor_t_test_alpha(self, alpha, beta, n):
         """t-test power matches analytical non-central t at non-default alpha."""
         from mcpower import MCPower
 
@@ -63,7 +62,7 @@ class TestAlphaAccuracyVsAnalytical:
         exact_power = analytical_t_power(beta, n, p=1, sigma_eps=1.0, vif_j=1.0, alpha=alpha)
         margin = mc_accuracy_margin(exact_power, N_SIMS)
         assert abs(mc_power - exact_power) < margin, (
-            f"[{backend}] alpha={alpha}, β={beta}, n={n}: MC={mc_power:.2f}%, analytical={exact_power:.2f}% ± {margin:.2f}%"
+            f"alpha={alpha}, β={beta}, n={n}: MC={mc_power:.2f}%, analytical={exact_power:.2f}% ± {margin:.2f}%"
         )
 
     @pytest.mark.parametrize("alpha", [0.01, 0.10])
@@ -74,7 +73,7 @@ class TestAlphaAccuracyVsAnalytical:
             (0.5, 0.3, 80),
         ],
     )
-    def test_two_predictors_uncorrelated_alpha(self, backend, alpha, b1, b2, n):
+    def test_two_predictors_uncorrelated_alpha(self, alpha, b1, b2, n):
         """Each t-test and F-test with Σ = I at non-default alpha."""
         from mcpower import MCPower
 
@@ -103,14 +102,14 @@ class TestAlphaAccuracyVsAnalytical:
             )
             margin = mc_accuracy_margin(exact, N_SIMS)
             assert abs(mc_power - exact) < margin, (
-                f"[{backend}] alpha={alpha}, {var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
+                f"alpha={alpha}, {var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
             )
 
         mc_f = get_power(result, "overall")
         exact_f = analytical_f_power([b1, b2], n, Sigma, sigma_eps=1.0, alpha=alpha)
         margin_f = mc_accuracy_margin(exact_f, N_SIMS)
         assert abs(mc_f - exact_f) < margin_f, (
-            f"[{backend}] alpha={alpha}, F-test: MC={mc_f:.2f}%, analytical={exact_f:.2f}% ± {margin_f:.2f}%"
+            f"alpha={alpha}, F-test: MC={mc_f:.2f}%, analytical={exact_f:.2f}% ± {margin_f:.2f}%"
         )
 
     @pytest.mark.parametrize("alpha", [0.01, 0.10])
@@ -121,7 +120,7 @@ class TestAlphaAccuracyVsAnalytical:
             (0.5, 0.3, 0.5, 80),
         ],
     )
-    def test_two_predictors_correlated_alpha(self, backend, alpha, b1, b2, rho, n):
+    def test_two_predictors_correlated_alpha(self, alpha, b1, b2, rho, n):
         """VIF-corrected t-tests with correlated predictors at non-default alpha."""
         from mcpower import MCPower
 
@@ -154,7 +153,7 @@ class TestAlphaAccuracyVsAnalytical:
             )
             margin = mc_accuracy_margin(exact, N_SIMS)
             assert abs(mc_power - exact) < margin, (
-                f"[{backend}] alpha={alpha}, rho={rho}, {var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
+                f"alpha={alpha}, rho={rho}, {var}: MC={mc_power:.2f}%, analytical={exact:.2f}% ± {margin:.2f}%"
             )
 
 
@@ -170,9 +169,9 @@ class TestAlphaCorrectionAccuracy:
 
     @pytest.mark.parametrize("alpha", [0.01, 0.10])
     @pytest.mark.parametrize("correction", ["bonferroni", "holm", "fdr"])
-    def test_corrected_leq_uncorrected_at_alpha(self, backend, alpha, correction):
+    def test_corrected_leq_uncorrected_at_alpha(self, alpha, correction):
         """Corrected power <= uncorrected power when all effects = 0."""
-        m = make_null_model("y = x1 + x2 + x3", n_sims=N_SIMS, alpha=alpha, seed=SEED)
+        m = make_null_model("y = x1 + x2 + x3", n_sims=N_SIMS_ORDERING, alpha=alpha, seed=SEED)
         result = m.find_power(
             sample_size=100,
             target_test="x1, x2, x3",
@@ -184,14 +183,14 @@ class TestAlphaCorrectionAccuracy:
             uncorr = get_power(result, var)
             corr = get_power_corrected(result, var)
             assert corr <= uncorr + 0.5, (
-                f"[{backend}] alpha={alpha}, {correction}: corrected {corr:.2f}% > uncorrected {uncorr:.2f}% for {var}"
+                f"alpha={alpha}, {correction}: corrected {corr:.2f}% > uncorrected {uncorr:.2f}% for {var}"
             )
 
     @pytest.mark.parametrize("alpha", [0.01, 0.10])
     @pytest.mark.parametrize("correction", ["bonferroni", "holm"])
-    def test_fwer_controlled_at_alpha(self, backend, alpha, correction):
+    def test_fwer_controlled_at_alpha(self, alpha, correction):
         """FWER-controlling methods keep per-test rejection below nominal alpha."""
-        m = make_null_model("y = x1 + x2 + x3", n_sims=N_SIMS, alpha=alpha, seed=SEED)
+        m = make_null_model("y = x1 + x2 + x3", n_sims=N_SIMS_ORDERING, alpha=alpha, seed=SEED)
         result = m.find_power(
             sample_size=100,
             target_test="x1, x2, x3",
@@ -201,17 +200,17 @@ class TestAlphaCorrectionAccuracy:
         )
         for var in ["x1", "x2", "x3"]:
             corr = get_power_corrected(result, var)
-            assert corr < alpha * 100 + mc_margin(alpha, N_SIMS), (
-                f"[{backend}] alpha={alpha}, {correction} FWER violation for {var}: corrected power = {corr:.2f}%"
+            assert corr < alpha * 100 + mc_margin(alpha, N_SIMS_ORDERING), (
+                f"alpha={alpha}, {correction} FWER violation for {var}: corrected power = {corr:.2f}%"
             )
 
     @pytest.mark.parametrize("alpha", [0.01, 0.10])
-    def test_bonferroni_more_conservative_than_fdr_at_alpha(self, backend, alpha):
+    def test_bonferroni_more_conservative_than_fdr_at_alpha(self, alpha):
         """Bonferroni should reject <= FDR (BH) under non-null at non-default alpha."""
         from mcpower import MCPower
 
         m = MCPower("y = x1 + x2 + x3")
-        m.set_simulations(N_SIMS)
+        m.set_simulations(N_SIMS_ORDERING)
         m.set_seed(SEED)
         m.set_alpha(alpha)
         m.set_effects("x1=0.3, x2=0.2, x3=0.1")
@@ -233,7 +232,7 @@ class TestAlphaCorrectionAccuracy:
         for var in ["x1", "x2", "x3"]:
             bonf = get_power_corrected(result_bonf, var)
             fdr = get_power_corrected(result_fdr, var)
-            assert bonf <= fdr + 2.0, f"[{backend}] alpha={alpha}: Bonferroni ({bonf:.2f}%) > FDR ({fdr:.2f}%) for {var}"
+            assert bonf <= fdr + 2.0, f"alpha={alpha}: Bonferroni ({bonf:.2f}%) > FDR ({fdr:.2f}%) for {var}"
 
 
 # ── Class 3: Null calibration at alpha != 0.05 (multi-predictor) ────
@@ -245,29 +244,29 @@ class TestAlphaCalibrationExtended:
     to multi-predictor models and corrected rejection under the null.
     """
 
-    @pytest.mark.parametrize("alpha", [0.01, 0.05, 0.10])
-    def test_null_rejection_multi_predictor(self, backend, alpha):
+    @pytest.mark.parametrize("alpha", [0.01, 0.10])
+    def test_null_rejection_multi_predictor(self, alpha):
         """Two-predictor null: each t-test and overall F-test reject at ~alpha."""
-        m = make_null_model("y = x1 + x2", n_sims=N_SIMS, alpha=alpha, seed=SEED)
+        m = make_null_model("y = x1 + x2", n_sims=N_SIMS_STANDARD, alpha=alpha, seed=SEED)
         result = m.find_power(
             sample_size=100,
             target_test="all",
             print_results=False,
             return_results=True,
         )
-        margin = mc_margin(alpha, N_SIMS)
+        margin = mc_margin(alpha, N_SIMS_STANDARD)
         expected = alpha * 100
         for test_name in ["x1", "x2", "overall"]:
             power = get_power(result, test_name)
             assert abs(power - expected) < margin, (
-                f"[{backend}] alpha={alpha}, {test_name}: observed {power:.2f}%, expected {expected}% ± {margin:.2f}%"
+                f"alpha={alpha}, {test_name}: observed {power:.2f}%, expected {expected}% ± {margin:.2f}%"
             )
 
-    @pytest.mark.parametrize("alpha", [0.01, 0.05, 0.10])
+    @pytest.mark.parametrize("alpha", [0.01, 0.10])
     @pytest.mark.parametrize("correction", ["bonferroni", "holm"])
-    def test_null_rejection_corrected_at_alpha(self, backend, alpha, correction):
+    def test_null_rejection_corrected_at_alpha(self, alpha, correction):
         """Corrected null rejection stays below alpha + MC margin for 3 predictors."""
-        m = make_null_model("y = x1 + x2 + x3", n_sims=N_SIMS, alpha=alpha, seed=SEED)
+        m = make_null_model("y = x1 + x2 + x3", n_sims=N_SIMS_STANDARD, alpha=alpha, seed=SEED)
         result = m.find_power(
             sample_size=100,
             target_test="x1, x2, x3",
@@ -275,9 +274,9 @@ class TestAlphaCalibrationExtended:
             print_results=False,
             return_results=True,
         )
-        margin = mc_margin(alpha, N_SIMS)
+        margin = mc_margin(alpha, N_SIMS_STANDARD)
         for var in ["x1", "x2", "x3"]:
             corr = get_power_corrected(result, var)
             assert corr < alpha * 100 + margin, (
-                f"[{backend}] alpha={alpha}, {correction}, {var}: corrected rejection {corr:.2f}% exceeds {alpha * 100}% + {margin:.2f}%"
+                f"alpha={alpha}, {correction}, {var}: corrected rejection {corr:.2f}% exceeds {alpha * 100}% + {margin:.2f}%"
             )
