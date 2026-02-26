@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.6.0] - 2026-02-24
+## [0.6.0] - 2026-02-26
 
 ### Breaking changes
 - **Removed `set_backend()`, `get_backend_info()`, `reset_backend()`** — only one backend (C++ native) exists since v0.5.0, so the multi-backend API was dead code. Use `from mcpower.backends import get_backend` if you need the backend instance directly
