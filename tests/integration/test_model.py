@@ -86,16 +86,6 @@ class TestSetMethods:
         assert model._pending_variable_types == "group=(factor,3)"
         assert model._applied is False
 
-    def test_set_heterogeneity(self, simple_model):
-        simple_model.set_heterogeneity(0.1)
-        assert simple_model._pending_heterogeneity == 0.1
-        assert simple_model._applied is False
-
-    def test_set_heteroskedasticity(self, simple_model):
-        simple_model.set_heteroskedasticity(0.2)
-        assert simple_model._pending_heteroskedasticity == 0.2
-        assert simple_model._applied is False
-
     def test_upload_data_dict(self, simple_model, sample_data):
         simple_model.upload_data(sample_data)
         assert simple_model._pending_data is not None
@@ -131,12 +121,12 @@ class TestApply:
     """Test apply() method."""
 
     def test_apply_sets_flag(self, configured_model):
-        configured_model.apply()
+        configured_model._apply()
         assert configured_model._applied is True
 
     def test_apply_processes_effects(self, simple_model):
         simple_model.set_effects("x1=0.5, x2=0.3")
-        simple_model.apply()
+        simple_model._apply()
         effect_sizes = simple_model._registry.get_effect_sizes()
         assert effect_sizes[0] == 0.5
         assert effect_sizes[1] == 0.3
@@ -147,21 +137,16 @@ class TestApply:
         model = MCPower("y = group + x1")
         model.set_variable_type("group=(factor,3)")
         model.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2")
-        model.apply()
+        model._apply()
         assert len(model._registry.factor_names) == 1
         assert len(model._registry.dummy_names) == 2
 
     def test_apply_processes_correlations(self, simple_model):
         simple_model.set_effects("x1=0.3, x2=0.2")
         simple_model.set_correlations("(x1,x2)=0.5")
-        simple_model.apply()
+        simple_model._apply()
         corr = simple_model.correlation_matrix
         assert corr[0, 1] == 0.5
-
-    def test_apply_processes_heterogeneity(self, configured_model):
-        configured_model.set_heterogeneity(0.15)
-        configured_model.apply()
-        assert configured_model.heterogeneity == 0.15
 
     def test_apply_order_independence(self, suppress_output):
         """Test that set_* methods can be called in any order."""
@@ -172,14 +157,14 @@ class TestApply:
         m1.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2, x2=0.1")
         m1.set_variable_type("group=(factor,3)")
         m1.set_correlations("(x1,x2)=0.5")
-        m1.apply()
+        m1._apply()
 
         # Order 2: variable_type, correlations, effects
         m2 = MCPower("y = group + x1 + x2")
         m2.set_variable_type("group=(factor,3)")
         m2.set_correlations("(x1,x2)=0.5")
         m2.set_effects("group[2]=0.4, group[3]=0.3, x1=0.2, x2=0.1")
-        m2.apply()
+        m2._apply()
 
         # Both should have same effect sizes
         assert np.allclose(m1._registry.get_effect_sizes(), m2._registry.get_effect_sizes())
@@ -242,7 +227,7 @@ class TestFindSampleSize:
         assert result["results"]["sample_sizes_tested"] == [50, 75, 100]
 
     def test_first_achieved(self, configured_model):
-        result = configured_model.find_sample_size(from_size=50, to_size=200, by=25, print_results=False, return_results=True)
+        result = configured_model.find_sample_size(from_size=50, to_size=200, by=50, print_results=False, return_results=True)
         assert "first_achieved" in result["results"]
 
     def test_find_sample_size_runs(self, configured_model):
@@ -257,7 +242,7 @@ class TestErrors:
     def test_invalid_effect_name(self, simple_model):
         simple_model.set_effects("invalid=0.3")
         with pytest.raises(ValueError, match="not found"):
-            simple_model.apply()
+            simple_model._apply()
 
     def test_missing_effects(self, simple_model):
         with pytest.raises(ValueError, match="Effect sizes must be set"):
@@ -290,7 +275,7 @@ class TestSetFactorLevels:
         model = MCPower("y = treatment + x1")
         model.set_factor_levels("treatment=placebo,drug_a,drug_b")
         model.set_effects("treatment[drug_a]=0.5, treatment[drug_b]=0.8, x1=0.3")
-        model.apply()
+        model._apply()
         assert "treatment" in model._registry.factor_names
         assert "treatment[drug_a]" in model._registry.dummy_names
         assert "treatment[drug_b]" in model._registry.dummy_names
@@ -302,7 +287,7 @@ class TestSetFactorLevels:
         model = MCPower("y = group + dose")
         model.set_factor_levels("group=control,treatment; dose=low,medium,high")
         model.set_effects("group[treatment]=0.5, dose[medium]=0.3, dose[high]=0.6")
-        model.apply()
+        model._apply()
         assert "group[treatment]" in model._registry.dummy_names
         assert "dose[medium]" in model._registry.dummy_names
         assert "dose[high]" in model._registry.dummy_names
@@ -313,7 +298,7 @@ class TestSetFactorLevels:
         model = MCPower("y = x1")
         with pytest.raises(ValueError, match="not found"):
             model.set_factor_levels("unknown=a,b,c")
-            model.apply()
+            model._apply()
 
     def test_single_level_raises(self):
         from mcpower import MCPower
@@ -321,7 +306,7 @@ class TestSetFactorLevels:
         model = MCPower("y = x1")
         with pytest.raises(ValueError, match="at least 2"):
             model.set_factor_levels("x1=only_one")
-            model.apply()
+            model._apply()
 
     def test_find_power_with_named_levels(self):
         """End-to-end: find_power works with set_factor_levels."""

@@ -405,7 +405,6 @@ class TestLmeAnalysisWrapper:
                 np.zeros(10),
                 np.array([0]),
                 np.zeros(10, dtype=int),
-                [],
                 0,
                 0.05,
                 backend="nonexistent",

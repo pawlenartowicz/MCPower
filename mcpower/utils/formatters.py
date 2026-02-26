@@ -6,11 +6,17 @@ in a clear, professional manner.
 """
 
 import math
+from itertools import combinations
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 __all__ = []
+
+
+def _is_nan(value) -> bool:
+    """Check if a value is NaN (float type check + math.isnan)."""
+    return isinstance(value, float) and math.isnan(value)
 
 
 class _TableFormatter:
@@ -25,7 +31,10 @@ class _TableFormatter:
         """Create formatted table with headers and rows."""
 
         if not col_widths:
-            col_widths = [max(len(str(h)), max(len(str(row[i])) + 2 for row in rows)) for i, h in enumerate(headers)]
+            if rows:
+                col_widths = [max(len(str(h)), max(len(str(row[i])) + 2 for row in rows)) for i, h in enumerate(headers)]
+            else:
+                col_widths = [len(str(h)) for h in headers]
 
         lines = []
 
@@ -131,7 +140,7 @@ class _ResultFormatter:
 
             for test in model["target_tests"]:
                 power_corr = results["individual_powers_corrected"][test]
-                if isinstance(power_corr, float) and math.isnan(power_corr):
+                if _is_nan(power_corr):
                     rows_corrected.append([test, "-", f"{target:.0f}", "-"])
                 else:
                     status = "✓" if power_corr >= target else "✗"
@@ -162,7 +171,7 @@ class _ResultFormatter:
                 power = results["individual_powers"][test]
                 power_corr = results.get("individual_powers_corrected", {}).get(test, power)
                 target = model.get("target_power", 80.0)
-                if isinstance(power_corr, float) and math.isnan(power_corr):
+                if _is_nan(power_corr):
                     rows.append([test, f"{power:.2f}", "-", f"{target:.1f}", "-"])
                 else:
                     achieved = "✓" if power_corr >= target else "✗"
@@ -331,13 +340,15 @@ class _ResultFormatter:
 
         lines = [f"\n{'=' * 80}", "SCENARIO SUMMARY", f"{'=' * 80}"]
 
-        # Uncorrected table
-        headers = ["Test", "Optimistic", "Realistic", "Doomer"]
-        rows = []
+        scenario_names = list(scenarios.keys())
+        headers = ["Test"] + [name.title() for name in scenario_names]
+        col_widths = [40] + [12] * len(scenario_names)
 
+        # Uncorrected table
+        rows = []
         for test in target_tests:
             row = [test]
-            for scenario in ["optimistic", "realistic", "doomer"]:
+            for scenario in scenario_names:
                 if scenario in scenarios and "results" in scenarios[scenario]:
                     power = scenarios[scenario]["results"]["individual_powers"][test]
                     row.append(f"{power:.1f}")
@@ -346,17 +357,17 @@ class _ResultFormatter:
             rows.append(row)
 
         lines.append("\nUncorrected Power:")
-        lines.append(self._table._create_table(headers, rows, [40, 12, 12, 12]))
+        lines.append(self._table._create_table(headers, rows, col_widths))
 
         # Corrected table if applicable
         if correction:
             rows_corr = []
             for test in target_tests:
                 row = [test]
-                for scenario in ["optimistic", "realistic", "doomer"]:
+                for scenario in scenario_names:
                     if scenario in scenarios and "results" in scenarios[scenario]:
                         power_corr = scenarios[scenario]["results"]["individual_powers_corrected"][test]
-                        if isinstance(power_corr, float) and math.isnan(power_corr):
+                        if _is_nan(power_corr):
                             row.append("-")
                         else:
                             row.append(f"{power_corr:.1f}")
@@ -365,7 +376,7 @@ class _ResultFormatter:
                 rows_corr.append(row)
 
             lines.append(f"\nCorrected Power ({correction}):")
-            lines.append(self._table._create_table(headers, rows_corr, [40, 12, 12, 12]))
+            lines.append(self._table._create_table(headers, rows_corr, col_widths))
 
         lines.append(f"{'=' * 80}")
 
@@ -395,74 +406,74 @@ class _ResultFormatter:
         lines.append("DETAILED SCENARIO RESULTS")
         lines.append(f"{'=' * 80}")
 
-        for scenario_name in ["optimistic", "realistic", "doomer"]:
-            if scenario_name in scenarios:
-                lines.append(f"\n{'-' * 80}")
-                lines.append(f"{scenario_name.upper()} SCENARIO")
-                lines.append(f"{'-' * 80}")
+        for scenario_name in scenarios:
+            lines.append(f"\n{'-' * 80}")
+            lines.append(f"{scenario_name.upper()} SCENARIO")
+            lines.append(f"{'-' * 80}")
 
-                # Use regular power formatter for each scenario
-                scenario_data = {
-                    "model": scenarios[scenario_name]["model"],
-                    "results": scenarios[scenario_name]["results"],
-                }
-                lines.append(self._format_long_power(scenario_data))
+            scenario_data = {
+                "model": scenarios[scenario_name]["model"],
+                "results": scenarios[scenario_name]["results"],
+            }
+            lines.append(self._format_long_power(scenario_data))
 
-        # 3. Comparison analysis
-        lines.append(f"\n{'=' * 80}")
-        lines.append("ROBUSTNESS ANALYSIS")
-        lines.append(f"{'=' * 80}")
+        # 3. Comparison analysis — compare each non-optimistic scenario to optimistic
+        if "optimistic" in scenarios and len(scenarios) > 1:
+            lines.append(f"\n{'=' * 80}")
+            lines.append("ROBUSTNESS ANALYSIS")
+            lines.append(f"{'=' * 80}")
 
-        # Power reduction table
-        headers = ["Test", "Opt→Real Drop", "Opt→Doom Drop", "Vulnerability"]
-        rows = []
-        vulnerable_tests = []
-        inflated_tests = []
+            other_scenarios = [s for s in scenarios if s != "optimistic"]
+            headers = ["Test"] + [f"Opt→{s.title()} Drop" for s in other_scenarios] + ["Vulnerability"]
+            rows = []
+            vulnerable_tests = []
+            inflated_tests = []
 
-        for test in target_tests:
-            opt_power = scenarios["optimistic"]["results"]["individual_powers"][test]
-            real_power = scenarios.get("realistic", {}).get("results", {}).get("individual_powers", {}).get(test, opt_power)
-            doom_power = scenarios.get("doomer", {}).get("results", {}).get("individual_powers", {}).get(test, opt_power)
+            for test in target_tests:
+                opt_power = scenarios["optimistic"]["results"]["individual_powers"][test]
+                row = [test]
+                max_drop = 0.0
 
-            real_drop = opt_power - real_power
-            doom_drop = opt_power - doom_power
+                for scenario in other_scenarios:
+                    other_power = scenarios.get(scenario, {}).get("results", {}).get("individual_powers", {}).get(test, opt_power)
+                    drop = opt_power - other_power
+                    max_drop = max(max_drop, drop)
+                    drop_str = f"+{abs(drop):.1f}%" if drop < 0 else f"-{drop:.1f}%"
+                    row.append(drop_str)
 
-            # Format drops with proper signs
-            real_drop_str = f"+{abs(real_drop):.1f}%" if real_drop < 0 else f"-{real_drop:.1f}%"
-            doom_drop_str = f"+{abs(doom_drop):.1f}%" if doom_drop < 0 else f"-{doom_drop:.1f}%"
+                if max_drop > HIGH_VULNERABILITY_THRESHOLD:
+                    vulnerability = "HIGH"
+                    vulnerable_tests.append(test)
+                elif max_drop > MEDIUM_VULNERABILITY_THRESHOLD:
+                    vulnerability = "MEDIUM"
+                elif max_drop < INFLATED_ERROR_THRESHOLD:
+                    vulnerability = "INFLATED FALSE POSITIVES"
+                    inflated_tests.append(test)
+                else:
+                    vulnerability = "LOW"
 
-            # Vulnerability assessment and categorization
-            if doom_drop > HIGH_VULNERABILITY_THRESHOLD:
-                vulnerability = "HIGH"
-                vulnerable_tests.append(test)
-            elif doom_drop > MEDIUM_VULNERABILITY_THRESHOLD:
-                vulnerability = "MEDIUM"
-            elif doom_drop < INFLATED_ERROR_THRESHOLD:
-                vulnerability = "INFLATED FALSE POSITIVES"
-                inflated_tests.append(test)
-            else:
-                vulnerability = "LOW"
+                row.append(vulnerability)
+                rows.append(row)
 
-            rows.append([test, real_drop_str, doom_drop_str, vulnerability])
-
-        lines.append(self._table._create_table(headers, rows))
+            lines.append(self._table._create_table(headers, rows))
 
         # 4. Recommendations
-        lines.append(f"\n{'=' * 80}")
-        lines.append("RECOMMENDATIONS")
-        lines.append(f"{'=' * 80}")
+        if "optimistic" in scenarios and len(scenarios) > 1:
+            lines.append(f"\n{'=' * 80}")
+            lines.append("RECOMMENDATIONS")
+            lines.append(f"{'=' * 80}")
 
-        if vulnerable_tests:
-            lines.append(f"• High vulnerability tests: {', '.join(vulnerable_tests)}")
-            lines.append("• Consider increasing sample size to maintain power under adverse conditions")
+            if vulnerable_tests:
+                lines.append(f"• High vulnerability tests: {', '.join(vulnerable_tests)}")
+                lines.append("• Consider increasing sample size to maintain power under adverse conditions")
 
-        if inflated_tests:
-            lines.append(f"• Inflated false positive risk: {', '.join(inflated_tests)}")
-            lines.append("• Be careful about interpretation")
+            if inflated_tests:
+                lines.append(f"• Inflated false positive risk: {', '.join(inflated_tests)}")
+                lines.append("• Be careful about interpretation")
 
-        if not vulnerable_tests and not inflated_tests:
-            lines.append("• Power analysis appears robust to assumption violations")
-            lines.append("• Original sample size should be sufficient")
+            if not vulnerable_tests and not inflated_tests:
+                lines.append("• Power analysis appears robust to assumption violations")
+                lines.append("• Original sample size should be sufficient")
 
         return "\n".join(lines)
 
@@ -484,25 +495,22 @@ class _ResultFormatter:
         """Short scenario sample size summary."""
 
         lines = [f"\n{'=' * 80}", "SCENARIO SUMMARY", f"{'=' * 80}"]
+        scenario_names = list(scenarios.keys())
 
         if correction:
             # Combined table with uncorrected and corrected
             lines.append("\nSample Size Requirements:")
-            headers = [
-                "Test",
-                "Opt(U)",
-                "Opt(C)",
-                "Real(U)",
-                "Real(C)",
-                "Doom(U)",
-                "Doom(C)",
-            ]
+            headers = ["Test"]
+            for name in scenario_names:
+                abbrev = name[:4].title()
+                headers.extend([f"{abbrev}(U)", f"{abbrev}(C)"])
+            col_widths = [40] + [8] * (len(scenario_names) * 2)
 
             rows = []
             for test in target_tests:
-                row = [test[:40]]  # Truncate to 40 chars
+                row = [test[:40]]
 
-                for scenario in ["optimistic", "realistic", "doomer"]:
+                for scenario in scenario_names:
                     if scenario in scenarios and "results" in scenarios[scenario]:
                         n_uncorr = scenarios[scenario]["results"]["first_achieved"][test]
                         n_corr = scenarios[scenario]["results"]["first_achieved_corrected"][test]
@@ -520,16 +528,17 @@ class _ResultFormatter:
                         row.extend(["N/A", "N/A"])
                 rows.append(row)
 
-            lines.append(self._table._create_table(headers, rows, [40, 8, 8, 8, 8, 8, 8]))
+            lines.append(self._table._create_table(headers, rows, col_widths))
             lines.append("Note: (U) = Uncorrected, (C) = Corrected")
         else:
             # Uncorrected only
-            headers = ["Test", "Optimistic", "Realistic", "Doomer"]
+            headers = ["Test"] + [name.title() for name in scenario_names]
+            col_widths = [40] + [12] * len(scenario_names)
 
             rows = []
             for test in target_tests:
-                row = [test[:40]]  # Truncate to 40 chars
-                for scenario in ["optimistic", "realistic", "doomer"]:
+                row = [test[:40]]
+                for scenario in scenario_names:
                     if scenario in scenarios and "results" in scenarios[scenario]:
                         n_required = scenarios[scenario]["results"]["first_achieved"][test]
                         if n_required > 0:
@@ -542,7 +551,7 @@ class _ResultFormatter:
                 rows.append(row)
 
             lines.append("\nUncorrected Sample Sizes:")
-            lines.append(self._table._create_table(headers, rows, [40, 12, 12, 12]))
+            lines.append(self._table._create_table(headers, rows, col_widths))
 
         lines.append(f"{'=' * 80}")
 
@@ -562,39 +571,33 @@ class _ResultFormatter:
         # 1. Overall summary
         lines.append(self._format_scenario_sample_size_short(scenarios, target_tests, correction))
 
-        # 2. Recommendations
+        # 2. Recommendations — summarize max N per non-optimistic scenario
         lines.append(f"\n{'=' * 80}")
         lines.append("RECOMMENDATIONS")
         lines.append(f"{'=' * 80}")
 
-        # Calculate max required N across scenarios
-        max_n_realistic = max(
-            (scenarios.get("realistic", {}).get("results", {}).get("first_achieved", {}).get(test, 0) for test in target_tests),
-            default=0,
-        )
-        max_n_doomer = max(
-            (scenarios.get("doomer", {}).get("results", {}).get("first_achieved", {}).get(test, 0) for test in target_tests),
-            default=0,
-        )
+        other_scenarios = [s for s in scenarios if s != "optimistic"]
+        for scenario in other_scenarios:
+            max_n = max(
+                (scenarios.get(scenario, {}).get("results", {}).get("first_achieved", {}).get(test, 0) for test in target_tests),
+                default=0,
+            )
+            max_tested = scenarios.get(scenario, {}).get("model", {}).get("sample_size_range", {}).get("to_size", 200)
+            label = scenario.title()
 
-        max_tested = scenarios.get("realistic", {}).get("model", {}).get("sample_size_range", {}).get("to_size", 200)
+            if max_n > 0 and max_n <= max_tested:
+                lines.append(f"• For power under {label} conditions: N = {max_n}")
+            elif max_n <= 0:
+                lines.append(f"• For power under {label} conditions: N > {max_tested}")
 
-        if max_n_realistic > 0 and max_n_realistic <= max_tested:
-            lines.append(f"• For robust power under realistic conditions: N = {max_n_realistic}")
-        elif max_n_realistic <= 0:
-            lines.append(f"• For robust power under realistic conditions: N > {max_tested}")
-
-        if max_n_doomer > 0 and max_n_doomer <= max_tested:
-            lines.append(f"• For power under worst-case conditions: N = {max_n_doomer}")
-        elif max_n_doomer <= 0:
-            lines.append(f"• For power under worst-case conditions: N > {max_tested}")
-
-        # Check if any tests couldn't achieve power
-        unachievable = [
-            test for test in target_tests if scenarios.get("doomer", {}).get("results", {}).get("first_achieved", {}).get(test, -1) <= 0
-        ]
-        if unachievable:
-            lines.append(f"• Warning: These tests may not achieve target power under adverse conditions: {', '.join(unachievable)}")
+        # Check unachievable across worst scenario (last non-optimistic)
+        if other_scenarios:
+            worst = other_scenarios[-1]
+            unachievable = [
+                test for test in target_tests if scenarios.get(worst, {}).get("results", {}).get("first_achieved", {}).get(test, -1) <= 0
+            ]
+            if unachievable:
+                lines.append(f"• Warning: These tests may not achieve target power under {worst} conditions: {', '.join(unachievable)}")
 
         # Add cumulative probability analysis
         cumulative_lines = self._format_cumulative_recommendations(data, is_scenario=True)
@@ -706,7 +709,7 @@ class _ResultFormatter:
         # Filter out tests with NaN power (e.g. non-contrast tests under Tukey correction)
         def _has_nan_power(t: str) -> bool:
             vals = powers_by_test[t]
-            return bool(vals and isinstance(vals[0], float) and math.isnan(vals[0]))
+            return bool(vals and _is_nan(vals[0]))
 
         valid_tests = [t for t in target_tests if not _has_nan_power(t)]
         if not valid_tests:
@@ -741,8 +744,6 @@ class _ResultFormatter:
                 else:  # ≥k cases
                     # Approximate using independence assumption
                     prob_at_least_k = 0.0
-                    from itertools import combinations
-
                     # Sum over all ways to choose at least k tests
                     for num_sig in range(k, n_tests + 1):
                         for combo in combinations(range(n_tests), num_sig):
@@ -859,6 +860,12 @@ class _ResultFormatter:
                 if prob >= target_power:
                     min_n_target = sample_sizes[i]
                     break
+
+            if min_n_target:
+                lines.append(f"• N={min_n_target} for {target_power:.0f}% chance all tests significant")
+            else:
+                max_tested = sample_sizes[-1]
+                lines.append(f"• >{max_tested} needed for {target_power:.0f}% chance all tests significant")
         return lines
 
 

@@ -23,7 +23,7 @@ class TestRandomSlopesIntegration:
             slope_intercept_corr=0.3,
         )
         model.set_effects("x1=0.5")
-        model.apply()
+        model._apply()
 
         # Verify cluster spec was configured correctly
         spec = model._registry._cluster_specs["school"]
@@ -106,7 +106,7 @@ class TestNestedIntegration:
         model.set_cluster("school", ICC=0.15, n_clusters=10)
         model.set_cluster("classroom", ICC=0.10, n_per_parent=3)
         model.set_effects("treatment=0.5")
-        model.apply()
+        model._apply()
 
         assert "school" in model._registry._cluster_specs
         assert "school:classroom" in model._registry._cluster_specs

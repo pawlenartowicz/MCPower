@@ -127,12 +127,6 @@ class TestPrintReporter:
 class TestTqdmReporter:
     """Test TqdmReporter with mock tqdm."""
 
-    def test_tqdm_missing_raises(self):
-        reporter = TqdmReporter()
-        with patch.dict("sys.modules", {"tqdm": None}):
-            with pytest.raises(ImportError, match="tqdm"):
-                reporter(0, 100)
-
     def test_tqdm_basic_flow(self):
         mock_bar = MagicMock()
         mock_bar.n = 0
@@ -153,6 +147,51 @@ class TestTqdmReporter:
             mock_bar.n = 50
             reporter(100, 100)  # closes
             mock_bar.close.assert_called_once()
+
+    def test_tqdm_successive_sessions(self):
+        """After close, a new session creates a fresh bar."""
+        mock_bar = MagicMock()
+        mock_bar.n = 0
+        mock_tqdm_cls = MagicMock(return_value=mock_bar)
+        mock_tqdm_module = MagicMock()
+        mock_tqdm_module.tqdm = mock_tqdm_cls
+
+        reporter = TqdmReporter()
+
+        with patch.dict("sys.modules", {"tqdm": mock_tqdm_module}):
+            # First session
+            reporter(0, 50)
+            mock_bar.n = 0
+            reporter(50, 50)
+            mock_bar.close.assert_called_once()
+            assert reporter._bar is None
+
+            # Second session — should create a new bar
+            mock_tqdm_cls.reset_mock()
+            mock_bar2 = MagicMock()
+            mock_bar2.n = 0
+            mock_tqdm_cls.return_value = mock_bar2
+
+            reporter(0, 200)
+            assert mock_tqdm_cls.call_count == 1
+            mock_tqdm_cls.assert_called_with(total=200, unit="sim")
+
+    def test_tqdm_no_negative_delta(self):
+        """When current <= bar.n, update should not be called with negative delta."""
+        mock_bar = MagicMock()
+        mock_bar.n = 50
+        mock_tqdm_cls = MagicMock(return_value=mock_bar)
+        mock_tqdm_module = MagicMock()
+        mock_tqdm_module.tqdm = mock_tqdm_cls
+
+        reporter = TqdmReporter()
+
+        with patch.dict("sys.modules", {"tqdm": mock_tqdm_module}):
+            reporter(0, 100)  # creates bar
+            mock_bar.n = 50
+            reporter(30, 100)  # current < bar.n
+            # update should NOT have been called (delta = 30 - 50 = -20, not > 0)
+            mock_bar.update.assert_not_called()
 
 
 class TestComputeTotalSimulations:

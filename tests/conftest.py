@@ -64,12 +64,6 @@ def correlation_matrix_2x2():
 
 
 @pytest.fixture
-def correlation_matrix_3x3():
-    """Create a 3x3 correlation matrix."""
-    return np.array([[1.0, 0.3, 0.2], [0.3, 1.0, 0.4], [0.2, 0.4, 1.0]])
-
-
-@pytest.fixture
 def sample_data():
     """Create sample empirical data."""
     np.random.seed(42)
@@ -80,41 +74,13 @@ def sample_data():
 
 
 @pytest.fixture
-def suppress_output(capsys):
-    """Suppress print output during tests by capturing it."""
-    yield
-    # Output is automatically captured by capsys
+def suppress_output():
+    """Suppress print output during tests."""
+    import contextlib
+    import io
 
-
-BACKENDS = ["c++"]
-
-
-@pytest.fixture(params=BACKENDS)
-def backend(request):
-    """
-    Force MCPower to run on a specific backend.
-
-    Parametrizes tests against C++ (primary backend).
-    Automatically resets backend after each test.
-    """
-    from mcpower.backends import reset_backend, set_backend
-
-    set_backend(request.param)
-    yield request.param
-    reset_backend()
-
-
-@pytest.fixture(autouse=True)
-def reset_backend_after_test():
-    """
-    Automatically reset backend to default after every test.
-
-    Ensures no hidden backend state leaks between tests.
-    """
-    yield
-    from mcpower.backends import reset_backend
-
-    reset_backend()
+    with contextlib.redirect_stdout(io.StringIO()):
+        yield
 
 
 def _statsmodels_available():

@@ -110,7 +110,9 @@ py::array_t<double> generate_y_wrapper(
     py::array_t<double> effects,
     double heterogeneity,
     double heteroskedasticity,
-    int seed
+    int seed,
+    int residual_dist,
+    double residual_df
 ) {
     auto X_buf = X.request();
     auto effects_buf = effects.request();
@@ -129,7 +131,8 @@ py::array_t<double> generate_y_wrapper(
     );
 
     Eigen::VectorXd y = generate_y(
-        X_map, effects_map, heterogeneity, heteroskedasticity, seed
+        X_map, effects_map, heterogeneity, heteroskedasticity, seed,
+        residual_dist, residual_df
     );
 
     py::array_t<double> result(n);
@@ -447,7 +450,9 @@ PYBIND11_MODULE(mcpower_native, m) {
         py::arg("heterogeneity") = 0.0,
         py::arg("heteroskedasticity") = 0.0,
         py::arg("seed") = -1,
-        "Generate dependent variable with heterogeneity and heteroskedasticity"
+        py::arg("residual_dist") = 0,
+        py::arg("residual_df") = 10.0,
+        "Generate dependent variable with heterogeneity, heteroskedasticity, and non-normal residuals"
     );
 
     // LME analysis (q=1 random intercept)

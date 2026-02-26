@@ -4,6 +4,8 @@ Tests for parallel execution in MCPower.
 
 import pytest
 
+from tests.config import N_SIMS_CHECK
+
 
 def _joblib_available():
     """Check if joblib is available."""
@@ -26,6 +28,7 @@ class TestParallelExecution:
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.3, x2=0.2")
         model.set_seed(42)
+        model.set_simulations(N_SIMS_CHECK)
 
         # Run sequential analysis
         model.set_parallel(False)
@@ -56,6 +59,7 @@ class TestParallelExecution:
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.3, x2=0.2")
         model.set_seed(42)
+        model.set_simulations(N_SIMS_CHECK)
 
         # Run sequential with scenarios
         model.set_parallel(False)
@@ -93,6 +97,7 @@ class TestParallelExecution:
         model = MCPower("y = a + b + a:b")
         model.set_effects("a=0.4, b=0.3, a:b=0.2")
         model.set_seed(42)
+        model.set_simulations(N_SIMS_CHECK)
 
         # Run sequential
         model.set_parallel(False)
@@ -128,6 +133,7 @@ class TestParallelExecution:
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.3, x2=0.2")
         model.set_seed(42)
+        model.set_simulations(N_SIMS_CHECK)
         model.set_parallel(True, n_cores=2)
 
         # Mock joblib.Parallel to raise an exception
@@ -157,6 +163,7 @@ class TestParallelExecution:
         model = MCPower("y = x1 + x2")
         model.set_effects("x1=0.3, x2=0.2")
         model.set_seed(42)
+        model.set_simulations(N_SIMS_CHECK)
 
         # Run with parallel=False
         model.set_parallel(False)

@@ -27,6 +27,11 @@ class _ValidationResult:
     errors: List[str]
     warnings: List[str]
 
+    @classmethod
+    def from_errors(cls, errors: List[str], warnings: Optional[List[str]] = None) -> "_ValidationResult":
+        """Create a result from error/warning lists, deriving ``is_valid`` automatically."""
+        return cls(len(errors) == 0, errors, warnings or [])
+
     def raise_if_invalid(self):
         """Raise ``ValueError`` if the validation failed."""
         if not self.is_valid:
@@ -88,12 +93,12 @@ def _validate_numeric_parameter(
         errors.append(range_error)
 
     # Rounding warning for floats when int expected
-    if allow_rounding and isinstance(value, float) and (int, float) in expected_types:
+    if allow_rounding and isinstance(value, float) and int in expected_types:
         rounded = int(round(value))
         if value != rounded:
             warnings.append(f"{name} rounded from {value} to {rounded}")
 
-    return _ValidationResult(len(errors) == 0, errors, warnings)
+    return _ValidationResult.from_errors(errors, warnings)
 
 
 def _validate_power(power: Any) -> _ValidationResult:
@@ -112,6 +117,8 @@ def _validate_simulations(n_simulations: Any) -> Tuple[int, _ValidationResult]:
 
     if result.is_valid:
         rounded = int(round(n_simulations))
+        # 800 simulations threshold: below this, Monte Carlo standard error
+        # exceeds ~1.5% for power near 50%, reducing result reliability.
         if rounded < 800:
             result.warnings.append(f"Low simulation count ({rounded}). Consider using at least 1000 for reliable results.")
         return rounded, result
@@ -139,7 +146,7 @@ def _validate_sample_size(sample_size: Any) -> _ValidationResult:
             f"sample_size too large ({sample_size:,}). Maximum recommended: 100,000. We cannot guarantee stability for such small p-values."
         )
 
-    return _ValidationResult(len(errors) == 0, errors, [])
+    return _ValidationResult.from_errors(errors)
 
 
 def _validate_sample_size_for_model(sample_size: int, n_variables: int) -> _ValidationResult:
@@ -157,6 +164,8 @@ def _validate_sample_size_for_model(sample_size: int, n_variables: int) -> _Vali
         _ValidationResult with errors if sample size is insufficient.
     """
     errors = []
+    # Green's rule of thumb: N >= 15 + p for adequate power in regression,
+    # where p is the number of predictors (design matrix columns).
     min_required = 15 + n_variables
 
     if sample_size < min_required:
@@ -165,7 +174,7 @@ def _validate_sample_size_for_model(sample_size: int, n_variables: int) -> _Vali
             f"variables. Minimum required: {min_required} (15 + {n_variables} variables)."
         )
 
-    return _ValidationResult(len(errors) == 0, errors, [])
+    return _ValidationResult.from_errors(errors)
 
 
 def _validate_sample_size_range(from_size: Any, to_size: Any, by: Any) -> _ValidationResult:
@@ -193,7 +202,7 @@ def _validate_sample_size_range(from_size: Any, to_size: Any, by: Any) -> _Valid
     if n_tests > 100:
         warnings.append(f"Large number of sample sizes to test ({n_tests}). This may take significant time.")
 
-    return _ValidationResult(len(errors) == 0, errors, warnings)
+    return _ValidationResult.from_errors(errors, warnings)
 
 
 def _validate_correlation_matrix(
@@ -226,12 +235,14 @@ def _validate_correlation_matrix(
     # Positive semi-definite check
     try:
         eigenvals = np.linalg.eigvals(corr_matrix)
+        # -1e-8 tolerance for positive semi-definiteness: allows small negative
+        # eigenvalues from floating-point rounding in correlation matrices.
         if np.any(eigenvals < -1e-8):  # Tolerance for floating point noise
             errors.append("Correlation matrix must be positive semi-definite. ")
     except np.linalg.LinAlgError:
         errors.append("Cannot compute eigenvalues of correlation matrix")
 
-    return _ValidationResult(len(errors) == 0, errors, [])
+    return _ValidationResult.from_errors(errors)
 
 
 def _validate_correction_method(correction: Optional[str]) -> _ValidationResult:
@@ -285,7 +296,7 @@ def _validate_parallel_settings(enable: Any, n_cores: Optional[int]) -> Tuple[Tu
         else:
             validated_n_cores = min(n_cores, max_cores)
 
-    return (enable, validated_n_cores), _ValidationResult(len(errors) == 0, errors, [])
+    return (enable, validated_n_cores), _ValidationResult.from_errors(errors)
 
 
 def _validate_model_ready(model) -> _ValidationResult:
@@ -301,9 +312,10 @@ def _validate_model_ready(model) -> _ValidationResult:
     errors: List[str] = []
     warnings: List[str] = []
 
-    # Check effect sizes - check if pending effects were set
-    has_effects = hasattr(model, "_pending_effects") and model._pending_effects is not None
-    if not has_effects:
+    # Check effect sizes — pending (pre-apply) or flagged as set by user
+    has_pending = hasattr(model, "_pending_effects") and model._pending_effects is not None
+    has_set = hasattr(model, "_effects_set") and model._effects_set
+    if not has_pending and not has_set:
         if hasattr(model, "_registry"):
             available = model._registry.effect_names
             errors.append(
@@ -318,7 +330,7 @@ def _validate_model_ready(model) -> _ValidationResult:
         if not hasattr(model, attr):
             errors.append(f"Model missing required attribute: {attr}")
 
-    return _ValidationResult(len(errors) == 0, errors, warnings)
+    return _ValidationResult.from_errors(errors, warnings)
 
 
 def _validate_test_formula(test_formula: str, available_variables: List[str]) -> _ValidationResult:
@@ -361,7 +373,7 @@ def _validate_test_formula(test_formula: str, available_variables: List[str]) ->
                 f"Variables not found in original model: {', '.join(sorted(missing_vars))}. Available: {', '.join(available_variables)}"
             )
 
-        return _ValidationResult(len(errors) == 0, errors, [])
+        return _ValidationResult.from_errors(errors)
 
     except Exception as e:
         errors.append(f"Error parsing test_formula: {str(e)}")
@@ -399,6 +411,8 @@ def _validate_factor_specification(n_levels: int, proportions: List[float]) -> _
         # Check if they sum to approximately 1
         if not errors:  # Only if no errors with individual proportions
             total = sum(proportions)
+            # 1e-6 tolerance: proportions are normalized later, so small deviations
+            # from 1.0 are acceptable and only warrant a warning.
             if abs(total - 1.0) > 1e-6:
                 warnings.append(f"Proportions sum to {total:.4f}, not 1.0 (will be normalized)")
 
@@ -406,7 +420,7 @@ def _validate_factor_specification(n_levels: int, proportions: List[float]) -> _
     if n_levels > 10:
         warnings.append(f"Factor has {n_levels} levels. This creates {n_levels - 1} dummy variables, which may require large sample sizes")
 
-    return _ValidationResult(len(errors) == 0, errors, warnings)
+    return _ValidationResult.from_errors(errors, warnings)
 
 
 def _validate_upload_data(data: np.ndarray) -> _ValidationResult:
@@ -425,7 +439,7 @@ def _validate_upload_data(data: np.ndarray) -> _ValidationResult:
     if data.shape[0] < 25:
         errors.append(f"Need at least 25 samples for reliable quantile matching, got {data.shape[0]}")
 
-    return _ValidationResult(len(errors) == 0, errors, [])
+    return _ValidationResult.from_errors(errors)
 
 
 def _validate_cluster_config(
@@ -475,7 +489,7 @@ def _validate_cluster_config(
             if not isinstance(cluster_size, int) or cluster_size < 5:
                 errors.append(f"cluster_size must be an integer >= 5 for reliable mixed model estimation. Got {cluster_size}.")
 
-    return _ValidationResult(len(errors) == 0, errors, warnings)
+    return _ValidationResult.from_errors(errors, warnings)
 
 
 def _validate_cluster_sample_size(
@@ -517,4 +531,4 @@ def _validate_cluster_sample_size(
             f"Small cluster sizes may cause convergence issues or biased variance estimates."
         )
 
-    return _ValidationResult(len(errors) == 0, errors, warnings)
+    return _ValidationResult.from_errors(errors, warnings)

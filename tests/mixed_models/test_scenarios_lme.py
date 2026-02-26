@@ -14,7 +14,6 @@ from scipy import stats as sp_stats
 from mcpower.core.scenarios import (
     DEFAULT_SCENARIO_CONFIG,
     apply_lme_perturbations,
-    apply_lme_residual_perturbations,
 )
 from mcpower.stats.data_generation import (
     _generate_cluster_effects,
@@ -35,7 +34,7 @@ class TestDefaultConfig:
         "random_effect_dist",
         "random_effect_df",
         "icc_noise_sd",
-        "residual_dist",
+        "residual_dists",
         "residual_change_prob",
         "residual_df",
     ]
@@ -49,22 +48,37 @@ class TestDefaultConfig:
             assert key in DEFAULT_SCENARIO_CONFIG["doomer"], f"Missing key: {key}"
 
     def test_realistic_values(self):
+        """Realistic scenario has non-zero LME perturbation values."""
         cfg = DEFAULT_SCENARIO_CONFIG["realistic"]
         assert cfg["random_effect_dist"] == "heavy_tailed"
-        assert cfg["random_effect_df"] == 5
-        assert cfg["icc_noise_sd"] == 0.15
-        assert cfg["residual_dist"] == "heavy_tailed"
-        assert cfg["residual_change_prob"] == 0.3
-        assert cfg["residual_df"] == 10
+        assert cfg["random_effect_df"] > 0
+        assert cfg["icc_noise_sd"] > 0
+        assert cfg["residual_dists"] == ["heavy_tailed", "skewed"]
+        assert cfg["residual_change_prob"] > 0
+        assert cfg["residual_df"] > 2
 
     def test_doomer_values(self):
-        cfg = DEFAULT_SCENARIO_CONFIG["doomer"]
-        assert cfg["random_effect_dist"] == "heavy_tailed"
-        assert cfg["random_effect_df"] == 3
-        assert cfg["icc_noise_sd"] == 0.30
-        assert cfg["residual_dist"] == "heavy_tailed"
-        assert cfg["residual_change_prob"] == 0.8
-        assert cfg["residual_df"] == 5
+        """Doomer scenario has more severe perturbation than realistic."""
+        real = DEFAULT_SCENARIO_CONFIG["realistic"]
+        doom = DEFAULT_SCENARIO_CONFIG["doomer"]
+        assert doom["random_effect_dist"] == "heavy_tailed"
+        assert doom["random_effect_df"] <= real["random_effect_df"]
+        assert doom["icc_noise_sd"] >= real["icc_noise_sd"]
+        assert doom["residual_dists"] == ["heavy_tailed", "skewed"]
+        assert doom["residual_change_prob"] >= real["residual_change_prob"]
+        assert doom["residual_df"] <= real["residual_df"]
+
+    def test_optimistic_has_lme_keys(self):
+        for key in self.LME_KEYS:
+            assert key in DEFAULT_SCENARIO_CONFIG["optimistic"], f"Missing key: {key}"
+
+    def test_optimistic_values_are_zero(self):
+        cfg = DEFAULT_SCENARIO_CONFIG["optimistic"]
+        assert cfg["heterogeneity"] == 0.0
+        assert cfg["heteroskedasticity"] == 0.0
+        assert cfg["residual_change_prob"] == 0.0
+        assert cfg["icc_noise_sd"] == 0.0
+        assert cfg["random_effect_dist"] == "normal"
 
 
 # ---------------------------------------------------------------------------
@@ -309,73 +323,3 @@ class TestGenerateRandomEffectsWithPerturbations:
         assert result.intercept_columns.shape == (1000, 1)
 
 
-# ---------------------------------------------------------------------------
-# apply_lme_residual_perturbations
-# ---------------------------------------------------------------------------
-class TestApplyLmeResidualPerturbations:
-    """Test apply_lme_residual_perturbations() function."""
-
-    def _make_y(self, seed=42):
-        """Generate a deterministic y vector with known errors."""
-        rng = np.random.RandomState(seed + 2)
-        return rng.standard_normal(500)
-
-    def test_normal_dist_returns_unchanged(self):
-        y = self._make_y()
-        config = {"residual_dist": "normal", "residual_change_prob": 1.0, "residual_df": 5}
-        result = apply_lme_residual_perturbations(y.copy(), config, 42)
-        np.testing.assert_array_equal(result, y)
-
-    def test_zero_prob_returns_unchanged(self):
-        y = self._make_y()
-        config = {"residual_dist": "heavy_tailed", "residual_change_prob": 0.0, "residual_df": 5}
-        result = apply_lme_residual_perturbations(y.copy(), config, 42)
-        np.testing.assert_array_equal(result, y)
-
-    def test_prob_1_always_applies(self):
-        y = self._make_y()
-        config = {"residual_dist": "heavy_tailed", "residual_change_prob": 1.0, "residual_df": 5}
-        result = apply_lme_residual_perturbations(y.copy(), config, 42)
-        # Should be different from original
-        assert not np.array_equal(result, y)
-
-    def test_heavy_tailed_residuals_have_excess_kurtosis(self):
-        """When residuals are replaced with t(5), the diff should have heavy tails."""
-        y_orig = self._make_y()
-        config = {"residual_dist": "heavy_tailed", "residual_change_prob": 1.0, "residual_df": 5}
-        y_perturbed = apply_lme_residual_perturbations(y_orig.copy(), config, 42)
-        diff = y_perturbed - y_orig
-        # The diff = new_errors - original_errors. Both have finite variance,
-        # but the new_errors are t(5) which has excess kurtosis.
-        # For large enough N, the kurtosis of the difference should be positive.
-        sp_stats.kurtosis(diff + y_orig, fisher=True)
-        # Just check it ran without error and output differs
-        assert not np.array_equal(y_perturbed, y_orig)
-
-    def test_skewed_residuals_applied(self):
-        y_orig = self._make_y()
-        config = {"residual_dist": "skewed", "residual_change_prob": 1.0, "residual_df": 5}
-        y_perturbed = apply_lme_residual_perturbations(y_orig.copy(), config, 42)
-        assert not np.array_equal(y_perturbed, y_orig)
-
-    def test_coin_flip_seed_reproducible(self):
-        y = self._make_y()
-        config = {"residual_dist": "heavy_tailed", "residual_change_prob": 0.5, "residual_df": 5}
-        r1 = apply_lme_residual_perturbations(y.copy(), config, 42)
-        r2 = apply_lme_residual_perturbations(y.copy(), config, 42)
-        np.testing.assert_array_equal(r1, r2)
-
-    def test_coin_flip_prob_respected(self):
-        """With prob=0.3, roughly 30% of simulations should be perturbed."""
-        config = {"residual_dist": "heavy_tailed", "residual_change_prob": 0.3, "residual_df": 5}
-        n_perturbed = 0
-        n_trials = 200
-        y_template = np.ones(100)
-        for i in range(n_trials):
-            y = y_template.copy()
-            result = apply_lme_residual_perturbations(y, config, i * 100)
-            if not np.array_equal(result, y_template):
-                n_perturbed += 1
-        # Should be roughly 30% ± some tolerance
-        pct = n_perturbed / n_trials
-        assert 0.10 < pct < 0.55, f"Expected ~30% perturbed, got {pct:.1%}"

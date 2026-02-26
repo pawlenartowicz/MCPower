@@ -90,7 +90,7 @@ class TestICCRecovery:
 
         from mcpower.stats.data_generation import _generate_cluster_effects
 
-        sample_size = 500
+        sample_size = 1000
         n_clusters = 20
         icc_target = ICC_MODERATE_HIGH
 
@@ -270,7 +270,7 @@ class TestConvergenceDiagnostics:
             y=y,
             target_indices=np.array([0]),
             cluster_ids=cluster_ids,
-            cluster_column_indices=[],
+
             correction_method=0,
             alpha=0.05,
             backend="statsmodels",

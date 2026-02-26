@@ -54,6 +54,7 @@ class ResultsProcessor:
         # Individual powers
         individual_powers = {}
         individual_powers_corrected = {}
+        non_overall_tests = [t for t in target_tests if t != "overall"]
 
         for test in target_tests:
             if test == "overall":
@@ -62,7 +63,6 @@ class ResultsProcessor:
                 individual_powers_corrected[test] = np.mean(results_corrected_array[:, 0]) * 100
             else:
                 # Find position among non-'overall' tests and add 1 for F-test offset
-                non_overall_tests = [t for t in target_tests if t != "overall"]
                 pos = non_overall_tests.index(test)
                 col_idx = pos + 1  # +1 because column 0 is F-test
                 individual_powers[test] = np.mean(results_array[:, col_idx]) * 100

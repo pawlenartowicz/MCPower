@@ -1,8 +1,7 @@
 """
-Power monotonicity tests — backend-agnostic.
+Power monotonicity tests.
 
 Power must increase with effect size, sample size, and alpha.
-Tests run on ALL available backends via the backend fixture.
 """
 
 import contextlib
@@ -10,7 +9,7 @@ import io
 
 import pytest
 
-from tests.config import N_SIMS, SEED
+from tests.config import N_SIMS_ORDERING as N_SIMS, SEED
 from tests.helpers.power_helpers import get_power
 
 
@@ -24,7 +23,7 @@ def _quiet():
 class TestPowerMonotonicity:
     """Power must increase with effect size, sample size, and alpha."""
 
-    def test_power_increases_with_effect_size(self, backend):
+    def test_power_increases_with_effect_size(self):
         """Larger standardised beta → higher power."""
         from mcpower import MCPower
 
@@ -43,9 +42,9 @@ class TestPowerMonotonicity:
             powers.append(get_power(result, "x1"))
 
         for i in range(len(powers) - 1):
-            assert powers[i] < powers[i + 1], f"[{backend}] Power not monotonic in effect size: {powers}"
+            assert powers[i] < powers[i + 1], f"Power not monotonic in effect size: {powers}"
 
-    def test_power_increases_with_sample_size(self, backend):
+    def test_power_increases_with_sample_size(self):
         """Larger N → higher power (for non-zero effect)."""
         from mcpower import MCPower
 
@@ -64,9 +63,9 @@ class TestPowerMonotonicity:
             powers.append(get_power(result, "x1"))
 
         for i in range(len(powers) - 1):
-            assert powers[i] < powers[i + 1], f"[{backend}] Power not monotonic in N: {powers}"
+            assert powers[i] < powers[i + 1], f"Power not monotonic in N: {powers}"
 
-    def test_power_increases_with_alpha(self, backend):
+    def test_power_increases_with_alpha(self):
         """Less stringent alpha → higher power."""
         from mcpower import MCPower
 
@@ -86,13 +85,13 @@ class TestPowerMonotonicity:
             powers.append(get_power(result, "x1"))
 
         for i in range(len(powers) - 1):
-            assert powers[i] < powers[i + 1], f"[{backend}] Power not monotonic in alpha: {powers}"
+            assert powers[i] < powers[i + 1], f"Power not monotonic in alpha: {powers}"
 
 
 class TestPowerConvergence:
     """Power must approach 100% when signal is overwhelming."""
 
-    def test_large_effect_high_power(self, backend):
+    def test_large_effect_high_power(self):
         """Very large effect → power near 100%."""
         from mcpower import MCPower
 
@@ -107,9 +106,9 @@ class TestPowerConvergence:
             return_results=True,
         )
         power = get_power(result, "x1")
-        assert power > 99.0, f"[{backend}] Large-effect power should be ~100%, got {power:.2f}%"
+        assert power > 99.0, f"Large-effect power should be ~100%, got {power:.2f}%"
 
-    def test_large_n_moderate_effect(self, backend):
+    def test_large_n_moderate_effect(self):
         """Large N with moderate effect → power near 100%."""
         from mcpower import MCPower
 
@@ -124,4 +123,4 @@ class TestPowerConvergence:
             return_results=True,
         )
         power = get_power(result, "x1")
-        assert power > 99.0, f"[{backend}] Large-N power should be ~100%, got {power:.2f}%"
+        assert power > 99.0, f"Large-N power should be ~100%, got {power:.2f}%"

@@ -102,7 +102,7 @@ class TestSampleSizeValidation:
         model.set_cluster("cluster", ICC=0.2, n_clusters=5)
         model.set_effects("x=0.5")
         model.set_simulations(10)
-        model.apply()
+        model._apply()
 
         # 50 / 5 = 10 (above warning band)
         result = model.find_power(sample_size=50, return_results=True)
@@ -118,7 +118,7 @@ class TestSampleSizeValidation:
         model.set_cluster("cluster", ICC=0.2, n_clusters=5)
         model.set_effects("x=0.5")
         model.set_simulations(10)
-        model.apply()
+        model._apply()
 
         # 20 / 5 = 4 (below minimum)
         with pytest.raises(ValueError, match="Insufficient observations per cluster"):
@@ -134,7 +134,7 @@ class TestSampleSizeValidation:
         model.set_cluster("cluster", ICC=0.2, n_clusters=10)
         model.set_effects("x=0.5")
         model.set_simulations(10)
-        model.apply()
+        model._apply()
 
         with pytest.raises(ValueError) as exc_info:
             model.find_power(sample_size=30)  # 30/10 = 3 < 5
@@ -155,7 +155,7 @@ class TestValidatorIntegration:
         model.set_cluster("cluster", ICC=0.2, n_clusters=5)
         model.set_effects("x=0.5")
         model.set_simulations(10)
-        model.apply()
+        model._apply()
 
         result = model.find_power(sample_size=50, return_results=True)  # 10 per cluster
 
@@ -170,7 +170,7 @@ class TestValidatorIntegration:
         model.set_effects("x=0.5")
         model.set_simulations(10)
         model.set_max_failed_simulations(0.30)  # Allow more failures at edge
-        model.apply()
+        model._apply()
 
         result = model.find_power(sample_size=20, return_results=True)  # 20/4 = 5
 
@@ -182,7 +182,7 @@ class TestValidatorIntegration:
         model.set_cluster("cluster", ICC=0.0, n_clusters=5)
         model.set_effects("x=0.5")
         model.set_simulations(20)
-        model.apply()
+        model._apply()
 
         result = model.find_power(sample_size=250, return_results=True)
 

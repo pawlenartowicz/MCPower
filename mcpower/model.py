@@ -123,10 +123,9 @@ class MCPower:
         self._pending_factor_levels: Optional[str] = None
         self._pending_effects: Optional[str] = None
         self._pending_correlations: Optional[Union[str, np.ndarray]] = None
-        self._pending_heterogeneity: Optional[float] = None
-        self._pending_heteroskedasticity: Optional[float] = None
         self._pending_data: Optional[Dict[str, Any]] = None
         self._pending_clusters: Dict[str, Dict] = {}  # {grouping_var: {n_clusters, cluster_size, icc}}
+        self._effects_set: bool = False  # True after set_effects() has been called
 
         # Detect mixed model formula
         if self._registry._random_effects_parsed:
@@ -134,8 +133,6 @@ class MCPower:
 
         # Applied state
         self._applied = False
-        self.heterogeneity = 0.0
-        self.heteroskedasticity = 0.0
 
         # Data storage
         self.upload_normal_values: Optional[np.ndarray] = None
@@ -385,6 +382,7 @@ class MCPower:
             raise ValueError("effects_string cannot be empty")
 
         self._pending_effects = effects_string
+        self._effects_set = True
         self._applied = False
         return self
 
@@ -432,13 +430,16 @@ class MCPower:
                 - ``"normal"`` — standard normal (default).
                 - ``"binary"`` or ``"binary(p)"`` — Bernoulli with proportion *p*
                   (default 0.5).
-                - ``"skewed"`` — heavy-tailed (t-distribution, df=3).
+                - ``"right_skewed"`` — positively skewed distribution.
+                - ``"left_skewed"`` — negatively skewed distribution.
+                - ``"high_kurtosis"`` — heavy-tailed (t-distribution, df=3).
+                - ``"uniform"`` — uniform distribution.
                 - ``"factor(k)"`` — categorical with *k* levels (creates *k-1*
                   dummy variables).
                 - ``"factor(k, p1, p2, ...)"`` — factor with custom level
                   proportions.
 
-                Example: ``"x1=binary, x2=skewed, x3=factor(3)"``.
+                Example: ``"x1=binary, x2=right_skewed, x3=factor(3)"``.
 
         Returns:
             self: For method chaining.
@@ -476,62 +477,6 @@ class MCPower:
         if not isinstance(spec, str):
             raise TypeError("spec must be a string")
         self._pending_factor_levels = spec
-        self._applied = False
-        return self
-
-    def set_heterogeneity(self, heterogeneity: float):
-        """Set heterogeneity (random variation) in effect sizes.
-
-        When non-zero, each simulation draws a per-simulation effect-size
-        multiplier from a normal distribution with mean 1 and the given
-        standard deviation. This models uncertainty about the true effect
-        size — for example, ``heterogeneity=0.1`` means effect sizes vary
-        by roughly +/- 10% across simulations.
-
-        This setting is deferred until ``apply()`` is called.
-
-        Args:
-            heterogeneity: Standard deviation of the random effect-size
-                multiplier. Must be non-negative. Default is 0 (no variation).
-
-        Returns:
-            self: For method chaining.
-
-        Raises:
-            TypeError: If *heterogeneity* is not numeric.
-        """
-        if not isinstance(heterogeneity, (int, float)):
-            raise TypeError("heterogeneity must be a number")
-
-        self._pending_heterogeneity = float(heterogeneity)
-        self._applied = False
-        return self
-
-    def set_heteroskedasticity(self, heteroskedasticity_correlation: float):
-        """Set heteroskedasticity (non-constant error variance).
-
-        Introduces a correlation between the first predictor's values and
-        the error standard deviation, producing variance that increases (or
-        decreases) with the predictor. This violates the homoskedasticity
-        assumption and typically reduces power.
-
-        This setting is deferred until ``apply()`` is called.
-
-        Args:
-            heteroskedasticity_correlation: Correlation between the first
-                predictor and the error standard deviation, in the range
-                [-1, 1]. Default is 0 (homoskedastic errors).
-
-        Returns:
-            self: For method chaining.
-
-        Raises:
-            TypeError: If the value is not numeric.
-        """
-        if not isinstance(heteroskedasticity_correlation, (int, float)):
-            raise TypeError("heteroskedasticity_correlation must be a number")
-
-        self._pending_heteroskedasticity = float(heteroskedasticity_correlation)
         self._applied = False
         return self
 
@@ -769,6 +714,7 @@ class MCPower:
             "preserve_factor_level_names": preserve_factor_level_names,
         }
         self._applied = False
+        return self
 
     def set_scenario_configs(self, configs_dict: Dict):
         """Set custom scenario configurations for robustness analysis.
@@ -786,7 +732,9 @@ class MCPower:
             configs_dict: Mapping of scenario names to configuration dicts.
                 Each configuration may include keys such as
                 ``"heterogeneity"``, ``"heteroskedasticity"``,
-                ``"effect_size_jitter"``, and ``"distribution_jitter"``.
+                ``"correlation_noise_sd"``, and ``"distribution_change_prob"``.
+                See ``DEFAULT_SCENARIO_CONFIG`` in ``mcpower.core.scenarios``
+                for the full list of keys.
 
         Returns:
             self: For method chaining.
@@ -802,7 +750,8 @@ class MCPower:
             if scenario in merged:
                 merged[scenario].update(config)
             else:
-                merged[scenario] = config
+                # New custom scenarios inherit all keys from optimistic baseline
+                merged[scenario] = {**DEFAULT_SCENARIO_CONFIG["optimistic"], **config}
 
         self._scenario_configs = merged
         print(f"Custom scenario configs set: {', '.join(configs_dict.keys())}")
@@ -812,7 +761,7 @@ class MCPower:
     # Apply method (processes all pending settings)
     # =========================================================================
 
-    def apply(self):
+    def _apply(self):
         """
         Apply all pending settings to the model.
 
@@ -857,15 +806,21 @@ class MCPower:
         # 7. Apply correlations
         self._apply_correlations(_parser)
 
-        # 8. Apply heterogeneity/heteroskedasticity
-        self._apply_heterogeneity()
-
-        # 9. Validate model is ready
+        # 8. Validate model is ready
         model_result = _validate_model_ready(self)
         model_result.raise_if_invalid()
 
-        # Invalidate effect plan cache when settings change (Phase 2 optimization)
+        # Invalidate the effect plan cache — apply() rebuilds the variable
+        # registry state, so any cached column mappings are now stale.
         self._effect_plan_cache = None
+
+        # Clear pending state to prevent double-application
+        self._pending_variable_types = None
+        self._pending_factor_levels = None
+        self._pending_effects = None
+        self._pending_correlations = None
+        self._pending_data = None
+        self._pending_clusters = {}
 
         self._applied = True
         print("Model settings applied successfully")
@@ -1024,6 +979,21 @@ class MCPower:
         # Extract matched data
         matched_data = data[:, matched_indices]
 
+        # Reject NaN values early
+        try:
+            if np.isnan(matched_data.astype(np.float64)).any():
+                nan_cols = [
+                    matched_columns[i] for i in range(matched_data.shape[1]) if np.isnan(matched_data[:, i].astype(np.float64)).any()
+                ]
+                raise ValueError(
+                    f"Uploaded data contains NaN values in columns: {', '.join(nan_cols)}. "
+                    f"Remove or impute missing values before uploading."
+                )
+        except (ValueError, TypeError):
+            # Object dtype columns (strings) can't be converted to float for NaN check.
+            # NaN check for numeric columns will happen after string encoding below.
+            pass
+
         # Convert to float64 if object dtype (common with mixed-type DataFrames)
         # String columns are encoded to integer indices; mapping is stored in string_col_indices
         string_col_indices = {}
@@ -1178,11 +1148,7 @@ class MCPower:
                 level_labels = info.get("level_labels")
 
                 # Determine reference from data_types tuple override
-                reference_level = None
-                if col in data_types_override:
-                    dt = data_types_override[col]
-                    if isinstance(dt, tuple) and len(dt) == 2:
-                        reference_level = str(dt[1])
+                reference_level = self._extract_reference_level(data_types_override, col)
 
                 # Calculate proportions for each level
                 proportions = []
@@ -1200,7 +1166,10 @@ class MCPower:
 
             else:  # continuous
                 # Normalize: mean=0, sd=1
-                normalized = (col_data - np.mean(col_data)) / np.std(col_data, ddof=1)
+                std = np.std(col_data, ddof=1)
+                if std < 1e-15:
+                    raise ValueError(f"Column '{col}' has zero variance (constant value). Remove it from the model or check your data.")
+                normalized = (col_data - np.mean(col_data)) / std
 
                 # Create lookup tables (type 99)
                 normal_vals, uploaded_vals = create_uploaded_lookup_tables(normalized.reshape(-1, 1))
@@ -1324,11 +1293,7 @@ class MCPower:
                 level_labels = info.get("level_labels")
 
                 # Determine reference from data_types tuple override
-                reference_level = None
-                if col in data_types_override:
-                    dt = data_types_override[col]
-                    if isinstance(dt, tuple) and len(dt) == 2:
-                        reference_level = str(dt[1])
+                reference_level = self._extract_reference_level(data_types_override, col)
 
                 self._uploaded_var_metadata[col] = {
                     "type": "factor",
@@ -1355,7 +1320,10 @@ class MCPower:
                 continuous_cols.append(idx)
                 # Normalize
                 col_data = data[:, idx]
-                normalized_data[:, idx] = (col_data - np.mean(col_data)) / np.std(col_data, ddof=1)
+                std = np.std(col_data, ddof=1)
+                if std < 1e-15:
+                    raise ValueError(f"Column '{col}' has zero variance (constant value). Remove it from the model or check your data.")
+                normalized_data[:, idx] = (col_data - np.mean(col_data)) / std
 
                 self._uploaded_var_metadata[col] = {
                     "type": "continuous",
@@ -1481,22 +1449,6 @@ class MCPower:
             self._registry.set_correlation_matrix(correlations_input)
             print("Correlation matrix set")
 
-    def _apply_heterogeneity(self):
-        """Validate and apply pending heterogeneity and heteroskedasticity settings."""
-        if self._pending_heterogeneity is not None:
-            if self._pending_heterogeneity < 0:
-                raise ValueError("heterogeneity must be non-negative")
-            self.heterogeneity = self._pending_heterogeneity
-            if self.heterogeneity > 0:
-                print(f"Heterogeneity: SD = {self.heterogeneity}")
-
-        if self._pending_heteroskedasticity is not None:
-            if not -1 <= self._pending_heteroskedasticity <= 1:
-                raise ValueError("heteroskedasticity_correlation must be between -1 and 1")
-            self.heteroskedasticity = self._pending_heteroskedasticity
-            if abs(self.heteroskedasticity) > 1e-8:
-                print(f"Heteroskedasticity: correlation = {self.heteroskedasticity}")
-
     # =========================================================================
     # Analysis methods
     # =========================================================================
@@ -1507,7 +1459,7 @@ class MCPower:
         target_test: str = "all",
         correction: Optional[str] = None,
         print_results: bool = True,
-        scenarios: bool = False,
+        scenarios: Union[bool, List[str]] = False,
         summary: str = "short",
         return_results: bool = False,
         test_formula: str = "",
@@ -1529,12 +1481,16 @@ class MCPower:
                 Duplicate tests raise ``ValueError``.
             correction: Multiple comparison correction (None, "bonferroni", "benjamini-hochberg", "holm")
             print_results: Whether to print results
-            scenarios: Run scenario analysis
+            scenarios: Scenario analysis control:
+                - ``False`` (default): no scenario analysis.
+                - ``True``: run all configured scenarios.
+                - List of scenario names: run only the specified scenarios
+                  (e.g. ``["optimistic", "extreme"]``). Case-insensitive.
             summary: Output detail level ("short" or "long")
             return_results: Return results dict
             test_formula: Formula for statistical testing (default: use data generation formula).
                 If the formula contains random effects like (1|school), analysis switches to
-                mixed model testing (not yet implemented).
+                mixed model testing.
             progress_callback: Progress reporting control:
                 - ``None`` (default): auto-use ``PrintReporter`` when
                   *print_results* is ``True``.
@@ -1549,7 +1505,10 @@ class MCPower:
         """
         # Auto-apply if settings have changed
         if not self._applied:
-            self.apply()
+            self._apply()
+
+        # Resolve scenarios parameter
+        scenario_filter = self._resolve_scenarios(scenarios)
 
         # Validate sample size (basic: >= 20, type check)
         _validate_sample_size(sample_size).raise_if_invalid()
@@ -1557,9 +1516,6 @@ class MCPower:
         # Validate sample size against model complexity (>= 15 + n_variables)
         n_variables = len(self._registry.effect_names)
         _validate_sample_size_for_model(sample_size, n_variables).raise_if_invalid()
-
-        # Validate and adjust cluster sample sizes
-        self._validate_cluster_sample_size(sample_size)
 
         # Warn if sample size is much larger than uploaded data
         if self._uploaded_data_n > 0 and sample_size > 3 * self._uploaded_data_n:
@@ -1570,33 +1526,13 @@ class MCPower:
             )
 
         self._validate_analysis_inputs(correction)
-        resolved_test_formula = self._resolve_test_formula(test_formula)
-        target_tests = self._parse_target_tests(target_test)
+        resolved_test_formula, test_formula_effects, test_random_effects = self._resolve_test_formula(test_formula)
+        target_tests = self._parse_target_tests(target_test, test_formula_effects=test_formula_effects)
+        self._validate_tukey_posthoc(correction)
 
-        if correction and correction.lower() == "tukey" and not self._posthoc_specs:
-            raise ValueError(
-                "Tukey correction requires at least one post-hoc comparison "
-                "(e.g., target_test='group[0] vs group[1]'). "
-                "Tukey HSD only applies to pairwise contrasts between factor levels."
-            )
+        reporter = self._resolve_progress(progress_callback, print_results, scenario_filter)
 
-        # Resolve progress callback
-        from .progress import PrintReporter, ProgressReporter, compute_total_simulations
-
-        if progress_callback is None:
-            effective_cb = PrintReporter() if print_results else None
-        elif progress_callback is False:
-            effective_cb = None
-        else:
-            effective_cb = progress_callback
-
-        reporter = None
-        if effective_cb is not None:
-            n_scenarios = (len(self._scenario_configs or DEFAULT_SCENARIO_CONFIG) + 1) if scenarios else 1
-            total = compute_total_simulations(self._effective_n_simulations, 1, n_scenarios)
-            reporter = ProgressReporter(total, effective_cb)
-
-        if scenarios:
+        if scenario_filter is not None:
             result = self._run_scenario_analysis(
                 "power",
                 sample_size=sample_size,
@@ -1605,8 +1541,11 @@ class MCPower:
                 summary=summary,
                 print_results=print_results,
                 test_formula=resolved_test_formula,
+                test_formula_effects=test_formula_effects,
+                test_random_effects=test_random_effects,
                 progress=reporter,
                 cancel_check=cancel_check,
+                scenario_filter=scenario_filter,
             )
         else:
             if reporter is not None:
@@ -1615,7 +1554,10 @@ class MCPower:
                 sample_size,
                 target_tests,
                 correction,
+                scenario_config=DEFAULT_SCENARIO_CONFIG["optimistic"],
                 test_formula=resolved_test_formula,
+                test_formula_effects=test_formula_effects,
+                test_random_effects=test_random_effects,
                 progress=reporter,
                 cancel_check=cancel_check,
             )
@@ -1623,7 +1565,7 @@ class MCPower:
         if reporter is not None:
             reporter.finish()
 
-        if not scenarios and print_results:
+        if scenario_filter is None and print_results:
             print(f"\n{'=' * 80}")
             print("MONTE CARLO POWER ANALYSIS RESULTS")
             print(f"{'=' * 80}")
@@ -1641,7 +1583,7 @@ class MCPower:
         by: int = 5,
         correction: Optional[str] = None,
         print_results: bool = True,
-        scenarios: bool = False,
+        scenarios: Union[bool, List[str]] = False,
         summary: str = "short",
         return_results: bool = False,
         test_formula: str = "",
@@ -1659,12 +1601,16 @@ class MCPower:
             by: Step size between sample sizes
             correction: Multiple comparison correction
             print_results: Whether to print results
-            scenarios: Run scenario analysis
+            scenarios: Scenario analysis control:
+                - ``False`` (default): no scenario analysis.
+                - ``True``: run all configured scenarios.
+                - List of scenario names: run only the specified scenarios
+                  (e.g. ``["optimistic", "extreme"]``). Case-insensitive.
             summary: Output detail level
             return_results: Return results dict
             test_formula: Formula for statistical testing (default: use data generation formula).
                 If the formula contains random effects like (1|school), analysis switches to
-                mixed model testing (not yet implemented).
+                mixed model testing.
             progress_callback: Progress reporting control:
                 - ``None`` (default): auto-use ``PrintReporter`` when
                   *print_results* is ``True``.
@@ -1680,7 +1626,10 @@ class MCPower:
         """
         # Auto-apply if settings have changed
         if not self._applied:
-            self.apply()
+            self._apply()
+
+        # Resolve scenarios parameter
+        scenario_filter = self._resolve_scenarios(scenarios)
 
         # Validate from_size meets minimum requirements
         _validate_sample_size(from_size).raise_if_invalid()
@@ -1696,40 +1645,20 @@ class MCPower:
             )
 
         self._validate_analysis_inputs(correction)
-        resolved_test_formula = self._resolve_test_formula(test_formula)
+        resolved_test_formula, test_formula_effects, test_random_effects = self._resolve_test_formula(test_formula)
         validation_result = _validate_sample_size_range(from_size, to_size, by)
         for warning in validation_result.warnings:
             print(f"Warning: {warning}")
         validation_result.raise_if_invalid()
 
-        target_tests = self._parse_target_tests(target_test)
-
-        if correction and correction.lower() == "tukey" and not self._posthoc_specs:
-            raise ValueError(
-                "Tukey correction requires at least one post-hoc comparison "
-                "(e.g., target_test='group[0] vs group[1]'). "
-                "Tukey HSD only applies to pairwise contrasts between factor levels."
-            )
+        target_tests = self._parse_target_tests(target_test, test_formula_effects=test_formula_effects)
+        self._validate_tukey_posthoc(correction)
 
         sample_sizes = list(range(from_size, to_size + 1, by))
 
-        # Resolve progress callback
-        from .progress import PrintReporter, ProgressReporter, compute_total_simulations
+        reporter = self._resolve_progress(progress_callback, print_results, scenario_filter, n_sample_sizes=len(sample_sizes))
 
-        if progress_callback is None:
-            effective_cb = PrintReporter() if print_results else None
-        elif progress_callback is False:
-            effective_cb = None
-        else:
-            effective_cb = progress_callback
-
-        reporter = None
-        if effective_cb is not None:
-            n_scenarios = (len(self._scenario_configs or DEFAULT_SCENARIO_CONFIG) + 1) if scenarios else 1
-            total = compute_total_simulations(self._effective_n_simulations, len(sample_sizes), n_scenarios)
-            reporter = ProgressReporter(total, effective_cb)
-
-        if scenarios:
+        if scenario_filter is not None:
             result = self._run_scenario_analysis(
                 "sample_size",
                 target_tests=target_tests,
@@ -1738,8 +1667,11 @@ class MCPower:
                 summary=summary,
                 print_results=print_results,
                 test_formula=resolved_test_formula,
+                test_formula_effects=test_formula_effects,
+                test_random_effects=test_random_effects,
                 progress=reporter,
                 cancel_check=cancel_check,
+                scenario_filter=scenario_filter,
             )
         else:
             if reporter is not None:
@@ -1748,7 +1680,10 @@ class MCPower:
                 sample_sizes,
                 target_tests,
                 correction,
+                scenario_config=DEFAULT_SCENARIO_CONFIG["optimistic"],
                 test_formula=resolved_test_formula,
+                test_formula_effects=test_formula_effects,
+                test_random_effects=test_random_effects,
                 progress=reporter,
                 cancel_check=cancel_check,
             )
@@ -1756,7 +1691,7 @@ class MCPower:
         if reporter is not None:
             reporter.finish()
 
-        if not scenarios and print_results:
+        if scenario_filter is None and print_results:
             print(f"\n{'=' * 80}")
             print("SAMPLE SIZE ANALYSIS RESULTS")
             print(f"{'=' * 80}")
@@ -1780,6 +1715,8 @@ class MCPower:
         heterogeneity: float = 0.0,
         heteroskedasticity: float = 0.0,
         sim_seed: Optional[int] = None,
+        residual_dist: int = 0,
+        residual_df: float = 10.0,
     ) -> np.ndarray:
         """Generate the dependent variable as y = X @ beta + error via the active backend."""
         return get_backend().generate_y(
@@ -1788,19 +1725,103 @@ class MCPower:
             heterogeneity,
             heteroskedasticity,
             sim_seed if sim_seed is not None else -1,
+            residual_dist,
+            residual_df,
         )
 
     # =========================================================================
     # Internal methods
     # =========================================================================
 
+    @staticmethod
+    def _extract_reference_level(data_types_override, col):
+        """Extract reference level from data_types_override tuple for a column."""
+        dt = data_types_override.get(col)
+        if isinstance(dt, tuple) and len(dt) == 2:
+            return str(dt[1])
+        return None
+
+    def _resolve_scenarios(self, scenarios: Union[bool, List[str]]) -> Optional[List[str]]:
+        """Resolve the scenarios parameter into a list of scenario names or None.
+
+        Args:
+            scenarios: ``False`` for no scenarios, ``True`` for all configured
+                scenarios, or a list of scenario names (case-insensitive).
+
+        Returns:
+            List of validated, lowercase scenario names, or ``None`` if
+            scenarios are disabled.
+
+        Raises:
+            ValueError: If any requested scenario name is not configured.
+            TypeError: If *scenarios* is not ``bool`` or a list of strings.
+        """
+        if scenarios is False:
+            return None
+
+        all_configs = self._scenario_configs or DEFAULT_SCENARIO_CONFIG
+        available = set(all_configs.keys())
+
+        if scenarios is True:
+            return list(all_configs.keys())
+
+        if not isinstance(scenarios, list):
+            raise TypeError(f"scenarios must be True, False, or a list of scenario names, got {type(scenarios).__name__}")
+
+        # Case-insensitive matching
+        available_lower = {k.lower(): k for k in available}
+        resolved = []
+        invalid = []
+        for name in scenarios:
+            if not isinstance(name, str):
+                raise TypeError(f"Scenario names must be strings, got {type(name).__name__}")
+            key = available_lower.get(name.lower())
+            if key is None:
+                invalid.append(name)
+            else:
+                resolved.append(key)
+
+        if invalid:
+            raise ValueError(f"Unknown scenario(s): {', '.join(repr(n) for n in invalid)}. Available: {', '.join(sorted(available))}")
+
+        return resolved
+
+    def _resolve_progress(self, progress_callback, print_results, scenario_filter, n_sample_sizes=1):
+        """Resolve progress_callback into a ProgressReporter or None."""
+        from .progress import PrintReporter, ProgressReporter, compute_total_simulations
+
+        if progress_callback is None:
+            effective_cb = PrintReporter() if print_results else None
+        elif progress_callback is False:
+            effective_cb = None
+        else:
+            effective_cb = progress_callback
+
+        if effective_cb is None:
+            return None
+
+        n_scenarios = len(scenario_filter) if scenario_filter is not None else 1
+        total = compute_total_simulations(self._effective_n_simulations, n_sample_sizes, n_scenarios)
+        return ProgressReporter(total, effective_cb)
+
     def _validate_analysis_inputs(self, correction):
         """Validate the multiple-comparison correction method before analysis."""
         result = _validate_correction_method(correction)
         result.raise_if_invalid()
 
+    def _validate_tukey_posthoc(self, correction):
+        """Raise if Tukey correction is requested without posthoc specs."""
+        if correction and correction.lower() == "tukey" and not self._posthoc_specs:
+            raise ValueError(
+                "Tukey correction requires at least one post-hoc comparison "
+                "(e.g., target_test='group[0] vs group[1]'). "
+                "Tukey HSD only applies to pairwise contrasts between factor levels."
+            )
+
     def _validate_cluster_sample_size(self, sample_size: int):
         """Derive missing cluster dimensions from sample_size and validate minimums."""
+        # NOTE: This method both validates AND mutates — it derives missing
+        # cluster_size/n_clusters from sample_size before checking minimums.
         if not self._registry.cluster_names:
             return  # No clusters, nothing to do
 
@@ -1811,10 +1832,12 @@ class MCPower:
             if spec.n_clusters is not None:
                 spec.cluster_size = sample_size // spec.n_clusters
             else:
-                assert spec.cluster_size is not None
+                if spec.cluster_size is None:
+                    raise RuntimeError(f"Cluster '{gv}': either n_clusters or cluster_size must be set")
                 spec.n_clusters = sample_size // spec.cluster_size
 
-            assert spec.n_clusters is not None and spec.cluster_size is not None
+            if spec.n_clusters is None or spec.cluster_size is None:
+                raise RuntimeError(f"Cluster '{gv}': failed to derive n_clusters and cluster_size from sample_size={sample_size}")
             actual_n = spec.n_clusters * spec.cluster_size
             if actual_n != sample_size:
                 print(
@@ -1825,7 +1848,7 @@ class MCPower:
 
             _validate_cluster_sample_size(sample_size, spec.n_clusters, spec.cluster_size).raise_if_invalid()
 
-    def _parse_target_tests(self, target_test: Union[str, List[str]]) -> List[str]:
+    def _parse_target_tests(self, target_test: Union[str, List[str]], test_formula_effects: Optional[List[str]] = None) -> List[str]:
         """Parse a target_test argument into a list of effect names to test.
 
         Supports regular effect names (e.g. ``"x1"``, ``"overall"``),
@@ -1875,7 +1898,10 @@ class MCPower:
         cluster_effects = self._registry.cluster_effect_names
 
         if "all" in keywords:
-            fixed_effects = [e for e in self._registry.effect_names if e not in cluster_effects]
+            if test_formula_effects is not None:
+                fixed_effects = [e for e in test_formula_effects if e not in cluster_effects]
+            else:
+                fixed_effects = [e for e in self._registry.effect_names if e not in cluster_effects]
             keyword_expansion += ["overall"] + fixed_effects
 
         if "all-posthoc" in keywords:
@@ -1928,6 +1954,17 @@ class MCPower:
                 "Each test may appear only once. If using keyword expansion "
                 "(e.g. 'all'), do not also list tests that are already included."
             )
+
+        # -- Phase 7b: Validate explicit tests against test formula ----------------
+        if test_formula_effects is not None:
+            test_formula_set = set(test_formula_effects)
+            for test in expanded:
+                if " vs " in test or test == "overall":
+                    continue
+                if test not in test_formula_set:
+                    raise ValueError(
+                        f"Target test '{test}' is not in the test formula. Available effects: {', '.join(test_formula_effects)}"
+                    )
 
         # -- Phase 8: Parse posthoc specs + validate ------------------------------
         regular_tests: list[str] = []
@@ -1982,6 +2019,8 @@ class MCPower:
                 # User level k (k≥2) = dummy factor[k]
                 effect_order = list(self._registry._effects.keys())
 
+                # Returns None for the reference level, which is absorbed into the
+                # intercept in dummy coding and has no dedicated design matrix column.
                 def _level_to_col(factor_name, user_level, _effect_order=effect_order):
                     factor_info = self._registry._factors[factor_name]
                     reference = factor_info.get("reference_level", 1)
@@ -2069,30 +2108,60 @@ class MCPower:
 
         return np.column_stack(columns) if columns else np.empty((X.shape[0], 0))
 
-    def _prepare_metadata(self, target_tests, correction=None):
+    def _prepare_metadata(self, target_tests, correction=None, test_formula_effects=None):
         """Pre-compute all static simulation metadata from the current model state."""
-        return prepare_metadata(self, target_tests, correction)
+        return prepare_metadata(self, target_tests, correction, test_formula_effects=test_formula_effects)
 
-    def _resolve_test_formula(self, test_formula: str) -> str:
-        """Resolve test formula and update _test_method accordingly.
+    def _resolve_test_formula(self, test_formula: str):
+        """Resolve test formula, validate, parse, and update _test_method.
 
-        Returns the resolved formula string.
+        Returns:
+            Tuple of (formula_string, test_effect_names, random_effects).
+            test_effect_names is None when test_formula is empty (use generation formula).
         """
-        if not test_formula:
-            resolved = self._registry.equation
-        else:
-            resolved = test_formula
-
         from .utils.parsers import _parse_equation
 
-        _, _, random_effects = _parse_equation(resolved)
+        if not test_formula:
+            resolved = self._registry.equation
+            _, _, random_effects = _parse_equation(resolved)
+            if random_effects:
+                self._test_method = "mixed_model"
+            else:
+                self._test_method = "linear_regression"
+            return resolved, None, []
+
+        # Validate test formula variables exist in the model
+        from .utils.validators import _validate_test_formula
+
+        available_vars = (
+            [self._registry.dependent] + self._registry.non_factor_names + self._registry.factor_names + self._registry.cluster_names
+        )
+        validation = _validate_test_formula(test_formula, available_vars)
+        validation.raise_if_invalid()
+
+        # Parse test formula to get effects and random effects
+        from .utils.test_formula_utils import _extract_test_formula_effects
+
+        test_effects, random_effects = _extract_test_formula_effects(test_formula, self._registry)
+
+        if not test_effects:
+            raise ValueError(f"test_formula '{test_formula}' contains no testable effects from the data generation model.")
+
+        # Check for OLS -> LME cross (invalid: no cluster data to fit)
+        if random_effects and not self._registry._cluster_specs:
+            grouping_vars = [re["grouping_var"] for re in random_effects]
+            raise ValueError(
+                f"test_formula contains random effects ({grouping_vars}) but the "
+                f"data generation model has no cluster structure. Cannot fit a "
+                f"mixed model to data without clusters."
+            )
 
         if random_effects:
             self._test_method = "mixed_model"
         else:
             self._test_method = "linear_regression"
 
-        return resolved
+        return test_formula, test_effects, random_effects
 
     def _run_find_power(
         self,
@@ -2101,6 +2170,8 @@ class MCPower:
         correction,
         scenario_config=None,
         test_formula=None,
+        test_formula_effects=None,
+        test_random_effects=None,
         progress=None,
         cancel_check=None,
     ):
@@ -2109,13 +2180,15 @@ class MCPower:
         self._validate_cluster_sample_size(sample_size)
 
         # Route based on test method (routing logic handled in simulation.py)
-        metadata = self._prepare_metadata(target_tests, correction)
+        metadata = self._prepare_metadata(target_tests, correction, test_formula_effects)
 
-        if scenario_config:
-            metadata.heterogeneity = scenario_config["heterogeneity"]
-            metadata.heteroskedasticity = scenario_config["heteroskedasticity"]
-            if metadata.cluster_specs:
-                metadata.lme_scenario_config = scenario_config
+        # Set the random effects flag for test formula
+        if test_random_effects:
+            metadata.test_has_random_effects = True
+
+        # scenario_config is always a dict (SCENARIO_ZERO or user-provided)
+        metadata.heterogeneity = scenario_config["heterogeneity"]
+        metadata.heteroskedasticity = scenario_config["heteroskedasticity"]
 
         runner = SimulationRunner(
             n_simulations=self._effective_n_simulations,
@@ -2127,9 +2200,15 @@ class MCPower:
         )
 
         # Compute critical values once before the simulation loop
-        p = len(metadata.effect_sizes)
+        # Use test formula's effect count for critical values when subsetting
+        if metadata.test_column_indices is not None:
+            p = metadata.test_effect_count
+            n_targets = len(metadata.test_target_indices)
+        else:
+            p = len(metadata.effect_sizes)
+            n_targets = len(metadata.target_indices)
+
         dof = sample_size - p - 1
-        n_targets = len(metadata.target_indices)
         n_posthoc = len(metadata.posthoc_specs)
 
         if n_posthoc > 0 and metadata.posthoc_method == "t-test":
@@ -2185,7 +2264,7 @@ class MCPower:
             analyze_func=analyze_func,
             create_X_extended_func=self._create_X_extended,
             scenario_config=scenario_config,
-            apply_perturbations_func=(apply_per_simulation_perturbations if scenario_config else None),
+            apply_perturbations_func=apply_per_simulation_perturbations,
             progress=progress,
             cancel_check=cancel_check,
         )
@@ -2193,11 +2272,17 @@ class MCPower:
         if not sim_results:
             return {}
 
+        # When test formula is active, filter target_tests to only effects in the test model
+        effective_target_tests = target_tests
+        if test_formula_effects is not None:
+            test_effect_set = set(test_formula_effects)
+            effective_target_tests = [t for t in target_tests if t == "overall" or t in test_effect_set]
+
         processor = ResultsProcessor(target_power=self.power)
         power_results = processor.calculate_powers(
             sim_results["all_results"],
             sim_results["all_results_corrected"],
-            target_tests,
+            effective_target_tests,
         )
 
         # Add n_simulations_failed to power_results
@@ -2207,13 +2292,13 @@ class MCPower:
         # Tukey correction only applies to pairwise contrasts; NaN-ify others
         if correction and correction.lower() == "tukey" and power_results.get("individual_powers_corrected"):
             posthoc_labels = {s.label for s in self._posthoc_specs}
-            for test in target_tests:
+            for test in effective_target_tests:
                 if test not in posthoc_labels:
                     power_results["individual_powers_corrected"][test] = float("nan")
 
         return build_power_result(
             model_type=self.model_type,
-            target_tests=target_tests,
+            target_tests=effective_target_tests,
             formula_to_test=test_formula,
             equation=self.equation,
             sample_size=sample_size,
@@ -2243,12 +2328,15 @@ class MCPower:
         correction,
         scenario_config=None,
         test_formula=None,
+        test_formula_effects=None,
+        test_random_effects=None,
         progress=None,
         cancel_check=None,
     ):
         """Iterate over sample sizes, running power analysis for each."""
         from .progress import SimulationCancelled
 
+        use_sequential = True
         if self._is_parallel_effective():
             from joblib import Parallel, delayed
 
@@ -2258,7 +2346,18 @@ class MCPower:
                     backend="loky",
                     verbose=0,
                     return_as="generator",
-                )(delayed(self._run_find_power)(ss, target_tests, correction, scenario_config, test_formula) for ss in sample_sizes)
+                )(
+                    delayed(self._run_find_power)(
+                        ss,
+                        target_tests,
+                        correction,
+                        scenario_config,
+                        test_formula,
+                        test_formula_effects,
+                        test_random_effects,
+                    )
+                    for ss in sample_sizes
+                )
                 results = []
                 for ss, result in zip(sample_sizes, power_results, strict=False):
                     if cancel_check is not None and cancel_check():
@@ -2266,25 +2365,13 @@ class MCPower:
                     results.append((ss, result))
                     if progress is not None:
                         progress.advance(self._effective_n_simulations)
+                use_sequential = False
             except Exception as e:
                 if isinstance(e, SimulationCancelled):
                     raise
                 print(f"Warning: Parallel execution failed ({e}). Falling back to sequential.")
-                results = []
-                for ss in sample_sizes:
-                    if cancel_check is not None and cancel_check():
-                        raise SimulationCancelled("Simulation cancelled by user") from None
-                    result = self._run_find_power(
-                        ss,
-                        target_tests,
-                        correction,
-                        scenario_config,
-                        test_formula,
-                        progress=progress,
-                        cancel_check=cancel_check,
-                    )
-                    results.append((ss, result))
-        else:
+
+        if use_sequential:
             results = []
             for sample_size in sample_sizes:
                 if cancel_check is not None and cancel_check():
@@ -2295,19 +2382,28 @@ class MCPower:
                     correction,
                     scenario_config,
                     test_formula,
+                    test_formula_effects=test_formula_effects,
+                    test_random_effects=test_random_effects,
                     progress=progress,
                     cancel_check=cancel_check,
                 )
                 results.append((sample_size, power_result))
 
         processor = ResultsProcessor(target_power=self.power)
-        analysis_results = processor.process_sample_size_results(results, target_tests, correction)
+        # Filter target_tests to match test formula effects
+        if test_formula_effects is not None:
+            test_set = set(test_formula_effects)
+            effective_target_tests = [t for t in target_tests if t in test_set or t == "overall"]
+        else:
+            effective_target_tests = target_tests
+
+        analysis_results = processor.process_sample_size_results(results, effective_target_tests, correction)
 
         # Tukey correction only applies to pairwise contrasts; NaN-ify others
         if correction and correction.lower() == "tukey":
             posthoc_labels = {s.label for s in self._posthoc_specs}
             if analysis_results.get("powers_by_test_corrected"):
-                for test in target_tests:
+                for test in effective_target_tests:
                     if test not in posthoc_labels:
                         n_points = len(analysis_results["powers_by_test_corrected"][test])
                         analysis_results["powers_by_test_corrected"][test] = [float("nan")] * n_points
@@ -2315,7 +2411,7 @@ class MCPower:
 
         return build_sample_size_result(
             model_type=self.model_type,
-            target_tests=target_tests,
+            target_tests=effective_target_tests,
             formula_to_test=test_formula,
             equation=self.equation,
             sample_sizes=sample_sizes,
@@ -2331,9 +2427,16 @@ class MCPower:
         """Delegate to ScenarioRunner for multi-scenario power or sample-size analysis."""
         from functools import partial
 
-        configs = self._scenario_configs or DEFAULT_SCENARIO_CONFIG
+        all_configs = self._scenario_configs or DEFAULT_SCENARIO_CONFIG
+        scenario_filter = kwargs.pop("scenario_filter", None)
+        if scenario_filter is not None:
+            configs = {k: all_configs[k] for k in scenario_filter}
+        else:
+            configs = all_configs
         scenario_runner = ScenarioRunner(self, configs)
         test_formula = kwargs.get("test_formula")
+        test_formula_effects = kwargs.get("test_formula_effects")
+        test_random_effects = kwargs.get("test_random_effects")
         progress = kwargs.get("progress")
         cancel_check = kwargs.get("cancel_check")
 
@@ -2341,6 +2444,8 @@ class MCPower:
             run_power_func = partial(
                 self._run_find_power,
                 test_formula=test_formula,
+                test_formula_effects=test_formula_effects,
+                test_random_effects=test_random_effects,
                 progress=progress,
                 cancel_check=cancel_check,
             )
@@ -2357,6 +2462,8 @@ class MCPower:
             run_ss_func = partial(
                 self._run_sample_size_analysis,
                 test_formula=test_formula,
+                test_formula_effects=test_formula_effects,
+                test_random_effects=test_random_effects,
                 progress=progress,
                 cancel_check=cancel_check,
             )
