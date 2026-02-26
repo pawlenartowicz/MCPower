@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
 - **`[all]` extra no longer includes `statsmodels`** — use `pip install mcpower[lme]` to get statsmodels for mixed-effects models
 
 ### Added
-- **`test_formula` parameter** on `find_power()` and `find_sample_size()` — test a reduced model against data generated from the full model to evaluate power under model misspecification. For example, generate data with `y = x1 + x2 + x3` but test with `test_formula="y ~ x1 + x2"` to see power when `x3` is omitted. Supports interactions, factors, and mixed models. See the [wiki tutorial](https://github.com/pawlenartowicz/MCPower/wiki/Model-Misspecification-Testing)
+- **`test_formula` parameter** on `find_power()` and `find_sample_size()` — test a reduced model against data generated from the full model to evaluate power under model misspecification. For example, generate data with `y = x1 + x2 + x3` but test with `test_formula="y ~ x1 + x2"` to see power when `x3` is omitted. Supports interactions, factors, and mixed models.
 - **C++ non-normal residual generation** — scenario perturbations now generate heavy-tailed (Student-t) and skewed (chi-squared) residuals directly in C++ via `residual_dist`/`residual_df` parameters in `generate_y()`, replacing the Python-side post-hoc perturbation approach. Applies to all model types (OLS and LME)
 - **`optimistic` scenario** is now a first-class entry in `DEFAULT_SCENARIO_CONFIG` with all-zero perturbation values, eliminating the special `scenario_config=None` code path. Custom scenarios inherit from the optimistic baseline, ensuring all required keys exist
 
