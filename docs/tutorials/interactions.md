@@ -14,6 +14,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ---
@@ -40,6 +42,7 @@ from mcpower import MCPower
 
 # 1. Define the model with an interaction
 model = MCPower("sales = advertising * age")
+model.set_simulations(400)
 
 # 2. Set effect sizes for main effects and the interaction
 model.set_effects("advertising=0.40, age=0.25, advertising:age=0.15")
@@ -57,6 +60,7 @@ model.find_power(sample_size=200, target_test="advertising:age")
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("sales = advertising * age")
+model.set_simulations(400)
 ```
 
 The `*` operator is shorthand for **main effects plus their interaction**. MCPower automatically expands this to:
@@ -125,7 +129,7 @@ model.find_sample_size(
     target_test="advertising:age",
     from_size=100,
     to_size=500,
-    by=25,
+    by=45,
 )
 ```
 
@@ -138,6 +142,7 @@ You can test whether the interaction itself depends on a third variable. For exa
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("sales = advertising * age * category")
+model.set_simulations(400)
 model.set_variable_type("category=binary")
 model.set_effects(
     "advertising=0.40, age=0.25, category=0.30, "
@@ -180,6 +185,7 @@ To detect an interaction with the same power as a main effect of the same size, 
 # Compare: main effect power vs. interaction power at the same N
 
 model = MCPower("y = x1 * x2")
+model.set_simulations(400)
 model.set_effects("x1=0.25, x2=0.25, x1:x2=0.25")
 
 # At N=100: main effects will have good power, interaction will not
@@ -195,6 +201,7 @@ model.find_power(sample_size=100, target_test="all")
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("outcome = treatment * covariate")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.50, covariate=0.25, treatment:covariate=0.20")
 model.find_power(sample_size=200, target_test="treatment:covariate")
@@ -207,6 +214,7 @@ Here, the interaction tests whether the treatment effect differs depending on th
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("y = drug * gender")
+model.set_simulations(400)
 model.set_variable_type("drug=binary, gender=binary")
 model.set_effects("drug=0.50, gender=0.20, drug:gender=0.30")
 model.find_power(sample_size=200, target_test="drug:gender")
@@ -217,6 +225,7 @@ model.find_power(sample_size=200, target_test="drug:gender")
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("performance = condition * experience")
+model.set_simulations(400)
 model.set_variable_type("condition=(factor,3)")
 model.set_effects(
     "condition[2]=0.40, condition[3]=0.60, experience=0.30, "
@@ -232,6 +241,7 @@ When a factor is involved in an interaction, each dummy variable gets its own in
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("score = condition * group")
+model.set_simulations(400)
 model.set_variable_type("condition=(factor,3), group=binary")
 model.set_effects(
     "condition[2]=0.40, condition[3]=0.60, group=0.30, "
@@ -250,6 +260,7 @@ Each factor is expanded into dummies (reference level omitted), and the interact
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("sales = advertising * age")
+model.set_simulations(400)
 model.set_effects("advertising=0.40, age=0.25, advertising:age=0.15")
 
 model.find_power(sample_size=300, target_test="all")
@@ -262,13 +273,14 @@ This shows power for `advertising`, `age`, `advertising:age`, and the overall F-
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("sales = advertising * age")
+model.set_simulations(400)
 model.set_effects("advertising=0.40, age=0.25, advertising:age=0.15")
 
 model.find_sample_size(
     target_test="advertising:age",
     from_size=100,
     to_size=600,
-    by=25,
+    by=56,
     scenarios=True,
 )
 ```

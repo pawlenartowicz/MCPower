@@ -12,6 +12,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Goal
@@ -28,6 +30,7 @@ from mcpower import MCPower
 
 # ── Define a 3-group treatment study ──────────────────────────────
 model = MCPower("pain_relief = treatment + baseline_pain")
+model.set_simulations(400)
 model.set_variable_type("treatment=(factor,3)")
 
 # ── Name the factor levels (optional but recommended) ─────────────
@@ -59,6 +62,7 @@ model.find_power(
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("pain_relief = treatment + baseline_pain")
+model.set_simulations(400)
 model.set_variable_type("treatment=(factor,3)")
 ```
 
@@ -154,6 +158,7 @@ MCPower uses two different indexing systems that can be confusing at first:
 # Setup for indexing examples
 from mcpower import MCPower
 model = MCPower("outcome = group + covariate")
+model.set_simulations(400)
 ```
 
 ### Effect sizes: bracket notation with level names or integers starting at 2
@@ -205,6 +210,7 @@ For a 3-level factor `group=(factor,3)` with levels named `control, drug_a, drug
 :tags: [remove-input, remove-output]
 # Restore treatment model for variations
 model = MCPower("pain_relief = treatment + baseline_pain")
+model.set_simulations(400)
 model.set_variable_type("treatment=(factor,3)")
 model.set_factor_levels("treatment=placebo,low_dose,high_dose")
 model.set_effects("treatment[low_dose]=0.50, treatment[high_dose]=0.80, baseline_pain=0.25")
@@ -259,6 +265,7 @@ If you skip `set_factor_levels()`, effects use integer-indexed dummies:
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("outcome = group + covariate")
+model.set_simulations(400)
 model.set_variable_type("group=(factor,3)")
 model.set_effects("group[2]=0.4, group[3]=0.6, covariate=0.25")
 
@@ -277,6 +284,7 @@ Search for the sample size needed to achieve 80% power on the hardest comparison
 :tags: [remove-input, remove-output]
 # Restore treatment model for sample size search
 model = MCPower("pain_relief = treatment + baseline_pain")
+model.set_simulations(400)
 model.set_variable_type("treatment=(factor,3)")
 model.set_factor_levels("treatment=placebo,low_dose,high_dose")
 model.set_effects("treatment[low_dose]=0.50, treatment[high_dose]=0.80, baseline_pain=0.25")
@@ -288,7 +296,7 @@ model.find_sample_size(
     target_test="treatment[low_dose] vs treatment[high_dose]",  # smallest effect (0.30 SD)
     from_size=100,
     to_size=600,
-    by=25,
+    by=56,
     correction="tukey",
 )
 ```
@@ -315,6 +323,7 @@ The syntax scales to any number of levels:
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("score = condition + age")
+model.set_simulations(400)
 model.set_variable_type("condition=(factor,4)")
 model.set_factor_levels("condition=placebo,low,medium,high")
 model.set_effects(

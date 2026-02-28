@@ -14,6 +14,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ---
@@ -41,6 +43,7 @@ from mcpower import MCPower
 
 # Define the full model (data generation)
 model = MCPower("y = x1 + x2 + x3")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x3=0.3")
 
 # Test with the reduced model (omit x3 from analysis)
@@ -73,6 +76,7 @@ The most common use case: you want to know how dropping a predictor affects powe
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2 + x3")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x3=0.3")
 
 # Full model -- baseline power
@@ -101,6 +105,7 @@ from mcpower import MCPower
 
 # Full model: mixed-effects with clustering
 model = MCPower("y ~ treatment + covariate + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_effects("treatment=0.5, covariate=0.3")
 model.set_variable_type("treatment=binary")
@@ -132,6 +137,7 @@ from mcpower import MCPower
 
 # Full model: continuous predictor + 3-level factor
 model = MCPower("y = x1 + group")
+model.set_simulations(400)
 model.set_variable_type("group=(factor,3)")
 model.set_effects("x1=0.5, group[2]=0.3, group[3]=0.4")
 

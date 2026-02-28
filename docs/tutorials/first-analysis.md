@@ -14,6 +14,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ---
@@ -39,6 +41,7 @@ from mcpower import MCPower
 
 # 1. Define the model
 model = MCPower("recovery = drug + baseline_health")
+model.set_simulations(400)
 
 # 2. Declare the treatment as a binary variable (drug vs. placebo)
 model.set_variable_type("drug=binary")
@@ -68,6 +71,7 @@ from mcpower import MCPower
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("recovery = drug + baseline_health")
+model.set_simulations(400)
 ```
 
 This creates a regression model where `recovery` is the outcome and `drug` and `baseline_health` are predictors. The formula uses R-style syntax -- you can also write `recovery ~ drug + baseline_health`.

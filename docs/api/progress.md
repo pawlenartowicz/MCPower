@@ -10,6 +10,8 @@ kernelspec:
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 import numpy as np
 np.random.seed(42)
 ```
@@ -45,6 +47,7 @@ Console progress reporter. Writes text-based progress to stderr. This is the def
 from mcpower import MCPower, PrintReporter
 
 model = MCPower("y = x1 + x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3")
 
 # Default behavior (PrintReporter auto-selected)
@@ -104,6 +107,7 @@ Any callable that accepts `(current: int, total: int)` can be used as a progress
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3")
 
 # Simple print callback

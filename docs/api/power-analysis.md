@@ -10,6 +10,8 @@ kernelspec:
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 import numpy as np
 np.random.seed(42)
 ```
@@ -66,6 +68,7 @@ Duplicate tests in the resolved list raise a `ValueError`.
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2 + x1:x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x1:x2=0.2")
 
 # Basic usage (prints results to stdout)
@@ -91,6 +94,7 @@ Generate data with a full model but test with a reduced model to evaluate model 
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("y = x1 + x2 + x3")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x3=0.2")
 
 # Full model (default)
@@ -131,11 +135,12 @@ See [Tutorial: Using test_formula](../tutorials/test-formula.md) for more exampl
 from mcpower import MCPower
 
 model = MCPower("y = treatment + age")
+model.set_simulations(400)
 model.set_effects("treatment=0.4, age=0.2")
 model.set_variable_type("treatment=binary")
 
-# Search from 30 to 300 in steps of 10
-model.find_sample_size(from_size=30, to_size=300, by=10)
+# Search from 30 to 300 in steps of 30
+model.find_sample_size(from_size=30, to_size=300, by=30)
 ```
 
 ```{code-cell} ipython3
@@ -145,7 +150,7 @@ result = model.find_sample_size(
     target_test="treatment",
     from_size=50,
     to_size=500,
-    by=25,
+    by=50,
     return_results=True,
     print_results=False,
 )
@@ -156,6 +161,7 @@ result = model.find_sample_size(
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("y = x1 + x2 + x3")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x3=0.2")
 
 # Full model (default)

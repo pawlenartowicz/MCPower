@@ -10,6 +10,8 @@ kernelspec:
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 import numpy as np
 np.random.seed(42)
 ```
@@ -25,6 +27,7 @@ When `return_results=True` is passed to `find_power()` or `find_sample_size()`, 
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3")
 
 # Print + return
@@ -133,6 +136,7 @@ else:
 from mcpower import MCPower
 
 model = MCPower("outcome = treatment + motivation + age")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.5, motivation=0.3, age=0.2")
 
@@ -178,7 +182,7 @@ result = model.find_sample_size(
     target_test="treatment",
     from_size=50,
     to_size=500,
-    by=25,
+    by=50,
     return_results=True,
     print_results=False,
 )

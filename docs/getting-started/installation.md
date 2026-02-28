@@ -14,6 +14,8 @@ This page covers how to install MCPower, its optional dependency groups, and how
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Basic Installation
@@ -102,6 +104,7 @@ Run a quick power analysis to confirm everything is working:
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3")
 result = model.find_power(sample_size=100, return_results=True, progress_callback=False)
 

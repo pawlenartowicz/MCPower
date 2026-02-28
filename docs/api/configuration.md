@@ -10,6 +10,8 @@ kernelspec:
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 import numpy as np
 np.random.seed(42)
 ```
@@ -67,6 +69,7 @@ model.find_power(sample_size=100)  # uses x1=0.5, x2=0.4
 from mcpower import MCPower
 
 model = MCPower("y = treatment + motivation + treatment:motivation")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.5, motivation=0.3, treatment:motivation=0.2")
 model.find_power(sample_size=100)
@@ -118,6 +121,7 @@ from mcpower import MCPower
 
 # Basic type declarations
 model = MCPower("y = treatment + condition + income")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary, condition=(factor,3), income=right_skewed")
 model.set_effects("treatment=0.5, condition[2]=0.3, condition[3]=0.4, income=0.2")
 model.find_power(sample_size=150)
@@ -212,6 +216,7 @@ model.set_correlations(np.array([
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2 + x3")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x3=0.2")
 model.set_correlations("(x1, x2)=0.4, (x2, x3)=0.2")
 model.find_power(sample_size=100)
@@ -255,6 +260,7 @@ from mcpower import MCPower
 
 # Use stricter significance threshold
 model = MCPower("y = x1 + x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3")
 model.set_alpha(0.01)
 model.find_power(sample_size=100)
@@ -295,9 +301,10 @@ from mcpower import MCPower
 
 # Require 90% power instead of the default 80%
 model = MCPower("y = x1 + x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3")
 model.set_power(90)
-model.find_sample_size(from_size=50, to_size=300)
+model.find_sample_size(from_size=50, to_size=300, by=30)
 ```
 
 ---
@@ -316,6 +323,7 @@ model.find_sample_size(from_size=50, to_size=300)
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3")
 
 # Reproducible results
@@ -428,6 +436,7 @@ from mcpower import MCPower
 
 # Default: parallel for mixed models only
 model = MCPower("y ~ treatment + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_effects("treatment=0.5")
 model.find_power(sample_size=1000)  # Runs in parallel automatically

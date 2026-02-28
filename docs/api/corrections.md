@@ -10,6 +10,8 @@ kernelspec:
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 import numpy as np
 np.random.seed(42)
 ```
@@ -105,6 +107,7 @@ model.find_power(
 from mcpower import MCPower
 
 model = MCPower("outcome = treatment + motivation + age")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.5, motivation=0.3, age=0.2")
 
@@ -121,7 +124,7 @@ model.find_power(
 # Find sample size with Holm correction
 model.find_sample_size(
     target_test="treatment, motivation, age",
-    from_size=100, to_size=500,
+    from_size=100, to_size=500, by=45,
     correction="holm",
 )
 ```
@@ -130,6 +133,7 @@ model.find_sample_size(
 :tags: [remove-output, remove-stderr]
 # Post-hoc with Tukey
 model = MCPower("outcome = group + age")
+model.set_simulations(400)
 model.set_variable_type("group=(factor,3)")
 model.set_effects("group[2]=0.4, group[3]=0.6, age=0.2")
 model.find_power(

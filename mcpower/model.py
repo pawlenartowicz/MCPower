@@ -304,9 +304,11 @@ class MCPower:
             ValueError: If *n_simulations* is not a positive integer or
                 *model_type* is unrecognised.
         """
+        import warnings as _warnings
+
         n_sims, result = _validate_simulations(n_simulations)
         for warning in result.warnings:
-            print(f"Warning: {warning}")
+            _warnings.warn(warning, stacklevel=2)
         result.raise_if_invalid()
 
         if model_type is None:

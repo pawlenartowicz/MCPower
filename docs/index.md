@@ -19,6 +19,8 @@ Two core functions drive every analysis:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Install
@@ -34,6 +36,7 @@ pip install mcpower
 from mcpower import MCPower
 
 model = MCPower("y = x1 + x2 + x1:x2")
+model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x1:x2=0.2")
 model.find_power(sample_size=100)
 ```
