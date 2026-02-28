@@ -1,0 +1,54 @@
+name: Build and deploy docs
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install MCPower and docs dependencies
+        run: pip install -e ".[docs]"
+
+      - name: Cache Jupyter execution results
+        uses: actions/cache@v4
+        with:
+          path: docs/_build/.jupyter_cache
+          key: jupyter-cache-${{ hashFiles('docs/**/*.md') }}
+          restore-keys: jupyter-cache-
+
+      - name: Build Sphinx docs
+        run: sphinx-build docs docs/_build/html -W
+        timeout-minutes: 20
+
+      - name: Determine target directory
+        id: target
+        run: |
+          if [[ "${{ github.ref_name }}" =~ (rc|dev|a[0-9]|b[0-9]) ]]; then
+            echo "dir=static/mcpower-dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=static/mcpower" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push docs to Hugo site repo
+        uses: cpina/github-action-push-to-another-repository@55306faa4ed53b815ae49e564af8cfb359d32ae2  # main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.HUGO_DEPLOY_TOKEN }}
+        with:
+          source-directory: docs/_build/html
+          destination-github-username: pawlenartowicz
+          destination-repository-name: freestylerscientist.pl
+          target-directory: homesite/${{ steps.target.outputs.dir }}
+          target-branch: main
+          commit-message: "docs: update MCPower docs from ${{ github.ref_name }}"

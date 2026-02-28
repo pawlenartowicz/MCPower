@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-02-28
+
+### Documentation
+- **Migrated docs to MyST-NB executable documentation** — all ~165 Python code blocks across 23 pages are now executed at Sphinx build time via `{code-cell}` directives. Output blocks are auto-generated instead of manually written. If any example breaks, the docs build fails.
+- Replaced `myst-parser` with `myst-nb` in Sphinx extensions; added `jupyter-cache` for cached notebook execution
+- Added hidden seed cells and model-restore cells to maintain deterministic, independent code sections across tutorial pages
+- Fixed post-hoc tutorial examples to use named factor levels when `set_factor_levels()` is active (integer indices are only valid without named levels)
+- Fixed docstring indentation in `set_parallel()`, `find_power()`, `find_sample_size()` that caused Sphinx/Napoleon parse errors
+
+### Packaging
+- Added `myst-nb`, `jupyter-cache`, `ipykernel`, `pandas` to `[docs]` extras; pinned `myst-parser>=3.0,<4` for cross-reference compatibility
+- Added Jupyter cache step and 20-minute timeout to docs CI workflow
+- Replaced `lint.yml` with `test.yml` — retains all lint/format/type checks and adds a `pytest` job on Python 3.14
+- Updated Documentation URL in `pyproject.toml` to point to the new Sphinx docs site
+
 ## [0.6.0] - 2026-02-26
 
 ### Breaking changes
