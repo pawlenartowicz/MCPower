@@ -1,0 +1,8 @@
+/* Increase paragraph spacing for readability */
+.bd-article-container p {
+    margin-bottom: 1.2em;
+}
+
+.bd-article-container li + li {
+    margin-top: 0.4em;
+}
