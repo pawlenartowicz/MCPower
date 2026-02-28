@@ -10,6 +10,8 @@ kernelspec:
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 import numpy as np
 np.random.seed(42)
 ```
@@ -70,6 +72,7 @@ These keys are only consumed when cluster specifications are present. They are i
 from mcpower import MCPower
 
 model = MCPower("outcome = treatment + motivation")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.5, motivation=0.3")
 
@@ -82,7 +85,7 @@ model.set_scenario_configs({
 
 model.find_sample_size(
     target_test="treatment",
-    from_size=50, to_size=300,
+    from_size=50, to_size=300, by=30,
     scenarios=True,
 )
 ```
@@ -92,6 +95,7 @@ model.find_sample_size(
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("y ~ treatment + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_effects("treatment=0.5")
 
@@ -166,6 +170,7 @@ from mcpower import MCPower
 
 # Random intercept model -- default threshold is usually fine
 model = MCPower("satisfaction ~ treatment + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_effects("treatment=0.5")
 model.find_power(sample_size=1000)
@@ -175,6 +180,7 @@ model.find_power(sample_size=1000)
 :tags: [remove-output, remove-stderr]
 # Random slopes -- relax the threshold
 model = MCPower("y ~ x1 + (1 + x1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20,
                    random_slopes=["x1"], slope_variance=0.1)
 model.set_effects("x1=0.5")
@@ -186,6 +192,7 @@ model.find_power(sample_size=1000)
 :tags: [remove-output, remove-stderr]
 # Nested design -- more tolerance needed
 model = MCPower("score ~ treatment + (1|school/classroom)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.15, n_clusters=10)
 model.set_cluster("classroom", ICC=0.10, n_per_parent=3)
 model.set_effects("treatment=0.5")

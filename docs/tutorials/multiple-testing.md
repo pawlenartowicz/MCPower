@@ -12,6 +12,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Goal
@@ -29,6 +31,7 @@ from mcpower import MCPower
 # ── Medical study with 5 biomarkers ──────────────────────────────
 # Some biomarkers have real effects, others are null (effect = 0)
 model = MCPower("outcome = biomarker1 + biomarker2 + biomarker3 + biomarker4 + biomarker5")
+model.set_simulations(400)
 
 model.set_effects(
     "biomarker1=0.40, "    # large real effect
@@ -55,6 +58,7 @@ model.find_power(
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("outcome = biomarker1 + biomarker2 + biomarker3 + biomarker4 + biomarker5")
+model.set_simulations(400)
 ```
 
 A study measuring five biomarkers as potential predictors of a health outcome.
@@ -199,7 +203,7 @@ model.find_sample_size(
     target_test="biomarker1, biomarker2",   # only the promising ones
     from_size=100,
     to_size=500,
-    by=25,
+    by=45,
     correction="holm",
 )
 ```
@@ -216,7 +220,7 @@ model.find_sample_size(
     target_test="biomarker1, biomarker2, biomarker4",
     from_size=50,
     to_size=600,
-    by=25,
+    by=62,
     correction="holm",
 )
 ```
@@ -233,7 +237,7 @@ model.find_sample_size(
     target_test="biomarker1, biomarker2",
     from_size=100,
     to_size=500,
-    by=25,
+    by=45,
     correction="holm",
     scenarios=True,
 )
@@ -248,6 +252,7 @@ When combining standard tests and post-hoc comparisons, the correction method de
 ```{code-cell} ipython3
 :tags: [remove-output, remove-stderr]
 model = MCPower("outcome = treatment + covariate")
+model.set_simulations(400)
 model.set_variable_type("treatment=(factor,3)")
 model.set_effects("treatment[2]=0.50, treatment[3]=0.80, covariate=0.25")
 

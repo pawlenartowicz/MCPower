@@ -16,6 +16,8 @@ You have clustered data (e.g., students in schools) and need to account for the 
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ---
@@ -39,6 +41,7 @@ from mcpower import MCPower
 
 # 1. Define the model with a random intercept for school
 model = MCPower("satisfaction ~ treatment + motivation + (1|school)")
+model.set_simulations(400)
 
 # 2. Configure the clustering structure
 model.set_cluster("school", ICC=0.2, n_clusters=20)
@@ -64,6 +67,7 @@ Copy this script into a Python file and run it. With 1000 observations split acr
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("satisfaction ~ treatment + motivation + (1|school)")
+model.set_simulations(400)
 ```
 
 The formula uses R-style syntax. The key part is `(1|school)`, which tells MCPower that observations are clustered within schools and each school has its own random intercept. The `1` means "intercept" -- every school gets a baseline shift up or down from the grand mean.
@@ -174,6 +178,7 @@ If you know the cluster size rather than the number of clusters:
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("satisfaction ~ treatment + motivation + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, cluster_size=50)
 model.set_effects("treatment=0.5, motivation=0.3")
 model.set_max_failed_simulations(0.10)
@@ -187,13 +192,14 @@ Search for the minimum sample size that achieves 80% power:
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("satisfaction ~ treatment + motivation + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_effects("treatment=0.5, motivation=0.3")
 model.set_max_failed_simulations(0.10)
 model.find_sample_size(
     from_size=200,
     to_size=2000,
-    by=100,
+    by=200,
     target_test="treatment",
 )
 ```
@@ -207,6 +213,7 @@ If treatment is a binary variable (0/1):
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("satisfaction ~ treatment + motivation + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.5, motivation=0.3")
@@ -221,6 +228,7 @@ Add as many fixed effects as your design requires:
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("satisfaction ~ treatment + motivation + age + gender + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=30)
 model.set_variable_type("treatment=binary, gender=binary")
 model.set_effects("treatment=0.5, motivation=0.3, age=0.1, gender=0.2")

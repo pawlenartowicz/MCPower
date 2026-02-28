@@ -14,6 +14,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ---
@@ -40,6 +42,7 @@ from mcpower import MCPower
 
 # 1. Define the model
 model = MCPower("achievement = teaching_method + motivation + ses")
+model.set_simulations(400)
 model.set_variable_type("teaching_method=binary")
 model.set_effects("teaching_method=0.40, motivation=0.30, ses=0.20")
 
@@ -59,7 +62,7 @@ model.set_scenario_configs({
 # 3. Find required sample sizes under custom scenarios
 model.find_sample_size(
     target_test="teaching_method",
-    from_size=50, to_size=400, by=10,
+    from_size=50, to_size=400, by=40,
     scenarios=True,
 )
 ```
@@ -73,6 +76,7 @@ model.find_sample_size(
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("achievement = teaching_method + motivation + ses")
+model.set_simulations(400)
 model.set_variable_type("teaching_method=binary")
 model.set_effects("teaching_method=0.40, motivation=0.30, ses=0.20")
 ```
@@ -110,7 +114,7 @@ For example, the realistic scenario above changes `heterogeneity` from 0.2 (defa
 :tags: [remove-stderr]
 model.find_sample_size(
     target_test="teaching_method",
-    from_size=50, to_size=400, by=10,
+    from_size=50, to_size=400, by=40,
     scenarios=True,
 )
 ```
@@ -143,6 +147,7 @@ You are not limited to the three built-in scenarios. Add custom scenarios with a
 :tags: [remove-input, remove-output]
 # Setup model for new scenario examples
 model = MCPower("outcome = treatment + covariate")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.40, covariate=0.25")
 ```
@@ -213,6 +218,7 @@ Mixed models have additional perturbation keys that control random effect and IC
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("score ~ treatment + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.15, n_clusters=25)
 model.set_effects("treatment=0.40")
 

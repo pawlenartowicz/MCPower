@@ -10,6 +10,8 @@ kernelspec:
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 import numpy as np
 np.random.seed(42)
 ```
@@ -138,6 +140,7 @@ model.set_factor_levels("group=control,drug_a,drug_b; dose=low,medium,high")
 from mcpower import MCPower
 
 model = MCPower("y = group + age")
+model.set_simulations(400)
 model.set_variable_type("group=(factor,3)")
 model.set_factor_levels("group=placebo,low_dose,high_dose")
 model.set_effects("group[low_dose]=0.3, group[high_dose]=0.6, age=0.2")
@@ -212,6 +215,7 @@ model.set_cluster("classroom", ICC=0.10, n_per_parent=3)
 from mcpower import MCPower
 
 model = MCPower("satisfaction ~ treatment + motivation + (1|school)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.2, n_clusters=20)
 model.set_effects("treatment=0.5, motivation=0.3")
 model.find_power(sample_size=600)  # 600 / 20 = 30 obs per cluster

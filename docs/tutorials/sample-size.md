@@ -14,6 +14,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ---
@@ -40,6 +42,7 @@ from mcpower import MCPower
 
 # 1. Define the model
 model = MCPower("test_score = teaching_method + prior_achievement")
+model.set_simulations(400)
 
 # 2. Set variable types
 model.set_variable_type("teaching_method=binary")
@@ -52,7 +55,7 @@ model.find_sample_size(
     target_test="teaching_method",
     from_size=50,
     to_size=300,
-    by=10,
+    by=28,
 )
 ```
 
@@ -65,6 +68,7 @@ model.find_sample_size(
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("test_score = teaching_method + prior_achievement")
+model.set_simulations(400)
 model.set_variable_type("teaching_method=binary")
 model.set_effects("teaching_method=0.40, prior_achievement=0.25")
 ```
@@ -82,7 +86,7 @@ model.find_sample_size(
     target_test="teaching_method",
     from_size=50,
     to_size=300,
-    by=10,
+    by=28,
 )
 ```
 
@@ -145,7 +149,7 @@ model.find_sample_size(
     target_test="teaching_method",
     from_size=50,
     to_size=300,
-    by=10,
+    by=28,
     scenarios=True,
 )
 ```
@@ -172,7 +176,7 @@ model.find_sample_size(
     target_test="teaching_method",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
 )
 ```
 
@@ -190,7 +194,7 @@ model.find_sample_size(
     target_test="teaching_method",
     from_size=50,
     to_size=300,
-    by=10,
+    by=28,
     summary="long",
 )
 ```
@@ -205,7 +209,7 @@ model.find_sample_size(
     target_test="all",
     from_size=50,
     to_size=300,
-    by=10,
+    by=28,
 )
 ```
 
@@ -219,7 +223,7 @@ model.find_sample_size(
     target_test="teaching_method",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
     scenarios=True,
     correction="bonferroni",
 )
@@ -247,7 +251,7 @@ model.find_sample_size(
     target_test="teaching_method",
     from_size=150,
     to_size=250,
-    by=5,
+    by=12,
 )
 # Result: Min N = 200
 ```
@@ -260,7 +264,7 @@ result = model.find_sample_size(
     target_test="teaching_method",
     from_size=50,
     to_size=300,
-    by=10,
+    by=28,
     return_results=True,
     print_results=False,
 )

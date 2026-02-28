@@ -14,6 +14,8 @@ This page walks you through your first Monte Carlo power analysis with MCPower, 
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Your First Power Analysis
@@ -27,6 +29,7 @@ Suppose you are planning a study to test whether a binary treatment improves sat
 from mcpower import MCPower
 
 model = MCPower("satisfaction = treatment + motivation")
+model.set_simulations(400)
 ```
 
 MCPower accepts both `=` and `~` as separators. For full formula syntax details, see [Model Specification](../model-specification.md).
@@ -88,10 +91,11 @@ model.find_sample_size(
     target_test="treatment",
     from_size=50,
     to_size=200,
+    by=20,
 )
 ```
 
-This evaluates power at each sample size from 50 to 200 (step: 5) and reports where target power is first reached.
+This evaluates power at each sample size from 50 to 200 and reports where target power is first reached.
 
 Control the search grid:
 
@@ -101,7 +105,7 @@ model.find_sample_size(
     target_test="treatment",
     from_size=50,
     to_size=300,
-    by=25,  # step size
+    by=30,  # step size
 )
 ```
 
@@ -113,6 +117,7 @@ model.find_sample_size(
     target_test="treatment",
     from_size=50,
     to_size=200,
+    by=20,
     summary="long",
 )
 ```
@@ -136,6 +141,7 @@ Factor variables represent categorical predictors with 3+ levels. MCPower automa
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("outcome = condition + age")
+model.set_simulations(400)
 model.set_variable_type("condition=(factor,3)")
 model.set_effects("condition[2]=0.4, condition[3]=0.6, age=0.2")
 ```
@@ -159,6 +165,7 @@ Test how robust your power is under realistic conditions:
 :tags: [remove-input, remove-output]
 # Restore the satisfaction model for scenario analysis
 model = MCPower("satisfaction = treatment + motivation")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.5, motivation=0.3")
 ```
@@ -169,6 +176,7 @@ model.find_sample_size(
     target_test="treatment",
     from_size=50,
     to_size=300,
+    by=30,
     scenarios=True,
 )
 ```

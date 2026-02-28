@@ -12,6 +12,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Goal
@@ -40,6 +42,7 @@ from mcpower import MCPower
 
 # 1. Define the model with a random intercept AND random slope for treatment
 model = MCPower("outcome ~ treatment + motivation + (1 + treatment|site)")
+model.set_simulations(400)
 
 # 2. Configure the clustering with random slope parameters
 model.set_cluster(
@@ -72,6 +75,7 @@ Copy this script into a Python file and run it. With 1500 observations across 30
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("outcome ~ treatment + motivation + (1 + treatment|site)")
+model.set_simulations(400)
 ```
 
 The key part is `(1 + treatment|site)`. This specifies:
@@ -221,6 +225,7 @@ from mcpower import MCPower
 
 for sv in [0.01, 0.05, 0.10, 0.20, 0.30]:
     model = MCPower("score ~ treatment + (1 + treatment|cluster)")
+    model.set_simulations(400)
     model.set_cluster("cluster", ICC=0.15, n_clusters=30,
                       random_slopes=["treatment"], slope_variance=sv)
     model.set_effects("treatment=0.15")
@@ -250,6 +255,7 @@ from mcpower import MCPower
 
 for n_cl in [15, 20, 30, 40, 50]:
     model = MCPower("score ~ treatment + (1 + treatment|cluster)")
+    model.set_simulations(400)
     model.set_cluster("cluster", ICC=0.15, n_clusters=n_cl,
                       random_slopes=["treatment"], slope_variance=0.10)
     model.set_effects("treatment=0.15")
@@ -289,6 +295,7 @@ When you have no reason to expect a relationship between baseline levels and tre
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("outcome ~ treatment + (1 + treatment|site)")
+model.set_simulations(400)
 model.set_cluster(
     "site",
     ICC=0.2,
@@ -309,6 +316,7 @@ In some contexts, clusters with higher baselines show smaller treatment effects 
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("outcome ~ treatment + (1 + treatment|site)")
+model.set_simulations(400)
 model.set_cluster(
     "site",
     ICC=0.2,
@@ -329,6 +337,7 @@ When you expect the effect to be mostly consistent across clusters but want to b
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("outcome ~ treatment + (1 + treatment|site)")
+model.set_simulations(400)
 model.set_cluster(
     "site",
     ICC=0.15,
@@ -347,6 +356,7 @@ model.find_power(sample_size=1000)
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("outcome ~ treatment + motivation + (1 + treatment|site)")
+model.set_simulations(400)
 model.set_cluster(
     "site",
     ICC=0.2,
@@ -360,7 +370,7 @@ model.set_max_failed_simulations(0.30)
 model.find_sample_size(
     from_size=500,
     to_size=3000,
-    by=250,
+    by=278,
     target_test="treatment",
 )
 ```
@@ -372,6 +382,7 @@ Treatment is often a binary variable (0/1). Combine `set_variable_type` with ran
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("outcome ~ treatment + age + (1 + treatment|site)")
+model.set_simulations(400)
 model.set_cluster(
     "site",
     ICC=0.15,

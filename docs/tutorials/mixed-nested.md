@@ -30,6 +30,8 @@ You have hierarchical data with multiple levels of nesting (e.g., students in cl
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Full Working Example
@@ -40,6 +42,7 @@ from mcpower import MCPower
 
 # 1. Define the model with nested random effects: classrooms within schools
 model = MCPower("score ~ treatment + (1|school/classroom)")
+model.set_simulations(400)
 
 # 2. Configure the parent level (schools)
 model.set_cluster("school", ICC=0.15, n_clusters=10)
@@ -68,6 +71,7 @@ Copy this script into a Python file and run it. With 1500 students across 10 sch
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("score ~ treatment + (1|school/classroom)")
+model.set_simulations(400)
 ```
 
 The notation `(1|school/classroom)` means "classrooms are nested within schools." This expands to two random intercept terms:
@@ -257,6 +261,7 @@ If each school has more classrooms:
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("score ~ treatment + (1|school/classroom)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.15, n_clusters=10)
 model.set_cluster("classroom", ICC=0.10, n_per_parent=5)  # 5 classrooms/school = 50 total
 model.set_effects("treatment=0.5")
@@ -269,6 +274,7 @@ model.find_power(sample_size=2500)  # 2500 / 50 = 50 per classroom
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("score ~ treatment + (1|school/classroom)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.15, n_clusters=15)
 model.set_cluster("classroom", ICC=0.10, n_per_parent=3)
 model.set_effects("treatment=0.5")
@@ -288,6 +294,7 @@ Add covariates as needed:
 ```{code-cell} ipython3
 :tags: [remove-stderr]
 model = MCPower("score ~ treatment + ses + motivation + (1|school/classroom)")
+model.set_simulations(400)
 model.set_cluster("school", ICC=0.15, n_clusters=15)
 model.set_cluster("classroom", ICC=0.10, n_per_parent=4)  # 60 classrooms
 model.set_variable_type("treatment=binary")

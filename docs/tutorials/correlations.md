@@ -14,6 +14,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ---
@@ -40,6 +42,7 @@ from mcpower import MCPower
 
 # 1. Define the model
 model = MCPower("health = income + education + social_support")
+model.set_simulations(400)
 
 # 2. Set effect sizes
 model.set_effects("income=0.30, education=0.25, social_support=0.40")
@@ -56,7 +59,7 @@ model.find_sample_size(
     target_test="all",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
 )
 ```
 
@@ -69,6 +72,7 @@ model.find_sample_size(
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("health = income + education + social_support")
+model.set_simulations(400)
 model.set_effects("income=0.30, education=0.25, social_support=0.40")
 ```
 
@@ -109,7 +113,7 @@ model.find_sample_size(
     target_test="all",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
 )
 ```
 
@@ -151,6 +155,7 @@ import numpy as np
 from mcpower import MCPower
 
 model = MCPower("health = income + education + social_support")
+model.set_simulations(400)
 model.set_effects("income=0.30, education=0.25, social_support=0.40")
 
 # Correlation matrix: rows/columns in formula order
@@ -165,7 +170,7 @@ model.find_sample_size(
     target_test="all",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
 )
 ```
 
@@ -189,6 +194,7 @@ from mcpower import MCPower
 
 # --- Without correlations (unrealistic but illustrative) ---
 model_uncorr = MCPower("health = income + education + social_support")
+model_uncorr.set_simulations(400)
 model_uncorr.set_effects("income=0.30, education=0.25, social_support=0.40")
 # No set_correlations call -- all correlations default to 0
 
@@ -196,11 +202,12 @@ model_uncorr.find_sample_size(
     target_test="all",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
 )
 
 # --- With correlations (realistic) ---
 model_corr = MCPower("health = income + education + social_support")
+model_corr.set_simulations(400)
 model_corr.set_effects("income=0.30, education=0.25, social_support=0.40")
 model_corr.set_correlations(
     "(income, education)=0.50, "
@@ -212,7 +219,7 @@ model_corr.find_sample_size(
     target_test="all",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
 )
 ```
 
@@ -237,6 +244,7 @@ The more strongly two predictors are correlated, the more each one's required sa
 :tags: [remove-input, remove-output]
 # Restore model for variations
 model = MCPower("health = income + education + social_support")
+model.set_simulations(400)
 model.set_effects("income=0.30, education=0.25, social_support=0.40")
 ```
 
@@ -253,6 +261,7 @@ Negative correlations are common in psychology (e.g., stress and coping strategi
 ```{code-cell} ipython3
 :tags: [remove-output]
 model = MCPower("outcome = treatment + age + severity")
+model.set_simulations(400)
 model.set_variable_type("treatment=binary")
 model.set_effects("treatment=0.50, age=0.20, severity=0.30")
 model.set_correlations("(age, severity)=0.40, (treatment, age)=0.10")
@@ -266,6 +275,7 @@ Correlations between continuous and binary variables work the same way. Here, ag
 :tags: [remove-input, remove-output]
 # Restore model for scenario analysis
 model = MCPower("health = income + education + social_support")
+model.set_simulations(400)
 model.set_effects("income=0.30, education=0.25, social_support=0.40")
 ```
 
@@ -277,7 +287,7 @@ model.find_sample_size(
     target_test="income",
     from_size=50,
     to_size=400,
-    by=10,
+    by=40,
     scenarios=True,
 )
 ```

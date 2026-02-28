@@ -12,6 +12,8 @@ kernelspec:
 :tags: [remove-input, remove-output]
 import numpy as np
 np.random.seed(42)
+import warnings
+warnings.filterwarnings("ignore", message="Low simulation")
 ```
 
 ## Goal
@@ -247,6 +249,7 @@ If you do not have data but want meaningful level names instead of integer indic
 from mcpower import MCPower
 
 model = MCPower("outcome = group + age")
+model.set_simulations(400)
 model.set_variable_type("group=(factor,3)")
 model.set_factor_levels("group=placebo,low_dose,high_dose")
 
