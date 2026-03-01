@@ -9,13 +9,17 @@
 
 /* --- Sidebar brand / project info --- */
 .sidebar-project-info {
-    padding: 0 var(--sidebar-item-spacing-horizontal);
     margin-bottom: 0.5rem;
 }
 
 .sidebar-project-info .sidebar-brand {
     display: block;
     text-decoration: none;
+}
+
+.sidebar-project-info .sidebar-version,
+.sidebar-project-info .sidebar-tagline {
+    padding: 0 var(--sidebar-item-spacing-horizontal);
 }
 
 .sidebar-project-info .sidebar-brand-text {
@@ -67,6 +71,9 @@
 .sidebar-author-links {
     margin-top: 0.3rem;
     font-size: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
 }
 
 .sidebar-author-links a {
@@ -83,6 +90,40 @@
     font-size: var(--sidebar-caption-font-size);
     font-weight: 700;
     text-transform: uppercase;
-    color: var(--color-foreground-primary);
+    color: var(--color-sidebar-caption-text);
     letter-spacing: 0.05em;
+}
+
+/* --- Indent items under captions (Getting Started, Other) --- */
+.sidebar-tree p.caption + ul > li.toctree-l1 > a {
+    padding-left: calc(var(--sidebar-item-spacing-horizontal) + 0.75rem);
+}
+
+/* --- Sidebar nav links: use brand color --- */
+.sidebar-tree li.toctree-l1 > a,
+.sidebar-tree li.toctree-l2 > a {
+    color: var(--color-brand-content);
+}
+
+/* --- Sidebar brand logo --- */
+.sidebar-brand-logo {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+/* --- Main page: vertically centered content --- */
+.bd-article-container > article {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: calc(100vh - 4rem);
+}
+
+/* --- Main page hero logo --- */
+.hero-logo {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin: 0 auto 1rem auto;
 }

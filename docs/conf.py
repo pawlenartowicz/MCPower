@@ -5,7 +5,7 @@ import importlib.metadata
 project = "MCPower"
 author = "Paweł Lenartowicz"
 release = importlib.metadata.version("MCPower")
-version = ".".join(release.split(".")[:2])
+version = release
 copyright = "2025–2026, Paweł Lenartowicz"
 
 # -- Extensions --

@@ -6,7 +6,12 @@ kernelspec:
   name: python3
 ---
 
-# MCPower Documentation
+```{image} _static/mcpower_asci.png
+:alt: MCPower
+:class: hero-logo
+```
+
+# MCPower
 
 Monte Carlo power analysis for complex statistical models. Instead of relying on closed-form formulas, MCPower **simulates thousands of datasets** and counts how often your analysis detects real effects.
 
@@ -14,6 +19,10 @@ Two core functions drive every analysis:
 
 - **`find_power()`** — Given a sample size, estimate statistical power
 - **`find_sample_size()`** — Find the minimum sample size for a target power level
+
+```{note}
+This is the documentation for the **MCPower Python package**. If you're looking for the desktop application, **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone app for Windows, Linux, and macOS — download it from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest). These docs are still useful for understanding how power analysis settings work under the hood.
+```
 
 ```{code-cell} ipython3
 :tags: [remove-input, remove-output]
@@ -40,14 +49,6 @@ model.set_simulations(400)
 model.set_effects("x1=0.5, x2=0.3, x1:x2=0.2")
 model.find_power(sample_size=100)
 ```
-
-## About
-
-MCPower is developed by [Paweł Lenartowicz](https://freestylerscientist.pl/about-me/), an independent researcher working on Monte Carlo methods, metascience, and open science tools.
-
-- [Project homepage](https://freestylerscientist.pl/projects/mcpower/) — screenshots, GUI walkthrough, citation info
-- [Support this project](https://freestylerscientist.pl/support_me/) — MCPower is free and open source
-- [GitHub](https://github.com/pawlenartowicz/MCPower)
 
 ```{toctree}
 :maxdepth: 2
