@@ -24,7 +24,7 @@ jobs:
       - name: Cache Jupyter execution results
         uses: actions/cache@v4
         with:
-          path: docs/_build/.jupyter_cache
+          path: _build/.jupyter_cache
           key: jupyter-cache-${{ hashFiles('docs/**/*.md') }}
           restore-keys: jupyter-cache-
 
@@ -49,6 +49,6 @@ jobs:
           source-directory: docs/_build/html
           destination-github-username: pawlenartowicz
           destination-repository-name: freestylerscientist.pl
-          target-directory: homesite/${{ steps.target.outputs.dir }}
+          target-directory: ${{ steps.target.outputs.dir }}
           target-branch: main
           commit-message: "docs: update MCPower docs from ${{ github.ref_name }}"
