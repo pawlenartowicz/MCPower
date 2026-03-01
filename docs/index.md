@@ -21,7 +21,7 @@ Two core functions drive every analysis:
 - **`find_sample_size()`** — Find the minimum sample size for a target power level
 
 ```{note}
-This is the documentation for the **MCPower Python package**. If you're looking for the desktop application, **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone app for Windows, Linux, and macOS — download it from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest). These docs are still useful for understanding how power analysis settings work under the hood.
+This is the documentation for the **MCPower Python package**. If you're looking for the desktop application, **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone app for Windows, Linux, and macOS with built-in documentation — download it from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest). These docs are still useful for understanding how power analysis settings work under the hood.
 ```
 
 ```{code-cell} ipython3
