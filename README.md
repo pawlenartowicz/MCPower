@@ -19,7 +19,7 @@
 
 ## Desktop Application
 
-It's a Python package, but prefer a graphical interface? **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone desktop app — no Python installation required. Download ready-to-run executables for Windows, Linux, and macOS from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest).
+It's a Python package, but prefer a graphical interface? **[MCPower GUI](https://github.com/pawlenartowicz/mcpower-gui)** is a standalone desktop app with built-in documentation — no Python installation required. Download ready-to-run executables for Windows, Linux, and macOS from the [releases page](https://github.com/pawlenartowicz/mcpower-gui/releases/latest).
 
 | Model setup | Results |
 |:---:|:---:|
@@ -347,9 +347,9 @@ model.set_max_failed_simulations(0.30)
 model.find_power(sample_size=1500)
 ```
 
-See the [Mixed-Effects Models wiki page](https://github.com/pawlenartowicz/MCPower/wiki/Mixed-Effects-Models) for detailed documentation on all model types, parameters, and design recommendations.
+See the [Mixed-Effects Models documentation](https://freestylerscientist.pl/mcpower/concepts/mixed-effects.html) for detailed documentation on all model types, parameters, and design recommendations.
 
-MCPower's mixed-effects solver is [validated against R's lme4](https://github.com/pawlenartowicz/MCPower/wiki/Concept-LME-Validation) across 95 scenarios using four independent strategies — all 230 scenario-strategy combinations pass.
+MCPower's mixed-effects solver is [validated against R's lme4](https://freestylerscientist.pl/mcpower/lme-validation.html) across 95 scenarios using four independent strategies — all 230 scenario-strategy combinations pass.
 
 ### More precision
 ```python
@@ -530,7 +530,7 @@ model.set_effects("treatment=0.5")
 model.find_power(1000, test_formula="y ~ treatment")
 ```
 
-See the [Test Formula Tutorial](https://github.com/pawlenartowicz/MCPower/wiki/Tutorial-Test-Formula) for details.
+See the [Test Formula Tutorial](https://freestylerscientist.pl/mcpower/tutorials/test-formula.html) for details.
 
 ### Formula Syntax
 ```python
@@ -568,16 +568,16 @@ model.set_correlations("(x1, x2)=0.3, (x1, x3)=-0.2")
 
 ## Documentation
 
-Full documentation is available on the **[MCPower Wiki](https://github.com/pawlenartowicz/MCPower/wiki)**, including:
+Full documentation is available at **[freestylerscientist.pl/mcpower](https://freestylerscientist.pl/mcpower/)**, including:
 
-- [Quick Start](https://github.com/pawlenartowicz/MCPower/wiki/Quick-Start)
-- [Model Specification](https://github.com/pawlenartowicz/MCPower/wiki/Model-Specification)
-- [Variable Types](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Variable-Types)
-- [Effect Sizes](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Effect-Sizes)
-- [Mixed-Effects Models](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Mixed-Effects) (random intercepts, slopes, nested effects)
-- [ANOVA & Post-Hoc Tests](https://github.com/pawlenartowicz/MCPower/wiki/Tutorial-ANOVA-PostHoc)
-- [Scenario Analysis](https://github.com/pawlenartowicz/MCPower/wiki/Concept-Scenario-Analysis)
-- [API Reference](https://github.com/pawlenartowicz/MCPower/wiki/API-Reference)
+- [Quick Start](https://freestylerscientist.pl/mcpower/getting-started/quickstart.html)
+- [Model Specification](https://freestylerscientist.pl/mcpower/model-specification.html)
+- [Variable Types](https://freestylerscientist.pl/mcpower/concepts/variable-types.html)
+- [Effect Sizes](https://freestylerscientist.pl/mcpower/concepts/effect-sizes.html)
+- [Mixed-Effects Models](https://freestylerscientist.pl/mcpower/concepts/mixed-effects.html) (random intercepts, slopes, nested effects)
+- [ANOVA & Post-Hoc Tests](https://freestylerscientist.pl/mcpower/tutorials/anova-posthoc.html)
+- [Scenario Analysis](https://freestylerscientist.pl/mcpower/concepts/scenario-analysis.html)
+- [API Reference](https://freestylerscientist.pl/mcpower/api/index.html)
 
 ## Need Help?
 
@@ -589,7 +589,7 @@ Full documentation is available on the **[MCPower Wiki](https://github.com/pawle
 - ✅ Scenarios, robustness analysis
 - ✅ Factor variables (categorical predictors)
 - ✅ C++ native backend (pybind11 + Eigen, 3x speedup)
-- ✅ Mixed Effects Models (random intercepts, random slopes, nested effects) — [validated against lme4](https://github.com/pawlenartowicz/MCPower/wiki/Concept-LME-Validation)
+- ✅ Mixed Effects Models (random intercepts, random slopes, nested effects) — [validated against lme4](https://freestylerscientist.pl/mcpower/lme-validation.html)
 - 🚧 Logistic Regression (coming soon)
 - ✅ ANOVA (factor variables as ANOVA, post-hoc pairwise comparisons)
 - ✅ Guide about methods, corrections

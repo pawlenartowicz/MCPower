@@ -192,11 +192,9 @@ class MCPower:
         processing with a warning if ``joblib`` is unavailable.
 
         Args:
-            enable: Parallel mode:
-                - ``True``: parallel for all analyses.
-                - ``False``: sequential processing.
-                - ``"mixedmodels"``: parallel only for mixed-model analyses
-                  (default).
+            enable: Parallel mode — ``True`` for all analyses,
+                ``False`` for sequential processing, or
+                ``"mixedmodels"`` for mixed-model analyses only (default).
             n_cores: Number of CPU cores to use. Defaults to
                 ``cpu_count // 2``.
 
@@ -306,9 +304,11 @@ class MCPower:
             ValueError: If *n_simulations* is not a positive integer or
                 *model_type* is unrecognised.
         """
+        import warnings as _warnings
+
         n_sims, result = _validate_simulations(n_simulations)
         for warning in result.warnings:
-            print(f"Warning: {warning}")
+            _warnings.warn(warning, stacklevel=2)
         result.raise_if_invalid()
 
         if model_type is None:
@@ -1471,31 +1471,27 @@ class MCPower:
 
         Args:
             sample_size: Number of observations per simulation
-            target_test: Effect(s) to test. Defaults to ``"all"``.
-                - ``"all"`` (default): overall F-test + all individual fixed effects (no contrasts)
-                - ``"all-posthoc"``: all pairwise contrasts for every factor variable
-                - ``"overall"``, ``"x1"``, etc.: specific tests
-                - ``"factor[a] vs factor[b]"``: post-hoc pairwise comparison
-                - ``"-test_name"``: exclude a test from keyword expansion
-                - Comma-separated combinations: ``"all, all-posthoc, -overall"``
-                Duplicate tests raise ``ValueError``.
+            target_test: Effect(s) to test. ``"all"`` (default) runs overall
+                F-test + all individual fixed effects. Also accepts
+                ``"all-posthoc"``, specific names like ``"x1"``,
+                pairwise comparisons like ``"factor[a] vs factor[b]"``,
+                exclusions like ``"-test_name"``, or comma-separated
+                combinations. Duplicate tests raise ``ValueError``.
             correction: Multiple comparison correction (None, "bonferroni", "benjamini-hochberg", "holm")
             print_results: Whether to print results
-            scenarios: Scenario analysis control:
-                - ``False`` (default): no scenario analysis.
-                - ``True``: run all configured scenarios.
-                - List of scenario names: run only the specified scenarios
-                  (e.g. ``["optimistic", "extreme"]``). Case-insensitive.
+            scenarios: Scenario analysis control — ``False`` (default) disables
+                scenario analysis, ``True`` runs all configured scenarios,
+                or pass a list of scenario names to run selectively
+                (e.g. ``["optimistic", "extreme"]``). Case-insensitive.
             summary: Output detail level ("short" or "long")
             return_results: Return results dict
-            test_formula: Formula for statistical testing (default: use data generation formula).
-                If the formula contains random effects like (1|school), analysis switches to
-                mixed model testing.
-            progress_callback: Progress reporting control:
-                - ``None`` (default): auto-use ``PrintReporter`` when
-                  *print_results* is ``True``.
-                - ``False``: explicitly disable progress.
-                - callable ``(current, total)``: custom callback.
+            test_formula: Formula for statistical testing (default: use data
+                generation formula). If the formula contains random effects
+                like ``(1|school)``, analysis switches to mixed model testing.
+            progress_callback: Progress reporting control — ``None`` (default)
+                auto-uses ``PrintReporter`` when *print_results* is ``True``,
+                ``False`` explicitly disables progress, or pass a callable
+                ``(current, total)`` for custom reporting.
             cancel_check: Optional callable returning ``True`` to abort.
 
         Returns:
@@ -1601,21 +1597,19 @@ class MCPower:
             by: Step size between sample sizes
             correction: Multiple comparison correction
             print_results: Whether to print results
-            scenarios: Scenario analysis control:
-                - ``False`` (default): no scenario analysis.
-                - ``True``: run all configured scenarios.
-                - List of scenario names: run only the specified scenarios
-                  (e.g. ``["optimistic", "extreme"]``). Case-insensitive.
+            scenarios: Scenario analysis control — ``False`` (default) disables
+                scenario analysis, ``True`` runs all configured scenarios,
+                or pass a list of scenario names to run selectively
+                (e.g. ``["optimistic", "extreme"]``). Case-insensitive.
             summary: Output detail level
             return_results: Return results dict
-            test_formula: Formula for statistical testing (default: use data generation formula).
-                If the formula contains random effects like (1|school), analysis switches to
-                mixed model testing.
-            progress_callback: Progress reporting control:
-                - ``None`` (default): auto-use ``PrintReporter`` when
-                  *print_results* is ``True``.
-                - ``False``: explicitly disable progress.
-                - callable ``(current, total)``: custom callback.
+            test_formula: Formula for statistical testing (default: use data
+                generation formula). If the formula contains random effects
+                like ``(1|school)``, analysis switches to mixed model testing.
+            progress_callback: Progress reporting control — ``None`` (default)
+                auto-uses ``PrintReporter`` when *print_results* is ``True``,
+                ``False`` explicitly disables progress, or pass a callable
+                ``(current, total)`` for custom reporting.
             cancel_check: Optional callable returning ``True`` to abort.
 
         Returns:

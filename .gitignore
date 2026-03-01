@@ -45,6 +45,9 @@ _deps/
 mcpower/backends/mcpower_native*.so
 mcpower/backends/mcpower_native*.pyd
 
+# Sphinx docs
+docs/_build/
+
 # OS files
 .DS_Store
 Thumbs.db

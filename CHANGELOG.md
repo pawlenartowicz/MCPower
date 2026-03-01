@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-02-28
+
+### Changed
+- `set_simulations()` low-count warning now uses `warnings.warn()` instead of `print()`, making it suppressible with `warnings.filterwarnings()`
+
+### Documentation
+- **New Sphinx documentation site** — complete docs site with Furo theme, custom CSS, sidebar branding, API reference, concepts guide, 11 tutorials, validation page, and FAQ (~7,700 lines of new content across 45 files). Hosted at freestylerscientist.pl/mcpower/
+- **Migrated docs to MyST-NB executable documentation** — all ~165 Python code blocks across 23 pages are now executed at Sphinx build time via `{code-cell}` directives. Output blocks are auto-generated instead of manually written. If any example breaks, the docs build fails.
+- Replaced `myst-parser` with `myst-nb` in Sphinx extensions; added `jupyter-cache` for cached notebook execution
+- Added hidden seed cells and model-restore cells to maintain deterministic, independent code sections across tutorial pages
+- Fixed post-hoc tutorial examples to use named factor levels when `set_factor_levels()` is active (integer indices are only valid without named levels)
+- Reformatted docstrings in `set_parallel()`, `find_power()`, `find_sample_size()` from bullet-list style to inline em-dash style to fix Sphinx/Napoleon parse errors
+- Reduced simulation counts (`set_simulations(400)`) and grid sizes in all executable doc cells to prevent Sphinx build timeouts
+- Updated GUI screenshots (`gui-model-setup.png`, `gui-results.png`)
+
+### Packaging
+- Added `myst-nb`, `jupyter-cache`, `ipykernel`, `pandas` to `[docs]` extras; pinned `myst-parser>=3.0,<4` for cross-reference compatibility
+- Added `docs.yml` CI workflow — builds Sphinx docs and deploys to freestylerscientist.pl, with Jupyter cache, 20-minute timeout, and separate target directories for stable vs rc/dev releases
+- Replaced `lint.yml` with `test.yml` — retains all lint/format/type checks and adds a `pytest` job on Python 3.14
+- Updated Documentation URL in `pyproject.toml` to point to the new Sphinx docs site
+- Added `docs/_build/` to `.gitignore`
+
 ## [0.6.0] - 2026-02-26
 
 ### Breaking changes
@@ -49,7 +71,7 @@ All notable changes to this project will be documented in this file.
 - **NumPy minimum version relaxed** to `>=1.26.0` (was `>=2.0.0`) in both build-requires and runtime dependencies
 - **`scikit-build-core` bumped** to `>=0.10` (was `>=0.5`)
 - **`statsmodels` added to `[dev]` extras** for test/development convenience
-- **Documentation URL** now points to the GitHub wiki
+- **Documentation URL** now points to freestylerscientist.pl/mcpower/
 - **Changelog URL** added to project URLs
 - **Removed unused pytest markers** (`unit`, `integration`) — only `lme` marker remains
 - **Per-module mypy overrides** replace blanket `ignore_missing_imports`
@@ -57,7 +79,7 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 - Updated README requirements section: added `tqdm`, specified `NumPy (>=1.26.0)`
 - Changed `pip install mcpower[all]` → `pip install mcpower[lme]` for statsmodels installation
-- Wiki documentation review and cleanup: fixed broken links, corrected API signatures (`set_scenario_configs` parameter name), removed stale `apply()` and `set_heterogeneity()` wiki pages, fixed formula redundancy in Model Specification, corrected Tukey return value docs, added mixed-model caveats
+- Documentation review and cleanup: fixed broken links, corrected API signatures (`set_scenario_configs` parameter name), removed stale `apply()` and `set_heterogeneity()` pages, fixed formula redundancy in Model Specification, corrected Tukey return value docs, added mixed-model caveats
 
 ### Technical
 - Removed ~150 lines of dead scipy fallback shims from `distributions.py`
@@ -75,7 +97,7 @@ All notable changes to this project will be documented in this file.
 ## [0.5.4] - 2026-02-22
 
 ### Changed
-- **Mixed-Effects Models no longer experimental** — removed experimental warnings and labels after [validation against R's lme4](https://github.com/pawlenartowicz/MCPower/wiki/Concept-LME-Validation) across 95 scenarios using four independent strategies (all 230 scenario-strategy combinations pass)
+- **Mixed-Effects Models no longer experimental** — removed experimental warnings and labels after [validation against R's lme4](https://freestylerscientist.pl/mcpower/lme-validation.html) across 95 scenarios using four independent strategies (all 230 scenario-strategy combinations pass)
 
 ### Fixed
 - Removed unused `predictor_names` assignment in `MCPower.__init__` (ruff F841)
