@@ -27,7 +27,7 @@ It's a Python package, but prefer a graphical interface? **[MCPower GUI](https:/
 
 ## Why MCPower?
 
-Traditional power formulas break down with interactions, correlated predictors, categorical variables, or non-normal data. MCPower simulates instead — generates thousands of datasets like yours, fits your model, and counts how often the effects are detected.
+Traditional power formulas (G\*Power) break down with interactions, correlated predictors, categorical variables, or non-normal data. R-based simulation tools (Spower) cover many test types but require coding the data generation pipeline. MCPower combines simulation flexibility with a C++ backend, automatic data generation from formulas, empirical data upload, and a no-code GUI.
 
 - **Write your formula.** Define your model the way you'd write it in R — `outcome = treatment + covariate + treatment*covariate`. MCPower parses it, sets up the simulation, and handles dummy coding, interactions, and factor variables automatically. You focus on the research question, not the mechanics.
 

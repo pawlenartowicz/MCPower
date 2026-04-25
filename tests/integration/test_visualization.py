@@ -103,6 +103,24 @@ class TestCreatePowerPlot:
         call_kwargs = mock_ax.axhline.call_args
         assert call_kwargs[1]["y"] == 80.0
 
+    def test_ci_bands_rendered(self):
+        """CI shaded bands are drawn when powers_by_test_ci is provided."""
+        mock_plt, mock_fig, mock_ax = _setup_mock_plt()
+        kwargs = _make_plot_args()
+        kwargs["powers_by_test_ci"] = {
+            "x1": [[25.0, 35.0], [54.0, 66.0], [74.0, 86.0], [90.0, 98.0]],
+            "x2": [[15.0, 26.0], [39.0, 51.0], [63.0, 77.0], [79.0, 90.0]],
+        }
+        _run_with_mock_plt(mock_plt, kwargs)
+        # fill_between called once per test line
+        assert mock_ax.fill_between.call_count == 2
+
+    def test_no_ci_bands_without_data(self):
+        """No fill_between when powers_by_test_ci is not provided."""
+        mock_plt, mock_fig, mock_ax = _setup_mock_plt()
+        _run_with_mock_plt(mock_plt, _make_plot_args())
+        assert mock_ax.fill_between.call_count == 0
+
     def test_matplotlib_import_error(self):
         """ImportError raised when matplotlib is not available."""
         # Save and remove matplotlib modules

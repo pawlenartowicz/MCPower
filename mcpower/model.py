@@ -2481,6 +2481,7 @@ class MCPower:
                 target_tests=results["model"]["target_tests"],
                 target_power=self.power,
                 title="Uncorrected Power",
+                powers_by_test_ci=results["results"].get("powers_by_test_ci"),
             )
             _create_power_plot(
                 sample_sizes=results["results"]["sample_sizes_tested"],
@@ -2489,6 +2490,7 @@ class MCPower:
                 target_tests=results["model"]["target_tests"],
                 target_power=self.power,
                 title=f"Corrected Power ({results['model']['correction'].title()})",
+                powers_by_test_ci=results["results"].get("powers_by_test_corrected_ci"),
             )
         else:
             _create_power_plot(
@@ -2498,6 +2500,7 @@ class MCPower:
                 target_tests=results["model"]["target_tests"],
                 target_power=self.power,
                 title="Power Analysis",
+                powers_by_test_ci=results["results"].get("powers_by_test_ci"),
             )
 
     def __repr__(self):

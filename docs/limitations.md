@@ -55,6 +55,8 @@ The following model types are **not** currently supported:
 - Time series models
 - Survival / Cox regression
 
+For tests MCPower doesn't cover — mediation, non-parametric tests, Bayesian power analysis, or GLMs (logistic, Poisson) — consider [Spower](https://philchalmers.github.io/Spower/) (R, simulation-based) or [G\*Power](https://www.psychologie.hhu.de/arbeitsgruppen/allgemeine-psychologie-und-arbeitspsychologie/gpower) (standalone app, analytical). See the [FAQ comparison](getting-started/faq.md#mcpower-vs-other-tools) for details.
+
 ---
 
 ## Mitigating Data Generation Limitations

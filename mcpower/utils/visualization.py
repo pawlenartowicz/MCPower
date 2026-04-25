@@ -4,7 +4,7 @@ Visualization utilities for Monte Carlo Power Analysis.
 This module provides plotting functions for power analysis results.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -19,6 +19,8 @@ def _create_power_plot(
     target_power: float,
     title: str,
     show: bool = True,
+    powers_by_test_ci: Optional[Dict[str, List[List[float]]]] = None,
+    show_ci: bool = True,
 ):
     """Create a sample-size vs. power line plot with achievement markers.
 
@@ -34,6 +36,12 @@ def _create_power_plot(
         target_tests: Ordered list of test names to plot.
         target_power: Target power percentage (drawn as reference line).
         title: Plot title.
+        show: Whether to call ``plt.show()`` (default ``True``).
+        powers_by_test_ci: Optional mapping of test name to list of
+            ``[lower, upper]`` CI pairs (one per sample size). When
+            provided and ``show_ci`` is ``True``, a shaded band is drawn
+            around each power line.
+        show_ci: Whether to render CI bands (default ``True``).
 
     Raises:
         ImportError: If ``matplotlib`` is not installed.
@@ -57,6 +65,21 @@ def _create_power_plot(
             linewidth=2,
             markersize=4,
         )
+
+        # CI band
+        if show_ci and powers_by_test_ci is not None and test in powers_by_test_ci:
+            ci_data = powers_by_test_ci[test]
+            ci_lower = [ci[0] for ci in ci_data]
+            ci_upper = [ci[1] for ci in ci_data]
+            n_tests = len(target_tests)
+            alpha = max(0.08, 0.15 / (n_tests / 3)) if n_tests >= 4 else 0.15
+            ax.fill_between(
+                sample_sizes,
+                ci_lower,
+                ci_upper,
+                color=colors[i],
+                alpha=alpha,
+            )
 
         # Mark achievement point
         if first_achieved[test] > 0 and first_achieved[test] in sample_sizes:

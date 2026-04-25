@@ -10,6 +10,29 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 
+def _wilson_ci(k: int, n: int) -> tuple[float, float]:
+    """Wilson score 95% confidence interval for a binomial proportion.
+
+    Args:
+        k: Number of successes (significant simulations).
+        n: Total number of trials (simulations).
+
+    Returns:
+        (lower, upper) as percentages (0-100).
+    """
+    if n == 0:
+        return (0.0, 100.0)
+    z = 1.96  # 95% CI
+    z2 = z * z
+    p = k / n
+    denom = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denom
+    margin = z * np.sqrt(p * (1.0 - p) / n + z2 / (4.0 * n * n)) / denom
+    lo = max(0.0, center - margin) * 100.0
+    hi = min(1.0, center + margin) * 100.0
+    return (lo, hi)
+
+
 class ResultsProcessor:
     """Converts raw simulation output into power estimates and statistics.
 
@@ -51,22 +74,27 @@ class ResultsProcessor:
         results_array = np.array(all_results, dtype=bool)
         results_corrected_array = np.array(all_results_corrected, dtype=bool)
 
-        # Individual powers
+        # Individual powers and confidence intervals
         individual_powers = {}
         individual_powers_corrected = {}
+        individual_powers_ci = {}
+        individual_powers_corrected_ci = {}
         non_overall_tests = [t for t in target_tests if t != "overall"]
 
         for test in target_tests:
             if test == "overall":
-                # F-test is always at column 0
-                individual_powers[test] = np.mean(results_array[:, 0]) * 100
-                individual_powers_corrected[test] = np.mean(results_corrected_array[:, 0]) * 100
+                col_idx = 0
             else:
-                # Find position among non-'overall' tests and add 1 for F-test offset
                 pos = non_overall_tests.index(test)
                 col_idx = pos + 1  # +1 because column 0 is F-test
-                individual_powers[test] = np.mean(results_array[:, col_idx]) * 100
-                individual_powers_corrected[test] = np.mean(results_corrected_array[:, col_idx]) * 100
+
+            k_uncorr = int(np.sum(results_array[:, col_idx]))
+            k_corr = int(np.sum(results_corrected_array[:, col_idx]))
+
+            individual_powers[test] = k_uncorr / n_sims * 100
+            individual_powers_corrected[test] = k_corr / n_sims * 100
+            individual_powers_ci[test] = list(_wilson_ci(k_uncorr, n_sims))
+            individual_powers_corrected_ci[test] = list(_wilson_ci(k_corr, n_sims))
 
         # Combined probabilities
         combined = {}
@@ -95,7 +123,9 @@ class ResultsProcessor:
 
         return {
             "individual_powers": individual_powers,
+            "individual_powers_ci": individual_powers_ci,
             "individual_powers_corrected": individual_powers_corrected,
+            "individual_powers_corrected_ci": individual_powers_corrected_ci,
             "combined_probabilities": combined,
             "combined_probabilities_corrected": combined_corrected,
             "cumulative_probabilities": cumulative,
@@ -122,6 +152,8 @@ class ResultsProcessor:
         """
         powers_by_test: Dict[str, List[float]] = {test: [] for test in target_tests}
         powers_by_test_corrected: Dict[str, List[float]] = {test: [] for test in target_tests}
+        powers_by_test_ci: Dict[str, List[List[float]]] = {test: [] for test in target_tests}
+        powers_by_test_corrected_ci: Dict[str, List[List[float]]] = {test: [] for test in target_tests}
         first_achieved = dict.fromkeys(target_tests, -1)
         first_achieved_corrected = dict.fromkeys(target_tests, -1)
 
@@ -136,6 +168,11 @@ class ResultsProcessor:
                 powers_by_test[test].append(power)
                 powers_by_test_corrected[test].append(power_corrected)
 
+                ci = power_result["results"]["individual_powers_ci"][test]
+                ci_corrected = power_result["results"]["individual_powers_corrected_ci"][test]
+                powers_by_test_ci[test].append(ci)
+                powers_by_test_corrected_ci[test].append(ci_corrected)
+
                 if power >= self.target_power and first_achieved[test] == -1:
                     first_achieved[test] = sample_size
 
@@ -146,6 +183,8 @@ class ResultsProcessor:
             "sample_sizes_tested": [r[0] for r in results],
             "powers_by_test": powers_by_test,
             "powers_by_test_corrected": (powers_by_test_corrected if correction else None),
+            "powers_by_test_ci": powers_by_test_ci,
+            "powers_by_test_corrected_ci": (powers_by_test_corrected_ci if correction else None),
             "first_achieved": first_achieved,
             "first_achieved_corrected": (first_achieved_corrected if correction else None),
         }

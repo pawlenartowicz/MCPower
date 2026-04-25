@@ -83,6 +83,70 @@ Then reinstall: `pip install --force-reinstall mcpower`
 
 ---
 
+## MCPower vs Other Tools
+
+**Q: How does MCPower compare to G\*Power?**
+
+A: They are complementary tools with different strengths. G\*Power uses analytical (closed-form) formulas and covers ~70+ standard tests. MCPower uses Monte Carlo simulation and handles complex models where closed-form solutions don't exist.
+
+| Feature | MCPower | G\*Power |
+|---|---|---|
+| **Approach** | Monte Carlo simulation | Analytical (closed-form) |
+| **Platform** | Python + app for Win/Mac/Linux | Win/Mac |
+| **Simple tests** (t, ANOVA) | Via regression formulation + dedicated ANOVA in app | Yes — ~70+ dedicated tests |
+| **MANOVA** | No | Yes |
+| **Regression** (linear, logistic, Poisson) | Linear (logistic and Poisson under development) | All three |
+| **Mixed-effects models** (nested, random slopes) | Yes (custom C++ solver) | No |
+| **Factorial designs & interactions** | Yes (almost any) | Limited |
+| **Correlated & non-normal predictors** | Yes (7 default distributions + unlimited empirical upload) | No |
+| **Effect sizes** | Cohen's conventions and standardized β | Full Cohen suite (d, f, w, h) + calculator |
+| **Power analysis modes** | A priori, post-hoc | A priori, post-hoc, sensitivity, compromise, criterion |
+| **Multiple comparison corrections** | Bonferroni, BH-FDR, Holm, Tukey HSD | No |
+| **Robustness stress-testing** | Yes (default + custom scenarios) | No |
+| **Model misspecification testing** | Yes (via different generation and testing formula) | No |
+| **Cumulative probability** (at-least-k significant) | Yes | No |
+| **Speed** | 1--5s simple, 15--30s complex models | Near-instant |
+
+**In short:** Use G\*Power for standard tests (t-test, χ², ANOVA) with known formulas. Use MCPower when your design involves interactions, correlated predictors, non-normal data, mixed-effects models, or you need robustness analysis.
+
+**Q: How does MCPower compare to Spower (R)?**
+
+A: Both are simulation-based, but they differ in architecture and scope. [Spower](https://philchalmers.github.io/Spower/) is an R package with built-in experiments for many test types (t-tests, ANOVA, mediation, non-parametric, chi-squared, correlation). MCPower focuses on linear and mixed-effects models but goes deeper — with automatic data generation, correlated predictors, empirical data upload, and a C++ backend.
+
+| Feature | MCPower | Spower |
+|---|---|---|
+| **Language** | Python (C++ backend) | R |
+| **GUI** | Yes (PySide6 desktop app) | No (R console) |
+| **Test coverage** | Linear regression, mixed models | t-tests, ANOVA, mediation, non-parametric, chi-squared, correlation, GLMs |
+| **Mixed-effects models** | Yes (random intercepts, slopes, nested) | No built-in support |
+| **Data generation** | Automatic from formula (correlated, non-normal, empirical) | User builds design matrix or uses per-test generators |
+| **Correlated predictors** | Built-in (Cholesky decomposition) | User must code manually |
+| **Non-normal predictors** | Declarative: `set_variable_type("x=right_skewed")` | User writes custom `gen_fun` in R |
+| **Empirical data** | `upload_data()` — auto-detects types, bootstraps rows | Not supported |
+| **Custom distributions** | Upload any data, MCPower bootstraps across simulations | Override `gen_fun` with arbitrary R code inside each sim |
+| **Bayesian power** | No | Yes (ROPE, Bayes Factors, posterior probabilities) |
+| **Type S/M errors** | No | Yes (sign and magnitude errors) |
+| **Solve for effect size / alpha** | No | Yes (stochastic root-finding) |
+| **Robustness scenarios** | Yes (optimistic / realistic / doomer) | No |
+| **Speed** | Sub-second to seconds (C++ backend) | Seconds to minutes (pure R, 10,000 sims) |
+
+**Key difference in customization:** Spower's flexibility comes from writing custom R functions that run inside each simulation loop — powerful but requires coding the data generation pipeline. MCPower's flexibility comes from formula composition and `upload_data()` — users generate data however they want (any tool, any distribution), upload it once, and MCPower handles the simulation machinery automatically. Most experimental designs expressible as a linear model can be set up declaratively:
+
+| Design | MCPower approach |
+|---|---|
+| t-test | `y = group` with binary predictor |
+| One-way ANOVA | `y = group` with `set_variable_type("group=(factor,k)")` |
+| ANCOVA | `y = group + covariate` |
+| Factorial ANOVA | `y = A + B + A:B` with both as factors |
+| Regression with interaction | `y = x1 + x2 + x1:x2` |
+| Correlated predictors | `y = x1 + x2` + `set_correlations("(x1,x2)=0.5")` |
+| Mixed / clustered | `y ~ group + (1\|subject)` + `set_cluster(...)` |
+| Real-world distributions | `upload_data(df)` — any empirical data |
+
+**In short:** Use Spower for tests MCPower doesn't cover (mediation, non-parametric, Bayesian) or if you work in R. Use MCPower for regression and mixed models with realistic data conditions, especially if you want a GUI or need performance.
+
+---
+
 ## Performance
 
 **Q: How can I speed up the analysis?**
