@@ -1,0 +1,38 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378640
+#
+# Overhead  Symbol                   Source:Line      
+# ........  .......................  .................
+#
+    33.97%  [.] __strncmp_avx2       strcmp-avx2.S:294
+    33.01%  [.] _dl_lookup_symbol_x  dl-new-hash.h:74
+    33.01%  [.] strlen               strlen-sse2.S:57
+
+
+# Samples: 60K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 32958577456
+#
+# Overhead  Symbol                                                                                               Source:Line                               
+# ........  ...................................................................................................  ..........................................
+#
+    50.21%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+    31.80%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:395
+     5.75%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:410
+     2.70%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:385
+     2.14%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:404
+     1.00%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     0.80%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+     0.76%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     0.43%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:0
+     0.35%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:338
+     0.31%  [.] engine_core::glmm::laplace_deviance                                                              matref.rs:399
+
+
+#
+# (Tip: Treat branches as callchains: perf record -b ... ; perf report --branch-history)
+#

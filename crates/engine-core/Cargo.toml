@@ -1,0 +1,55 @@
+[package]
+name = "engine-core"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+engine-contract = { path = "../engine-contract" }
+rayon        = "1.10"
+serde        = { version = "1", features = ["derive"] }
+# Used only by bin/throughput.rs (baseline JSON read/write); already in the
+# workspace tree via engine-contract, so this adds no new compilation unit.
+serde_json   = "1"
+thiserror    = "1"
+thread_local = "1.1"
+# Pure-Rust BOBYQA — zero-alloc warm path, wasm-clean, bit-exact parity-pinned
+# vs PRIMA (native + wasm32-wasip1). BOBYQA drives the LMM/GLMM θ-search, so a
+# release that shifts tie-breaking or float-fusion order would move θ̂ and break
+# the frozen parity goldens. The 0.1.x line is parity-stable, so patches inside it
+# are accepted unpinned; a 0.2+ bump must be deliberate and reviewed — the caret
+# here stops at <0.2.0, so a minor bump is never picked up silently.
+bobyqa = "0.1"
+
+# Portable SIMD (x86 AVX/AVX-512, wasm simd128, NEON, scalar fallback) for the
+# fit-path transcendentals (simd_transcendental.rs). Already in the tree
+# transitively via faer; declared direct so engine-core can call it. Exact-pinned
+# for the same reason as bobyqa: pulp's codegen/lane choice sets the fitted-MLE
+# low bits, so a version bump can move the GLMM goldens — must be deliberate,
+# never picked up by a caret range. Keep == faer's transitive version.
+pulp = "=0.22.2"
+
+# wasm32 target: drop faer's `rayon` feature (pulls spindle → atomic-wait, which
+# has no wasm32 implementation) and `rand` (pulls rand 0.9 → getrandom 0.3, which
+# requires the wasm_js backend shim). `std` and `linalg` cover everything
+# engine-core actually uses: Mat/MatRef/MatMut, llt(), Solve, reborrow.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+faer         = { version = "0.24", default-features = false, features = ["std", "linalg"] }
+
+# Non-wasm targets: keep faer's default features (std, rayon, rand, sparse-linalg, npy).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+faer         = "0.24"
+
+[dev-dependencies]
+engine-contract = { path = "../engine-contract", features = ["test-fixtures"] }
+rmp-serde = "1"
+approx    = "0.5"
+dhat      = "0.3"
+libm      = "0.2"

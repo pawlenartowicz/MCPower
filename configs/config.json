@@ -1,0 +1,83 @@
+{
+  "simulation": {
+    "seed": 2137,
+    "alpha": 0.05,
+    "target_power": 0.8,
+    "n_sims": { "ols": 1600, "mixed": 800, "anova": 1000 },
+    "max_failed_fraction": 0.1,
+    "sample_size_bounds": { "from": 30, "to": 200, "by": "auto" },
+    "cluster_auto_count": 12
+  },
+  "benchmarks": {
+    "continuous": [0.1, 0.25, 0.4],
+    "binary_factor": [0.2, 0.5, 0.8]
+  },
+  "limits": {
+    "max_alpha": 0.25,
+    "icc_stability": [0.05, 0.95],
+    "baseline_p_warn": [0.05, 0.95],
+    "factor_levels": [2, 20],
+    "min_clusters": 5,
+    "min_rows_per_cluster": 2,
+    "reliable_rows_per_cluster": 5,
+    "recommended_rows_per_cluster": 10,
+    "factor_min_level_count": 5
+  },
+  "report": {
+    "format": {
+      "power_decimals_short": 1,
+      "power_decimals_long": 1,
+      "target_decimals": 0,
+      "drop_decimals": 1,
+      "joint_table_decimals": 1
+    },
+    "thresholds": {
+      "convergence_min": 0.95,
+      "lme_boundary_hit_max": 0.01,
+      "glm_baseline_drift_max": 0.05,
+      "factor_exclusion_max": 0.0,
+      "glmm_tau_sq_warn": 1.0
+    },
+    "baseline_scenario": { "prefer_label": "optimistic", "fallback_to_first": true },
+    "overall_label_by_estimator": { "ols": "Overall F", "glm": "LR χ²", "mle": "Wald χ²" },
+    "text": {
+      "long_title": "MCPower · Power Analysis",
+      "main_caption": "Per-test power",
+      "uncorrected_suffix": " — Uncorrected",
+      "corrected_suffix": " — Corrected",
+      "ci_caption": "Power & 95% CI",
+      "ci_footnote": "95% CIs are Monte-Carlo (Wilson), n_sims={n_sims}.",
+      "estimator_extras_caption": "Estimator details",
+      "sample_size_caption": "Required sample size per effect",
+      "required_n_ci_caption": "Required N & 95% CI",
+      "required_n_ci_footnote": "Required N from the model-based crossing fit (isotonic); CI by Wilson band inversion, rounded outward.",
+      "required_n_ci_footnote_appr": "appr. = probit extrapolation beyond the search range — rerun with a higher `to` to confirm.",
+      "required_n_ci_footnote_suppressed": "— = fit suppressed ({labels}: non-monotone within the grid).",
+      "required_n_ci_footnote_floor": "≤ = target reached at or below the search floor — rerun with a lower `from` to localise.",
+      "non_monotone_warning": "⚠ {label}: power not monotone in N (max drop {drop} > MC noise); model-based fit suppressed — grid value shown.",
+      "vs_token": "vs",
+      "columns": {
+        "test": "Test",
+        "power": "Power",
+        "target": "Target",
+        "ci": "CI 95%",
+        "required_n": "Required N",
+        "uncorrected": "uncorrected",
+        "corrected": "corrected"
+      }
+    }
+  },
+  "upload": {
+    "max_rows": 1000000,
+    "max_rows_wasm": 10000,
+    "min_rows": 20,
+    "max_factor_k_soft": 7,
+    "max_factor_ratio": 15,
+    "strict_warning_ratio": 2.0
+  },
+  "correction_aliases": {
+    "bh": "benjamini_hochberg",
+    "fdr": "benjamini_hochberg",
+    "tukey": "tukey_hsd"
+  }
+}

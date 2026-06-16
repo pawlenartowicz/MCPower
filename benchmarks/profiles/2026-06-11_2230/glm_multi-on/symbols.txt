@@ -1,0 +1,53 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377311
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    33.74%  [.] __memmove_avx_unaligned_erms
+    33.13%  [.] do_lookup_x
+    33.13%  [.] get_common_cache_info.constprop.0
+
+
+# Samples: 9K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 4912928351
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    19.08%  [.] engine_core::data_gen::generate_sim_data
+    13.10%  [.] engine_core::glm::glm_irls_fit
+    12.04%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     9.50%  [.] engine_core::rng::fill_words
+     8.12%  [.] engine_core::rng::fill_normal_column
+     4.58%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4
+     4.37%  [.] gemm_v0_gemm_pack_f64_simd256_m8
+     3.84%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.72%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2
+     2.95%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.90%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.90%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.48%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.14%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.72%  [.] engine_core::philox::philox4x32_10
+     0.72%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.70%  [.] engine_core::critvals::betacf
+     0.70%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.68%  [.] engine_core::scenarios::perturb_correlation
+     0.53%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.50%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.46%  [.] __memset_avx2_unaligned_erms
+     0.41%  [.] private_gemm_x86::gemm
+     0.39%  [.] __ieee754_log_fma
+     0.36%  [.] faer::linalg::matmul::matmul_imp
+     0.34%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+
+
+#
+# (Tip: Show current config key-value pairs: perf config --list)
+#

@@ -1,0 +1,57 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol         
+# ........  ...............
+#
+    50.00%  [.] dl_main
+    50.00%  [.] do_lookup_x
+
+
+# Samples: 15K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 8163293676
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    33.26%  [.] engine_core::lmm::reml_deviance
+     7.60%  [.] bobyqa::linalg::matprod12_into
+     7.21%  [.] bobyqa::update::updateh
+     7.15%  [.] bobyqa::linalg::matprod21_into
+     5.52%  [.] bobyqa::trustregion::trsbox
+     4.77%  [.] bobyqa::geometry::geostep
+     4.00%  [.] engine_core::data_gen::generate_sim_data
+     3.44%  [.] __ieee754_log_fma
+     2.81%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     2.38%  [.] bobyqa::bobyqb::bobyqb
+     2.09%  [.] __memset_avx2_unaligned_erms
+     1.88%  [.] bobyqa::powalg::calvlag_noadd
+     1.45%  [.] bobyqa::powalg::hess_mul_into
+     1.34%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.28%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n4
+     1.19%  [.] engine_core::rng::SimRng::next_u32
+     0.90%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.86%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n2
+     0.77%  [.] bobyqa::powalg::calden_into
+     0.72%  [.] bobyqa::geometry::setdrop_tr
+     0.70%  [.] bobyqa::update::tryqalt
+     0.62%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.59%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.54%  [.] engine_core::data_gen::draw_residual
+     0.50%  [.] bobyqa::linalg::matprod22_into
+     0.47%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.47%  [.] bobyqa::bobyqb::shiftbase
+     0.46%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m8_n4
+     0.39%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.36%  [.] __log_finite@plt
+     0.31%  [.] private_gemm_x86::gemm
+
+
+#
+# (Tip: To compute metrics for samples use perf record -e '{cycles,instructions}' ... ; perf script -F +metric)
+#

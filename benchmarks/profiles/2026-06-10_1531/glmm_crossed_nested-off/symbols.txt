@@ -1,0 +1,30 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 374733
+#
+# Overhead  Symbol                           
+# ........  .................................
+#
+    33.36%  [.] _dl_lookup_symbol_x
+    33.36%  [.] init_cpu_features.constprop.0
+    33.29%  [k] 0xffffffff97201988
+
+
+# Samples: 60K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 32846368624
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    96.80%  [.] engine_core::glmm::laplace_deviance
+     0.86%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.71%  [.] pulp::x86::v3::V3::vectorize::imp
+
+
+#
+# (Tip: To not accumulate CPU time of children symbols add --no-children)
+#

@@ -1,0 +1,96 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 348047
+#
+# Overhead  Symbol                            Source:Line                
+# ........  ................................  ...........................
+#
+    35.91%  [.] _dl_new_object                dl-object.c:131
+    32.64%  [.] _nl_intern_locale_data        _nl_intern_locale_data+2642
+    31.44%  [.] _dl_relocate_object_no_relro  dl-reloc.c:170
+
+
+# Samples: 7K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 4294503463
+#
+# Overhead  Symbol                                                                                               Source:Line                                   
+# ........  ...................................................................................................  ..............................................
+#
+    17.65%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     6.98%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n3                                                  private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     4.58%  [.] engine_core::glm::glm_irls_fit                                                                   range.rs:772
+     2.87%  [.] engine_core::rng::fill_words                                                                     philox.rs:27
+     2.39%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:242
+     2.33%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:328
+     2.32%  [.] engine_core::rng::fill_words                                                                     philox.rs:20
+     2.28%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:405
+     2.26%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     2.22%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:292
+     2.21%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:290
+     1.95%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:291
+     1.89%  [.] engine_core::rng::fill_words                                                                     philox.rs:19
+     1.68%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:236
+     1.54%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:35
+     1.16%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:561
+     1.11%  [.] pulp::x86::v3::V3::vectorize::imp                                                                mod.rs:793
+     1.11%  [.] engine_core::data_gen::generate_sim_data                                                         uint_macros.rs:844
+     1.05%  [.] __ieee754_exp_fma                                                                                e_exp.c:151
+     1.04%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:220
+     1.04%  [.] engine_core::rng::fill_normal_column                                                             f32.rs:1570
+     1.02%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:0
+     0.97%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:560
+     0.96%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:180
+     0.82%  [.] faer::linalg::matmul::matvec_rowmajor::matvec                                                    mod.rs:832
+     0.75%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:389
+     0.73%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:210
+     0.73%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:209
+     0.71%  [.] pulp::x86::v3::V3::vectorize::imp                                                                fma.rs:51
+     0.66%  [.] engine_core::data_gen::generate_sim_data                                                         f64.rs:412
+     0.65%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:192
+     0.64%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:33
+     0.64%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:291
+     0.64%  [.] __ieee754_exp_fma                                                                                e_exp.c:157
+     0.64%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     0.63%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:31
+     0.59%  [.] engine_core::rng::fill_words                                                                     mod.rs:547
+     0.57%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:700
+     0.57%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:229
+     0.56%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+521
+     0.56%  [.] __ieee754_exp_fma                                                                                e_exp.c:141
+     0.54%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+428
+     0.54%  [.] engine_core::data_gen::generate_sim_data                                                         glm.rs:111
+     0.53%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:245
+     0.52%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:104
+     0.52%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:37
+     0.50%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:48
+     0.47%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+489
+     0.47%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     0.45%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+571
+     0.44%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       range.rs:772
+     0.44%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+331
+     0.44%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+456
+     0.44%  [.] __ieee754_exp_fma                                                                                math_config.h:85
+     0.42%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:32
+     0.40%  [.] __ieee754_exp_fma                                                                                e_exp.c:142
+     0.40%  [.] __ieee754_exp_fma                                                                                e_exp.c:104
+     0.39%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:606
+     0.39%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+552
+     0.39%  [.] pulp::x86::v3::V3::vectorize::imp                                                                lib.rs:1491
+     0.38%  [.] __exp_finite@plt                                                                                 __exp_finite@plt+4
+     0.37%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+347
+     0.37%  [.] __ieee754_exp_fma                                                                                e_exp.c:135
+     0.35%  [.] gemm_v0_gemm_pack_f64_simd256_m4                                                                 gemm_v0_gemm_pack_f64_simd256_m4+364
+     0.34%  [.] __ieee754_exp_fma                                                                                math_config.h:97
+     0.34%  [.] engine_core::data_gen::generate_sim_data                                                         uint_macros.rs:0
+     0.33%  [.] engine_core::data_gen::generate_sim_data                                                         mod.rs:612
+     0.30%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:0
+     0.30%  [.] engine_core::rng::fill_words                                                                     uint_macros.rs:0
+
+
+#
+# (Tip: Print event counts in machine readable CSV format with: perf stat -x\;)
+#

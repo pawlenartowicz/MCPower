@@ -1,0 +1,45 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                
+# ........  ......................
+#
+    50.00%  [.] do_lookup_x
+    50.00%  [k] 0xffffffff97201988
+
+
+# Samples: 17K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 9427673955
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    31.11%  [.] engine_core::glmm::laplace_deviance
+    15.64%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+     9.59%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     9.41%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     7.39%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     5.10%  [.] pulp::x86::v3::V3::vectorize::imp
+     4.65%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.38%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n2
+     2.01%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     1.46%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.79%  [.] bobyqa::trustregion::trsbox
+     0.62%  [.] bobyqa::linalg::matprod21_into
+     0.57%  [.] bobyqa::linalg::matprod12_into
+     0.52%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.46%  [.] bobyqa::update::updateh
+     0.38%  [.] engine_core::data_gen::generate_sim_data
+     0.37%  [.] bobyqa::geometry::geostep
+     0.36%  [.] __memset_avx2_unaligned_erms
+     0.32%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+
+
+#
+# (Tip: To show information about system the samples were collected on use perf report --header)
+#

@@ -1,0 +1,33 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                         
+# ........  ...............................
+#
+    50.00%  [.] _dl_process_pt_gnu_property
+    50.00%  [.] do_lookup_x
+
+
+# Samples: 17K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 9521650899
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    58.14%  [.] engine_core::glm::glm_irls_fit
+    28.72%  [.] engine_core::data_gen::generate_sim_data
+     6.67%  [.] engine_core::rng::SimRng::next_u32
+     1.51%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.02%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.82%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.44%  [.] __ieee754_exp_fma
+
+
+#
+# (Tip: To show time in nanoseconds in record/report add --ns)
+#

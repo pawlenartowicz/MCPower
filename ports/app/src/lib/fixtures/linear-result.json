@@ -1,0 +1,12 @@
+{
+  "family": "linear",
+  "kind": "find-power",
+  "n": 200,
+  "ranAt": "2026-05-19T10:00:00.000Z",
+  "simulations": 1000,
+  "effects": [
+    { "name": "x1", "power": 0.86, "ci": [0.84, 0.88] },
+    { "name": "x2", "power": 0.61, "ci": [0.58, 0.64] },
+    { "name": "x1:x2", "power": 0.42, "ci": [0.39, 0.45] }
+  ]
+}

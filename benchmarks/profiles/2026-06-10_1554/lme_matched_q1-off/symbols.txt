@@ -1,0 +1,41 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 349914
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    35.72%  [.] get_common_cache_info.constprop.0
+    32.44%  [.] check_match
+    31.84%  [.] do_lookup_x
+
+
+# Samples: 1K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 797956750
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    39.05%  [.] engine_core::data_gen::generate_sim_data
+    14.68%  [.] engine_core::lme::LmeSuffStats::add_rows
+    14.21%  [.] engine_core::rng::SimRng::next_u32
+    13.44%  [.] engine_core::lme::profiled_deviance
+     5.85%  [.] engine_core::data_gen::draw_residual
+     2.45%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.09%  [.] __ieee754_log_fma
+     2.02%  [.] engine_core::critvals::betacf
+     0.61%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.54%  [.] faer::linalg::solvers::Llt<T>::new
+     0.48%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.47%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.41%  [.] engine_core::lme::lme_fit
+     0.40%  [.] log@@GLIBC_2.29
+
+
+#
+# (Tip: Customize output of perf script with: perf script -F event,ip,sym)
+#

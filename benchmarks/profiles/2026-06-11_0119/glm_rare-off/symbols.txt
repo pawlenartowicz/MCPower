@@ -1,0 +1,43 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    50.00%  [.] _dl_relocate_object_no_relro
+    50.00%  [.] dl_main
+
+
+# Samples: 7K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 4221798078
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    21.88%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+    17.83%  [.] engine_core::glm::glm_irls_fit
+    15.99%  [.] engine_core::data_gen::generate_sim_data
+     8.94%  [.] engine_core::rng::fill_words
+     7.53%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n3
+     6.29%  [.] engine_core::rng::fill_normal_column
+     4.31%  [.] __ieee754_exp_fma
+     4.29%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     2.59%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.35%  [.] exp@@GLIBC_2.29
+     1.22%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.96%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.57%  [.] __exp_finite@plt
+     0.44%  [.] __memset_avx2_unaligned_erms
+     0.40%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.38%  [.] engine_core::critvals::betacf
+     0.35%  [.] pulp::x86::v3::V3::vectorize::imp
+
+
+#
+# (Tip: Skip collecting build-id when recording: perf record -B)
+#

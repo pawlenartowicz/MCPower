@@ -1,0 +1,61 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 366855
+#
+# Overhead  Symbol                            
+# ........  ..................................
+#
+    34.07%  [.] __tunable_get_val
+    34.07%  [.] do_lookup_x
+    31.85%  [.] __default_morecore@GLIBC_2.2.5
+
+
+# Samples: 4K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 2265214197
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    30.20%  [.] engine_core::lmm::reml_deviance
+     8.66%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     7.35%  [.] bobyqa::linalg::matprod12_into
+     4.98%  [.] bobyqa::trustregion::trsbox
+     4.36%  [.] engine_core::data_gen::generate_sim_data
+     3.50%  [.] bobyqa::linalg::matprod21_into
+     3.13%  [.] bobyqa::geometry::geostep
+     3.04%  [.] engine_core::rng::fill_normal_column
+     2.81%  [.] engine_core::rng::fill_words
+     2.77%  [.] bobyqa::update::updateh
+     2.65%  [.] __ieee754_log_fma
+     2.63%  [.] bobyqa::bobyqb::bobyqb
+     2.54%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.42%  [.] __memset_avx2_unaligned_erms
+     2.12%  [.] bobyqa::powalg::calvlag_noadd
+     1.44%  [.] bobyqa::powalg::hess_mul_into
+     1.12%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n4
+     1.10%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.85%  [.] bobyqa::powalg::calden_into
+     0.79%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.67%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m8_n4
+     0.65%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.62%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n2
+     0.53%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.52%  [.] bobyqa::geometry::setdrop_tr
+     0.50%  [.] private_gemm_x86::gemm
+     0.50%  [.] __memmove_avx_unaligned_erms
+     0.47%  [.] engine_core::critvals::betacf
+     0.43%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.43%  [.] log@@GLIBC_2.29
+     0.38%  [.] bobyqa::util::xinbd_into
+     0.38%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.31%  [.] bobyqa::linalg::matprod22_into
+     0.31%  [.] bobyqa::update::tryqalt
+
+
+#
+# (Tip: To see how parallelism changes over time, try: perf report -F time,latency,parallelism --time-quantum=1s)
+#

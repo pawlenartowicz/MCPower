@@ -1,0 +1,46 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 348652
+#
+# Overhead  Symbol                    
+# ........  ..........................
+#
+    35.85%  [.] do_tunable_update_val
+    32.62%  [.] _nl_intern_locale_data
+    31.53%  [.] do_lookup_x
+
+
+# Samples: 4K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 2512410660
+#
+# Overhead  Symbol                                                                                                               
+# ........  .....................................................................................................................
+#
+    51.95%  [.] engine_core::lmm::reml_deviance
+    13.50%  [.] engine_core::data_gen::generate_sim_data
+     6.97%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     4.41%  [.] __ieee754_log_fma
+     4.14%  [.] engine_core::rng::SimRng::next_u32
+     2.05%  [.] bobyqa::linalg::matprod12_into
+     1.99%  [.] bobyqa::linalg::matprod21_into
+     1.77%  [.] bobyqa::trustregion::trsbox
+     1.60%  [.] engine_core::data_gen::draw_residual
+     1.51%  [.] bobyqa::geometry::geostep
+     1.34%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.08%  [.] bobyqa::bobyqb::bobyqb
+     0.73%  [.] bobyqa::update::updateh
+     0.67%  [.] bobyqa::powalg::calvlag_noadd
+     0.58%  [.] engine_core::critvals::betacf
+     0.52%  [.] __memset_avx2_unaligned_erms
+     0.52%  [.] __log_finite@plt
+     0.35%  [.] log@@GLIBC_2.29
+     0.35%  [.] bobyqa::powalg::hess_mul_into
+
+
+#
+# (Tip: List events using substring match: perf list <keyword>)
+#

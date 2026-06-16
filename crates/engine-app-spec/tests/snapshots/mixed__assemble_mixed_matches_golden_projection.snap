@@ -1,0 +1,14 @@
+---
+source: crates/engine-app-spec/tests/mixed.rs
+assertion_line: 174
+expression: summary
+---
+{
+  "n_contracts": 1,
+  "target_count": 1,
+  "coefficient_count": 2,
+  "generation_column_count": 1,
+  "alpha": 0.05,
+  "correction_code": 0,
+  "outcome_kind_is_continuous": true
+}

@@ -1,0 +1,49 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378921
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    34.02%  [.] _int_malloc
+    32.99%  [.] _dl_lookup_symbol_x
+    32.99%  [.] get_common_cache_info.constprop.0
+
+
+# Samples: 5K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3074500961
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    19.44%  [.] engine_core::data_gen::generate_sim_data
+    14.75%  [.] engine_core::glm::glm_irls_fit
+    11.89%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     9.55%  [.] engine_core::rng::fill_words
+     8.49%  [.] engine_core::rng::fill_normal_column
+     4.76%  [.] gemm_v0_gemm_pack_f64_simd256_m8
+     4.71%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4
+     4.05%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2
+     3.57%  [.] __ieee754_exp_fma
+     3.30%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.14%  [.] exp@@GLIBC_2.29
+     1.61%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.37%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     1.22%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.58%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.55%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.54%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.51%  [.] engine_core::philox::philox4x32_10
+     0.44%  [.] __memset_avx2_unaligned_erms
+     0.39%  [.] private_gemm_x86::gemm
+     0.37%  [.] engine_core::critvals::betacf
+     0.32%  [.] __memmove_avx_unaligned_erms
+
+
+#
+# (Tip: To show IPC for sampling periods use perf record -e '{cycles,instructions}:S' and then browse context)
+#

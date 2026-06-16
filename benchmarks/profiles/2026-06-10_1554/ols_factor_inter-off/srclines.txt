@@ -1,0 +1,100 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377476
+#
+# Overhead  Symbol                             Source:Line                      
+# ........  .................................  .................................
+#
+    33.77%  [.] _nl_load_locale_from_archive   _nl_load_locale_from_archive+1053
+    33.11%  [.] do_lookup_x                    dl-lookup.c:426
+    33.11%  [.] init_cpu_features.constprop.0  dl-cacheinfo.h:1035
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1591567436
+#
+# Overhead  Symbol                                                                                               Source:Line                               
+# ........  ...................................................................................................  ..........................................
+#
+     4.87%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:97
+     3.85%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         lib.rs:700
+     3.64%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         lib.rs:0
+     3.64%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         range.rs:772
+     3.37%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     3.00%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:0
+     2.82%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:219
+     2.66%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     2.65%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:167
+     2.52%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:0
+     2.42%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:167
+     2.35%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:62
+     1.98%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:525
+     1.98%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:180
+     1.88%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         cmp.rs:1916
+     1.84%  [.] engine_core::data_gen::generate_sim_data                                                         cmp.rs:1916
+     1.67%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:27
+     1.59%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:229
+     1.59%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:221
+     1.47%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:20
+     1.46%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:52
+     1.36%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:99
+     1.32%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:0
+     1.29%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:284
+     1.23%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:767
+     1.22%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:67
+     1.19%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:368
+     1.13%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:19
+     1.09%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:60
+     1.02%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:379
+     1.02%  [.] engine_core::data_gen::generate_sim_data                                                         non_null.rs:1720
+     1.02%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:604
+     0.99%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:25
+     0.97%  [.] engine_core::rng::SimRng::next_u32                                                               uint_macros.rs:2457
+     0.96%  [.] engine_core::data_gen::draw_residual                                                             data_gen.rs:898
+     0.96%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:524
+     0.92%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:91
+     0.88%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:605
+     0.85%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         uint_macros.rs:844
+     0.82%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:700
+     0.78%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:101
+     0.75%  [.] engine_core::data_gen::generate_sim_data                                                         uint_macros.rs:844
+     0.74%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:191
+     0.72%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:272
+     0.72%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:118
+     0.68%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:451
+     0.68%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:118
+     0.68%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:384
+     0.65%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:564
+     0.61%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:192
+     0.61%  [.] engine_core::data_gen::draw_residual                                                             data_gen.rs:871
+     0.58%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:219
+     0.58%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:189
+     0.58%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:383
+     0.58%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:67
+     0.54%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:53
+     0.51%  [.] engine_core::data_gen::generate_sim_data                                                         matref.rs:399
+     0.51%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:341
+     0.50%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:284
+     0.48%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:599
+     0.47%  [.] engine_core::data_gen::draw_residual                                                             data_gen.rs:870
+     0.44%  [.] engine_core::data_gen::generate_sim_data                                                         matown.rs:1520
+     0.41%  [.] engine_core::data_gen::generate_sim_data                                                         matown.rs:1501
+     0.41%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:210
+     0.41%  [.] engine_core::data_gen::generate_sim_data                                                         mod.rs:612
+     0.38%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:560
+     0.38%  [.] engine_core::data_gen::generate_sim_data                                                         const_ptr.rs:384
+     0.38%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:192
+     0.37%  [.] engine_core::data_gen::generate_sim_data                                                         matown.rs:1521
+     0.34%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:191
+     0.31%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:610
+     0.31%  [.] engine_core::data_gen::generate_sim_data                                                         enumerate.rs:82
+     0.30%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:189
+
+
+#
+# (Tip: To show information about system the samples were collected on use perf report --header)
+#

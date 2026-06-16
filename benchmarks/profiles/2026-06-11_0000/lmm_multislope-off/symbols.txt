@@ -1,0 +1,58 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378513
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.95%  [.] getenv
+    33.02%  [.] _dl_relocate_object_no_relro
+    33.02%  [.] strlen
+
+
+# Samples: 14K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 7712342436
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    35.10%  [.] engine_core::lmm::reml_deviance
+     7.59%  [.] bobyqa::linalg::matprod12_into
+     7.18%  [.] bobyqa::linalg::matprod21_into
+     6.96%  [.] bobyqa::update::updateh
+     5.58%  [.] bobyqa::trustregion::trsbox
+     5.07%  [.] bobyqa::geometry::geostep
+     3.29%  [.] __ieee754_log_fma
+     2.63%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     2.57%  [.] bobyqa::bobyqb::bobyqb
+     2.22%  [.] __memset_avx2_unaligned_erms
+     2.02%  [.] bobyqa::powalg::calvlag_noadd
+     1.65%  [.] bobyqa::powalg::hess_mul_into
+     1.58%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.23%  [.] engine_core::data_gen::generate_sim_data
+     1.22%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n4
+     0.89%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.83%  [.] engine_core::rng::fill_words
+     0.79%  [.] bobyqa::powalg::calden_into
+     0.77%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n2
+     0.76%  [.] bobyqa::geometry::setdrop_tr
+     0.71%  [.] engine_core::rng::fill_normal_column
+     0.68%  [.] bobyqa::update::tryqalt
+     0.63%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.53%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.49%  [.] bobyqa::linalg::matprod22_into
+     0.44%  [.] bobyqa::bobyqb::shiftbase
+     0.40%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.37%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m8_n4
+     0.36%  [.] bobyqa::linalg::r1update
+     0.34%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.30%  [.] __memmove_avx_unaligned_erms
+
+
+#
+# (Tip: To collect Processor Trace with samples use perf record -e '{intel_pt//,cycles}' ; perf script --call-trace or --insn-trace --xed -F +ipc (remove --xed if no xed))
+#

@@ -1,0 +1,38 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol            
+# ........  ..................
+#
+    50.00%  [.] _dl_new_object
+    50.00%  [.] memchr
+
+
+# Samples: 3K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1934870628
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    42.52%  [.] engine_core::data_gen::generate_sim_data
+    16.06%  [.] engine_core::lme::LmeSuffStats::add_rows
+    15.03%  [.] engine_core::rng::SimRng::next_u32
+    14.71%  [.] engine_core::lme::profiled_deviance
+     2.46%  [.] engine_core::data_gen::draw_residual
+     1.71%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.62%  [.] __ieee754_log_fma
+     0.64%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.56%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.50%  [.] engine_core::critvals::betacf
+     0.39%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.31%  [.] engine_core::lme::lme_fit
+
+
+#
+# (Tip: To set sampling period of individual events use perf record -e cpu/cpu-cycles,period=100001/,cpu/branches,period=10001/ ...)
+#

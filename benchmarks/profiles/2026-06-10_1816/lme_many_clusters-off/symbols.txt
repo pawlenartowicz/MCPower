@@ -1,0 +1,38 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378090
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.88%  [.] _getopt_internal_r
+    33.06%  [.] _dl_relocate_object_no_relro
+    33.06%  [.] dl_main
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1519498706
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    40.55%  [.] engine_core::data_gen::generate_sim_data
+    23.74%  [.] engine_core::lme::profiled_deviance
+    13.78%  [.] engine_core::lme::LmeSuffStats::add_rows
+    10.20%  [.] engine_core::rng::SimRng::next_u32
+     3.51%  [.] __ieee754_log_fma
+     3.36%  [.] engine_core::data_gen::draw_residual
+     0.77%  [.] engine_core::critvals::betacf
+     0.71%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.43%  [.] log@@GLIBC_2.29
+     0.39%  [.] engine_core::workspace::SimWorkspace::reset_lme_suff_stats
+     0.32%  [.] faer::linalg::solvers::Llt<T>::new
+
+
+#
+# (Tip: To change sampling frequency to 100 Hz: perf record -F 100)
+#

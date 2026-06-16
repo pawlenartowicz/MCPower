@@ -1,0 +1,52 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                   
+# ........  .........................
+#
+    50.00%  [.] __x86_cacheinfo_ifunc
+    50.00%  [.] _dl_next_ld_env_entry
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1205251744
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    23.95%  [.] engine_core::lme::profiled_deviance
+    18.02%  [.] engine_core::data_gen::generate_sim_data
+    13.54%  [.] engine_core::rng::fill_normal_column
+    12.77%  [.] engine_core::rng::fill_words
+     6.99%  [.] engine_core::lme::LmeSuffStats::add_rows
+     3.09%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.24%  [.] gemm_v0_gemm_pack_f64_simd256_m8
+     2.12%  [.] __ieee754_log_fma
+     2.02%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.71%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.53%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4
+     1.17%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2
+     1.08%  [.] engine_core::critvals::betacf
+     0.72%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.58%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.54%  [.] faer::linalg::matmul::matmul_imp
+     0.54%  [.] faer::linalg::solvers::Llt<T>::new
+     0.54%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.49%  [.] engine_core::lme::lme_fit
+     0.40%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.36%  [.] engine_core::data_gen::draw_residual
+     0.36%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.34%  [.] __memset_avx2_unaligned_erms
+     0.32%  [.] libpulp_v0_22_2_ld_b32s_1111000000000000
+     0.32%  [.] faer::linalg::cholesky::ldlt::factor::cholesky_recursion_right_looking
+     0.31%  [.] log@@GLIBC_2.29
+
+
+#
+# (Tip: To show inline functions in call traces add --inline to perf report)
+#

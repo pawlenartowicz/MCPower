@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378404
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.93%  [.] do_taskset
+    33.03%  [.] _dl_add_to_namespace_list
+    33.03%  [.] _dl_relocate_object_no_relro
+
+
+# Samples: 47K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 25677017269
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    61.23%  [.] engine_core::glmm::laplace_deviance
+    22.84%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.11%  [.] bobyqa::linalg::matprod12_into
+     1.89%  [.] bobyqa::linalg::matprod21_into
+     1.78%  [.] bobyqa::trustregion::trsbox
+     1.70%  [.] bobyqa::update::updateh
+     1.13%  [.] bobyqa::geometry::geostep
+     0.84%  [.] __ieee754_log_fma
+     0.73%  [.] bobyqa::bobyqb::bobyqb
+     0.65%  [.] engine_core::data_gen::generate_sim_data
+     0.58%  [.] bobyqa::powalg::calvlag_noadd
+     0.56%  [.] engine_core::glmm::glmm_block_solve
+     0.50%  [.] bobyqa::powalg::hess_mul_into
+
+
+#
+# (Tip: To compare hot regions in two workloads use perf record -b -o file ... ; perf diff --stream file1 file2)
+#

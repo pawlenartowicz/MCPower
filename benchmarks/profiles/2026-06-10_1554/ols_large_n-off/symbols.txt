@@ -1,0 +1,31 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377467
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    33.77%  [.] __GI___memmem
+    33.12%  [.] do_lookup_x
+    33.12%  [.] get_common_cache_info.constprop.0
+
+
+# Samples: 17K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 9740722549
+#
+# Overhead  Symbol                                                                                               
+# ........  .....................................................................................................
+#
+    62.74%  [.] engine_core::data_gen::generate_sim_data
+    17.23%  [.] engine_core::ols::OlsSuffStats::add_rows
+    15.67%  [.] engine_core::rng::SimRng::next_u32
+     3.91%  [.] engine_core::data_gen::draw_residual
+
+
+#
+# (Tip: If call chains don't work try perf record --call-graph dwarf or --call-graph lbr)
+#

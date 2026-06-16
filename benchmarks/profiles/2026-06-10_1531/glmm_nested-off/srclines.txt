@@ -1,0 +1,38 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377265
+#
+# Overhead  Symbol                     Source:Line      
+# ........  .........................  .................
+#
+    33.73%  [.] __GI___memmem          memmem.c:92
+    33.13%  [.] do_lookup_x            dl-lookup.c:436
+    33.13%  [.] do_tunable_update_val  dl-tunables.c:116
+
+
+# Samples: 60K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 32967157096
+#
+# Overhead  Symbol                                                                                               Source:Line                               
+# ........  ...................................................................................................  ..........................................
+#
+    50.60%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+    31.92%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:395
+     5.33%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:410
+     2.60%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:385
+     2.06%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:404
+     1.03%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     0.78%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     0.76%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+     0.51%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:0
+     0.36%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:338
+     0.33%  [.] engine_core::glmm::laplace_deviance                                                              matref.rs:399
+
+
+#
+# (Tip: Show estimate cycles per function and IPC in annotate use perf record -b ... ; perf report --total-cycles)
+#

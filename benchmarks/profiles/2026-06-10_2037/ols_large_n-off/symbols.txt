@@ -1,0 +1,31 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 353696
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    35.34%  [.] dl_main
+    33.04%  [.] _nl_load_locale_from_archive
+    31.62%  [.] _dl_relocate_object_no_relro
+
+
+# Samples: 18K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 9773088836
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    63.61%  [.] engine_core::data_gen::generate_sim_data
+    17.49%  [.] engine_core::ols::OlsSuffStats::add_rows
+    14.88%  [.] engine_core::rng::SimRng::next_u32
+     3.67%  [.] engine_core::data_gen::draw_residual
+
+
+#
+# (Tip: Print event counts in machine readable CSV format with: perf stat -x\;)
+#

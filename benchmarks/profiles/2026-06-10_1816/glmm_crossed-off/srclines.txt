@@ -1,0 +1,56 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377825
+#
+# Overhead  Symbol                            Source:Line      
+# ........  ................................  .................
+#
+    33.83%  [.] __strncmp_avx2                strcmp-avx2.S:337
+    33.08%  [.] __tunable_get_val             dl-tunables.c:450
+    33.08%  [.] _dl_relocate_object_no_relro  dl-machine.h:269
+
+
+# Samples: 19K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 10494697361
+#
+# Overhead  Symbol                                                                                               Source:Line                                    
+# ........  ...................................................................................................  ...............................................
+#
+    15.96%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4                                                 private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     9.74%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4                                                  private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     8.30%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+     6.52%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     5.14%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:406
+     4.45%  [.] pulp::x86::v3::V3::vectorize::imp                                                                lib.rs:1506
+     3.23%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n2                                                  private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     3.11%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+     2.75%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     1.82%  [.] pulp::x86::v3::V3::vectorize::imp                                                                fma.rs:51
+     1.73%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     1.57%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:313
+     1.23%  [.] engine_core::glmm::laplace_deviance                                                              matref.rs:399
+     1.17%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     1.17%  [.] pulp::x86::v3::V3::vectorize::imp                                                                uint_macros.rs:844
+     0.98%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+469
+     0.91%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:418
+     0.86%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:340
+     0.82%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:398
+     0.77%  [.] pulp::x86::v3::V3::vectorize::imp                                                                lib.rs:1491
+     0.76%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:0
+     0.71%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:311
+     0.67%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+882
+     0.60%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:35
+     0.46%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:408
+     0.41%  [.] pulp::x86::v3::V3::vectorize::imp                                                                mod.rs:793
+     0.33%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+422
+     0.30%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:378
+     0.30%  [.] bobyqa::linalg::matprod21_into                                                                   linalg.rs:53
+
+
+#
+# (Tip: To collect Processor Trace with samples use perf record -e '{intel_pt//,cycles}' ; perf script --call-trace or --insn-trace --xed -F +ipc (remove --xed if no xed))
+#

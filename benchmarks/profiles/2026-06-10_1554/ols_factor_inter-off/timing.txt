@@ -1,0 +1,2 @@
+case               mode     n  n_sims  elapsed_s fits_per_sec   conv   power  vs_baseline
+ols_factor_inter   off    200   10000      0.182        54879  1.000   0.973  0.99x

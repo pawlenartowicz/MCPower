@@ -1,0 +1,36 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377602
+#
+# Overhead  Symbol                            Source:Line      
+# ........  ................................  .................
+#
+    33.79%  [.] __strncmp_avx2                strcmp-avx2.S:322
+    33.10%  [.] _dl_next_ld_env_entry         dl-environ.c:34
+    33.10%  [.] _dl_relocate_object_no_relro  dl-reloc.c:170
+
+
+# Samples: 60K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 32906889664
+#
+# Overhead  Symbol                                                                                               Source:Line                                
+# ........  ...................................................................................................  ...........................................
+#
+    50.52%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+    34.98%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:395
+     4.75%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:410
+     2.59%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:385
+     1.58%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:404
+     0.65%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     0.50%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     0.46%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+     0.30%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:0
+
+
+#
+# (Tip: For parallelism histogram, try: perf report --hierarchy --sort latency,parallelism,comm,symbol)
+#

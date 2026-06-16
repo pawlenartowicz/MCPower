@@ -1,0 +1,43 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 348117
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    35.91%  [.] get_common_cache_info.constprop.0
+    32.49%  [k] 0xffffffff97201988
+    31.60%  [.] do_lookup_x
+
+
+# Samples: 1K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 800240529
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    42.34%  [.] engine_core::data_gen::generate_sim_data
+    14.97%  [.] engine_core::lme::LmeSuffStats::add_rows
+    13.17%  [.] engine_core::lme::profiled_deviance
+    12.07%  [.] engine_core::rng::SimRng::next_u32
+     4.70%  [.] engine_core::data_gen::draw_residual
+     2.27%  [.] __ieee754_log_fma
+     1.88%  [.] engine_core::critvals::betacf
+     1.56%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.88%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.54%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.47%  [.] faer::linalg::cholesky::ldlt::factor::cholesky_recursion_right_looking
+     0.47%  [.] faer::linalg::matmul::matmul_imp
+     0.41%  [.] engine_core::lme::lme_fit
+     0.34%  [.] faer::linalg::solvers::Solve::solve_in_place
+     0.34%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.34%  [.] faer::linalg::solvers::Llt<T>::new
+
+
+#
+# (Tip: To not record events from perf itself add --exclude-perf)
+#

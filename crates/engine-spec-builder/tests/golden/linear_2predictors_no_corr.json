@@ -1,0 +1,28 @@
+{
+  "input": {
+    "formula": "y = x1 + x2",
+    "predictors": [
+      { "name": "x1", "kind": "normal" },
+      { "name": "x2", "kind": "binary", "proportion": 0.3 }
+    ],
+    "effects": [
+      { "name": "x1", "size": 0.5 },
+      { "name": "x2", "size": 0.3 }
+    ],
+    "correlations": [],
+    "alpha": 0.05,
+    "correction": "bonferroni",
+    "targets": ["overall"],
+    "heterogeneity": 0.0,
+    "heteroskedasticity": {},
+    "residual": { "distribution": "normal", "df": 0.0 },
+    "max_failed_fraction": 0.1,
+    "scenarios": []
+  },
+  "expected_scenarios": ["optimistic"],
+  "expected_n_non_factor": 2,
+  "expected_n_factor_dummies": 0,
+  "expected_var_types": [0, 1],
+  "expected_effect_sizes": [0.0, 0.5, 0.3],
+  "expected_target_indices": [1, 2]
+}

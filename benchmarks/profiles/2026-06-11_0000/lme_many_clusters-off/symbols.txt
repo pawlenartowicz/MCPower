@@ -1,0 +1,41 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378998
+#
+# Overhead  Symbol             
+# ........  ...................
+#
+    34.04%  [.] main
+    32.98%  [.] __wcsnlen_ifunc
+    32.98%  [.] dl_main
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1085857039
+#
+# Overhead  Symbol                                                                                               
+# ........  .....................................................................................................
+#
+    33.34%  [.] engine_core::lme::profiled_deviance
+    18.87%  [.] engine_core::lme::LmeSuffStats::add_rows
+    13.28%  [.] engine_core::data_gen::generate_sim_data
+    10.48%  [.] engine_core::rng::fill_words
+    10.03%  [.] engine_core::rng::fill_normal_column
+     3.90%  [.] __ieee754_log_fma
+     1.48%  [.] engine_core::critvals::betacf
+     1.30%  [.] log@@GLIBC_2.29
+     1.15%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.14%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.94%  [.] engine_core::data_gen::draw_residual
+     0.70%  [.] engine_core::philox::philox4x32_10
+     0.35%  [.] faer::linalg::solvers::Llt<T>::new
+     0.30%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+
+
+#
+# (Tip: To show context switches in perf report sample context add --switch-events to perf record.)
+#

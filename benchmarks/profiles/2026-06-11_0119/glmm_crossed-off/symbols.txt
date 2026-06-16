@@ -1,0 +1,44 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    50.00%  [.] _dl_relocate_object_no_relro
+    50.00%  [.] memmove
+
+
+# Samples: 17K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 9589060205
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    31.95%  [.] engine_core::glmm::laplace_deviance
+    15.06%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+     9.70%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     9.41%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     6.64%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     5.07%  [.] pulp::x86::v3::V3::vectorize::imp
+     4.92%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.06%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n2
+     2.38%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     1.55%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.80%  [.] bobyqa::trustregion::trsbox
+     0.68%  [.] bobyqa::linalg::matprod12_into
+     0.62%  [.] bobyqa::linalg::matprod21_into
+     0.49%  [.] bobyqa::update::updateh
+     0.49%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.34%  [.] bobyqa::geometry::geostep
+     0.33%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.31%  [.] __memset_avx2_unaligned_erms
+
+
+#
+# (Tip: Use --symfs <dir> if your symbol files are in non-standard locations)
+#

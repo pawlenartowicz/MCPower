@@ -1,0 +1,28 @@
+[package]
+name = "engine-orchestrator"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+engine-contract = { path = "../engine-contract" }
+engine-core = { path = "../engine-core" }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+thiserror   = "1"
+indexmap    = "2"
+
+[dev-dependencies]
+rayon       = "1.10"
+engine-contract = { path = "../engine-contract", features = ["test-fixtures"] }
+engine-spec-builder = { path = "../engine-spec-builder" }
+approx = "0.5"
+rmp-serde = "1"
+insta = { version = "1", features = ["json"] }

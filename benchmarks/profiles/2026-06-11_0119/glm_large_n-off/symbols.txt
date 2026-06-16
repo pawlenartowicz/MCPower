@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    50.00%  [.] _dl_relocate_object_no_relro
+    50.00%  [.] dl_main
+
+
+# Samples: 8K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 4763297779
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
+# ........  ....................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    23.69%  [.] engine_core::data_gen::generate_sim_data
+    18.56%  [.] engine_core::glm::glm_irls_fit
+    14.83%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+    10.68%  [.] engine_core::rng::fill_words
+     8.26%  [.] engine_core::rng::fill_normal_column
+     5.32%  [.] __ieee754_exp_fma
+     5.10%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     2.95%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.87%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     2.82%  [.] exp@@GLIBC_2.29
+     1.40%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.18%  [.] __memset_avx2_unaligned_erms
+     0.66%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.39%  [.] __exp_finite@plt
+
+
+#
+# (Tip: To compute metrics for samples use perf record -e '{cycles,instructions}' ... ; perf script -F +metric)
+#

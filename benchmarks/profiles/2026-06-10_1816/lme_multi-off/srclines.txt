@@ -1,0 +1,81 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377318
+#
+# Overhead  Symbol                      Source:Line                
+# ........  ..........................  ...........................
+#
+    33.74%  [.] _nl_intern_locale_data  _nl_intern_locale_data+2721
+    33.13%  [.] dl_main                 rtld.c:1646
+    33.13%  [.] strcmp                  strcmp-sse2.S:160
+
+
+# Samples: 3K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1950316852
+#
+# Overhead  Symbol                                                                                               Source:Line                                
+# ........  ...................................................................................................  ...........................................
+#
+     7.92%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:167
+     4.86%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         lme.rs:204
+     3.28%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:27
+     3.25%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     3.06%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:219
+     2.73%  [.] engine_core::lme::profiled_deviance                                                              const_ptr.rs:384
+     2.50%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:62
+     2.39%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         range.rs:772
+     2.36%  [.] engine_core::data_gen::generate_sim_data                                                         cmp.rs:1916
+     2.31%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:191
+     2.25%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:563
+     2.22%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:19
+     2.22%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:52
+     2.11%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         lib.rs:700
+     1.95%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:0
+     1.95%  [.] engine_core::lme::profiled_deviance                                                              lib.rs:700
+     1.95%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     1.94%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:272
+     1.81%  [.] engine_core::lme::profiled_deviance                                                              range.rs:772
+     1.78%  [.] engine_core::lme::profiled_deviance                                                              lme.rs:288
+     1.47%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         lme.rs:0
+     1.47%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         cmp.rs:1916
+     1.44%  [.] engine_core::rng::SimRng::next_u32                                                               uint_macros.rs:2457
+     1.44%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:192
+     1.42%  [.] engine_core::lme::profiled_deviance                                                              matref.rs:399
+     1.36%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:67
+     1.20%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:118
+     1.14%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:524
+     1.11%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:167
+     1.08%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:767
+     1.08%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:189
+     1.06%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:210
+     1.03%  [.] engine_core::data_gen::generate_sim_data                                                         const_ptr.rs:384
+     0.97%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:0
+     0.94%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         matref.rs:398
+     0.92%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         uint_macros.rs:844
+     0.86%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:221
+     0.80%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:53
+     0.75%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:20
+     0.75%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:1169
+     0.67%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:60
+     0.61%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         lme.rs:206
+     0.53%  [.] engine_core::lme::profiled_deviance                                                              lme.rs:0
+     0.53%  [.] engine_core::lme::profiled_deviance                                                              lme.rs:302
+     0.50%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:229
+     0.50%  [.] __ieee754_log_fma                                                                                e_log.c:130
+     0.45%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:383
+     0.44%  [.] engine_core::data_gen::generate_sim_data                                                         matown.rs:1501
+     0.42%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         lme.rs:195
+     0.42%  [.] engine_core::lme::LmeSuffStats::add_rows                                                         lib.rs:0
+     0.42%  [.] engine_core::lme::profiled_deviance                                                              lme.rs:285
+     0.42%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:525
+     0.36%  [.] engine_core::lme::profiled_deviance                                                              matref.rs:41
+     0.36%  [.] engine_core::data_gen::generate_sim_data                                                         mod.rs:1815
+
+
+#
+# (Tip: To only collect call graph on one event use perf record -e cpu/cpu-cycles,callgraph=1/,branches ; perf report --show-ref-call-graph)
+#

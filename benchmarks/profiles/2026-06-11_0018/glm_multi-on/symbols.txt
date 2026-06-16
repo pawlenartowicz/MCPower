@@ -1,0 +1,47 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol     
+# ........  ...........
+#
+   100.00%  [.] dl_main
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5952415275
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    25.19%  [.] engine_core::data_gen::generate_sim_data
+    10.96%  [.] engine_core::glm::glm_irls_fit
+     9.68%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     7.76%  [.] engine_core::rng::fill_words
+     6.90%  [.] engine_core::rng::fill_normal_column
+     5.94%  [.] __ieee754_exp_fma
+     4.30%  [.] exp@@GLIBC_2.29
+     4.06%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4
+     3.99%  [.] __ieee754_log_fma
+     3.21%  [.] gemm_v0_gemm_pack_f64_simd256_m8
+     3.02%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2
+     2.81%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.50%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.28%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.86%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.63%  [.] engine_core::critvals::betacf
+     0.55%  [.] log@@GLIBC_2.29
+     0.55%  [.] __exp_finite@plt
+     0.54%  [.] engine_core::philox::philox4x32_10
+     0.46%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.46%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.31%  [.] __memset_avx2_unaligned_erms
+
+
+#
+# (Tip: Use parent filter to see specific call path: perf report -p <regex>)
+#

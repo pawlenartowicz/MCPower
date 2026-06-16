@@ -1,0 +1,7 @@
+date: 2026-06-11_0119
+git: bf44802+dirty
+case: glm_multi  mode: off
+pin_core: 2  perf_freq: 4000
+no_turbo: 1  governor: performance
+cpu: Intel(R) Core(TM) Ultra 7 265H
+perf.data + binaries: /tmp/mcpower-profile/2026-06-11_0119 (tmpfs — gone on reboot)

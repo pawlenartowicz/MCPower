@@ -1,0 +1,72 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377674
+#
+# Overhead  Symbol         Source:Line      
+# ........  .............  .................
+#
+    33.81%  [.] setlocale  setlocale.c:361
+    33.10%  [.] strcmp     strcmp-sse2.S:157
+    33.10%  [.] strlen     strlen-sse2.S:102
+
+
+# Samples: 3K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1749251300
+#
+# Overhead  Symbol                                                                                                 Source:Line                               
+# ........  .....................................................................................................  ..........................................
+#
+     9.34%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           range.rs:772
+     7.07%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           ols.rs:97
+     6.33%  [.] engine_core::rng::fill_normal_column                                                               rng.rs:254
+     6.05%  [.] engine_core::data_gen::generate_sim_data                                                           range.rs:772
+     4.99%  [.] engine_core::rng::fill_words                                                                       philox.rs:27
+     4.46%  [.] engine_core::rng::fill_words                                                                       philox.rs:20
+     3.76%  [.] engine_core::rng::fill_words                                                                       philox.rs:19
+     3.74%  [.] engine_core::data_gen::generate_sim_data                                                           data_gen.rs:244
+     3.27%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           lib.rs:700
+     3.25%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           cmp.rs:1916
+     3.22%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           lib.rs:0
+     2.98%  [.] engine_core::data_gen::generate_sim_data                                                           data_gen.rs:237
+     2.85%  [.] engine_core::rng::fill_normal_column                                                               rng.rs:232
+     2.75%  [.] engine_core::rng::fill_normal_column                                                               rng.rs:303
+     2.44%  [.] engine_core::rng::fill_normal_column                                                               f32.rs:1570
+     2.25%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                         avx.rs:48
+     2.14%  [.] engine_core::data_gen::generate_sim_data                                                           data_gen.rs:612
+     1.67%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           ols.rs:91
+     1.40%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           ols.rs:99
+     1.30%  [.] engine_core::data_gen::generate_sim_data                                                           data_gen.rs:611
+     1.02%  [.] engine_core::data_gen::generate_sim_data                                                           lib.rs:700
+     0.97%  [.] engine_core::rng::fill_words                                                                       mod.rs:547
+     0.87%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           uint_macros.rs:844
+     0.78%  [.] engine_core::data_gen::generate_sim_data                                                           range.rs:0
+     0.77%  [.] engine_core::data_gen::generate_sim_data                                                           macros.rs:180
+     0.68%  [.] engine_core::rng::fill_words                                                                       range.rs:772
+     0.65%  [.] engine_core::rng::fill_words                                                                       uint_macros.rs:0
+     0.59%  [.] engine_core::data_gen::generate_sim_data                                                           data_gen.rs:619
+     0.56%  [.] engine_core::data_gen::generate_sim_data                                                           index.rs:272
+     0.53%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           ols.rs:101
+     0.52%  [.] engine_core::rng::fill_normal_column                                                               mod.rs:1028
+     0.50%  [.] engine_core::data_gen::generate_sim_data                                                           data_gen.rs:651
+     0.47%  [.] engine_core::data_gen::generate_sim_data                                                           uint_macros.rs:844
+     0.46%  [.] engine_core::ols::OlsSuffStats::add_rows                                                           ols.rs:0
+     0.43%  [.] engine_core::data_gen::generate_sim_data                                                           uint_macros.rs:0
+     0.40%  [.] engine_core::rng::fill_words                                                                       rng.rs:148
+     0.40%  [.] engine_core::data_gen::generate_sim_data                                                           matown.rs:1521
+     0.40%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                         rng.rs:201
+     0.37%  [.] engine_core::data_gen::generate_sim_data                                                           data_gen.rs:448
+     0.37%  [.] engine_core::philox::philox4x32_10                                                                 philox.rs:27
+     0.37%  [.] engine_core::rng::fill_normal_column                                                               rng.rs:230
+     0.31%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                         macros.rs:180
+     0.31%  [.] engine_core::ols::fit_suff_stats_t_sq                                                              range.rs:772
+     0.31%  [.] __memmove_avx_unaligned_erms                                                                       memmove-vec-unaligned-erms.S:342
+     0.31%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                         avx.rs:283
+
+
+#
+# (Tip: If you have debuginfo enabled, try: perf report -s sym,srcline)
+#

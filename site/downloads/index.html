@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Downloads — MCPower</title>
+    <meta
+      name="description"
+      content="Get MCPower: desktop installers, pip install mcpower for Python, R-universe for R — or run it in the browser."
+    />
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <!-- Fonts are self-hosted via @font-face in ../style.css (no Google CDN). -->
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <div class="backdrop" aria-hidden="true"></div>
+
+    <main class="page">
+      <nav class="crumb rise" style="--i: 0" aria-label="Breadcrumb">
+        <a href="../">← mcpower.app</a>
+      </nav>
+
+      <h1 class="title rise" style="--i: 1">Downloads</h1>
+
+      <section class="dl" aria-label="Install options">
+        <article class="dl-card rise" style="--i: 2">
+          <h2>Desktop app</h2>
+          <div class="dl-body">
+            <p>Native installers — grab the build for your platform from GitHub Releases.</p>
+            <nav class="links">
+              <a href="https://github.com/pawlenartowicz/MCPower/releases">Linux <span class="ext">AppImage · deb</span></a>
+              <a href="https://github.com/pawlenartowicz/MCPower/releases">Windows <span class="ext">msi</span></a>
+              <a href="https://github.com/pawlenartowicz/MCPower/releases">macOS <span class="ext">dmg</span></a>
+            </nav>
+          </div>
+        </article>
+
+        <article class="dl-card rise" style="--i: 3">
+          <h2>Python</h2>
+          <div class="dl-body">
+            <p>From PyPI:</p>
+            <div class="snippet">
+              <code>pip install mcpower</code>
+              <button class="copy" type="button" aria-label="Copy install command">copy</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="dl-card rise" style="--i: 4">
+          <h2>R</h2>
+          <div class="dl-body">
+            <p>From R-universe:</p>
+            <div class="snippet">
+              <code>install.packages("mcpower", repos = "https://pawlenartowicz.r-universe.dev")</code>
+              <button class="copy" type="button" aria-label="Copy install command">copy</button>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="tutorials rise" style="--i: 5" aria-label="Tutorials">
+        <h2>New here? Start with a tutorial</h2>
+        <nav class="links">
+          <a href="https://docs.mcpower.app/tutorial-app/">App tutorial</a>
+          <a href="https://docs.mcpower.app/tutorial-python/">Python tutorial</a>
+          <a href="https://docs.mcpower.app/tutorial-r/">R tutorial</a>
+        </nav>
+      </section>
+
+      <p class="foot rise" style="--i: 6">
+        Or skip the install — <a href="/online/">run MCPower in your browser</a>.
+      </p>
+    </main>
+
+    <script>
+      document.querySelectorAll('.copy').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const code = btn.closest('.snippet').querySelector('code');
+          navigator.clipboard.writeText(code.textContent).then(
+            () => {
+              btn.textContent = 'copied';
+              btn.classList.add('done');
+              setTimeout(() => {
+                btn.textContent = 'copy';
+                btn.classList.remove('done');
+              }, 1600);
+            },
+            () => {
+              // clipboard API unavailable — select the text so the user can copy manually
+              const range = document.createRange();
+              range.selectNodeContents(code);
+              const sel = getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          );
+        });
+      });
+    </script>
+  </body>
+</html>

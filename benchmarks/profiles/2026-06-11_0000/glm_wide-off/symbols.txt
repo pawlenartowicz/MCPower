@@ -1,0 +1,49 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                 
+# ........  .......................
+#
+    50.00%  [.] _dl_lookup_symbol_x
+    50.00%  [k] 0xffffffff97201988
+
+
+# Samples: 7K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3863854883
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    21.00%  [.] engine_core::data_gen::generate_sim_data
+    13.58%  [.] engine_core::glm::glm_irls_fit
+    10.75%  [.] engine_core::rng::fill_normal_column
+     9.59%  [.] engine_core::rng::fill_words
+     8.57%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+     6.94%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     5.34%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     4.23%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     3.27%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.54%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.00%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.11%  [.] __ieee754_exp_fma
+     1.01%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     0.73%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.67%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.60%  [.] engine_core::philox::philox4x32_10
+     0.56%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.52%  [.] exp@@GLIBC_2.29
+     0.52%  [.] __memset_avx2_unaligned_erms
+     0.42%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.39%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.34%  [.] engine_core::critvals::betacf
+     0.34%  [.] faer::linalg::matmul::matmul_imp
+
+
+#
+# (Tip: To show context switches in perf report sample context add --switch-events to perf record.)
+#

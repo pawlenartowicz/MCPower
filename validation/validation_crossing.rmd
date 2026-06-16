@@ -1,0 +1,239 @@
+---
+output:
+  md_document:
+    variant: gfm+tex_math_dollars
+---
+
+# MCPower validation — Model-based crossing estimate
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+# Run from mcpower/validation/ (rmarkdown::render sets wd to this file's dir).
+source("common.R")     # build_model, parse_effects
+source("tolerances.R") # CROSSING_TOL — the central L3 crossing gate
+source("formulas.R")   # CROSS_CASES — the case list shared with regression.R
+
+# Full-size campaign knobs (smoke-test with reduced values: N_SIMS_DENSE=2000,
+# BY_DENSE=10, N_SIMS_COARSE=800 — knit once to verify, then restore):
+N_SIMS_DENSE  <- 100000L   # dense ground-truth sims (MC error ~0.3% at N=100)
+BY_DENSE      <- 2L        # dense grid step
+N_SIMS_COARSE <- 1600L     # coarse auto-grid sims (default campaign cadence)
+FROM_SIZE     <- 20L
+TO_SIZE       <- 300L
+
+# Seeds — MCPower-golden discipline: committed seeds so the results are
+# reproducible; changing them changes the validation data (not a regression).
+SEED_DENSE  <- 2137L
+SEED_COARSE <- 2138L       # different seed so the two runs are independent
+```
+
+# What this report shows
+
+The model-based crossing feature fits an isotonic (PAVA) regression of the
+simulated power-vs-N curve and reports the interpolated N where the fit
+crosses the target — this is `n_achievable`, the headline "Required N". The
+fit also provides a Wilson-band 95% CI on that crossing, rounded outward to
+integers (`ci_lo`, `ci_hi`).
+
+This report checks that the coarse default grid (~12 auto-placed points at
+1 600 sims) agrees with a dense ground truth (step-2 grid at 100 000 sims):
+
+- **Accuracy gate:** |coarse n_achievable − dense n_achievable| / dense ≤ `CROSSING_TOL$n_rel`.
+- **Coverage gate:** `[floor(ci_lo), ceiling(ci_hi)]` brackets the dense crossing.
+
+Cases: OLS two-predictor (`cross_ols`), logistic two-predictor (`cross_glm`),
+LME random-intercept (`cross_lme`), and OLS with a small second effect
+(`cross_partial`) where x2=0.05 is NOT expected to reach 80% within the grid.
+
+# How the check works
+
+1. **Dense run** — `by = 2` over `[FROM_SIZE, TO_SIZE]` at `N_SIMS_DENSE` sims.
+   The dense empirical crossing per target is `n_achievable` from `fitted`.
+2. **Coarse run** — auto-grid (~12 points) at `N_SIMS_COARSE` sims.
+   The coarse estimate is `n_achievable` + `[ci_lo, ci_hi]` from `fitted`.
+3. Gates are computed per **fitted** target from the two runs.
+
+# The thresholds
+
+| Quantity | Allowed difference | Why |
+|---|---|---|
+| `n_rel` | ≤ `CROSSING_TOL$n_rel` = `r CROSSING_TOL$n_rel` | Relative band on \|coarse − dense\| / dense. Smoke measured worst: 0.023 (4× safety → 0.10). |
+| CI coverage | boolean | [floor(ci_lo), ceil(ci_hi)] must contain the dense truth. |
+
+```{r run-cases, cache=FALSE, results='asis'}
+# Helper: build an MCPower (not Debug) from a CROSS_CASES entry — the crossing
+# feature uses find_sample_size, a public orchestrator entry point.
+build_cross_model <- function(cc) {
+  m <- MCPower$new(cc$formula)
+  m$set_effects(cc$effects)
+  if (!is.null(cc$baseline_probability)) m$set_baseline_probability(cc$baseline_probability)
+  if (!is.null(cc$cluster)) {
+    cl <- cc$cluster
+    m$set_cluster(cl$var, ICC = cl$ICC,
+                  n_clusters = cl$n_clusters %||% NULL,
+                  cluster_size = cl$cluster_size %||% NULL)
+  }
+  m
+}
+
+# Accumulate one gate table row per (case, target).
+all_rows <- list()
+
+for (cc in CROSS_CASES) {
+  cat(sprintf("\n# Case: %s\n\n", cc$label))
+
+  m <- build_cross_model(cc)
+
+  # Dense run.
+  dense_res <- m$find_sample_size(
+    from_size = FROM_SIZE, to_size = TO_SIZE, by = BY_DENSE,
+    n_sims = N_SIMS_DENSE, seed = SEED_DENSE,
+    verbose = FALSE, progress_callback = FALSE
+  )
+  dense_fitted <- dense_res$fitted
+
+  # Coarse run (auto-grid: no `by` argument).
+  coarse_res <- m$find_sample_size(
+    from_size = FROM_SIZE, to_size = TO_SIZE,
+    n_sims = N_SIMS_COARSE, seed = SEED_COARSE,
+    verbose = FALSE, progress_callback = FALSE
+  )
+  coarse_fitted <- coarse_res$fitted
+
+  # cluster_atom > 1 for LME: the engine rounds to the nearest multiple.
+  cat(sprintf("cluster_atom: dense=%d  coarse=%d\n\n",
+              dense_res$cluster_atom, coarse_res$cluster_atom))
+
+  target_labels <- names(parse_effects(cc$effects))
+  n_targets <- length(target_labels)
+
+  # Identify which target is the deliberately small / not-fitted one.
+  # For cross_partial, the last effect (x2=0.05) is the partial target.
+  partial_label <- if (cc$label == "cross_partial") target_labels[n_targets] else NULL
+
+  rows <- lapply(seq_len(n_targets), function(i) {
+    key   <- as.character(i - 1L)
+    d     <- dense_fitted[[key]]
+    c_fit <- coarse_fitted[[key]]
+    lbl   <- target_labels[i]
+
+    # For the partial target, not-fitted in dense is expected; skip accuracy gate.
+    is_partial_target <- !is.null(partial_label) && lbl == partial_label
+    dense_fitted_ok   <- d$status == "fitted"
+    coarse_fitted_ok  <- c_fit$status == "fitted"
+
+    dense_n   <- if (dense_fitted_ok)  d$n_achievable  else NA_integer_
+    coarse_n  <- if (coarse_fitted_ok) c_fit$n_achievable else NA_integer_
+
+    rel_diff <- if (!is.na(dense_n) && !is.na(coarse_n)) {
+      abs(coarse_n - dense_n) / dense_n
+    } else NA_real_
+    acc_ok <- if (is_partial_target) NA else {
+      # Designed-to-fit target: require both fitted and within tolerance.
+      dense_fitted_ok && coarse_fitted_ok && !is.na(rel_diff) &&
+        rel_diff <= CROSSING_TOL$n_rel
+    }
+
+    ci_lo_int <- if (!is.null(c_fit$ci_lo)) floor(c_fit$ci_lo) else NA_integer_
+    ci_hi_int <- if (!is.null(c_fit$ci_hi)) ceiling(c_fit$ci_hi) else NA_integer_
+    cov_ok <- if (is_partial_target || is.na(dense_n)) NA else {
+      !is.na(ci_lo_int) && !is.na(ci_hi_int) &&
+        ci_lo_int <= dense_n && dense_n <= ci_hi_int
+    }
+
+    data.frame(
+      Case          = cc$label,
+      Target        = lbl,
+      Partial       = is_partial_target,
+      Dense_status  = d$status,
+      Dense_N       = dense_n,
+      Coarse_status = c_fit$status,
+      Coarse_N      = coarse_n,
+      Rel_diff      = if (!is.na(rel_diff)) round(rel_diff, 4) else NA_real_,
+      Acc_threshold = CROSSING_TOL$n_rel,
+      Acc_PASS      = acc_ok,
+      CI            = sprintf("[%s, %s]",
+                              if (is.na(ci_lo_int)) "NA" else ci_lo_int,
+                              if (is.na(ci_hi_int)) "NA" else ci_hi_int),
+      Cov_PASS      = cov_ok,
+      stringsAsFactors = FALSE
+    )
+  })
+  case_table <- do.call(rbind, rows)
+  all_rows <- c(all_rows, list(case_table))
+
+  cat(knitr::kable(case_table[, c("Target", "Partial", "Dense_status", "Dense_N",
+                                   "Coarse_status", "Coarse_N", "Rel_diff",
+                                   "Acc_PASS", "CI", "Cov_PASS")],
+                   caption = sprintf("Crossing gates — %s", cc$label),
+                   format = "pipe"), sep = "\n")
+  cat("\n\n")
+
+  # Diagnostics.
+  cat(sprintf("Dense run:  sample_sizes %d - %d, %d points, %d sims\n",
+              min(as.numeric(dense_res$sample_sizes)),
+              max(as.numeric(dense_res$sample_sizes)),
+              length(dense_res$sample_sizes),
+              dense_res$n_sims))
+  cat(sprintf("Coarse run: sample_sizes %d - %d, %d points, %d sims\n",
+              min(as.numeric(coarse_res$sample_sizes)),
+              max(as.numeric(coarse_res$sample_sizes)),
+              length(coarse_res$sample_sizes),
+              coarse_res$n_sims))
+  cat("\n")
+
+  # cross_partial: assert the partial target is NOT fitted (expected behaviour).
+  if (cc$label == "cross_partial") {
+    partial_row <- case_table[case_table$Target == partial_label, , drop = FALSE]
+    if (partial_row$Dense_status == "fitted")
+      stop(sprintf("cross_partial: expected x2 target NOT fitted in dense run (too small to reach 80%%); got status='fitted', n=%d",
+                   partial_row$Dense_N))
+    cat(sprintf("cross_partial: partial target (%s) is not-fitted as expected (status=%s).\n\n",
+                partial_label, partial_row$Dense_status))
+  }
+
+  # Gate: all DESIGNED-TO-FIT targets (non-partial) must pass acc + cov.
+  fit_rows <- case_table[!case_table$Partial, , drop = FALSE]
+  stat_fail <- any(fit_rows$Dense_status != "fitted" | fit_rows$Coarse_status != "fitted")
+  # isTRUE is not vectorised; use direct logical negation (NA -> TRUE, which triggers failure).
+  acc_fail  <- any(!fit_rows$Acc_PASS %in% TRUE)
+  cov_fail  <- any(!fit_rows$Cov_PASS %in% TRUE)
+  if (stat_fail)
+    stop(sprintf("[%s] Expected status=='fitted' for all designed-to-fit targets in both runs.", cc$label))
+  if (acc_fail)
+    stop(sprintf("[%s] Accuracy gate FAILED: max rel_diff = %.4f > %.4f",
+                 cc$label, max(fit_rows$Rel_diff, na.rm = TRUE), CROSSING_TOL$n_rel))
+  if (cov_fail)
+    stop(sprintf("[%s] Coverage gate FAILED: CI does not bracket the dense crossing.", cc$label))
+
+  # Freeze dense fitted crossings for the fitted targets to data/<label>.golden.rds.
+  # Stores per-target dense n_achievable keyed by target label; regression.R
+  # loads this and compares the cheap coarse run within CROSSING_TOL$n_rel.
+  dense_golden <- lapply(seq_len(n_targets), function(i) {
+    key <- as.character(i - 1L)
+    d   <- dense_fitted[[key]]
+    list(status = d$status, n_achievable = d$n_achievable)
+  })
+  names(dense_golden) <- target_labels
+  saveRDS(
+    list(label = cc$label, frozen_on = as.character(Sys.Date()),
+         n_sims = N_SIMS_DENSE, by = BY_DENSE,
+         from_size = FROM_SIZE, to_size = TO_SIZE,
+         seed = SEED_DENSE,
+         dense = dense_golden),
+    file = file.path("data", paste0(cc$label, ".golden.rds"))
+  )
+  cat(sprintf("Golden frozen: data/%s.golden.rds\n\n", cc$label))
+}
+
+cat("All gates PASS.\n")
+```
+
+# Summary
+
+```{r summary-table}
+gate_table <- do.call(rbind, all_rows)
+knitr::kable(gate_table[, c("Case", "Target", "Partial", "Dense_N", "Coarse_N",
+                              "Rel_diff", "Acc_PASS", "Cov_PASS")],
+             caption = "All crossing gates across all cases")
+```

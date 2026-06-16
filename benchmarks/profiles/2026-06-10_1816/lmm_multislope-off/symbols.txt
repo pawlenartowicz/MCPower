@@ -1,0 +1,51 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 367625
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    34.00%  [.] _dl_relocate_object_no_relro
+    34.00%  [.] strlen
+    32.00%  [.] _nl_intern_locale_data
+
+
+# Samples: 16K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 9163553023
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    44.26%  [.] engine_core::lmm::reml_deviance
+     8.83%  [.] bobyqa::linalg::matprod21_into
+     6.45%  [.] bobyqa::linalg::matprod12_into
+     5.89%  [.] bobyqa::update::updateh
+     4.52%  [.] bobyqa::trustregion::trsbox
+     4.31%  [.] bobyqa::geometry::geostep
+     3.74%  [.] engine_core::data_gen::generate_sim_data
+     2.41%  [.] __ieee754_log_fma
+     2.39%  [.] bobyqa::bobyqb::bobyqb
+     2.28%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     1.66%  [.] bobyqa::powalg::calvlag_noadd
+     1.49%  [.] bobyqa::powalg::hess_mul_into
+     1.43%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.19%  [.] engine_core::rng::SimRng::next_u32
+     0.88%  [.] bobyqa::powalg::calden_into
+     0.76%  [.] __memset_avx2_unaligned_erms
+     0.65%  [.] bobyqa::geometry::setdrop_tr
+     0.58%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.53%  [.] engine_core::data_gen::draw_residual
+     0.51%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.47%  [.] bobyqa::update::tryqalt
+     0.41%  [.] bobyqa::linalg::matprod22_into
+     0.38%  [.] log@@GLIBC_2.29
+     0.34%  [.] bobyqa::bobyqb::shiftbase
+
+
+#
+# (Tip: System-wide collection from all CPUs: perf record -a)
+#

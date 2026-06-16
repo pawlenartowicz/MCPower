@@ -1,0 +1,24 @@
+[package]
+name = "engine-r"
+version = "0.0.0"
+edition = "2021"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+publish = false
+description = "R adapter for the MCPower engine (extendr)"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+engine-contract     = { path = "../engine-contract" }
+engine-core         = { path = "../engine-core" }
+engine-orchestrator = { path = "../engine-orchestrator" }
+engine-spec-builder = { path = "../engine-spec-builder" }
+extendr-api         = "0.9"
+rmp-serde           = "1"
+serde               = { version = "1", features = ["derive"] }
+serde_json          = "1"

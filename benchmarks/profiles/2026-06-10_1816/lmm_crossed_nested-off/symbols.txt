@@ -1,0 +1,52 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378342
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.92%  [.] _nl_intern_locale_data
+    33.04%  [.] __GI___tunable_set_val
+    33.04%  [.] _dl_relocate_object_no_relro
+
+
+# Samples: 6K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3635521501
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    46.47%  [.] engine_core::lmm::reml_deviance
+     9.31%  [.] engine_core::data_gen::generate_sim_data
+     5.56%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     4.35%  [.] bobyqa::linalg::matprod12_into
+     3.98%  [.] bobyqa::trustregion::trsbox
+     3.60%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.53%  [.] engine_core::rng::SimRng::next_u32
+     2.46%  [.] bobyqa::linalg::matprod21_into
+     2.23%  [.] __ieee754_log_fma
+     2.10%  [.] bobyqa::update::updateh
+     2.05%  [.] bobyqa::geometry::geostep
+     1.79%  [.] bobyqa::bobyqb::bobyqb
+     1.58%  [.] bobyqa::powalg::calvlag_noadd
+     0.95%  [.] engine_core::data_gen::draw_residual
+     0.91%  [.] __memset_avx2_unaligned_erms
+     0.82%  [.] bobyqa::powalg::hess_mul_into
+     0.69%  [.] bobyqa::powalg::calden_into
+     0.60%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.46%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.45%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.42%  [.] engine_core::critvals::betacf
+     0.42%  [.] libpulp_v0_22_2_ld_b32s_1111111100000000
+     0.37%  [.] bobyqa::linalg::matprod22_into
+     0.34%  [.] bobyqa::geometry::setdrop_tr
+     0.32%  [.] log@@GLIBC_2.29
+
+
+#
+# (Tip: To only collect call graph on one event use perf record -e cpu/cpu-cycles,callgraph=1/,branches ; perf report --show-ref-call-graph)
+#

@@ -1,0 +1,2 @@
+case               mode     n  n_sims  elapsed_s fits_per_sec   conv   power  ev/fit ev/f_cv  vs_baseline
+lmm_slope          off    480    1000      0.259         3856  1.000   0.459    34.9    34.9  1.00x

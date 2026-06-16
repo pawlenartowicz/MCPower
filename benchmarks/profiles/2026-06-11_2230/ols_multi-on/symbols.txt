@@ -1,0 +1,44 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378913
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    34.02%  [.] sysmalloc
+    32.99%  [.] do_lookup_x
+    32.99%  [.] get_common_cache_info.constprop.0
+
+
+# Samples: 7K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3872065835
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    25.80%  [.] engine_core::data_gen::generate_sim_data
+    21.75%  [.] engine_core::ols::OlsSuffStats::add_rows
+    17.33%  [.] engine_core::rng::fill_normal_column
+    15.84%  [.] engine_core::rng::fill_words
+     3.74%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     3.39%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.87%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.03%  [.] engine_core::critvals::betacf
+     0.89%  [.] engine_core::philox::philox4x32_10
+     0.87%  [.] engine_core::scenarios::perturb_correlation
+     0.81%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.78%  [.] engine_core::ols::fit_suff_stats_t_sq
+     0.46%  [.] __memmove_avx_unaligned_erms
+     0.45%  [.] __ieee754_log_fma
+     0.41%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.34%  [.] __memset_avx2_unaligned_erms
+     0.32%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+
+
+#
+# (Tip: To see list of saved events and attributes: perf evlist -v)
+#

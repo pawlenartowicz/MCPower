@@ -1,0 +1,88 @@
+---
+source: crates/engine-orchestrator/tests/plot.rs
+expression: "parse(&power_at_n_spec(&single_scenario(), &opts))"
+---
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "ci_hi": 0.86,
+        "ci_lo": 0.8,
+        "power": 0.83,
+        "scenario": "optimistic",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.74,
+        "ci_lo": 0.67,
+        "power": 0.71,
+        "scenario": "optimistic",
+        "target": "target_2"
+      }
+    ]
+  },
+  "height": 112.0,
+  "layer": [
+    {
+      "encoding": {
+        "x": {
+          "field": "power",
+          "scale": {
+            "domain": [
+              0,
+              1
+            ]
+          },
+          "title": "Power",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "target",
+          "scale": {
+            "paddingInner": 0.4,
+            "paddingOuter": 0
+          },
+          "title": "Effect",
+          "type": "nominal"
+        }
+      },
+      "mark": "bar"
+    },
+    {
+      "encoding": {
+        "x": {
+          "field": "ci_lo",
+          "title": "Power",
+          "type": "quantitative"
+        },
+        "x2": {
+          "field": "ci_hi"
+        },
+        "y": {
+          "field": "target",
+          "title": "Effect",
+          "type": "nominal"
+        }
+      },
+      "mark": "errorbar"
+    },
+    {
+      "encoding": {
+        "x": {
+          "datum": 0.8,
+          "type": "quantitative"
+        }
+      },
+      "mark": {
+        "strokeDash": [
+          4,
+          4
+        ],
+        "type": "rule"
+      }
+    }
+  ],
+  "title": "Power at N=120",
+  "width": 360.0
+}

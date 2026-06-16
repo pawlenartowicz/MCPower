@@ -1,0 +1,2 @@
+case               mode     n  n_sims  elapsed_s fits_per_sec   conv   power  vs_baseline
+lme_multi          off    500    2000      0.226         8863  1.000   0.907  0.98x

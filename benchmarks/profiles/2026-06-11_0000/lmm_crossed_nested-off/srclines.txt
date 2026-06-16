@@ -1,0 +1,89 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378132
+#
+# Overhead  Symbol                            Source:Line                     
+# ........  ................................  ................................
+#
+    33.89%  [.] _nl_load_locale_from_archive  _nl_load_locale_from_archive+431
+    33.06%  [.] __tls_pre_init_tp             dl-tls_init_tp.c:57
+    33.06%  [.] _dl_lookup_symbol_x           dl-new-hash.h:74
+
+
+# Samples: 4K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 2555213542
+#
+# Overhead  Symbol                                                                                                                                               Source:Line                                    
+# ........  ...................................................................................................................................................  ...............................................
+#
+     6.53%  [.] engine_core::lmm::reml_deviance                                                                                                                  range.rs:772
+     3.22%  [.] bobyqa::linalg::matprod12_into                                                                                                                   range.rs:772
+     2.33%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4                                                                                                 private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     1.74%  [.] engine_core::lmm::reml_deviance                                                                                                                  lmm.rs:1032
+     1.65%  [.] __memset_avx2_unaligned_erms                                                                                                                     memset-vec-unaligned-erms.S:199
+     1.57%  [.] _int_malloc                                                                                                                                      malloc.c:4354
+     1.48%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   range.rs:772
+     1.44%  [.] engine_core::lmm::reml_deviance                                                                                                                  range.rs:0
+     1.23%  [.] engine_core::lmm::reml_deviance                                                                                                                  cmp.rs:1916
+     1.21%  [.] bobyqa::linalg::matprod21_into                                                                                                                   linalg.rs:53
+     1.08%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   uint_macros.rs:844
+     1.06%  [.] engine_core::lmm::reml_deviance                                                                                                                  uint_macros.rs:844
+     1.00%  [.] engine_core::lmm::reml_deviance                                                                                                                  lmm.rs:1052
+     0.99%  [.] bobyqa::linalg::matprod21_into                                                                                                                   range.rs:772
+     0.95%  [.] engine_core::rng::fill_words                                                                                                                     philox.rs:27
+     0.95%  [.] bobyqa::powalg::calvlag_noadd                                                                                                                    range.rs:772
+     0.89%  [.] __ieee754_log_fma                                                                                                                                e_log.c:130
+     0.87%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m12_n4                                                                              private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     0.78%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   lmm.rs:406
+     0.76%  [.] engine_core::rng::fill_words                                                                                                                     philox.rs:20
+     0.76%  [.] engine_core::lmm::reml_deviance                                                                                                                  mod.rs:1851
+     0.76%  [.] engine_core::rng::fill_normal_column                                                                                                             rng.rs:242
+     0.72%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   index.rs:272
+     0.68%  [.] engine_core::lmm::reml_deviance                                                                                                                  lmm.rs:1020
+     0.68%  [.] bobyqa::linalg::matprod12_into                                                                                                                   range.rs:0
+     0.66%  [.] bobyqa::trustregion::trsbox                                                                                                                      range.rs:772
+     0.64%  [.] bobyqa::update::updateh                                                                                                                          range.rs:772
+     0.63%  [.] pulp::x86::v3::V3::vectorize::imp                                                                                                                x86.rs:263
+     0.62%  [.] engine_core::lmm::reml_deviance                                                                                                                  lmm.rs:947
+     0.59%  [.] bobyqa::linalg::matprod12_into                                                                                                                   mat.rs:37
+     0.57%  [.] engine_core::rng::fill_words                                                                                                                     philox.rs:19
+     0.57%  [.] engine_core::data_gen::generate_sim_data                                                                                                         data_gen.rs:236
+     0.55%  [.] pulp::x86::v3::V3::vectorize::imp                                                                                                                range.rs:772
+     0.51%  [.] engine_core::data_gen::generate_sim_data                                                                                                         range.rs:772
+     0.51%  [.] engine_core::lmm::reml_deviance                                                                                                                  index.rs:272
+     0.49%  [.] libpulp_v0_22_2_ld_b32s_1111111100000000                                                                                                         libpulp_v0_22_2_ld_b32s_1111111100000000+4
+     0.49%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   range.rs:0
+     0.47%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   cmp.rs:1916
+     0.47%  [.] engine_core::lmm::reml_deviance                                                                                                                  lmm.rs:1025
+     0.47%  [.] bobyqa::update::updateh                                                                                                                          uint_macros.rs:844
+     0.45%  [.] engine_core::data_gen::generate_sim_data                                                                                                         mod.rs:612
+     0.44%  [.] bobyqa::powalg::beta_from_noadd_vlag                                                                                                             range.rs:772
+     0.42%  [.] engine_core::lmm::reml_deviance                                                                                                                  lib.rs:0
+     0.42%  [.] bobyqa::linalg::matprod12_into                                                                                                                   linalg.rs:30
+     0.42%  [.] engine_core::lmm::reml_deviance                                                                                                                  f64.rs:472
+     0.42%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   index.rs:0
+     0.40%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   lmm.rs:399
+     0.40%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   lmm.rs:0
+     0.39%  [.] bobyqa::linalg::matprod12_into                                                                                                                   uint_macros.rs:0
+     0.38%  [.] bobyqa::linalg::matprod12_into                                                                                                                   cmp.rs:1916
+     0.38%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m8_n4                                                                               private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     0.38%  [.] engine_core::rng::fill_normal_column                                                                                                             f32.rs:1570
+     0.36%  [.] engine_core::lmm::reml_deviance                                                                                                                  lmm.rs:0
+     0.36%  [.] __ieee754_log_fma                                                                                                                                e_log.c:106
+     0.36%  [.] __ieee754_log_fma                                                                                                                                e_log.c:119
+     0.34%  [.] bobyqa::geometry::geostep                                                                                                                        geometry.rs:0
+     0.34%  [.] engine_core::lmm::reml_deviance                                                                                                                  matref.rs:369
+     0.34%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                                                                   matref.rs:369
+     0.34%  [.] bobyqa::powalg::calvlag_noadd                                                                                                                    powalg.rs:237
+     0.32%  [.] bobyqa::powalg::hess_mul_into                                                                                                                    powalg.rs:88
+     0.32%  [.] bobyqa::trustregion::trsbox                                                                                                                      trustregion.rs:623
+     0.32%  [.] engine_core::lmm::reml_deviance                                                                                                                  index.rs:278
+
+
+#
+# (Tip: Boolean options have negative forms, e.g.: perf report --no-children)
+#

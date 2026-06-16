@@ -1,0 +1,58 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 370103
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.77%  [.] _dl_new_object
+    33.77%  [.] _dl_relocate_object_no_relro
+    32.45%  [.] __isoc23_strtoul
+
+
+# Samples: 3K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1989531652
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    41.92%  [.] engine_core::lmm::reml_deviance
+     9.22%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     4.62%  [.] __ieee754_log_fma
+     4.22%  [.] engine_core::data_gen::generate_sim_data
+     3.40%  [.] engine_core::rng::fill_normal_column
+     3.04%  [.] engine_core::rng::fill_words
+     2.55%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n4
+     2.54%  [.] bobyqa::trustregion::trsbox
+     2.50%  [.] bobyqa::linalg::matprod12_into
+     2.34%  [.] bobyqa::linalg::matprod21_into
+     2.08%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.01%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n2
+     1.92%  [.] bobyqa::geometry::geostep
+     1.91%  [.] __memset_avx2_unaligned_erms
+     1.69%  [.] bobyqa::bobyqb::bobyqb
+     1.09%  [.] bobyqa::update::updateh
+     1.01%  [.] bobyqa::powalg::calvlag_noadd
+     0.87%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.76%  [.] log@@GLIBC_2.29
+     0.65%  [.] engine_core::data_gen::draw_residual
+     0.61%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.54%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.49%  [.] bobyqa::bobyqb::errbd
+     0.47%  [.] engine_core::critvals::betacf
+     0.44%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m8_n4
+     0.41%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.41%  [.] bobyqa::powalg::hess_mul_into
+     0.38%  [.] private_gemm_x86::gemm
+     0.38%  [.] __log_finite@plt
+     0.36%  [.] __memmove_avx_unaligned_erms
+     0.33%  [.] bobyqa::powalg::calvlag_and_den_into
+
+
+#
+# (Tip: Add -I to perf record to sample register values, which will be visible in perf report sample context.)
+#

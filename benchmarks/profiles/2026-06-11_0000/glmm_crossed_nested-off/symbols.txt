@@ -1,0 +1,46 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol             
+# ........  ...................
+#
+    50.00%  [.] __wcsnlen_ifunc
+    50.00%  [.] dl_main
+
+
+# Samples: 11K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 6253540072
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    22.94%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+    21.71%  [.] engine_core::glmm::laplace_deviance
+    13.44%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4
+     9.34%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     6.61%  [.] pulp::x86::v3::V3::vectorize::imp
+     5.81%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.61%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.28%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.71%  [.] gemm_v0_gemm_pack_f64_simd256_m8
+     1.47%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2
+     0.54%  [.] bobyqa::trustregion::trsbox
+     0.49%  [.] bobyqa::linalg::matprod21_into
+     0.47%  [.] __memset_avx2_unaligned_erms
+     0.44%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.43%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.43%  [.] bobyqa::update::updateh
+     0.42%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.41%  [.] libpulp_v0_22_2_ld_b32s_1111000000000000
+     0.40%  [.] bobyqa::linalg::matprod12_into
+     0.36%  [.] faer::linalg::matmul::matmul_imp
+
+
+#
+# (Tip: To analyze cache line scalability issues use perf c2c record ... ; perf c2c report)
+#

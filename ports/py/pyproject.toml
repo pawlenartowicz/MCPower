@@ -1,0 +1,64 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mcpower"
+version = "1.0.0a2"
+description = "Monte Carlo Power Analysis — native Rust engine"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+authors = [
+    {name = "Paweł Lenartowicz", email = "pawellenartowicz@europe.com"}
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "numpy>=1.26.0",
+    "msgpack>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.4.0",
+    "maturin>=1.5,<2",
+]
+pandas = ["pandas>=2.0.0"]
+
+[tool.maturin]
+manifest-path = "../../crates/engine-py/Cargo.toml"
+python-source = "."
+module-name = "mcpower._engine"
+# `test-bridge` exposes the raw `build_contract_from_json` back-door used by
+# `tests/test_contract_bridge.py`. Release builds drop this feature so the
+# symbol disappears from PyPI wheels — strip `test-bridge` from the line below
+# when cutting a release build.
+features = ["pyo3/extension-module", "test-bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 140
+target-version = "py310"
+exclude = [".git", ".venv", "target", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "C4"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mcpower"]

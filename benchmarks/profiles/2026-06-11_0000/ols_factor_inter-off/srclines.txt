@@ -1,0 +1,85 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378120
+#
+# Overhead  Symbol              Source:Line      
+# ........  ..................  .................
+#
+    33.88%  [.] getenv          getenv.c:49
+    33.06%  [.] _dl_new_object  dl-object.c:59
+    33.06%  [.] strcmp          strcmp-sse2.S:214
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1164324382
+#
+# Overhead  Symbol                                                                                               Source:Line                               
+# ........  ...................................................................................................  ..........................................
+#
+     6.00%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:97
+     4.91%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         lib.rs:0
+     4.65%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         lib.rs:700
+     4.13%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         range.rs:772
+     3.71%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:0
+     3.25%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:242
+     3.19%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     3.12%  [.] engine_core::data_gen::generate_sim_data                                                         uint_macros.rs:844
+     2.89%  [.] engine_core::rng::fill_words                                                                     philox.rs:27
+     2.75%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         cmp.rs:1916
+     2.70%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:640
+     2.41%  [.] engine_core::rng::fill_words                                                                     philox.rs:20
+     2.18%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:180
+     1.99%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:700
+     1.88%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:641
+     1.86%  [.] engine_core::rng::fill_words                                                                     philox.rs:19
+     1.82%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:560
+     1.71%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     1.67%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:291
+     1.66%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:220
+     1.57%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         uint_macros.rs:844
+     1.44%  [.] engine_core::rng::fill_normal_column                                                             f32.rs:1570
+     1.43%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:91
+     1.43%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:0
+     1.40%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:236
+     1.35%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:99
+     1.20%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:0
+     1.16%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:561
+     1.16%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:487
+     1.12%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:416
+     0.89%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:25
+     0.89%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:389
+     0.82%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:600
+     0.79%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:284
+     0.75%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:48
+     0.70%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:596
+     0.69%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:101
+     0.69%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:646
+     0.65%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:581
+     0.65%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:102
+     0.65%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:425
+     0.65%  [.] engine_core::data_gen::generate_sim_data                                                         non_null.rs:1720
+     0.61%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:635
+     0.56%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:0
+     0.56%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:229
+     0.56%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:415
+     0.47%  [.] engine_core::data_gen::generate_sim_data                                                         mod.rs:3022
+     0.42%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:284
+     0.42%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:418
+     0.42%  [.] engine_core::data_gen::generate_sim_data                                                         cmp.rs:1916
+     0.42%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:332
+     0.37%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       rng.rs:189
+     0.37%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:219
+     0.37%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:320
+     0.33%  [.] engine_core::rng::fill_normal_column                                                             mod.rs:612
+     0.33%  [.] engine_core::data_gen::generate_sim_data                                                         const_ptr.rs:384
+     0.33%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:0
+     0.32%  [.] engine_core::rng::fill_words                                                                     rng.rs:136
+
+
+#
+# (Tip: To not accumulate CPU time of children symbols add --no-children)
+#

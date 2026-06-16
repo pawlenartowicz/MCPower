@@ -1,0 +1,50 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol            
+# ........  ..................
+#
+    50.00%  [.] _dl_new_object
+    50.00%  [.] strncpy
+
+
+# Samples: 4K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 2236372031
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    38.15%  [.] engine_core::lmm::reml_deviance
+    15.22%  [.] engine_core::data_gen::generate_sim_data
+     8.36%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     4.68%  [.] engine_core::rng::SimRng::next_u32
+     4.64%  [.] __ieee754_log_fma
+     2.45%  [.] bobyqa::linalg::matprod12_into
+     2.26%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n4
+     2.21%  [.] bobyqa::linalg::matprod21_into
+     1.86%  [.] bobyqa::geometry::geostep
+     1.85%  [.] bobyqa::trustregion::trsbox
+     1.80%  [.] engine_core::data_gen::draw_residual
+     1.70%  [.] __memset_avx2_unaligned_erms
+     1.60%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.55%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n2
+     1.09%  [.] bobyqa::powalg::calvlag_noadd
+     0.97%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.92%  [.] bobyqa::bobyqb::bobyqb
+     0.66%  [.] log@@GLIBC_2.29
+     0.66%  [.] bobyqa::update::updateh
+     0.58%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.54%  [.] engine_core::critvals::betacf
+     0.53%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m8_n4
+     0.34%  [.] __log_finite@plt
+     0.32%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+
+
+#
+# (Tip: To show information about system the samples were collected on use perf report --header)
+#

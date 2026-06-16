@@ -1,0 +1,44 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378713
+#
+# Overhead  Symbol           
+# ........  .................
+#
+    33.99%  [.] __GI___memmem
+    33.01%  [.] check_match
+    33.01%  [.] dl_main
+
+
+# Samples: 13K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 7363899231
+#
+# Overhead  Symbol                                                   
+# ........  .........................................................
+#
+    53.56%  [.] engine_core::glmm::laplace_deviance
+    28.15%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.47%  [.] bobyqa::linalg::matprod12_into
+     2.30%  [.] bobyqa::trustregion::trsbox
+     1.34%  [.] bobyqa::linalg::matprod21_into
+     1.31%  [.] engine_core::data_gen::generate_sim_data
+     1.04%  [.] bobyqa::update::updateh
+     1.03%  [.] bobyqa::geometry::geostep
+     0.87%  [.] engine_core::glmm::glmm_block_solve
+     0.80%  [.] bobyqa::bobyqb::bobyqb
+     0.80%  [.] bobyqa::powalg::calvlag_noadd
+     0.61%  [.] engine_core::glmm::fit_glmm
+     0.52%  [.] __ieee754_log_fma
+     0.46%  [.] bobyqa::powalg::hess_mul_into
+     0.45%  [.] __ieee754_exp_fma
+     0.40%  [.] engine_core::critvals::chi2_ppf
+     0.34%  [.] engine_core::rng::fill_words
+
+
+#
+# (Tip: Search options using a keyword: perf report -h <keyword>)
+#

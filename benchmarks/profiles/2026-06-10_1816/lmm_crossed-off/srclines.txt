@@ -1,0 +1,69 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377314
+#
+# Overhead  Symbol                                 Source:Line       
+# ........  .....................................  ..................
+#
+    33.74%  [.] __cache_sysconf                    cacheinfo.c:28
+    33.13%  [.] do_lookup_x                        dl-lookup.c:426
+    33.13%  [.] get_common_cache_info.constprop.0  dl-cacheinfo.h:729
+
+
+# Samples: 6K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3453651476
+#
+# Overhead  Symbol                                                                                               Source:Line                               
+# ........  ...................................................................................................  ..........................................
+#
+    15.24%  [.] engine_core::lmm::reml_deviance                                                                  lib.rs:700
+    10.74%  [.] engine_core::lmm::reml_deviance                                                                  range.rs:772
+     9.55%  [.] engine_core::lmm::reml_deviance                                                                  cmp.rs:1916
+     7.48%  [.] engine_core::lmm::reml_deviance                                                                  range.rs:0
+     6.05%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:1016
+     3.20%  [.] engine_core::lmm::reml_deviance                                                                  const_ptr.rs:384
+     2.01%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:1014
+     1.85%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:167
+     1.32%  [.] pulp::x86::v3::V3::vectorize::imp                                                                x86.rs:263
+     1.05%  [.] engine_core::lmm::reml_deviance                                                                  matown.rs:1520
+     0.99%  [.] engine_core::lmm::reml_deviance                                                                  matown.rs:1519
+     0.89%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   range.rs:772
+     0.88%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:0
+     0.83%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   lmm.rs:392
+     0.78%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     0.77%  [.] bobyqa::linalg::matprod12_into                                                                   range.rs:772
+     0.71%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:219
+     0.66%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:1002
+     0.66%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   const_ptr.rs:0
+     0.64%  [.] pulp::x86::v3::V3::vectorize::imp                                                                cmp.rs:1916
+     0.64%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:62
+     0.64%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:27
+     0.61%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   cmp.rs:1916
+     0.60%  [.] engine_core::data_gen::generate_sim_data                                                         cmp.rs:1916
+     0.60%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   lmm.rs:393
+     0.58%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:0
+     0.56%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:835
+     0.56%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     0.53%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:167
+     0.53%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:563
+     0.50%  [.] pulp::x86::v3::V3::vectorize::imp                                                                arith.rs:720
+     0.47%  [.] libpulp_v0_22_2_ld_b32s_1111000000000000                                                         libpulp_v0_22_2_ld_b32s_1111000000000000+4
+     0.45%  [.] bobyqa::linalg::matprod21_into                                                                   linalg.rs:53
+     0.42%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:52
+     0.41%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:19
+     0.39%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     0.39%  [.] __ieee754_log_fma                                                                                e_log.c:130
+     0.35%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:847
+     0.35%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:191
+     0.33%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:272
+     0.33%  [.] engine_core::rng::SimRng::next_u32                                                               uint_macros.rs:2457
+     0.31%  [.] engine_core::data_gen::generate_sim_data                                                         const_ptr.rs:384
+
+
+#
+# (Tip: To add Node.js USDT(User-Level Statically Defined Tracing): perf buildid-cache --add `which node`)
+#

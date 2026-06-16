@@ -1,0 +1,273 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+@import 'tw-animate-css';
+@import 'shadcn-svelte/tailwind.css';
+
+/* Self-hosted fonts (no Google CDN — a desktop binary must render offline, and
+   the WASM build is EU-served). Relative ./fonts/ URLs let Vite fingerprint and
+   rewrite them for both base paths (/ Tauri, /online/ WASM).
+
+   Vendored woff2, kept in sync with two other copies (the sets are NOT
+   identical — change the matching files together):
+     - site/fonts/                                    (+ italic Fraunces; landing <em>)
+     - documentation/.leyline/vaultconfig/theme/static/fonts/  (Manrope + Fraunces only;
+       docs inherits JetBrains Mono from leyline_base)
+   This app ships Manrope + upright Fraunces + JetBrains Mono; no italic Fraunces
+   (nothing here renders it). Each family is latin + latin-ext (Polish needs ext). */
+@font-face {
+  font-family: 'Manrope';
+  src: url('./fonts/manrope-latin.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Manrope';
+  src: url('./fonts/manrope-latin-ext.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Fraunces';
+  src: url('./fonts/fraunces-latin.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces';
+  src: url('./fonts/fraunces-latin-ext.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./fonts/jetbrains-mono-latin.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Deliberate: text-xs renders at text-sm size (0.875rem/1.25rem) app-wide —
+   the Tailwind default (0.75rem) was too small for comfortable reading. The
+   xs/sm distinction in markup is kept as semantic hierarchy (micro vs standard)
+   even though both currently resolve to the same size. */
+@theme {
+  --text-xs: 0.875rem;
+  --text-xs--line-height: 1.25rem;
+}
+
+/* Palette: Studio — cool slate + raspberry. Modern indie-app feel.
+   Two variants:
+     :root  — light (pale slate + char + raspberry accent)
+     .dark  — dark  (midnight-purple + cream + magenta-rose; the former
+                     "wild" variant, promoted to the only dark theme)
+   Raspberry #c2356b is the daylight counterpart of the dark theme's
+   #ff5e8a (~4.9:1 on card white — AA for button text). Destructive stays
+   brick-red so errors never read as brand colour. The retired amber
+   palette is preserved in the comment block after .dark. */
+:root {
+  /* Drives native form-control paint (selects, scrollbars, spinners). Without
+     it the UA defaults to light, so native <select> popups render on white in
+     dark mode — class-based bg-* can't override a native widget's UA paint. */
+  color-scheme: light;
+  --background: #eef1f5;
+  --foreground: #14161a;
+  --card: #f6f8fb;
+  --card-foreground: #14161a;
+  --popover: #f6f8fb;
+  --popover-foreground: #14161a;
+  --primary: #c2356b;
+  --primary-foreground: #f6f8fb;
+  --secondary: #e6eaef;
+  --secondary-foreground: #14161a;
+  --muted: #e6eaef;
+  --muted-foreground: #6a7280;
+  --accent: #e3e8ec;
+  --accent-foreground: #14161a;
+  --destructive: #c54a3a;
+  --destructive-foreground: #f6f8fb;
+  --border: #d4dae0;
+  --input: #d4dae0;
+  --ring: #c2356b;
+  --chart-1: #c2356b;
+  --chart-2: #3d7d6e;
+  --chart-3: #5a7a9a;
+  --chart-4: #b58936;
+  --chart-5: #8a909a;
+  --radius: 0.625rem;
+  --sidebar: #e6eaef;
+  --sidebar-foreground: #14161a;
+  --sidebar-primary: #c2356b;
+  --sidebar-primary-foreground: #f6f8fb;
+  --sidebar-accent: #e3e8ec;
+  --sidebar-accent-foreground: #14161a;
+  --sidebar-border: #d4dae0;
+  --sidebar-ring: #c2356b;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #110b1c;
+  --foreground: #ede5f0;
+  --card: #1c142a;
+  --card-foreground: #ede5f0;
+  --popover: #1c142a;
+  --popover-foreground: #ede5f0;
+  --primary: #ff5e8a;
+  --primary-foreground: #110b1c;
+  --secondary: #211930;
+  --secondary-foreground: #ede5f0;
+  --muted: #211930;
+  --muted-foreground: #8e8295;
+  --accent: #181125;
+  --accent-foreground: #ede5f0;
+  --destructive: #ef6b7a;
+  --destructive-foreground: #110b1c;
+  --border: #2a2138;
+  --input: #2a2138;
+  --ring: #ff5e8a;
+  --chart-1: #ff5e8a;
+  --chart-2: #d9a55a;
+  --chart-3: #9b8ad9;
+  --chart-4: #6dbca5;
+  --chart-5: #9b8ea0;
+  --sidebar: #1c142a;
+  --sidebar-foreground: #ede5f0;
+  --sidebar-primary: #ff5e8a;
+  --sidebar-primary-foreground: #110b1c;
+  --sidebar-accent: #181125;
+  --sidebar-accent-foreground: #ede5f0;
+  --sidebar-border: #2a2138;
+  --sidebar-ring: #ff5e8a;
+}
+
+/* Retired amber palette (replaced by raspberry, 2026-06). Kept for reference.
+   Light accent was amber across the five accent slots:
+     --primary / --ring / --chart-1 / --sidebar-primary / --sidebar-ring: #d97843
+   Dark was a blue-night + amber-flame variant:
+     --background: #0f1318;          --foreground: #e4e9ee;
+     --card / --popover / --sidebar: #181d23;
+     --primary / --ring / --chart-1 / --sidebar-primary / --sidebar-ring: #f4965f;
+     --primary-foreground / --destructive-foreground / --sidebar-primary-foreground: #0f1318;
+     --secondary / --muted: #1d2229; --muted-foreground: #7d8794;
+     --accent / --sidebar-accent: #14191f;
+     --destructive: #e5806f;
+     --border / --input / --sidebar-border: #232a31;
+     --chart-2: #6dbca5;  --chart-3: #7ea4c6;  --chart-4: #e0a55c;  --chart-5: #8b95a3; */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Fraunces', ui-serif, Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Tutorial/doc Markdown (`prose`) follows the live app theme instead of the
+   typography plugin's baked-in light-theme grays. The app themes via a
+   .dark class + CSS-variable cascade (not Tailwind's `dark:` variant,
+   which keys off prefers-color-scheme and is decoupled from the in-app
+   toggle), so map the plugin's --tw-prose-* tokens onto our theme
+   variables: one mapping covers both light and dark, and makes
+   `dark:prose-invert` unnecessary. Unlayered so it wins over the plugin's
+   utility-layer defaults. */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--card-foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    /* WebKitGTK (Tauri) renders native GTK scrollbars for inner scroll areas and
+       misplaces the trough inside transformed containers (e.g. the animated
+       slide-over panels — a stale groove floats mid-panel). Declaring the CSS
+       scrollbar properties switches the engine to CSS-drawn scrollbars, which
+       are positioned correctly and follow the theme. */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 40%, transparent) transparent;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+  html,
+  body,
+  #app {
+    height: 100%;
+    margin: 0;
+  }
+  h1, h2, h3, h4 {
+    font-family: 'Fraunces', ui-serif, Georgia, serif;
+    font-variation-settings: 'opsz' 36, 'wght' 500;
+    letter-spacing: -0.01em;
+  }
+  code, kbd, samp, pre {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+}

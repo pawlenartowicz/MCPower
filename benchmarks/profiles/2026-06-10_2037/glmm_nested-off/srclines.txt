@@ -1,0 +1,60 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 367887
+#
+# Overhead  Symbol              Source:Line      
+# ........  ..................  .................
+#
+    33.98%  [.] _dl_new_object  dl-object.c:59
+    33.98%  [.] do_lookup_x     dl-lookup.c:345
+    32.04%  [.] __strncmp_avx2  strcmp-avx2.S:318
+
+
+# Samples: 12K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 6643351925
+#
+# Overhead  Symbol                                                                                               Source:Line                                    
+# ........  ...................................................................................................  ...............................................
+#
+    31.15%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4                                                 private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     8.48%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+     6.05%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:411
+     4.25%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     2.68%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+     2.37%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     2.34%  [.] pulp::x86::v3::V3::vectorize::imp                                                                lib.rs:1506
+     1.99%  [.] pulp::x86::v3::V3::vectorize::imp                                                                fma.rs:51
+     1.81%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+469
+     1.80%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:345
+     1.73%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     1.39%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:318
+     1.29%  [.] pulp::x86::v3::V3::vectorize::imp                                                                uint_macros.rs:844
+     1.21%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     0.96%  [.] pulp::x86::v3::V3::vectorize::imp                                                                lib.rs:1491
+     0.92%  [.] engine_core::glmm::laplace_deviance                                                              matref.rs:399
+     0.88%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+882
+     0.83%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:316
+     0.70%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+601
+     0.63%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:0
+     0.62%  [.] pulp::x86::v3::V3::vectorize::imp                                                                x86.rs:263
+     0.60%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:403
+     0.58%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:423
+     0.56%  [.] pulp::x86::v3::V3::vectorize::imp                                                                cmp.rs:1916
+     0.42%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+956
+     0.41%  [.] libpulp_v0_22_2_ld_b32s_1111111100000000                                                         libpulp_v0_22_2_ld_b32s_1111111100000000+4
+     0.39%  [.] pulp::x86::v3::V3::vectorize::imp                                                                arith.rs:720
+     0.39%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+408
+     0.38%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:35
+     0.38%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+602
+     0.36%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+674
+     0.31%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+864
+     0.30%  [.] gemm_v0_gemm_pack_f64_simd256_m12                                                                gemm_v0_gemm_pack_f64_simd256_m12+473
+
+
+#
+# (Tip: Add -I to perf record to sample register values, which will be visible in perf report sample context.)
+#

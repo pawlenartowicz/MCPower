@@ -1,0 +1,30 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 348156
+#
+# Overhead  Symbol         
+# ........  ...............
+#
+    35.90%  [.] strlen
+    32.47%  [.] main
+    31.63%  [.] check_match
+
+
+# Samples: 52K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 28368725273
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    93.44%  [.] engine_core::glmm::laplace_deviance
+     2.79%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.59%  [.] pulp::x86::v3::V3::vectorize::imp
+
+
+#
+# (Tip: To count events every 1000 msec: perf stat -I 1000)
+#

@@ -1,0 +1,2 @@
+case               mode     n  n_sims  elapsed_s fits_per_sec   conv   power  vs_baseline
+lme_matched_q1     off    480    1000      0.091        11028  1.000   0.896  1.00x

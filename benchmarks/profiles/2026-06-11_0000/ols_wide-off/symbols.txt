@@ -1,0 +1,37 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 348524
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    35.87%  [.] get_common_cache_info.constprop.0
+    32.36%  [.] _dl_lookup_symbol_x
+    31.77%  [.] _dl_relocate_object_no_relro
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5904531738
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                          
+# ........  ................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    41.06%  [.] engine_core::ols::OlsSuffStats::add_rows
+    23.40%  [.] engine_core::data_gen::generate_sim_data
+    14.40%  [.] engine_core::rng::fill_normal_column
+    13.31%  [.] engine_core::rng::fill_words
+     2.31%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.14%  [.] engine_core::ols::fit_suff_stats_t_sq
+     0.68%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.57%  [.] engine_core::philox::philox4x32_10
+     0.39%  [.] __memmove_avx_unaligned_erms
+     0.33%  [.] __memset_avx2_unaligned_erms
+
+
+#
+# (Tip: List events using substring match: perf list <keyword>)
+#

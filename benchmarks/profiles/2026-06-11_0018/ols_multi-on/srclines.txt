@@ -1,0 +1,105 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377626
+#
+# Overhead  Symbol                      Source:Line                
+# ........  ..........................  ...........................
+#
+    33.80%  [.] _nl_intern_locale_data  _nl_intern_locale_data+1057
+    33.10%  [.] do_lookup_x             dl-lookup.c:387
+    33.10%  [.] do_tunable_update_val   dl-tunables.c:116
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5709794276
+#
+# Overhead  Symbol                                                                                               Source:Line                               
+# ........  ...................................................................................................  ..........................................
+#
+     4.09%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         range.rs:772
+     3.95%  [.] engine_core::distributions::sample_t                                                             rng.rs:291
+     3.54%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:291
+     3.43%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:97
+     2.93%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     2.45%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:242
+     2.24%  [.] engine_core::rng::fill_words                                                                     philox.rs:27
+     2.17%  [.] engine_core::data_gen::generate_sim_data                                                         distributions.rs:46
+     1.65%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         lib.rs:700
+     1.64%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:63
+     1.63%  [.] engine_core::rng::fill_words                                                                     philox.rs:20
+     1.61%  [.] engine_core::distributions::sample_t                                                             rng.rs:63
+     1.52%  [.] engine_core::rng::fill_words                                                                     philox.rs:19
+     1.50%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         lib.rs:0
+     1.43%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:229
+     1.42%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     1.40%  [.] engine_core::distributions::sample_t                                                             rng.rs:242
+     1.40%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         cmp.rs:1916
+     1.39%  [.] engine_core::philox::philox4x32_10                                                               philox.rs:27
+     1.38%  [.] __ieee754_log_fma                                                                                e_log.c:130
+     1.35%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:220
+     1.21%  [.] __ieee754_exp_fma                                                                                e_exp.c:151
+     1.17%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:243
+     1.13%  [.] engine_core::philox::philox4x32_10                                                               philox.rs:20
+     1.11%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:242
+     1.07%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:236
+     1.03%  [.] engine_core::data_gen::generate_sim_data                                                         f64.rs:412
+     1.03%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:33
+     0.98%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:291
+     0.98%  [.] engine_core::rng::fill_normal_column                                                             f32.rs:1570
+     0.96%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:37
+     0.88%  [.] engine_core::philox::philox4x32_10                                                               uint_macros.rs:2457
+     0.83%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:99
+     0.82%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:803
+     0.81%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:242
+     0.79%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:48
+     0.79%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         ols.rs:91
+     0.79%  [.] engine_core::data_gen::generate_sim_data                                                         uint_macros.rs:844
+     0.76%  [.] engine_core::philox::philox4x32_10                                                               philox.rs:19
+     0.75%  [.] engine_core::distributions::sample_t                                                             rng.rs:315
+     0.74%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:563
+     0.73%  [.] __exp_finite@plt                                                                                 __exp_finite@plt+4
+     0.67%  [.] engine_core::data_gen::generate_sim_data                                                         cmp.rs:1916
+     0.65%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:32
+     0.64%  [.] engine_core::data_gen::draw_residual                                                             data_gen.rs:921
+     0.64%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:0
+     0.64%  [.] __ieee754_exp_fma                                                                                e_exp.c:135
+     0.63%  [.] __ieee754_exp_fma                                                                                e_exp.c:104
+     0.62%  [.] __ieee754_exp_fma                                                                                math_config.h:85
+     0.58%  [.] engine_core::data_gen::generate_sim_data                                                         f64.rs:472
+     0.56%  [.] __ieee754_log_fma                                                                                e_log.c:119
+     0.52%  [.] engine_core::distributions::sample_t                                                             distributions.rs:82
+     0.51%  [.] exp@@GLIBC_2.29                                                                                  w_exp_template.c:31
+     0.51%  [.] engine_core::data_gen::generate_sim_data                                                         distributions.rs:47
+     0.51%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:700
+     0.47%  [.] __ieee754_exp_fma                                                                                e_exp.c:157
+     0.46%  [.] __ieee754_exp_fma                                                                                e_exp.c:142
+     0.45%  [.] engine_core::data_gen::generate_sim_data                                                         f64.rs:1568
+     0.43%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:315
+     0.43%  [.] engine_core::distributions::sample_t                                                             distributions.rs:88
+     0.42%  [.] engine_core::data_gen::generate_sim_data                                                         distributions.rs:45
+     0.41%  [.] engine_core::ols::OlsSuffStats::add_rows                                                         uint_macros.rs:844
+     0.41%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:389
+     0.40%  [.] engine_core::data_gen::generate_sim_data                                                         macros.rs:180
+     0.39%  [.] __ieee754_exp_fma                                                                                e_exp.c:141
+     0.38%  [.] engine_core::data_gen::generate_sim_data                                                         f64.rs:1037
+     0.38%  [.] engine_core::philox::philox4x32_10                                                               philox.rs:41
+     0.35%  [.] __ieee754_log_fma                                                                                e_log.c:61
+     0.33%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:575
+     0.33%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:561
+     0.31%  [.] engine_core::distributions::sample_t                                                             distributions.rs:72
+     0.31%  [.] engine_core::rng::fill_normal_column                                                             mod.rs:1028
+     0.31%  [.] engine_core::data_gen::draw_residual                                                             f32.rs:1570
+     0.31%  [.] log@@GLIBC_2.29                                                                                  w_log_template.c:32
+     0.31%  [.] engine_core::rng::fill_words                                                                     range.rs:772
+     0.31%  [.] engine_core::rng::fill_words                                                                     mod.rs:547
+     0.30%  [.] engine_core::distributions::sample_t                                                             rng.rs:67
+     0.30%  [.] __ieee754_log_fma                                                                                e_log.c:131
+
+
+#
+# (Tip: To see callchains in a more compact form: perf report -g folded)
+#

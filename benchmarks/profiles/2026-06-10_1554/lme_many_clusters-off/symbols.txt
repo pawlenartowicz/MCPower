@@ -1,0 +1,35 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol         
+# ........  ...............
+#
+    50.00%  [.] dl_main
+    50.00%  [.] do_lookup_x
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1509863741
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    41.94%  [.] engine_core::data_gen::generate_sim_data
+    23.49%  [.] engine_core::lme::profiled_deviance
+    12.93%  [.] engine_core::lme::LmeSuffStats::add_rows
+    10.74%  [.] engine_core::rng::SimRng::next_u32
+     3.72%  [.] __ieee754_log_fma
+     2.55%  [.] engine_core::data_gen::draw_residual
+     0.72%  [.] engine_core::critvals::betacf
+     0.65%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.50%  [.] log@@GLIBC_2.29
+
+
+#
+# (Tip: Save output of perf stat using: perf stat record <target workload>)
+#

@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377242
+#
+# Overhead  Symbol                    
+# ........  ..........................
+#
+    33.73%  [.] _nl_intern_locale_data
+    33.13%  [.] check_match
+    33.13%  [.] strlen
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5479062835
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    32.51%  [.] engine_core::data_gen::generate_sim_data
+    13.96%  [.] engine_core::glm::glm_irls_fit
+    12.78%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     9.61%  [.] engine_core::rng::SimRng::next_u32
+     8.00%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     6.71%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n3
+     3.73%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     3.06%  [.] __ieee754_exp_fma
+     2.56%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.65%  [.] exp@@GLIBC_2.29
+     0.64%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.49%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.35%  [.] pulp::x86::v3::V3::vectorize::imp
+
+
+#
+# (Tip: Use --symfs <dir> if your symbol files are in non-standard locations)
+#

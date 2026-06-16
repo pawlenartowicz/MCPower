@@ -1,0 +1,44 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377544
+#
+# Overhead  Symbol                           
+# ........  .................................
+#
+    33.78%  [.] _nl_intern_locale_data
+    33.11%  [.] _dl_lookup_symbol_x
+    33.11%  [.] init_cpu_features.constprop.0
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5533513207
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    51.26%  [.] engine_core::data_gen::generate_sim_data
+    11.31%  [.] engine_core::rng::SimRng::next_u32
+     8.16%  [.] engine_core::glm::glm_irls_fit
+     5.84%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+     4.55%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     3.27%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     2.49%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.40%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.66%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.54%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.69%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     0.64%  [.] __ieee754_exp_fma
+     0.63%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.51%  [.] exp@@GLIBC_2.29
+     0.43%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.33%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.31%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+
+
+#
+# (Tip: When collecting LBR backtraces use --stitch-lbr to handle more than 32 deep entries: perf record --call-graph lbr ; perf report --stitch-lbr)
+#

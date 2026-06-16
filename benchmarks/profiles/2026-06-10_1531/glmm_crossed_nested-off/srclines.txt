@@ -1,0 +1,35 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 367873
+#
+# Overhead  Symbol                                 Source:Line       
+# ........  .....................................  ..................
+#
+    33.98%  [.] _dl_lookup_symbol_x                dl-new-hash.h:74
+    33.98%  [.] get_common_cache_info.constprop.0  dl-cacheinfo.h:729
+    32.04%  [.] tcache_init.part.0                 malloc.c:3412
+
+
+# Samples: 61K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 33060241575
+#
+# Overhead  Symbol                                                                                               Source:Line                                
+# ........  ...................................................................................................  ...........................................
+#
+    49.96%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+    35.27%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:395
+     4.58%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:410
+     2.96%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:385
+     1.45%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:404
+     0.76%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     0.58%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     0.55%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+
+
+#
+# (Tip: To not accumulate CPU time of children symbols add --no-children)
+#

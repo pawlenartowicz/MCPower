@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 368728
+#
+# Overhead  Symbol                           
+# ........  .................................
+#
+    33.90%  [.] check_match
+    33.90%  [.] init_cpu_features.constprop.0
+    32.20%  [.] _nl_intern_locale_data
+
+
+# Samples: 3K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1792633396
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    31.30%  [.] engine_core::ols::OlsSuffStats::add_rows
+    23.78%  [.] engine_core::data_gen::generate_sim_data
+    18.31%  [.] engine_core::rng::fill_normal_column
+    15.19%  [.] engine_core::rng::fill_words
+     3.30%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.30%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.25%  [.] engine_core::ols::fit_suff_stats_t_sq
+     1.18%  [.] engine_core::philox::philox4x32_10
+     0.76%  [.] engine_core::critvals::betacf
+     0.36%  [.] __memmove_avx_unaligned_erms
+     0.36%  [.] __memset_avx2_unaligned_erms
+     0.33%  [.] engine_core::batch::run_one_sim
+     0.30%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+
+
+#
+# (Tip: Customize output of perf script with: perf script -F event,ip,sym)
+#

@@ -1,0 +1,41 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    50.00%  [.] _dl_relocate_object_no_relro
+    50.00%  [k] 0xffffffff97201988
+
+
+# Samples: 40K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 21779492411
+#
+# Overhead  Symbol                                                                                                            
+# ........  ..................................................................................................................
+#
+    59.83%  [.] engine_core::glmm::laplace_deviance
+    21.29%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.48%  [.] bobyqa::linalg::matprod12_into
+     2.45%  [.] bobyqa::trustregion::trsbox
+     2.13%  [.] bobyqa::update::updateh
+     2.13%  [.] bobyqa::linalg::matprod21_into
+     1.24%  [.] bobyqa::geometry::geostep
+     0.88%  [.] bobyqa::bobyqb::bobyqb
+     0.85%  [.] __ieee754_log_fma
+     0.77%  [.] engine_core::data_gen::generate_sim_data
+     0.70%  [.] bobyqa::powalg::calvlag_noadd
+     0.57%  [.] bobyqa::powalg::hess_mul_into
+     0.52%  [.] engine_core::glmm::glmm_block_solve
+     0.33%  [.] engine_core::glmm::fit_glmm
+     0.32%  [.] bobyqa::powalg::calden_into
+
+
+#
+# (Tip: For hierarchical output, try: perf report --hierarchy)
+#

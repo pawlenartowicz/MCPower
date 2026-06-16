@@ -1,0 +1,49 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol           
+# ........  .................
+#
+    50.00%  [.] __mempcpy_chk
+    50.00%  [.] dl_main
+
+
+# Samples: 16K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 8883424706
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    44.87%  [.] engine_core::lmm::reml_deviance
+     6.72%  [.] bobyqa::update::updateh
+     6.47%  [.] bobyqa::linalg::matprod21_into
+     6.42%  [.] bobyqa::linalg::matprod12_into
+     4.85%  [.] bobyqa::trustregion::trsbox
+     4.40%  [.] bobyqa::geometry::geostep
+     3.72%  [.] engine_core::data_gen::generate_sim_data
+     2.46%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     2.37%  [.] __ieee754_log_fma
+     2.26%  [.] bobyqa::bobyqb::bobyqb
+     1.86%  [.] bobyqa::powalg::calvlag_noadd
+     1.51%  [.] bobyqa::powalg::hess_mul_into
+     1.47%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.21%  [.] engine_core::rng::SimRng::next_u32
+     0.93%  [.] __memset_avx2_unaligned_erms
+     0.79%  [.] bobyqa::powalg::calden_into
+     0.70%  [.] bobyqa::geometry::setdrop_tr
+     0.57%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.56%  [.] bobyqa::update::tryqalt
+     0.54%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.53%  [.] bobyqa::linalg::matprod22_into
+     0.45%  [.] bobyqa::bobyqb::shiftbase
+     0.44%  [.] engine_core::data_gen::draw_residual
+
+
+#
+# (Tip: To add Node.js USDT(User-Level Statically Defined Tracing): perf buildid-cache --add `which node`)
+#

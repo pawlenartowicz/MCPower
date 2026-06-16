@@ -1,0 +1,2 @@
+case               mode     n  n_sims  elapsed_s fits_per_sec   conv   power  vs_baseline
+lmm_crossed_nested off    480    1000      0.415         2408  1.000   0.886  1.01x

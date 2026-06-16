@@ -1,0 +1,8 @@
+# Generated validation artifacts — regenerable from the committed source
+# (formulas.R + common.R + data_generation.r + the .rmd reports).
+# data/ (goldens) is deliberately tracked: a missing golden silently
+# re-freezes from the current engine, so deletion must be visible in git.
+figures/
+*.html
+*_files/
+*_cache/

@@ -1,0 +1,39 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 379085
+#
+# Overhead  Symbol                           
+# ........  .................................
+#
+    34.05%  [.] _nl_intern_locale_data
+    32.97%  [.] do_lookup_x
+    32.97%  [.] init_cpu_features.constprop.0
+
+
+# Samples: 62K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 33404494940
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ...............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    55.59%  [.] JS:engine_core::simd_transcendental::pw_and_log1pexp_sum::h46990bc2ccfc8e06-237-turbofan
+    28.35%  [.] JS:engine_core::glmm::laplace_deviance::h1c4b8b840d03c28a-25-turbofan
+     1.19%  [.] JS:bobyqa::linalg::matprod12_into::ha1abf966d3dcd23b-579-turbofan
+     1.05%  [.] JS:bobyqa::trustregion::trsbox::h39f46f4fa14afa02-12-turbofan
+     0.98%  [.] JS:bobyqa::linalg::matprod21_into::h226e1b944ec7e274-275-turbofan
+     0.73%  [.] JS:bobyqa::update::updateh::h4e7ce4d0d14e8fc1-51-turbofan
+     0.67%  [.] JS:engine_core::batch::run_one_sim::h91b9fe423eeef654-5-turbofan
+     0.67%  [.] JS:engine_core::glmm::fit_glmm::h2a2b56b2fd84f550-14-turbofan
+     0.62%  [.] JS:compiler_builtins[40f58339702e5617]::math::partial_availability::log-804-turbofan
+     0.58%  [.] JS:bobyqa::geometry::geostep::h942e3ec593b085d8-9-turbofan
+     0.37%  [.] JS:fmax-1723-turbofan
+     0.36%  [.] JS:bobyqa::powalg::calvlag_noadd::h03451ba528816dc3-288-turbofan
+
+
+#
+# (Tip: To analyze particular parallelism levels, try: perf report --latency --parallelism=32-64)
+#

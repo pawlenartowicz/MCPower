@@ -1,0 +1,30 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378816
+#
+# Overhead  Symbol                           
+# ........  .................................
+#
+    34.01%  [.] getenv
+    33.00%  [.] _dl_relocate_object_no_relro
+    33.00%  [.] init_cpu_features.constprop.0
+
+
+# Samples: 60K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 32944662743
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    96.55%  [.] engine_core::glmm::laplace_deviance
+     0.88%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.78%  [.] pulp::x86::v3::V3::vectorize::imp
+
+
+#
+# (Tip: For parallelism histogram, try: perf report --hierarchy --sort latency,parallelism,comm,symbol)
+#

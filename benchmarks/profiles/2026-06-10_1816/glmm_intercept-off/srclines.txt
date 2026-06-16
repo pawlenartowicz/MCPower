@@ -1,0 +1,56 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377870
+#
+# Overhead  Symbol              Source:Line       
+# ........  ..................  ..................
+#
+    33.84%  [.] __stpcpy_avx2   strcpy-avx2.S:85
+    33.08%  [.] _dl_new_object  dl-object.c:59
+    33.08%  [.] strcmp          strcmp-sse2.S:1018
+
+
+# Samples: 15K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 8354896564
+#
+# Overhead  Symbol                                                                                               Source:Line                     
+# ........  ...................................................................................................  ................................
+#
+    25.10%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     8.34%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+     6.70%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:0
+     6.26%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:517
+     5.52%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+     3.17%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:536
+     2.94%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:514
+     2.57%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:35
+     2.46%  [.] engine_core::glmm::laplace_deviance                                                              uint_macros.rs:844
+     2.27%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     2.15%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:528
+     2.03%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:534
+     1.88%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:527
+     1.34%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:516
+     1.34%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:563
+     1.19%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:480
+     1.00%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:243
+     0.93%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:244
+     0.89%  [.] bobyqa::linalg::matprod12_into                                                                   range.rs:772
+     0.82%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       range.rs:772
+     0.79%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:518
+     0.76%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:499
+     0.68%  [.] engine_core::glmm::laplace_deviance                                                              uint_macros.rs:0
+     0.64%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:1169
+     0.57%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:519
+     0.53%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:535
+     0.45%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:0
+     0.44%  [.] bobyqa::linalg::matprod21_into                                                                   linalg.rs:53
+     0.34%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:481
+
+
+#
+# (Tip: Order by the overhead of source file name and line number: perf report -s srcline)
+#

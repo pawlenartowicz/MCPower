@@ -1,0 +1,33 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378834
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    34.01%  [.] _nl_intern_locale_data
+    33.00%  [.] __tunable_get_val
+    33.00%  [.] _dl_relocate_object_no_relro
+
+
+# Samples: 9K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5315073118
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    31.62%  [.] engine_core::ols::OlsSuffStats::add_rows
+    25.12%  [.] engine_core::data_gen::generate_sim_data
+    19.58%  [.] engine_core::rng::fill_normal_column
+    19.09%  [.] engine_core::rng::fill_words
+     3.22%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.54%  [.] __memset_avx2_unaligned_erms
+
+
+#
+# (Tip: Skip collecting build-id when recording: perf record -B)
+#

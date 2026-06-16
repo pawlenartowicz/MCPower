@@ -1,0 +1,32 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol     
+# ........  ...........
+#
+    50.00%  [.] dl_main
+    50.00%  [.] strcmp
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5437109883
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    30.95%  [.] engine_core::ols::OlsSuffStats::add_rows
+    26.70%  [.] engine_core::data_gen::generate_sim_data
+    19.23%  [.] engine_core::rng::fill_words
+    18.84%  [.] engine_core::rng::fill_normal_column
+     2.88%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.62%  [.] __memset_avx2_unaligned_erms
+
+
+#
+# (Tip: If you prefer Intel style assembly, try: perf annotate -M intel)
+#

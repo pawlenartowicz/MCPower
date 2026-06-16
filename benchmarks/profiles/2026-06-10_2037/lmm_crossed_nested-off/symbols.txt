@@ -1,0 +1,64 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol            
+# ........  ..................
+#
+    50.00%  [.] __mempcpy_chk
+    50.00%  [.] _dl_new_object
+
+
+# Samples: 5K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 2772510569
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    19.49%  [.] engine_core::lmm::reml_deviance
+    12.24%  [.] engine_core::data_gen::generate_sim_data
+     7.44%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     6.03%  [.] bobyqa::linalg::matprod12_into
+     5.50%  [.] bobyqa::trustregion::trsbox
+     4.77%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.76%  [.] engine_core::rng::SimRng::next_u32
+     3.32%  [.] bobyqa::linalg::matprod21_into
+     3.25%  [.] __ieee754_log_fma
+     3.21%  [.] bobyqa::geometry::geostep
+     2.96%  [.] bobyqa::update::updateh
+     2.37%  [.] __memset_avx2_unaligned_erms
+     2.25%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+     2.25%  [.] bobyqa::bobyqb::bobyqb
+     1.90%  [.] bobyqa::powalg::calvlag_noadd
+     1.66%  [.] _int_malloc
+     1.23%  [.] engine_core::data_gen::draw_residual
+     1.12%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     1.11%  [.] bobyqa::powalg::hess_mul_into
+     1.04%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m12_n4
+     0.76%  [.] bobyqa::powalg::calden_into
+     0.68%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.61%  [.] bobyqa::geometry::setdrop_tr
+     0.59%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.57%  [.] faer::linalg::solvers::Llt<T>::new
+     0.57%  [.] __memmove_avx_unaligned_erms
+     0.53%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.52%  [.] bobyqa::update::tryqalt
+     0.49%  [.] engine_core::critvals::betacf
+     0.47%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.47%  [.] gemm_v0_gemm_microkernel_f64_simd256_m12_n4
+     0.41%  [.] bobyqa::linalg::matprod22_into
+     0.37%  [.] private_gemm_x86::millikernel_colmajor
+     0.35%  [.] log@@GLIBC_2.29
+     0.33%  [.] _mid_memalign
+     0.33%  [.] bobyqa::bobyqb::shiftbase
+     0.31%  [.] bobyqa::bobyqb::errbd
+     0.31%  [.] libpulp_v0_22_2_ld_b32s_1111111100000000
+
+
+#
+# (Tip: To show IPC for sampling periods use perf record -e '{cycles,instructions}:S' and then browse context)
+#

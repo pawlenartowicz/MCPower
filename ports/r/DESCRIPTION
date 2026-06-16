@@ -1,0 +1,38 @@
+Package: mcpower
+Title: Statistical Power Analysis via MCPower Engine
+Version: 0.0.0.9000
+Authors@R:
+    person("MCPower", "Authors", role = c("aut", "cre"), email = "6quarg@gmail.com")
+Description: R bindings for the MCPower simulation engine. Provides OLS, GLM,
+    mixed-effects, and ANOVA power analysis via a compiled Rust backend.
+License: GPL-3
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Config/rextendr/version: 0.5.0
+SystemRequirements: Cargo (Rust's package manager), rustc >= 1.65.0, xz
+Imports:
+    R6,
+    jsonlite,
+    cli,
+    htmltools
+Suggests:
+    knitr,
+    png,
+    rsvg,
+    testthat (>= 3.0.0),
+    tibble,
+    V8,
+    vegawidget
+Depends:
+    R (>= 4.2)
+Collate: 
+    'data-upload.R'
+    'extendr-wrappers.R'
+    'mcpower-debug.R'
+    'mcpower.R'
+    'output-report.R'
+    'output-plotting.R'
+    'output-results.R'
+    'spec-builder.R'
+    'zzz.R'

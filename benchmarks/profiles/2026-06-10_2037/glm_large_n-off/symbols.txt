@@ -1,0 +1,38 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                         
+# ........  ...............................
+#
+    50.00%  [.] _dl_process_pt_gnu_property
+    50.00%  [.] do_lookup_x
+
+
+# Samples: 12K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 6711179278
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    50.93%  [.] engine_core::data_gen::generate_sim_data
+    13.20%  [.] engine_core::glm::glm_irls_fit
+    10.60%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     9.66%  [.] engine_core::rng::SimRng::next_u32
+     3.75%  [.] __ieee754_exp_fma
+     3.44%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     2.42%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     2.15%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.87%  [.] exp@@GLIBC_2.29
+     0.46%  [.] __memset_avx2_unaligned_erms
+     0.44%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.33%  [.] __exp_finite@plt
+
+
+#
+# (Tip: To analyze cache line scalability issues use perf c2c record ... ; perf c2c report)
+#

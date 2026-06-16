@@ -1,0 +1,27 @@
+[package]
+name = 'mcpower'
+publish = false
+version = '0.1.0'
+edition = '2021'
+rust-version = '1.65'
+
+[lib]
+crate-type = [ 'rlib', 'staticlib' ]
+name = 'mcpower'
+
+[[bin]]
+name = 'document'
+path = 'document.rs'
+
+[dependencies]
+extendr-api = '0.9.0'
+engine-r    = { path = "../../../../crates/engine-r" }
+
+[workspace]
+resolver = "2"
+# Standalone: do NOT join the outer mcpower workspace (avoids resolver clashes
+# with the staticlib build R drives). Path dep into the workspace still resolves.
+
+[profile.release]
+lto = true
+codegen-units = 1

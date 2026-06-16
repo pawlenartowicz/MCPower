@@ -1,0 +1,81 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 9K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 4978043573
+#
+# Overhead  Symbol                                                                                               Source:Line                                   
+# ........  ...................................................................................................  ..............................................
+#
+     9.30%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     4.79%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4                                                  private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     3.73%  [.] engine_core::glm::glm_irls_fit                                                                   range.rs:772
+     3.60%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2                                                  private_gemm_x86.7bfd82eee90c021b-cgu.0:0
+     3.19%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     3.02%  [.] engine_core::rng::fill_words                                                                     philox.rs:27
+     2.70%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:705
+     2.40%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:254
+     2.26%  [.] engine_core::rng::fill_words                                                                     philox.rs:20
+     2.16%  [.] engine_core::rng::fill_words                                                                     philox.rs:19
+     1.82%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:330
+     1.78%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:407
+     1.66%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:234
+     1.41%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:294
+     1.38%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:232
+     1.36%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:241
+     1.25%  [.] engine_core::rng::fill_normal_column                                                             f32.rs:1570
+     1.19%  [.] pulp::x86::v3::V3::vectorize::imp                                                                mod.rs:793
+     1.19%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:292
+     1.14%  [.] engine_core::rng::fill_normal_column                                                             rng.rs:303
+     1.09%  [.] engine_core::data_gen::generate_sim_data                                                         lib.rs:700
+     1.06%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:293
+     1.04%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       fma.rs:51
+     0.99%  [.] faer::linalg::matmul::matvec_rowmajor::matvec                                                    mod.rs:832
+     0.92%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     0.91%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     0.90%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:48
+     0.87%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:270
+     0.86%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:251
+     0.86%  [.] __ieee754_log_fma                                                                                e_log.c:130
+     0.79%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:625
+     0.77%  [.] pulp::x86::v3::V3::vectorize::imp                                                                fma.rs:51
+     0.71%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       avx.rs:35
+     0.64%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:247
+     0.63%  [.] engine_core::rng::fill_words                                                                     mod.rs:547
+     0.59%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:247
+     0.48%  [.] pulp::x86::v3::V3::vectorize::imp                                                                lib.rs:1491
+     0.47%  [.] __ieee754_log_fma                                                                                e_log.c:119
+     0.47%  [.] engine_core::data_gen::generate_sim_data                                                         cmp.rs:1916
+     0.46%  [.] engine_core::data_gen::generate_sim_data                                                         matown.rs:1521
+     0.46%  [.] engine_core::rng::fill_words                                                                     range.rs:772
+     0.42%  [.] engine_core::rng::fill_normal_column                                                             mod.rs:1028
+     0.40%  [.] engine_core::data_gen::generate_sim_data                                                         mod.rs:612
+     0.37%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       fma.rs:51
+     0.37%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:623
+     0.37%  [.] engine_core::data_gen::generate_sim_data                                                         f64.rs:472
+     0.36%  [.] engine_core::glm::glm_irls_fit                                                                   glm.rs:194
+     0.35%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:272
+     0.34%  [.] engine_core::rng::fill_words                                                                     cmp.rs:1916
+     0.34%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       range.rs:772
+     0.33%  [.] engine_core::data_gen::generate_sim_data                                                         uint_macros.rs:0
+     0.32%  [.] log@@GLIBC_2.29                                                                                  w_log_template.c:32
+     0.31%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:263
+     0.30%  [.] engine_core::rng::fill_words                                                                     uint_macros.rs:0
+
+
+# Samples: 3  of event 'cpu_lowpower/cycles/Pu'
+# Event count (approx.): 367284
+#
+# Overhead  Symbol                      Source:Line       
+# ........  ..........................  ..................
+#
+    34.03%  [.] _dl_check_map_versions  dl-version.c:94
+    34.03%  [.] strcmp                  strcmp-sse2.S:1410
+    31.93%  [.] getenv                  getenv.c:55
+
+
+#
+# (Tip: Show current config key-value pairs: perf config --list)
+#

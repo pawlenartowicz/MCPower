@@ -1,0 +1,461 @@
+/* MCPower site — shared styles (landing + downloads).
+   Palette/fonts mirror the desktop app's .dark.wild theme (ports/app/src/app.css):
+   midnight-purple background, cream text, magenta-rose accent,
+   Manrope / Fraunces / JetBrains Mono. */
+
+/* Self-hosted fonts (no Google CDN — EU-served public surface, GDPR). No build
+   step here: url('fonts/…') resolves relative to THIS file, so it works for
+   both index.html and downloads/index.html (which loads ../style.css).
+
+   Vendored woff2, kept in sync with two other copies (the sets are NOT
+   identical — change the matching files together):
+     - ports/app/src/fonts/                                   (no italic Fraunces)
+     - documentation/.leyline/vaultconfig/theme/static/fonts/ (Manrope + Fraunces only)
+   The site is the only consumer of italic Fraunces (the tagline <em>). Each
+   family is latin + latin-ext (Polish author/copyright strings need ext). */
+@font-face {
+  font-family: 'Manrope';
+  src: url('fonts/manrope-latin.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Manrope';
+  src: url('fonts/manrope-latin-ext.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Fraunces';
+  src: url('fonts/fraunces-latin.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces';
+  src: url('fonts/fraunces-latin-ext.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Fraunces';
+  src: url('fonts/fraunces-italic-latin.woff2') format('woff2');
+  font-weight: 400 500;
+  font-style: italic;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Fraunces';
+  src: url('fonts/fraunces-italic-latin-ext.woff2') format('woff2');
+  font-weight: 400 500;
+  font-style: italic;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('fonts/jetbrains-mono-latin.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  --background: #110b1c;
+  --foreground: #ede5f0;
+  --card: #1c142a;
+  --primary: #ff5e8a;
+  --primary-dim: #d44d74;
+  --muted: #211930;
+  --muted-foreground: #8e8295;
+  --border: #2a2138;
+  --radius: 0.625rem;
+
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Fraunces', ui-serif, Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100svh;
+}
+
+::selection {
+  background: var(--primary);
+  color: var(--background);
+}
+
+a {
+  color: inherit;
+}
+
+/* ---- atmosphere: one faint rose glow above the fold, vignette below ---- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60rem 32rem at 50% -8rem, rgba(255, 94, 138, 0.07), transparent 70%),
+    radial-gradient(80rem 50rem at 50% 110%, rgba(0, 0, 0, 0.5), transparent 60%);
+}
+
+/* ---- layout ---- */
+
+.page {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: clamp(3rem, 10vh, 7rem) 1.5rem 5rem;
+}
+
+/* ---- wordmark banner ---- */
+
+/* The MCPower wordmark — inline svg in index.html (mirrors mcpower-logo.svg);
+   fill="currentColor" picks up `color` below so --primary tints it, and the
+   drop-shadow rides the glyph alpha for the glow. Inlined rather than a CSS
+   mask of the external svg, which renders no alpha with currentColor.
+   The svg's natural ratio is 38400/9240 ≈ 4.16; here it carries
+   preserveAspectRatio="none" so this slightly wider aspect-ratio (4.78) stretches
+   it ~15% horizontally only — wider, not taller. aspect-ratio (not a fixed
+   height) keeps that stretch proportional as width shrinks on narrow screens. */
+.banner {
+  display: block;
+  width: min(34.5rem, 100%);
+  aspect-ratio: 4.78;
+  height: auto;
+  margin-inline: auto;
+  color: var(--primary);
+  filter: drop-shadow(0 0 24px rgba(255, 94, 138, 0.25));
+  user-select: none;
+}
+
+/* ---- tagline ---- */
+
+.tagline {
+  margin-top: 2.25rem;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: clamp(1.25rem, 3.4vw, 1.625rem);
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  text-wrap: balance;
+  max-width: 36rem;
+  margin-inline: auto;
+  text-align: center;
+}
+
+.tagline em {
+  font-style: italic;
+  color: var(--primary);
+}
+
+/* ---- link row ---- */
+
+.links {
+  margin-top: 2.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.links a {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 0.625rem 1.125rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  background: var(--card);
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.links a:hover,
+.links a:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.links a.cta {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--background);
+}
+
+.links a.cta:hover,
+.links a.cta:focus-visible {
+  background: var(--primary-dim);
+  border-color: var(--primary-dim);
+  color: var(--background);
+}
+
+.links a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---- why bullets ---- */
+
+.why {
+  margin-top: 4.5rem;
+  list-style: none;
+  display: grid;
+  gap: 2rem;
+}
+
+.why li {
+  padding-left: 1.75rem;
+  position: relative;
+  max-width: 95%;
+}
+
+/* marker: small rose square, terminal-cursor nod */
+.why li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.5rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--primary);
+}
+
+.why strong {
+  display: block;
+  font-weight: 700;
+  font-size: 1.0625rem;
+  letter-spacing: 0.005em;
+  margin-bottom: 0.25rem;
+}
+
+.why p {
+  color: var(--muted-foreground);
+  font-size: 0.9375rem;
+}
+
+/* ---- downloads page ---- */
+
+.crumb {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+.crumb a {
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.crumb a:hover,
+.crumb a:focus-visible {
+  color: var(--primary);
+}
+
+.title {
+  margin-top: 1.5rem;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: clamp(2rem, 6vw, 2.75rem);
+  letter-spacing: -0.01em;
+}
+
+.dl {
+  margin-top: 2.5rem;
+  display: grid;
+  gap: 0.875rem;
+}
+
+/* two columns: narrow title rail on the left, content on the right */
+.dl-card {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 1.5rem;
+  align-items: start;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.dl-card h2 {
+  align-self: center;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 1.1875rem;
+  letter-spacing: 0.005em;
+}
+
+.dl-card p {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.dl-card .links {
+  margin-top: 0.875rem;
+}
+
+/* secondary file-type label inside a platform download button */
+.ext {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.links a:hover .ext,
+.links a:focus-visible .ext {
+  color: inherit;
+}
+
+/* copy-to-clipboard snippet: mono command + flush-right button */
+.snippet {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: stretch;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.snippet code {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--foreground);
+  /* wrap long commands (the R install line) rather than scroll a tiny box */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.copy {
+  flex-shrink: 0;
+  padding: 0 0.875rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  background: var(--card);
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.copy:hover,
+.copy:focus-visible {
+  color: var(--primary);
+  background: var(--background);
+}
+
+.copy:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.copy.done {
+  color: var(--primary);
+}
+
+.tutorials {
+  margin-top: 3.5rem;
+}
+
+.tutorials h2 {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 1.125rem;
+  color: var(--muted-foreground);
+}
+
+.tutorials .links {
+  margin-top: 1.25rem;
+}
+
+.foot {
+  margin-top: 3.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.9375rem;
+}
+
+.foot a {
+  color: var(--primary);
+  text-decoration-color: var(--primary-dim);
+  text-underline-offset: 3px;
+}
+
+/* ---- load animation: one staggered fade-up pass ---- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise {
+    opacity: 0;
+    transform: translateY(0.75rem);
+    animation: rise 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: calc(var(--i, 0) * 110ms);
+  }
+
+  @keyframes rise {
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* ---- small screens ---- */
+
+@media (max-width: 480px) {
+  .page {
+    padding-top: 3.5rem;
+  }
+  .links {
+    flex-direction: column;
+  }
+  .links a {
+    text-align: center;
+  }
+  /* title rail can't sit beside content at phone widths — stack it */
+  .dl-card {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+}

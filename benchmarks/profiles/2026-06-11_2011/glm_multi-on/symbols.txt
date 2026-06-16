@@ -1,0 +1,54 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 9K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5002885867
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    19.18%  [.] engine_core::data_gen::generate_sim_data
+    13.55%  [.] engine_core::glm::glm_irls_fit
+    11.07%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     9.36%  [.] engine_core::rng::fill_words
+     8.63%  [.] engine_core::rng::fill_normal_column
+     4.64%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4
+     3.88%  [.] gemm_v0_gemm_pack_f64_simd256_m8
+     3.67%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2
+     3.61%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.86%  [.] __ieee754_log_fma
+     2.81%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.01%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.47%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.18%  [.] faer::linalg::matmul::matvec_rowmajor::matvec
+     0.79%  [.] engine_core::critvals::betacf
+     0.66%  [.] engine_core::philox::philox4x32_10
+     0.65%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.64%  [.] engine_core::scenarios::perturb_correlation
+     0.58%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.54%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.53%  [.] log@@GLIBC_2.29
+     0.51%  [.] __memset_avx2_unaligned_erms
+     0.50%  [.] private_gemm_x86::gemm
+     0.46%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.39%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.34%  [.] __log_finite@plt
+     0.32%  [.] faer::linalg::matmul::matmul_imp
+
+
+# Samples: 3  of event 'cpu_lowpower/cycles/Pu'
+# Event count (approx.): 364597
+#
+# Overhead  Symbol                    
+# ........  ..........................
+#
+    34.28%  [.] _dl_check_all_versions
+    34.28%  [.] _dl_lookup_symbol_x
+    31.43%  [.] _nl_intern_locale_data
+
+
+#
+# (Tip: If call chains don't work try perf record --call-graph dwarf or --call-graph lbr)
+#

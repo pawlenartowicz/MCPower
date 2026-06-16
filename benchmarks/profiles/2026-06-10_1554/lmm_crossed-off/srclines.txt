@@ -1,0 +1,71 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 352590
+#
+# Overhead  Symbol                         Source:Line              
+# ........  .............................  .........................
+#
+    35.45%  [.] _dl_add_to_namespace_list  dl-object.c:45
+    32.83%  [.] _nl_intern_locale_data     _nl_intern_locale_data+37
+    31.72%  [.] do_lookup_x                dl-lookup.c:420
+
+
+# Samples: 6K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3470354832
+#
+# Overhead  Symbol                                                                                               Source:Line                               
+# ........  ...................................................................................................  ..........................................
+#
+    15.15%  [.] engine_core::lmm::reml_deviance                                                                  lib.rs:700
+    11.38%  [.] engine_core::lmm::reml_deviance                                                                  range.rs:772
+     9.66%  [.] engine_core::lmm::reml_deviance                                                                  cmp.rs:1916
+     6.85%  [.] engine_core::lmm::reml_deviance                                                                  range.rs:0
+     6.11%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:1016
+     2.72%  [.] engine_core::lmm::reml_deviance                                                                  const_ptr.rs:384
+     1.75%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:167
+     1.75%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:1014
+     1.36%  [.] pulp::x86::v3::V3::vectorize::imp                                                                x86.rs:263
+     1.20%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:0
+     1.05%  [.] engine_core::lmm::reml_deviance                                                                  matown.rs:1520
+     1.00%  [.] engine_core::lmm::reml_deviance                                                                  matown.rs:1519
+     0.86%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   lmm.rs:392
+     0.86%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   range.rs:772
+     0.84%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:219
+     0.81%  [.] pulp::x86::v3::V3::vectorize::imp                                                                range.rs:772
+     0.67%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   cmp.rs:1916
+     0.64%  [.] bobyqa::linalg::matprod12_into                                                                   range.rs:772
+     0.62%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   const_ptr.rs:0
+     0.61%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:835
+     0.61%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:772
+     0.61%  [.] pulp::x86::v3::V3::vectorize::imp                                                                arith.rs:720
+     0.59%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:27
+     0.58%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:52
+     0.58%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi                                                   lmm.rs:393
+     0.56%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:0
+     0.53%  [.] engine_core::data_gen::draw_residual                                                             rng.rs:167
+     0.53%  [.] engine_core::data_gen::generate_sim_data                                                         range.rs:563
+     0.48%  [.] engine_core::data_gen::generate_sim_data                                                         cmp.rs:1916
+     0.48%  [.] libpulp_v0_22_2_ld_b32s_1111000000000000                                                         libpulp_v0_22_2_ld_b32s_1111000000000000+4
+     0.47%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:1002
+     0.47%  [.] pulp::x86::v3::V3::vectorize::imp                                                                cmp.rs:1916
+     0.44%  [.] engine_core::data_gen::generate_sim_data                                                         index.rs:272
+     0.44%  [.] bobyqa::linalg::matprod21_into                                                                   linalg.rs:53
+     0.42%  [.] engine_core::data_gen::generate_sim_data                                                         data_gen.rs:0
+     0.39%  [.] engine_core::lmm::reml_deviance                                                                  lmm.rs:847
+     0.36%  [.] __ieee754_log_fma                                                                                e_log.c:130
+     0.33%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:19
+     0.33%  [.] engine_core::rng::SimRng::next_u32                                                               rng.rs:62
+     0.33%  [.] engine_core::data_gen::generate_sim_data                                                         rng.rs:191
+     0.33%  [.] engine_core::rng::SimRng::next_u32                                                               philox.rs:20
+     0.31%  [.] pulp::x86::v3::V3::vectorize::imp                                                                fma.rs:51
+     0.31%  [.] bobyqa::linalg::matprod21_into                                                                   range.rs:772
+     0.31%  [.] bobyqa::trustregion::trsbox                                                                      range.rs:772
+
+
+#
+# (Tip: Add -I to perf record to sample register values, which will be visible in perf report sample context.)
+#

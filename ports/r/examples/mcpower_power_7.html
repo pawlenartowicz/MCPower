@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+</head><body><div id="vis"></div><script>vegaEmbed("#vis",
+{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"values":[{"ci_hi":0.796,"ci_lo":0.7552,"power":0.7762,"scenario":"optimistic","target":"treatment"},{"ci_hi":0.9178,"ci_lo":0.889,"power":0.9044,"scenario":"optimistic","target":"dose"},{"ci_hi":0.6219,"ci_lo":0.5739,"power":0.5981,"scenario":"optimistic","target":"age"}]},"height":112,"layer":[{"encoding":{"x":{"field":"power","scale":{"domain":[0,1]},"title":"Power","type":"quantitative"},"y":{"field":"target","scale":{"paddingInner":0.4,"paddingOuter":0},"title":"Effect","type":"nominal"}},"mark":"bar"},{"encoding":{"x":{"field":"ci_lo","title":"Power","type":"quantitative"},"x2":{"field":"ci_hi"},"y":{"field":"target","title":"Effect","type":"nominal"}},"mark":{"type":"errorbar","ticks":{"color":"#333333"},"rule":{"color":"#333333","strokeWidth":1.5}}}],"width":360}
+);</script></body></html>

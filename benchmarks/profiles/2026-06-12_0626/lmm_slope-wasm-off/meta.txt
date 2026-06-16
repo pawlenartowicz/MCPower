@@ -1,0 +1,8 @@
+date: 2026-06-12_0626
+git: bf44802+dirty
+case: lmm_slope  mode: off  runtime: node v22.22.2 (--perf-basic-prof, wasm-pack --profiling artifact)
+pin_core: 2  perf_freq: 4000
+no_turbo: 1  governor: performance
+cpu: Intel(R) Core(TM) Ultra 7 265H
+perf.data + profiling artifact: /tmp/mcpower-profile-wasm/2026-06-12_0626 (tmpfs — gone on reboot)
+note: timing.txt is from the STANDARD artifact; symbols.txt from the names-kept one

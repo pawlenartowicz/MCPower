@@ -1,0 +1,35 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                   
+# ........  .........................
+#
+    50.00%  [.] _dl_next_ld_env_entry
+    50.00%  [.] memchr
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1509026204
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    40.91%  [.] engine_core::data_gen::generate_sim_data
+    24.94%  [.] engine_core::lme::profiled_deviance
+    12.83%  [.] engine_core::lme::LmeSuffStats::add_rows
+    10.34%  [.] engine_core::rng::SimRng::next_u32
+     3.16%  [.] engine_core::data_gen::draw_residual
+     3.00%  [.] __ieee754_log_fma
+     0.99%  [.] engine_core::critvals::betacf
+     0.97%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.65%  [.] log@@GLIBC_2.29
+
+
+#
+# (Tip: Show user configuration overrides: perf config --user --list)
+#

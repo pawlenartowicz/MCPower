@@ -1,0 +1,23 @@
+{
+  "name": "@mcpower/engine-wasm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": {
+    "strip:wasm": "cargo run --manifest-path ../../scripts/wasm-strip-relaxed/Cargo.toml -- vendor/engine-wasm/engine_wasm_bg.wasm vendor/engine-wasm/engine_wasm_bg.wasm.tmp && mv -f vendor/engine-wasm/engine_wasm_bg.wasm.tmp vendor/engine-wasm/engine_wasm_bg.wasm",
+    "build:wasm": "wasm-pack build ../../crates/engine-wasm --target web --out-dir ../../ports/wasm/vendor/engine-wasm && pnpm strip:wasm",
+    "build": "pnpm build:wasm && vite build",
+    "bench": "node bench/throughput.mjs",
+    "bench:scaling": "vite --open /bench/scaling/index.html",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.6"
+  }
+}

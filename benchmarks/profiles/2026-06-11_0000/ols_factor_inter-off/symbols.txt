@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    50.00%  [.] _dl_relocate_object_no_relro
+    50.00%  [.] dl_main
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1173961146
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    41.94%  [.] engine_core::data_gen::generate_sim_data
+    30.34%  [.] engine_core::ols::OlsSuffStats::add_rows
+     9.46%  [.] engine_core::rng::fill_words
+     9.16%  [.] engine_core::rng::fill_normal_column
+     1.42%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.01%  [.] engine_core::ols::fit_suff_stats_t_sq
+     0.83%  [.] engine_core::critvals::betacf
+     0.60%  [.] engine_core::philox::philox4x32_10
+     0.55%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.46%  [.] __memmove_avx_unaligned_erms
+     0.42%  [.] __ieee754_log_fma
+     0.42%  [.] engine_core::batch::run_one_sim
+     0.35%  [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter_nested::SpecFromIterNested<T,I>>::from_iter
+     0.32%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+
+
+#
+# (Tip: To not accumulate CPU time of children symbols add --no-children)
+#

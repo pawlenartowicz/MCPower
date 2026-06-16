@@ -1,0 +1,35 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378497
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    33.95%  [.] __strcmp_avx2
+    33.03%  [.] _dl_relocate_object_no_relro
+    33.03%  [.] get_common_cache_info.constprop.0
+
+
+# Samples: 69K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 37563019818
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ...................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    54.96%  [.] JS:gemm_f64::microkernel::scalar::f64::x2x4::h7187dd700a13118f-116-turbofan
+    10.93%  [.] JS:gemm_common::pack_operands::pack_lhs::h21e3906eba3e870d-44-turbofan
+     9.23%  [.] JS:engine_core::glmm::laplace_deviance::h1c4b8b840d03c28a-25-turbofan
+     7.25%  [.] JS:engine_core::simd_transcendental::pw_and_log1pexp_sum::h46990bc2ccfc8e06-236-turbofan
+     2.99%  [.] JS:faer::linalg::matmul::matvec_colmajor::matvec::h12abd26b54f3fd7e-166-turbofan
+     2.81%  [.] JS:faer::linalg::matmul::matvec_rowmajor::matvec::h9f18413873b83c58-36-turbofan
+     2.21%  [.] JS:faer::linalg::cholesky::ldlt::factor::cholesky_recursion_right_looking::h4c150a16b6ba23d8-28-turbofan
+     0.45%  [.] JS:gemm_common::gemm::gemm_basic_generic::{{closure}}::hacf2e39e1eb7531c-149-turbofan
+
+
+#
+# (Tip: To see callchains in a more compact form: perf report -g folded)
+#

@@ -1,0 +1,40 @@
+# ─── Rust ────────────────────────────────────────────────────────────────
+/target
+**/target/
+**/*.rs.bk
+
+# ─── Python ──────────────────────────────────────────────────────────────
+*.pyc
+__pycache__/
+*.so
+*.pyd
+*.dylib
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─── Node / Tauri / Vite (ports/app) ─────────────────────────────────────
+node_modules/
+dist-ssr/
+*.local
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+test-results/
+playwright-report/
+**/src-tauri/gen/
+
+# ─── Editor / OS cruft ───────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.swp
+*.swo

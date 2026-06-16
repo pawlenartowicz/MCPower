@@ -1,0 +1,45 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377719
+#
+# Overhead  Symbol                    
+# ........  ..........................
+#
+    33.81%  [.] _nl_intern_locale_data
+    33.09%  [.] __tunable_get_val
+    33.09%  [.] do_lookup_x
+
+
+# Samples: 6K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3494397973
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    59.44%  [.] engine_core::lmm::reml_deviance
+     9.99%  [.] engine_core::data_gen::generate_sim_data
+     6.00%  [.] pulp::x86::v3::V3::vectorize::imp
+     4.86%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     3.30%  [.] engine_core::rng::SimRng::next_u32
+     1.77%  [.] bobyqa::linalg::matprod12_into
+     1.50%  [.] bobyqa::trustregion::trsbox
+     1.36%  [.] bobyqa::linalg::matprod21_into
+     1.13%  [.] engine_core::data_gen::draw_residual
+     1.10%  [.] __ieee754_log_fma
+     0.99%  [.] bobyqa::geometry::geostep
+     0.81%  [.] bobyqa::bobyqb::bobyqb
+     0.77%  [.] __memset_avx2_unaligned_erms
+     0.62%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.55%  [.] bobyqa::update::updateh
+     0.51%  [.] bobyqa::powalg::calvlag_noadd
+     0.48%  [.] libpulp_v0_22_2_ld_b32s_1111000000000000
+     0.39%  [.] engine_core::critvals::betacf
+
+
+#
+# (Tip: To add Node.js USDT(User-Level Statically Defined Tracing): perf buildid-cache --add `which node`)
+#

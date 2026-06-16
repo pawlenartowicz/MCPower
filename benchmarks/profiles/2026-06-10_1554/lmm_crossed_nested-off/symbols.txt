@@ -1,0 +1,49 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol     
+# ........  ...........
+#
+   100.00%  [.] dl_main
+
+
+# Samples: 6K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 3624677558
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    45.27%  [.] engine_core::lmm::reml_deviance
+     9.47%  [.] engine_core::data_gen::generate_sim_data
+     5.69%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     4.61%  [.] bobyqa::trustregion::trsbox
+     4.50%  [.] bobyqa::linalg::matprod12_into
+     3.62%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.86%  [.] engine_core::rng::SimRng::next_u32
+     2.80%  [.] bobyqa::linalg::matprod21_into
+     2.53%  [.] bobyqa::update::updateh
+     2.41%  [.] bobyqa::geometry::geostep
+     1.97%  [.] __ieee754_log_fma
+     1.47%  [.] bobyqa::bobyqb::bobyqb
+     1.47%  [.] bobyqa::powalg::calvlag_noadd
+     1.27%  [.] engine_core::data_gen::draw_residual
+     0.97%  [.] bobyqa::powalg::hess_mul_into
+     0.97%  [.] __memset_avx2_unaligned_erms
+     0.61%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.52%  [.] faer::linalg::solvers::Llt<T>::new
+     0.51%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.40%  [.] bobyqa::powalg::calden_into
+     0.40%  [.] bobyqa::geometry::setdrop_tr
+     0.38%  [.] engine_core::critvals::betacf
+     0.34%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.34%  [.] bobyqa::update::tryqalt
+
+
+#
+# (Tip: For memory address profiling, try: perf mem record / perf mem report)
+#

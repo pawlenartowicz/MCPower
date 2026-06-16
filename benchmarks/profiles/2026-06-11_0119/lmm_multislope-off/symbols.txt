@@ -1,0 +1,60 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378529
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.96%  [.] new_composite_name
+    33.02%  [.] _dl_relocate_object_no_relro
+    33.02%  [.] strlen
+
+
+# Samples: 14K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 7756866863
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    34.55%  [.] engine_core::lmm::reml_deviance
+     8.07%  [.] bobyqa::linalg::matprod12_into
+     7.65%  [.] bobyqa::update::updateh
+     7.50%  [.] bobyqa::linalg::matprod21_into
+     5.11%  [.] bobyqa::trustregion::trsbox
+     4.78%  [.] bobyqa::geometry::geostep
+     3.22%  [.] __ieee754_log_fma
+     2.35%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     2.32%  [.] bobyqa::bobyqb::bobyqb
+     2.24%  [.] __memset_avx2_unaligned_erms
+     2.06%  [.] bobyqa::powalg::calvlag_noadd
+     1.59%  [.] bobyqa::powalg::hess_mul_into
+     1.38%  [.] engine_core::data_gen::generate_sim_data
+     1.29%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.18%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n4
+     0.97%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.89%  [.] engine_core::rng::fill_normal_column
+     0.85%  [.] engine_core::rng::fill_words
+     0.84%  [.] bobyqa::powalg::calden_into
+     0.80%  [.] bobyqa::geometry::setdrop_tr
+     0.74%  [.] gemm_v0_gemm_microkernel_f64_simd256_mask_m8_n2
+     0.69%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.64%  [.] bobyqa::update::tryqalt
+     0.63%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.49%  [.] bobyqa::linalg::matprod22_into
+     0.41%  [.] private_gemm_x86::gemm
+     0.41%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+     0.38%  [.] bobyqa::linalg::planerot
+     0.38%  [.] gemm_v0_gemm_microkernel_f64_simd256_epilogue_mask_lower_add_m8_n4
+     0.37%  [.] bobyqa::bobyqb::shiftbase
+     0.36%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.33%  [.] bobyqa::linalg::r1update
+     0.32%  [.] __memmove_avx_unaligned_erms
+
+
+#
+# (Tip: To browse sample contexts use perf report --sample 10 and select in context menu)
+#

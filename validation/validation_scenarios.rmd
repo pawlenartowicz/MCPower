@@ -1,0 +1,940 @@
+---
+output:
+  md_document:
+    variant: gfm+tex_math_dollars
+---
+
+# MCPower — Validating the Scenario Perturbations
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+# Run with the working directory set to mcpower/validation/ (rmarkdown::render
+# does this automatically from the .rmd's location).
+source("common.R")     # scenario probes: scenario_model, zgate, classifiers, oracles
+source("tolerances.R") # SCENARIO_TOL — the central L5 gates
+source("formulas.R")   # SCENARIO_CASES — the scenario-perturbation catalogue
+
+GOLDEN_PATH <- file.path("data", "scenario_golden.rds")
+
+# ---- shared formatting -------------------------------------------------------
+gate_row <- function(case_label, gate_name, g) {
+  data.frame(
+    Case     = case_label,
+    Gate     = gate_name,
+    Measured = g$est,
+    Law      = g$law,
+    z        = if (is.null(g$z) || is.na(g$z)) NA_real_ else g$z,
+    Verdict  = if (g$ok) "PASS" else "FAIL",
+    check.names = FALSE, row.names = NULL)
+}
+gates_table <- function(label, gates) do.call(rbind, Map(
+  function(nm, g) gate_row(label, nm, g), names(gates), gates))
+
+# Deterministic gate (no z): bit-identity, exact counts, bounds.
+dgate <- function(ok, est, law) list(est = est, law = law, se = NA, z = NA, ok = ok)
+
+# ---- Tier A runners ------------------------------------------------------------
+
+# He: per-predictor jitter slopes vs h^2 b_j^2.
+run_he <- function(case) {
+  m  <- scenario_model(case)
+  d0 <- scen_draw(m, case$scenario, case$seed + 1)
+  tb <- true_beta_vector(case, d0$columns)
+  h  <- case$scenario_configs[[case$scenario]]$heterogeneity
+  pred  <- d0$columns[d0$columns != "intercept"]
+  terms <- term_labels(case, d0$columns)[d0$columns != "intercept"]
+  S <- vapply(seq_len(case$K), function(k)
+    jitter_slopes(scen_draw(m, case$scenario, case$seed + k), tb),
+    numeric(length(pred)))
+  gates <- list()
+  for (j in seq_along(pred)) {
+    gates[[sprintf("jitter slope on %s² = h²β²  (h=%.1f)", terms[j], h)]] <-
+      zgate(S[j, ], (h * tb[[pred[j]]])^2)
+  }
+  list(gates = gates)
+}
+
+# Hs: log-e² slope vs ln(lambda)/4 (z = x1 since lp = b1·x1 standardized).
+run_hs <- function(case) {
+  m  <- scenario_model(case)
+  d0 <- scen_draw(m, case$scenario, case$seed + 1)
+  tb <- true_beta_vector(case, d0$columns)
+  lam <- case$scenario_configs[[case$scenario]]$heteroskedasticity_ratio
+  res <- vapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    c(hsk_gamma(d, tb, d$design[, 2]), hsk_bin_ratio(d, tb, d$design[, 2]))
+  }, numeric(2))
+  list(gates = list(`log-e² slope γ = ln(λ)/4` = zgate(res[1, ], log(lam) / 4)),
+       lambda_hat = exp(4 * mean(res[1, ])),
+       bin_ratio  = mean(res[2, ], na.rm = TRUE), lam = lam)
+}
+
+# Co (p = 2): per-block r mean = censored-normal law, SD = sqrt(s²/2 + sampling).
+run_co2 <- function(case) {
+  m   <- scenario_model(case)
+  s   <- case$scenario_configs[[case$scenario]]$correlation_noise_sd
+  rho <- parse_correlation(case)$rho
+  r_k <- vapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    stats::cor(d$design[, 2], d$design[, 3])
+  }, numeric(1))
+  cm     <- clamp_normal_moments(rho, s / sqrt(2))
+  sd_law <- sqrt(cm$sd^2 + (1 - cm$mean^2)^2 / case$n)
+  list(gates = list(
+    `block-r mean = ±0.8-clamp censored law` = zgate(r_k, cm$mean),
+    `block-r SD = √(s²/2 + (1−ρ²)²/n)`       = sdgate(r_k, sd_law)
+  ), r_k = r_k, cm = cm, rho = rho, s = s)
+}
+
+# Co (p = 3, PSD repair): no closed-form law, but PSD repair has a known PROPERTY.
+# The eigenvalue-floor + renormalize-to-unit-diagonal repair (correlation.rs) shrinks
+# every off-diagonal toward zero, so each repaired pair-mean must sit BELOW the ρ = 0.6
+# input yet stay substantially positive. Property-gated on r ∈ [0.45, 0.60] (realised
+# ~0.557–0.585) — catches an over-shrink or a repair that failed to shrink, which the
+# bare moment-freeze (still kept as golden_only) cannot distinguish from correct output.
+run_co_psd <- function(case) {
+  m <- scenario_model(case)
+  R <- vapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    X <- d$design[, 2:4]
+    c(stats::cor(X[, 1], X[, 2]), stats::cor(X[, 1], X[, 3]), stats::cor(X[, 2], X[, 3]))
+  }, numeric(3))
+  stats <- c(r12_mean = mean(R[1, ]), r13_mean = mean(R[2, ]), r23_mean = mean(R[3, ]),
+             r12_sd   = stats::sd(R[1, ]), r13_sd = stats::sd(R[2, ]), r23_sd = stats::sd(R[3, ]))
+  rmean <- stats[c("r12_mean", "r13_mean", "r23_mean")]
+  list(gates = list(
+    `PSD-repaired r ∈ [0.45, 0.60] (shrinks below ρ=0.6 input, stays positive)` =
+      dgate(all(rmean >= 0.45 & rmean <= 0.60), min(rmean), 0.45)
+  ), golden_only = stats)
+}
+
+# Px (preset pool): swap frequency, pick uniformity, candidate moments.
+run_px <- function(case) {
+  m <- scenario_model(case)
+  q <- case$scenario_configs[[case$scenario]]$distribution_change_prob
+  pool <- c("right_skewed", "left_skewed", "uniform")
+  per_draw <- lapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    lapply(which(grepl("^col_", d$columns)), function(j) {
+      x <- d$design[, j]
+      list(cls = classify_marginal(x), m = mean(x), v = stats::var(x))
+    })
+  })
+  flat <- unlist(per_draw, recursive = FALSE)
+  cls  <- vapply(flat, `[[`, character(1), "cls")
+  f_k  <- vapply(per_draw, function(dd)
+    mean(vapply(dd, `[[`, character(1), "cls") != "normal"), numeric(1))
+  n_sw  <- sum(cls != "normal")
+  gates <- list(`swap frequency = q` = zgate(f_k, q))
+  for (cnd in pool) {
+    gates[[sprintf("pick share %s = 1/3", cnd)]] <- zgate_se(
+      mean(cls[cls != "normal"] == cnd), 1 / 3, sqrt((1 / 3) * (2 / 3) / n_sw))
+  }
+  for (cnd in pool) {
+    sel <- cls == cnd
+    gates[[sprintf("%s mean = 0", cnd)]] <- zgate(vapply(flat[sel], `[[`, numeric(1), "m"), 0)
+    gates[[sprintf("%s var = 1", cnd)]]  <- zgate(vapply(flat[sel], `[[`, numeric(1), "v"), 1)
+  }
+  list(gates = gates, cls_table = table(cls))
+}
+
+# Px (custom high_kurtosis pool): moments vs the censored-table law
+# (var = 1 by construction — the engine normalizes the table by its own SD).
+run_px_t3 <- function(case) {
+  m  <- scenario_model(case)
+  tm <- t3_table_moments()
+  res <- vapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    x <- d$design[, 2]
+    c(as.numeric(classify_marginal(x) == "high_kurtosis"), mean(x), stats::var(x))
+  }, numeric(3))
+  list(gates = list(
+    `every block swapped (q = 1)`     = dgate(all(res[1, ] == 1), mean(res[1, ]), 1),
+    `t3 mean = 0`                     = zgate(res[2, ], 0),
+    `t3 var = 1 (table-normalized)`   = zgate(res[3, ], tm$var)
+  ), tm = tm, var_mean = mean(res[3, ]))
+}
+
+# Re (preset pool): swap frequency, pick split, df recovery from shape laws.
+run_re <- function(case) {
+  m   <- scenario_model(case)
+  cfg <- case$scenario_configs[[case$scenario]]
+  d0  <- scen_draw(m, case$scenario, case$seed + 1)
+  tb  <- true_beta_vector(case, d0$columns)
+  res <- lapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    e <- d$outcome - as.numeric(d$design %*% tb)
+    list(cls = classify_residual(e), sk = samp_skew(e), kt = samp_exkurt(e))
+  })
+  cls   <- vapply(res, `[[`, character(1), "cls")
+  n_sw  <- sum(cls != "normal")
+  df    <- cfg$residual_df
+  gates <- list(`swap frequency = q_r` = zgate(as.numeric(cls != "normal"),
+                                               cfg$residual_change_prob))
+  for (cnd in c("heavy_tailed", "skewed")) {
+    gates[[sprintf("pick share %s = 1/2", cnd)]] <- zgate_se(
+      mean(cls[cls != "normal"] == cnd), 0.5, sqrt(0.25 / n_sw))
+  }
+  gates[[sprintf("skewed: skew = √(8/df), df = %d", df)]] <-
+    zgate(vapply(res[cls == "skewed"], `[[`, numeric(1), "sk"), sqrt(8 / df))
+  gates[[sprintf("heavy: excess kurtosis = 6/(df−4), df = %d", df)]] <-
+    zgate(vapply(res[cls == "heavy_tailed"], `[[`, numeric(1), "kt"), 6 / (df - 4))
+  list(gates = gates, cls_table = table(cls))
+}
+
+# Re (pinned residual, swap inert): set_residual_distribution("high_kurtosis")
+# PINS the spec residual, and pick_residual (scenarios.rs) only swaps an UNPINNED
+# default-normal residual — so the configured right_skewed swap
+# (residual_change_prob = 1, residual_dists = right_skewed, residual_df = 6) never
+# fires; every draw keeps the pinned high_kurtosis residual — a standardized t(6)
+# (residual_df = 6; draw_residual in data_gen.rs), NOT the censored-t3 *table* used
+# for the high_kurtosis predictor *marginal*. Gates assert the pin holds (symmetric,
+# heavy-tailed, unit-variance), NOT the old χ²(6) replacement shape. A fired swap
+# would push skew to √(8/df)=1.15 (z≈+70) — the skew=0 gate is the swap-inert
+# tripwire. Sample excess kurtosis of the t(6) residual is downward-biased and
+# high-variance, so (like run_px_t3) it is NOT gated against a point law;
+# heavy-tailedness is asserted via the classifier share instead.
+run_re_replace <- function(case) {
+  m   <- scenario_model(case)
+  d0  <- scen_draw(m, case$scenario, case$seed + 1)
+  tb  <- true_beta_vector(case, d0$columns)
+  res <- vapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    e <- d$outcome - as.numeric(d$design %*% tb)
+    c(as.numeric(classify_residual(e) == "heavy_tailed"), samp_skew(e), mean(e), stats::var(e))
+  }, numeric(4))
+  list(gates = list(
+    # ≥0.95 floor (not all==1 like run_px_t3): classify_residual's skew/kurtosis
+    # cuts slip on ~2% of the heavy-tailed RESIDUAL samples (realised share ~0.98);
+    # a fired swap drops this share to ~0.
+    `pin holds: residual stays high_kurtosis (right_skewed swap inert)` =
+      dgate(mean(res[1, ]) >= 0.95, mean(res[1, ]), 1),
+    `symmetric: skew = 0 (pinned t(6), not the χ² swap)` = zgate(res[2, ], 0),
+    `mean = 0`                                           = zgate(res[3, ], 0),
+    `var = 1 (t(6) standardized)`                        = zgate(res[4, ], 1)
+  ))
+}
+
+# Fa: fixed (deterministic counts) vs sampled (multinomial variance).
+run_fa <- function(case) {
+  m     <- scenario_model(case)
+  props <- parse_factor_props(case)
+  n     <- case$n
+  C_fix <- vapply(seq_len(20L), function(k)
+    factor_counts(scen_draw(m, case$scenario_a, case$seed + k)), numeric(length(props)))
+  C_smp <- vapply(seq_len(case$K), function(k)
+    factor_counts(scen_draw(m, case$scenario_b, case$seed + 500 + k)), numeric(length(props)))
+  dev   <- max(abs(C_fix - n * props))
+  gates <- list(
+    `fixed: counts identical across draws (no RNG)` =
+      dgate(all(C_fix == C_fix[, 1]), as.numeric(all(C_fix == C_fix[, 1])), 1),
+    `fixed: max |count − n·p| ≤ 1 (largest remainder)` =
+      dgate(dev <= SCENARIO_TOL$alloc_dev_max, dev, SCENARIO_TOL$alloc_dev_max)
+  )
+  for (g in seq_along(props)) {
+    gates[[sprintf("sampled: Var(count) level %d = n·p(1−p)", g)]] <-
+      zgate((C_smp[g, ] - n * props[g])^2, n * props[g] * (1 - props[g]))
+  }
+  list(gates = gates, counts_fixed = C_fix[, 1], expected = n * props)
+}
+
+# Fa under Mle additionally proves the full entry point accepts the toggle.
+run_fa_mle_smoke <- function(case) {
+  m <- build_model(case)
+  m$set_scenario_configs(case$scenario_configs)
+  ok <- tryCatch({
+    m$find_power(case$n, n_sims = 50, seed = 1, scenarios = case$scenario_b,
+                 progress_callback = FALSE, verbose = FALSE)
+    TRUE
+  }, error = function(e) FALSE)
+  list(gates = list(
+    `find_power accepts Fa toggle under estimator = Mle` = dgate(ok, as.numeric(ok), 1)))
+}
+
+# ---- Tier B runners --------------------------------------------------------------
+
+# B0: scenarios=FALSE call vs the optimistic member of the scenarios=TRUE call.
+run_b0 <- function(case) {
+  mk <- function() {
+    m <- MCPower$new(case$formula, family = case$family)
+    m$set_effects(case$effects)
+    m
+  }
+  r1 <- mk()$find_power(case$n, n_sims = case$n_sims, seed = case$seed,
+                        scenarios = FALSE, progress_callback = FALSE, verbose = FALSE)
+  r2 <- mk()$find_power(case$n, n_sims = case$n_sims, seed = case$seed,
+                        scenarios = TRUE, progress_callback = FALSE, verbose = FALSE)
+  nm <- sort(names(unclass(r1)))
+  ok <- identical(unclass(r1)[nm], r2$scenarios$optimistic[nm])
+  list(gates = list(
+    `optimistic ≡ non-scenario path (bit-identical PowerResult)` =
+      dgate(ok, as.numeric(ok), 1)),
+    power = unlist(r1$power_uncorrected))
+}
+
+# B1: beta-hat unbiased (incl. intercept) per preset. OLS z-gated against the
+# true betas (linear averaging keeps them exact under every knob). Logit is gated
+# on the absolute band against the PER-STUDY pseudo-true value (glm_perstudy_beta):
+# the engine's β-jitter is drawn once per study, so each study fits a clean logit
+# at its own β_eff and the mean β̂ → E[β_eff] — the slopes get only the tiny clip
+# nudge (×1.0008 at h = 0.4), the intercept stays at β_0. Gating against an
+# attenuation oracle (the per-observation population-averaged law) over-predicted
+# a ~0.025 shift the per-study DGP never produces.
+run_b1 <- function(case) {
+  m  <- scenario_model(case)
+  d0 <- scen_draw(m, "optimistic", case$seed + 1)
+  tb <- true_beta_vector(case, d0$columns)
+  terms <- term_labels(case, d0$columns)
+  scen_cfg <- jsonlite::fromJSON("../configs/scenarios.json")
+  gates <- list(); B <- list()
+  for (i in seq_along(case$presets)) {
+    sc   <- case$presets[i]
+    offs <- (i - 1L) * case$K
+    h_sc <- if (case$family == "logit") scen_cfg[[sc]]$heterogeneity else 0
+    res <- vapply(seq_len(case$K), function(k) {
+      d <- scen_draw(m, sc, case$seed + offs + k)
+      c(fit_sota(case$family, d$design, d$outcome, d$cluster_ids)$beta,
+        if (case$family == "logit") glm_perstudy_beta(tb, h_sc) else as.numeric(tb))
+    }, numeric(2L * length(tb)))
+    Bm <- res[seq_along(tb), , drop = FALSE]            # fitted betas
+    Pm <- res[length(tb) + seq_along(tb), , drop = FALSE]  # pseudo-true betas
+    for (j in seq_along(tb)) {
+      if (case$family == "logit") {
+        g <- zgate(Bm[j, ] - Pm[j, ], 0)
+        g$est <- mean(Bm[j, ]); g$law <- mean(Pm[j, ])   # display: beta-hat vs predicted
+        g$ok  <- abs(g$est - g$law) <= SCENARIO_TOL$glm_beta_abs &&
+                 abs(g$z) <= SCENARIO_TOL$z_c   # AND the per-preset K-SE z-gate (the abs band alone is 7.4σ at optimistic)
+        gates[[sprintf("%s: β̂[%s] = per-study pseudo-true", sc, terms[j])]] <- g
+      } else {
+        gates[[sprintf("%s: β̂[%s] unbiased", sc, terms[j])]] <- zgate(Bm[j, ], tb[[j]])
+      }
+    }
+    B[[sc]] <- Bm
+  }
+  list(gates = gates, B = B, tb = tb, terms = terms)
+}
+
+# B2: He×Hs separation with the λ driver pinned to the other column.
+run_b2 <- function(case) {
+  m  <- scenario_model(case)
+  d0 <- scen_draw(m, case$scenario_a, case$seed + 1)
+  tb <- true_beta_vector(case, d0$columns)
+  h  <- case$scenario_configs[[case$scenario_a]]$heterogeneity
+  res <- vapply(seq_len(case$K), function(k) {
+    s1 <- jitter_slopes(scen_draw(m, case$scenario_a, case$seed + k), tb)
+    s4 <- jitter_slopes(scen_draw(m, case$scenario_b, case$seed + k), tb)
+    c(s1[["col_1"]], s4[["col_1"]], s1[["col_2"]], s4[["col_2"]])
+  }, numeric(4))
+  list(gates = list(
+    `x1 jitter slope at λ=1 = h²β₁²`            = zgate(res[1, ], (h * tb[["col_1"]])^2),
+    `x1 jitter slope λ-invariant (paired Δ = 0)` = zgate(res[2, ] - res[1, ], 0)
+  ), res = res, h = h, tb = tb)
+}
+
+# B3: Hs ratio preserved under forced t / chi² residuals (shape-blind slope).
+run_b3 <- function(case) {
+  m  <- scenario_model(case)
+  d0 <- scen_draw(m, case$scenarios[1], case$seed + 1)
+  tb <- true_beta_vector(case, d0$columns)
+  gates <- list()
+  for (i in seq_along(case$scenarios)) {
+    sc   <- case$scenarios[i]
+    offs <- (i - 1L) * case$K
+    lam  <- case$scenario_configs[[sc]]$heteroskedasticity_ratio
+    g_k <- vapply(seq_len(case$K), function(k) {
+      d <- scen_draw(m, sc, case$seed + offs + k)
+      hsk_gamma(d, tb, d$design[, 2])
+    }, numeric(1))
+    pool <- case$scenario_configs[[sc]]$residual_dists[[1]]
+    gates[[sprintf("γ = ln(λ)/4 under forced %s residual", pool)]] <-
+      zgate(g_k, log(lam) / 4)
+  }
+  list(gates = gates)
+}
+
+# B4: realized r equals the NORTA oracle, not the latent spec value.
+run_b4 <- function(case) {
+  m   <- scenario_model(case)
+  rho <- parse_correlation(case)$rho
+  gates <- list()
+  for (i in seq_along(case$scenarios)) {
+    sc   <- case$scenarios[i]
+    offs <- (i - 1L) * case$K
+    mar  <- case$scenario_configs[[sc]]$new_distributions[[1]]
+    law  <- norta_r(mar, mar, rho)
+    r_k <- vapply(seq_len(case$K), function(k) {
+      d <- scen_draw(m, sc, case$seed + offs + k)
+      stats::cor(d$design[, 2], d$design[, 3])
+    }, numeric(1))
+    gates[[sprintf("%s pair: r = NORTA %.4f (latent ρ = %.2f)", mar, law, rho)]] <-
+      zgate(r_k, law)
+  }
+  list(gates = gates, rho = rho)
+}
+
+# B5: P6 staleness — magnitude law, the staleness regression, the drift bound,
+# and the preset drift quantification.
+run_b5 <- function(case) {
+  m   <- scenario_model(case)
+  d0  <- scen_draw(m, case$scenario, case$seed + 1)
+  tb  <- true_beta_vector(case, d0$columns)
+  rho <- parse_correlation(case)$rho
+  s0  <- lp_sigma0(tb, matrix(c(1, rho, rho, 1), 2))
+  lam <- case$scenario_configs[[case$scenario]]$heteroskedasticity_ratio
+  gam <- log(lam) / 4
+  res <- vapply(seq_len(case$K), function(k) {
+    d  <- scen_draw(m, case$scenario, case$seed + k)
+    lp <- as.numeric(d$design %*% tb)
+    c(hsk_gamma(d, tb, lp), stats::sd(lp))
+  }, numeric(2))
+  lam_meas <- exp(4 * res[1, ] * res[2, ])   # measured per-block ±2σ̂′ ratio
+  lam_pred <- exp(4 * gam * res[2, ] / s0)   # moment-predicted λ′ (stale anchor)
+  sl <- summary(stats::lm(lam_meas ~ lam_pred))$coefficients["lam_pred", ]
+  # A-priori drift bound: σ′ at the ±0.8 clamp extreme, inflated by the σ̂′
+  # sampling slack (z_c SDs of SD(lp-hat) at this n: σ̂′/σ′ ≈ 1 + z_c/√(2n)).
+  b      <- tb[names(tb) != "intercept"]
+  s_max  <- sqrt(sum(b^2) + 2 * abs(prod(b)) * 0.8)
+  bound  <- exp(4 * gam * (s_max / s0) * (1 + SCENARIO_TOL$z_c / sqrt(2 * case$n)))
+  gates <- list(
+    `slope magnitude = γ/σ₀ (stale spec anchor)` = zgate(res[1, ], gam / s0),
+    `staleness: lm(λ̂′ ~ λ′ predicted) slope = 1` = zgate_se(sl[["Estimate"]], 1, sl[["Std. Error"]]),
+    `drift bounded: max λ′ ≤ clamp-range bound`   = dgate(max(lam_pred) <= bound, max(lam_pred), bound)
+  )
+  # Preset drift quantification — σ̂′/σ₀ alone (no residual probe → He-immune).
+  scen_cfg <- jsonlite::fromJSON("../configs/scenarios.json")
+  drift <- list()
+  for (i in seq_along(case$presets)) {
+    sc   <- case$presets[i]
+    g_sc <- log(scen_cfg[[sc]]$heteroskedasticity_ratio) / 4
+    offs <- i * case$K
+    sp_k <- vapply(seq_len(case$K), function(k) {
+      d <- scen_draw(m, sc, case$seed + offs + k)
+      stats::sd(as.numeric(d$design %*% tb))
+    }, numeric(1))
+    drift[[sc]] <- stats::quantile(exp(4 * g_sc * sp_k / s0), c(.05, .5, .95))
+  }
+  list(gates = gates, lam_meas = lam_meas, lam_pred = lam_pred,
+       drift = drift, lam = lam, bound = bound, s0 = s0)
+}
+
+# ---- family-gating runners ---------------------------------------------------------
+
+run_fg_ident <- function(case) {
+  m <- scenario_model(case)
+  gates <- list()
+  for (p in case$pairs) {
+    ok <- all(vapply(seq_len(case$K), function(k) {
+      da <- scen_draw(m, p[1], case$seed + k)
+      db <- scen_draw(m, p[2], case$seed + k)
+      identical(da$design, db$design) && identical(da$outcome, db$outcome)
+    }, logical(1)))
+    gates[[sprintf("bit-identity under logit: %s ≡ %s", p[1], p[2])]] <-
+      dgate(ok, as.numeric(ok), 1)
+  }
+  list(gates = gates)
+}
+
+run_fg_flip <- function(case) {
+  m  <- scenario_model(case)
+  d0 <- scen_draw(m, case$scenario_a, case$seed + 1)
+  tb <- true_beta_vector(case, d0$columns)
+  h  <- case$scenario_configs[[case$scenario_b]]$heterogeneity
+  res <- vapply(seq_len(case$K), function(k) {
+    da <- scen_draw(m, case$scenario_a, case$seed + k)
+    db <- scen_draw(m, case$scenario_b, case$seed + k)
+    stopifnot(identical(da$design, db$design))  # the pairing premise
+    c(mean(da$outcome != db$outcome),
+      glm_fliprate_pred(da$design, tb, h),
+      mean(db$outcome) - mean(da$outcome))
+  }, numeric(3))
+  list(gates = list(
+    `h-toggle flip rate = MC prediction (paired Δ = 0)` = zgate(res[1, ] - res[2, ], 0)
+  ), res = res, h = h)
+}
+```
+
+# What this report shows
+
+MCPower's **scenario analysis** deliberately stresses a planned study: instead of
+simulating the idealised design you specified, each scenario *perturbs* it —
+slopes wobble between observations, residual variance trends with the predictors,
+correlations differ from the plan, predictor and residual distributions get
+swapped, group allocation becomes random. Each perturbation is controlled by a
+knob in `configs/scenarios.json`, and each knob documents a precise statistical
+*law* for the disturbance it injects.
+
+This report checks **that every knob generates exactly its documented law** — no
+more, no less. It is the L5 layer of the validation charter: the L3 reports prove
+the *optimistic* (unperturbed) generator faithful against the spec as a point
+oracle; here the spec value is deliberately randomised, so the oracle is the
+perturbation law itself (including its documented distortions: the ±0.8
+correlation clamp, PSD repair, the censored t(3) table, the stale
+heteroskedasticity anchor).
+
+**The gate doctrine.** Every gate is *set == get on the realised magnitude*: the
+knob's value, recovered from the generated data by a probe, must match the
+documented law within an SE-of-mean z-band of `r SCENARIO_TOL$z_c` (each case
+draws K independent perturbation blocks; a mis-scaled knob lands tens of σ out,
+chance alone exceeds the band once in ~10,000 gates). Two checks are explicitly
+**not** gates: monotone power across presets (a readable summary that washes out
+real faults) and a global error-variance invariant (heterogeneity is *supposed*
+to inflate it). The β̂-unbiasedness backstop (B1) — **including the intercept** —
+is kept as a cheap mean-leak tripwire: a mis-centred swapped distribution lands
+in β̂₀ while every effect estimate stays clean.
+
+```{r compute, results='hide'}
+R5 <- list(
+  scen_he         = run_he(SCENARIO_CASES$scen_he),
+  scen_hs         = run_hs(SCENARIO_CASES$scen_hs),
+  scen_co_low     = run_co2(SCENARIO_CASES$scen_co_low),
+  scen_co_high    = run_co2(SCENARIO_CASES$scen_co_high),
+  scen_co_psd     = run_co_psd(SCENARIO_CASES$scen_co_psd),
+  scen_px         = run_px(SCENARIO_CASES$scen_px),
+  scen_px_t3      = run_px_t3(SCENARIO_CASES$scen_px_t3),
+  scen_re         = run_re(SCENARIO_CASES$scen_re),
+  scen_re_replace = run_re_replace(SCENARIO_CASES$scen_re_replace),
+  scen_fa_ols     = run_fa(SCENARIO_CASES$scen_fa_ols),
+  scen_fa_mle     = run_fa(SCENARIO_CASES$scen_fa_mle),
+  scen_fa_mle_fp  = run_fa_mle_smoke(SCENARIO_CASES$scen_fa_mle),
+  scen_b0         = run_b0(SCENARIO_CASES$scen_b0),
+  scen_b1_ols     = run_b1(SCENARIO_CASES$scen_b1_ols),
+  scen_b1_glm     = run_b1(SCENARIO_CASES$scen_b1_glm),
+  scen_b2         = run_b2(SCENARIO_CASES$scen_b2),
+  scen_b3         = run_b3(SCENARIO_CASES$scen_b3),
+  scen_b4         = run_b4(SCENARIO_CASES$scen_b4),
+  scen_b5         = run_b5(SCENARIO_CASES$scen_b5),
+  fg_glm_ident    = run_fg_ident(SCENARIO_CASES$scen_fg_glm_ident),
+  fg_glm_flip     = run_fg_flip(SCENARIO_CASES$scen_fg_glm_flip)
+)
+
+ALL_GATES <- do.call(rbind, lapply(names(R5), function(lbl) {
+  g <- R5[[lbl]]$gates
+  if (length(g)) gates_table(lbl, g) else NULL
+}))
+
+# ---- MCPower-golden: freeze on first proof run, exact-reproduce afterwards ----
+# Headline stats are deterministic given the committed seeds, so the golden
+# check is the L3 hash-tripwire in numeric form: any engine/DGP change moves
+# them by orders more than SCENARIO_TOL$golden_abs.
+headline <- lapply(R5, function(r) {
+  v <- vapply(r$gates, function(g) as.numeric(g$est), numeric(1))
+  if (!is.null(r$golden_only)) v <- c(v, r$golden_only)
+  v
+})
+if (!file.exists(GOLDEN_PATH)) {
+  saveRDS(headline, GOLDEN_PATH)
+  GOLDEN_FROZEN_NOW <- TRUE
+  golden_tab <- data.frame(Case = names(headline),
+                           `Golden check` = "frozen this run", check.names = FALSE)
+} else {
+  GOLDEN_FROZEN_NOW <- FALSE
+  frozen <- readRDS(GOLDEN_PATH)
+  golden_tab <- do.call(rbind, lapply(names(headline), function(lbl) {
+    cur <- headline[[lbl]]; old <- frozen[[lbl]]
+    ok <- !is.null(old) && length(old) == length(cur) &&
+      all(abs(cur - old) <= SCENARIO_TOL$golden_abs)
+    data.frame(Case = lbl,
+               `Golden check` = if (ok) "reproduces" else "DRIFTED",
+               check.names = FALSE)
+  }))
+}
+```
+
+# Results at a glance
+
+```{r summary, results='asis'}
+n_pass <- sum(ALL_GATES$Verdict == "PASS"); n_all <- nrow(ALL_GATES)
+golden_ok <- all(golden_tab$`Golden check` %in% c("reproduces", "frozen this run"))
+cat(sprintf(
+  "> **%d of %d gates pass.** Golden reproducibility: %s.\n\n",
+  n_pass, n_all,
+  if (GOLDEN_FROZEN_NOW) "baseline frozen this run"
+  else if (golden_ok) "all cases reproduce" else "**DRIFT DETECTED — see below**"))
+summ <- stats::aggregate(Verdict ~ Case, ALL_GATES,
+                         function(v) if (all(v == "PASS")) "all PASS" else "REVIEW")
+knitr::kable(merge(summ, golden_tab, by = "Case", all.x = TRUE))
+```
+
+# Tier A — one knob at a time
+
+Each case turns on a single knob on an otherwise-optimistic design, draws
+K independent perturbation blocks, and recovers the knob's magnitude with a
+probe matched to its law.
+
+## Heterogeneity (slope wobble)
+
+Effects vary per observation: βⱼ + N(0, (h·βⱼ)²). The probe regresses squared
+true-β residuals on each squared predictor — the slope recovers h²βⱼ²
+per predictor, separating He from anything that only moves pooled moments.
+
+```{r he}
+knitr::kable(gates_table("scen_he", R5$scen_he$gates), digits = 5)
+```
+
+## Heteroskedasticity (residual-variance trend)
+
+Residual variance follows Var(εᵢ) = σ²·exp(γzᵢ)/exp(γ²/2) with γ = ln(λ)/4, z
+the standardised driver. log e² is then *linear* in z with slope exactly γ —
+shape-blind, so the same probe serves B3. The realised ±2σ ratio is exp(4γ̂).
+
+```{r hs}
+knitr::kable(gates_table("scen_hs", R5$scen_hs$gates), digits = 5)
+r <- R5$scen_hs
+```
+
+Realised λ̂ = exp(4γ̂) = **`r round(r$lambda_hat, 3)`** (set: `r r$lam`); the raw
+±2σ binned variance ratio reads `r round(r$bin_ratio, 2)` (reported only — finite
+bins make its law approximate; the slope is the gate).
+
+## Correlation noise
+
+Per block the off-diagonals get symmetrised Gaussian noise — symmetrisation
+halves the variance, so the per-block ρ law is N(ρ, s²/2) **censored at ±0.8**,
+plus finite-n sampling noise in quadrature. The low-ρ case gates the exact law;
+the high-ρ case sits against the clamp, gating the censored-normal truncation
+law itself (mean visibly below the naive ρ).
+
+```{r co}
+knitr::kable(rbind(gates_table("scen_co_low",  R5$scen_co_low$gates),
+                   gates_table("scen_co_high", R5$scen_co_high$gates)), digits = 5)
+co <- R5$scen_co_high
+```
+
+At ρ = `r co$rho`, s = `r co$s`: the censored law predicts mean
+`r round(co$cm$mean, 4)` — the −`r round(co$rho - co$cm$mean, 4)` shift below the
+nominal ρ **is** the documented clamp truncation, and the realised mean lands on
+it.
+
+### PSD repair (3 predictors, high ρ)
+
+Repair cannot fire at p = 2 (any clamped 2×2 is PD), so a 3-variable all-0.6
+design under s = 0.3 is where eigenvalue-floor + diagonal-renormalisation
+distortion lives. There is no closed-form law; the empirical per-pair moments
+are frozen as MCPower-golden (table below) and re-checked on every run.
+
+```{r co_psd}
+knitr::kable(t(as.matrix(R5$scen_co_psd$golden_only)), digits = 5)
+```
+
+## Distribution swaps (predictors)
+
+Each continuous-normal column is swapped per block with probability q to a
+uniform pick from the pool; every pool candidate is standardised (mean 0,
+var 1), so a swap perturbs *shape only* — a mis-centred candidate would be a
+mean leak straight into β̂₀.
+
+```{r px}
+knitr::kable(gates_table("scen_px", R5$scen_px$gates), digits = 5)
+```
+
+Block classifications: `r paste(names(R5$scen_px$cls_table), as.integer(R5$scen_px$cls_table), collapse = ", ")`.
+
+### Custom pool: `high_kurtosis`
+
+The only swappable marginal outside the presets. Its engine identity is a
+**censored** standardised t(3): a 2048-knot inverse-CDF table on percentiles
+[0.00121, 0.99879], normalised at build to the censored table's own SD
+(`r round(R5$scen_px_t3$tm$sd_raw, 4)` raw, vs √3 ≈ 1.7321 for the full t(3))
+— so the marginal has **exactly unit variance**, excess kurtosis ≈ 6.39, and
+support ±6.0 SD. The censoring is deliberate: it bounds every synthetic
+marginal at ±6 SD while keeping this the heaviest-tailed shape (t(3)'s own
+kurtosis is infinite). v1 — and this engine until 2026-06 — divided by √3,
+which standardises the *full* t(3) and left the censored marginal at
+var ≈ 0.858, a silent ~14% effect-size shrink for every high-kurtosis
+predictor; the L5 gate below caught it, and the table is now normalised by
+construction.
+
+```{r px_t3}
+knitr::kable(gates_table("scen_px_t3", R5$scen_px_t3$gates), digits = 5)
+```
+
+## Residual swaps
+
+With probability q_r the block's residual distribution is **replaced** —
+distribution *and* df — by a pool pick (t(df)·√((df−2)/df) or
+(χ²(df)−df)/√(2df)). The shape laws (skew = √(8/df), excess kurtosis =
+6/(df−4)) recover the df, proving the scenario's df is carried, not the spec's.
+
+```{r re}
+knitr::kable(rbind(gates_table("scen_re",         R5$scen_re$gates),
+                   gates_table("scen_re_replace", R5$scen_re_replace$gates)), digits = 5)
+```
+
+The pinned case (`scen_re_replace`) verifies the swap-eligibility rule: it
+*pins* the spec residual with `set_residual_distribution("high_kurtosis")`, then
+configures a forced right_skewed swap (q_r = 1). Because `pick_residual` only
+swaps an **unpinned default-normal** residual, the swap is inert — every draw
+keeps the pinned, symmetric censored-t3 high_kurtosis residual (skew ≈ 0,
+table-normalised to var 1), never the χ²(6) the config asks for. The skew = 0
+gate is the tripwire: a fired swap would force skew = √(8/6) ≈ 1.15.
+
+## Factor-proportion sampling
+
+`sampled_factor_proportions = FALSE` (the optimistic default) assigns factor
+levels by a deterministic largest-remainder walk — counts are a pure function of
+(n, p), identical across draws, each within 1 of n·p. `TRUE` draws levels per
+row: counts are Binomial(n, p) with variance n·p(1−p).
+
+```{r fa}
+knitr::kable(rbind(gates_table("scen_fa_ols", R5$scen_fa_ols$gates),
+                   gates_table("scen_fa_mle", R5$scen_fa_mle$gates),
+                   gates_table("scen_fa_mle_fp", R5$scen_fa_mle_fp$gates)), digits = 4)
+```
+
+Fixed counts at n = `r SCENARIO_CASES$scen_fa_ols$n`:
+`r paste(R5$scen_fa_ols$counts_fixed, collapse = "/")` against expected
+`r paste(R5$scen_fa_ols$expected, collapse = "/")`. The MLE rows are the one
+scenario knob the mixed-model estimator admits (every other knob is rejected by
+the engine's estimator gate — a deterministic L1 assertion owned by the engine
+test suite, not re-tested here).
+
+# Tier B — knob interactions
+
+The shipped presets co-vary every knob, so B2–B4 isolate single interactions
+through custom scenario pairs on **shared seeds** (P1 pairing: two scenarios at
+the same seed draw the same raw noise streams, so cross-scenario deltas are
+knob-attributable).
+
+## B0 — Optimistic ≡ baseline
+
+```{r b0}
+knitr::kable(gates_table("scen_b0", R5$scen_b0$gates), digits = 4)
+```
+
+The optimistic member of a three-scenario paired call is bit-identical to the
+plain non-scenario call — the DGP-level companion to the orchestrator's
+call-seed test (power here: `r paste(round(R5$scen_b0$power, 3), collapse = ", ")`).
+
+## B1 — β̂ unbiased across the presets (leak backstop)
+
+```{r b1}
+knitr::kable(rbind(gates_table("scen_b1_ols", R5$scen_b1_ols$gates),
+                   gates_table("scen_b1_glm", R5$scen_b1_glm$gates)), digits = 4)
+```
+
+OLS rows gate on the z-band, **intercept included** — the mean-leak tripwire
+(linear averaging keeps OLS β̂ exactly unbiased under every knob). Logit rows
+need a different law: the heterogeneity β-jitter is drawn **once per study**, so
+each study's data is a clean logit at its own β_eff and the MLE recovers it —
+averaged over the K studies the fitted coefficient → E[β_eff], **not** the
+attenuated coefficient a per-observation population-averaged marginal would show.
+The clip toward zero (s_j = h·|β_j|) nudges each slope's magnitude *up* by
+×(Φ(1/h)+h·φ(1/h)) ≈ ×1.0008 at doomer's h = 0.4; the symmetric unclipped
+intercept jitter leaves β_0 unchanged. So the logit law is this per-study
+pseudo-true value (`glm_perstudy_beta`), gated on the absolute band
+±`r SCENARIO_TOL$glm_beta_abs`. The GLM calibration gates remain Tier A and the
+flip rate below.
+
+## B2 — He × Hs separation
+
+The β-jitter variance ∝ xᵢⱼ²βⱼ² must be present at λ = 1 and *unchanged* by a λ
+toggle (λ is driven by the clean linear predictor, never the jittered one). The
+λ driver is pinned to x2, so the x1²-decomposed jitter variance is
+uncontaminated by the λ channel's even cosh component; the paired Δ across
+{h = 0.4, λ = 1} vs {h = 0.4, λ = 4} isolates the interaction.
+
+```{r b2}
+knitr::kable(gates_table("scen_b2", R5$scen_b2$gates), digits = 5)
+b2 <- R5$scen_b2
+```
+
+The *driver* column shows why the pin matters: x2²-slope reads
+`r round(mean(b2$res[3, ]), 4)` at λ = 1 (law h²β₂² = `r round((b2$h * b2$tb[["col_2"]])^2, 4)`)
+but inflates to `r round(mean(b2$res[4, ]), 4)` at λ = 4 — the cosh(γz)
+contamination the naive probe would misread as an He × Hs interaction.
+
+## B3 — Hs × Re preservation
+
+```{r b3}
+knitr::kable(gates_table("scen_b3", R5$scen_b3$gates), digits = 5)
+```
+
+Under a forced t(10) or χ²(10) residual the log-e² slope still reads ln(λ)/4 —
+the multiplicative variance trend amplifies the swapped tails without bending
+the ratio.
+
+## B4 — Co × Px (NORTA)
+
+Correlation is induced on the *latent* normals; a swapped marginal transforms
+them, so the realised Pearson r follows the NORTA law, not the latent spec
+value. The oracle is computed numerically in R (Gauss–Hermite over the latent
+bivariate normal; it matches the closed forms (e^ρ−1)/(e−1) and (6/π)asin(ρ/2)
+to 7 digits).
+
+```{r b4}
+knitr::kable(gates_table("scen_b4", R5$scen_b4$gates), digits = 5)
+```
+
+## B5 — Heteroskedasticity-anchor drift (P6), measured and bounded
+
+`het_coeffs` (the driver moments that standardise the λ driver) is computed
+once from the **base spec**; correlation noise moves the realised driver SD σ′
+per block while the anchor σ₀ stays put, so the realised ±2σ′ ratio drifts to
+λ′ = exp(4γσ′/σ₀). This is an accepted approximation — the gates *prove the
+mechanism* and *bound the drift*; they do not fail on the drift itself.
+
+```{r b5}
+knitr::kable(gates_table("scen_b5", R5$scen_b5$gates), digits = 5)
+b5 <- R5$scen_b5
+drift_tab <- do.call(rbind, lapply(names(b5$drift), function(sc)
+  data.frame(Preset = sc, `λ set` = c(realistic = 2, doomer = 4)[[sc]],
+             `λ′ 5%` = b5$drift[[sc]][1], `λ′ median` = b5$drift[[sc]][2],
+             `λ′ 95%` = b5$drift[[sc]][3], check.names = FALSE)))
+knitr::kable(drift_tab, digits = 3, row.names = FALSE)
+```
+
+The staleness gate is the discriminating one: per block, the measured ratio
+λ̂′ tracks the moment-predicted λ′ = exp(4γσ̂′/σ₀) with regression slope ≈ 1.
+(A per-block recompute of the anchor would pin λ̂′ at λ, slope ≈ 0 — ~11σ
+away.) Note the *mean* slope alone cannot tell the two designs apart
+(γ·E[1/σ′] ≈ γ/σ₀ to 0.1%); the per-block tracking is what evidences the
+stale anchor. The preset table quantifies the documented drift: under
+realistic/doomer the effective λ′ wobbles around the set λ by the quantiles
+shown — second-order next to the perturbations themselves.
+
+# Family gating
+
+Knobs must be live or inert exactly per family.
+
+```{r fg}
+knitr::kable(rbind(gates_table("fg_glm_ident", R5$fg_glm_ident$gates),
+                   gates_table("fg_glm_flip",  R5$fg_glm_flip$gates)), digits = 5)
+fg <- R5$fg_glm_flip
+```
+
+- **GLM λ / residual swaps — inert by bit-identity.** `apply_hsk` requires a
+  continuous outcome and consumes no RNG, so a λ toggle is an exact no-op under
+  logit; a forced residual swap only consumes scenario-stream draws after every
+  other consumer, leaving the Bernoulli outcomes bit-identical.
+- **GLM heterogeneity — live, latent.** The per-row log-odds jitter is hidden
+  behind a single Bernoulli draw, so the observable is the paired h-toggle
+  **flip rate**: X and the uniforms are drawn before the jitter normals, the
+  pair shares them bit-identically, and P(flip) = E|p_h − p₀| — predicted by
+  numerical integration row by row. Realised flip rate
+  `r round(mean(fg$res[1, ]), 4)` vs predicted `r round(mean(fg$res[2, ]), 4)`.
+  The Jensen mean-rate shift (`r sprintf("%+.4f", mean(fg$res[3, ]))`) is
+  expected and reported, not gated — median latent-rate invariance is
+  unobservable.
+- **MLE — only `sampled_factor_proportions` is live** (see the Fa section above);
+  every other knob is rejected by the engine's estimator gate.
+
+# Verdict table — every gate
+
+```{r verdict}
+knitr::kable(ALL_GATES, digits = 4, row.names = FALSE)
+```
+
+```{r overall, results='asis'}
+cat(if (n_pass == n_all && golden_ok) sprintf(paste0(
+  "> **All %d gates pass and every case reproduces its golden baseline.** ",
+  "Each scenario knob generates its documented law: the realised slope wobble, ",
+  "variance trend, correlation noise (with its clamp truncation), swap ",
+  "frequencies, pool moments, allocation behaviour, NORTA coupling, and ",
+  "heteroskedasticity-anchor drift all land on their predicted values, and the ",
+  "β̂ backstop shows no mean leak.\n"), n_all)
+else "> **Some gates need review** — investigate before trusting scenario results (an L5 gate failure is a potential engine bug, never a tolerance to widen).\n")
+```
+
+# scen_re_multi — multi-grouping RE knobs (M2)
+
+The §2.5 uniformity law on a crossed extra beside the primary:
+`random_effect_dist` / `random_effect_df` apply to *every* grouping's draw, and
+`icc_noise_sd` jitters every grouping's τ² **independently**. Measurement
+mirrors `scen_re`'s level-mean-variance recovery (solver-free); β̂ unbiased is
+the leak tripwire. The jitter-presence check is paired against a no-jitter
+(`optimistic`) control: the realised τ̂² spread under the knob must exceed the
+control's Monte-Carlo floor on the *extra* grouping too.
+
+```{r scen-re-multi, results="asis"}
+case <- SCENARIO_CASES$scen_re_multi
+
+# Level-mean-variance estimator of a grouping's tau^2 from OLS residuals:
+# Var(level means) minus the within-noise floor (mirrors scen_re's measurement).
+real_var <- function(ids, resid) {
+  lv  <- tapply(resid, ids, mean)
+  n_l <- tapply(resid, ids, length)
+  var(lv) - mean(tapply(resid, ids, var) / n_l)
+}
+
+# Scenario model with the M2 extra grouping attached (scenario_model already
+# applied set_cluster via build_model); draw block 0 under `scen` keyed on s.
+draw_multi <- function(scen, s) {
+  m <- scenario_model(case)
+  m$set_extra_groupings_debug(case$extra_groupings)
+  scen_draw(m, scen, s)
+}
+
+measure <- function(scen) {
+  gp <- numeric(case$K); gx <- numeric(case$K); b1 <- numeric(case$K)
+  for (k in seq_len(case$K)) {
+    d  <- draw_multi(scen, case$seed + k)
+    # Residualise on the full design (intercept + x1) by position — the engine
+    # labels design columns positionally; beta-hat[x1] is column 2.
+    ols <- stats::lm.fit(x = d$design, y = d$outcome)
+    b1[k] <- ols$coefficients[2]
+    e <- ols$residuals
+    gp[k] <- real_var(factor(d$cluster_ids), e)
+    gx[k] <- real_var(factor(d$extra_grouping_ids[[1]]), e)
+  }
+  list(primary = gp, extra = gx, beta1 = b1)
+}
+
+# The LME scenario knobs (random_effect_dist / icc_noise_sd) are not yet
+# exposed in the R port (the scenario contract sends `lme = NULL`), so
+# `set_scenario_configs` rejects them. Detect that and skip cleanly — the §2.5
+# per-grouping uniformity law is validated at the engine level (`data_gen` Rust
+# test `scenario_icc_jitter_is_independent_per_grouping`) until the
+# LME-scenario port surface lands; this section then activates verbatim.
+m2_scen_supported <- tryCatch(
+  { invisible(draw_multi("re_t5", case$seed + 1L)); TRUE },
+  error = function(e) FALSE)
+
+if (!m2_scen_supported) {
+  cat("**scen_re_multi**: SKIPPED — LME scenario knobs not yet exposed in the ",
+      "R port (`lme = NULL` in the scenario contract). The §2.5 per-grouping ",
+      "uniformity law is validated at the engine level (`data_gen` Rust tests) ",
+      "until the LME-scenario port surface lands.\n\n", sep = "")
+} else {
+  jit  <- measure("re_t5")       # heavy_tailed + icc_noise_sd 0.05 on both groupings
+  ctrl <- measure("optimistic")  # paired no-jitter control
+
+  tau_p <- case$cluster$ICC / (1 - case$cluster$ICC)
+  tau_x <- case$extra_groupings[[1]]$tau_squared
+
+  # set == get per grouping (jitter is mean-zero => means recover base tau^2).
+  stopifnot(abs(mean(jit$primary) - tau_p) <= 4 * sd(jit$primary) / sqrt(case$K) + 0.02)
+  stopifnot(abs(mean(jit$extra)   - tau_x) <= 4 * sd(jit$extra)   / sqrt(case$K) + 0.02)
+  # Jitter present on the EXTRA grouping (independent per-grouping draw): the
+  # realised tau^2 spread under the knob exceeds the no-jitter control floor.
+  stopifnot(sd(jit$extra) > sd(ctrl$extra))
+  # beta-hat unbiased — the leak tripwire.
+  stopifnot(abs(mean(jit$beta1) - 0.30) <= 4 * sd(jit$beta1) / sqrt(case$K))
+  cat("**scen_re_multi**: set == get per grouping, independent jitter present, ",
+      "beta unbiased — PASS\n\n", sep = "")
+}
+```
+
+# How this was produced
+
+```{r provenance}
+prov <- data.frame(
+  item = c("Report generated", "R version", "mcpower",
+           "Gate band (SE-of-mean z)", "Golden tolerance", "Cases", "Gates"),
+  value = c(format(Sys.Date(), "%e %B %Y"), R.version.string,
+            as.character(utils::packageVersion("mcpower")),
+            as.character(SCENARIO_TOL$z_c), format(SCENARIO_TOL$golden_abs),
+            as.character(length(R5)), as.character(nrow(ALL_GATES))),
+  check.names = FALSE)
+knitr::kable(prov)
+```
+
+Cases live in `mcpower/validation/formulas.R` (`SCENARIO_CASES`), probes in
+`mcpower/validation/common.R`, gates in `mcpower/validation/tolerances.R`
+(`SCENARIO_TOL`). Golden baseline: `mcpower/validation/data/scenario_golden.rds`
+(delete it to re-freeze after a *deliberate* DGP change). To reproduce, from the
+repository root:
+
+```r
+rmarkdown::render("mcpower/validation/validation_scenarios.rmd",
+                  output_dir = "mcpower/documentation/validation")
+```

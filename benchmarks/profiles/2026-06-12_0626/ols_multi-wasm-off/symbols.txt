@@ -1,0 +1,51 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 347320
+#
+# Overhead  Symbol               
+# ........  .....................
+#
+    35.99%  [.] strlen
+    32.46%  [.] __libc_early_init
+    31.55%  [.] check_match
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5462594736
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ....................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    16.07%  [.] JS:engine_core::rng::fill_normal_column::hca4842986380a6e1-240-turbofan
+    14.99%  [.] JS:engine_core::batch::run_one_sim::h0b2f18fa70940de2-5-turbofan
+    13.89%  [.] JS:engine_core::rng::fill_words::ha145618492a4c537-327-turbofan
+     4.83%  [.] JS:engine_core::ols::OlsSuffStats::add_rows::ha515df89fe58f4e0-288-turbofan
+     4.61%  [.] JS:gemm_f64::microkernel::scalar::f64::x2x4::h7187dd700a13118f-116-turbofan
+     2.74%  [.] JS:engine_core::batch::run_one_sim::h0b2f18fa70940de2-5-liftoff
+     2.39%  [.] JS:gemm_f64::microkernel::scalar::f64::x2x2::hdb07dfbf2590995e-161-turbofan
+     1.91%  [.] JS:gemm_common::pack_operands::pack_lhs::h21e3906eba3e870d-45-turbofan
+     1.40%  [.] JS:faer::linalg::matmul::matvec_rowmajor::matvec::h9f18413873b83c58-36-turbofan
+     1.10%  [.] JS:faer::linalg::cholesky::ldlt::factor::cholesky_recursion_right_looking::h4c150a16b6ba23d8-28-turbofan
+     0.93%  [.] v8::internal::Scanner::Next()
+     0.77%  [.] __memmove_avx_unaligned_erms
+     0.75%  [.] JS:engine_core::ols::fit_suff_stats_t_sq::h44002a857c3f0fc0-59-turbofan
+     0.59%  [.] <core::hash::sip::Hasher<core::hash::sip::Sip13Rounds> as core::hash::Hasher>::write
+     0.57%  [.] v8::internal::compiler::Scheduler::ScheduleLate()
+     0.55%  [.] JS:engine_core::philox::philox4x32_10::h34aa3d12b872c657-567-turbofan
+     0.52%  [.] _int_malloc
+     0.50%  [.] JS:compiler_builtins[40f58339702e5617]::math::partial_availability::log-806-turbofan
+     0.50%  [.] JS:fmaxf-1724-turbofan
+     0.43%  [.] void v8::internal::CalculateLineEndsImpl<unsigned char>(v8::base::SmallVector<int, 32ul, std::allocator<int> >*, v8::base::Vector<unsigned char const>, bool)
+     0.43%  [.] v8::internal::compiler::TopLevelLiveRange::GetChildCovers(v8::internal::compiler::LifetimePosition)
+     0.39%  [.] JS:faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp::h32b4a3318997cb0f-15-turbofan
+     0.31%  [.] JS:engine_core::critvals::betacf::h12c3969af86ee001-775-turbofan
+     0.30%  [.] _dl_lookup_symbol_x
+
+
+#
+# (Tip: To filter subset of samples with report or script add --time X-Y or --cpu A,B,C or --socket-filter ...)
+#

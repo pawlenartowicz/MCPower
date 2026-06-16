@@ -1,0 +1,47 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377731
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    33.82%  [k] 0xffffffffade01988
+    33.09%  [.] _dl_lookup_symbol_x
+    33.09%  [.] get_common_cache_info.constprop.0
+
+
+# Samples: 21K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 11443275247
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ...........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    20.62%  [.] JS:engine_core::batch::run_one_sim::h0b2f18fa70940de2-5-turbofan
+    16.18%  [.] JS:engine_core::rng::fill_normal_column::hca4842986380a6e1-240-turbofan
+    14.43%  [.] JS:engine_core::rng::fill_words::ha145618492a4c537-327-turbofan
+     7.69%  [.] JS:engine_core::simd_transcendental::ln_fill::h8f9ae1a619eb0f6b-205-turbofan
+     7.32%  [.] JS:engine_core::simd_transcendental::phi_fill::h9e43c1e8907b7337-281-turbofan
+     3.69%  [.] JS:engine_core::ols::OlsSuffStats::add_rows::ha515df89fe58f4e0-288-turbofan
+     3.34%  [.] JS:gemm_f64::microkernel::scalar::f64::x2x4::h7187dd700a13118f-116-turbofan
+     1.63%  [.] JS:gemm_f64::microkernel::scalar::f64::x2x2::hdb07dfbf2590995e-161-turbofan
+     1.49%  [.] JS:gemm_common::pack_operands::pack_lhs::h21e3906eba3e870d-45-turbofan
+     1.27%  [.] JS:engine_core::batch::run_one_sim::h0b2f18fa70940de2-5-liftoff
+     1.10%  [.] JS:faer::linalg::matmul::matvec_rowmajor::matvec::h9f18413873b83c58-36-turbofan
+     0.71%  [.] JS:engine_core::ols::fit_suff_stats_t_sq::h44002a857c3f0fc0-59-turbofan
+     0.68%  [.] JS:engine_core::philox::philox4x32_10::h34aa3d12b872c657-567-turbofan
+     0.65%  [.] JS:faer::linalg::cholesky::ldlt::factor::cholesky_recursion_right_looking::h4c150a16b6ba23d8-28-turbofan
+     0.47%  [.] __memmove_avx_unaligned_erms
+     0.47%  [.] JS:compiler_builtins[40f58339702e5617]::math::partial_availability::log-806-turbofan
+     0.45%  [.] JS:engine_core::critvals::betacf::h12c3969af86ee001-775-turbofan
+     0.36%  [.] JS:fmaxf-1724-turbofan
+     0.34%  [.] v8::internal::Scanner::Next()
+     0.31%  [.] v8::internal::compiler::Scheduler::ScheduleLate()
+
+
+#
+# (Tip: To adjust path to source files to local file system use perf report --prefix=... --prefix-strip=...)
+#

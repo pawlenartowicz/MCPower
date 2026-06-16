@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 367817
+#
+# Overhead  Symbol            
+# ........  ..................
+#
+    33.98%  [.] __memcpy_chk
+    33.98%  [.] _dl_new_object
+    32.03%  [.] main
+
+
+# Samples: 3K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1937716915
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    41.82%  [.] engine_core::data_gen::generate_sim_data
+    16.70%  [.] engine_core::lme::LmeSuffStats::add_rows
+    15.70%  [.] engine_core::rng::SimRng::next_u32
+    14.49%  [.] engine_core::lme::profiled_deviance
+     2.38%  [.] engine_core::data_gen::draw_residual
+     1.59%  [.] pulp::x86::v3::V3::vectorize::imp
+     1.44%  [.] __ieee754_log_fma
+     0.75%  [.] engine_core::critvals::betacf
+     0.59%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.42%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.42%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.36%  [.] faer::mat::matown::<impl faer::mat::generic::Mat<faer::mat::matown::Own<T,Rows,Cols>>>::from_fn
+     0.34%  [.] pulp::x86::v3::V3::vectorize::imp
+
+
+#
+# (Tip: Limit to show entries above 5% only: perf report --percent-limit 5)
+#

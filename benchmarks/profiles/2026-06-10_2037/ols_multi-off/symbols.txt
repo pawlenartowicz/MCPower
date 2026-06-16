@@ -1,0 +1,33 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    50.00%  [.] _dl_new_object
+    50.00%  [.] _dl_relocate_object_no_relro
+
+
+# Samples: 5K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 2947103737
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    54.04%  [.] engine_core::data_gen::generate_sim_data
+    20.34%  [.] engine_core::ols::OlsSuffStats::add_rows
+    19.03%  [.] engine_core::rng::SimRng::next_u32
+     2.87%  [.] engine_core::data_gen::draw_residual
+     0.68%  [.] engine_core::ols::fit_suff_stats_t_sq
+     0.52%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.40%  [.] engine_core::critvals::betacf
+
+
+#
+# (Tip: Create an archive with symtabs to analyse on other machine: perf archive)
+#

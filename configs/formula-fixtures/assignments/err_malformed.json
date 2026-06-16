@@ -1,0 +1,13 @@
+{
+  "expected": {
+    "error": "malformed assignment input"
+  },
+  "input": "nonsense",
+  "kind": "effect",
+  "known": {
+    "interaction_terms": [],
+    "predictors": [
+      "x1"
+    ]
+  }
+}

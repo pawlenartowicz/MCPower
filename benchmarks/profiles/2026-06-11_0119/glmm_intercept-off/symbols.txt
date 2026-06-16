@@ -1,0 +1,44 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol              
+# ........  ....................
+#
+    50.00%  [.] __minimal_malloc
+    50.00%  [.] __strnlen_ifunc
+
+
+# Samples: 13K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 7342210012
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    53.73%  [.] engine_core::glmm::laplace_deviance
+    27.90%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     2.40%  [.] bobyqa::linalg::matprod12_into
+     2.18%  [.] bobyqa::trustregion::trsbox
+     1.40%  [.] bobyqa::linalg::matprod21_into
+     1.28%  [.] engine_core::data_gen::generate_sim_data
+     1.23%  [.] bobyqa::update::updateh
+     1.13%  [.] bobyqa::geometry::geostep
+     0.85%  [.] bobyqa::bobyqb::bobyqb
+     0.85%  [.] engine_core::glmm::glmm_block_solve
+     0.80%  [.] __ieee754_log_fma
+     0.77%  [.] bobyqa::powalg::calvlag_noadd
+     0.56%  [.] engine_core::glmm::fit_glmm
+     0.41%  [.] __ieee754_exp_fma
+     0.38%  [.] engine_core::rng::fill_words
+     0.38%  [.] bobyqa::powalg::hess_mul_into
+     0.37%  [.] engine_core::critvals::chi2_ppf
+     0.31%  [.] bobyqa::powalg::beta_from_noadd_vlag
+
+
+#
+# (Tip: To see how parallelism changes over time, try: perf report -F time,latency,parallelism --time-quantum=1s)
+#

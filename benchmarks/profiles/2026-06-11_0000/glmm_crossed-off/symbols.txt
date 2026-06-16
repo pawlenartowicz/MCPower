@@ -1,0 +1,44 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol               
+# ........  .....................
+#
+    50.00%  [.] _dl_protect_relro
+    50.00%  [.] dl_main
+
+
+# Samples: 17K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 9612648762
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    31.16%  [.] engine_core::glmm::laplace_deviance
+    15.53%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+     9.56%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     9.26%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     6.76%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     5.76%  [.] pulp::x86::v3::V3::vectorize::imp
+     4.99%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.93%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n2
+     2.02%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     1.41%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.83%  [.] bobyqa::trustregion::trsbox
+     0.77%  [.] bobyqa::linalg::matprod21_into
+     0.65%  [.] bobyqa::linalg::matprod12_into
+     0.52%  [.] bobyqa::update::updateh
+     0.40%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.38%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.37%  [.] __memset_avx2_unaligned_erms
+     0.31%  [.] bobyqa::powalg::calvlag_noadd
+
+
+#
+# (Tip: Use parent filter to see specific call path: perf report -p <regex>)
+#

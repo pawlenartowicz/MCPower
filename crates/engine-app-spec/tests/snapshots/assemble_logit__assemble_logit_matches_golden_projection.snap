@@ -1,0 +1,13 @@
+---
+source: crates/engine-app-spec/tests/assemble_logit.rs
+assertion_line: 110
+expression: summary
+---
+{
+  "n_contracts": 1,
+  "target_count": 2,
+  "coefficient_count": 3,
+  "generation_column_count": 2,
+  "alpha": 0.05,
+  "correction_code": 0
+}

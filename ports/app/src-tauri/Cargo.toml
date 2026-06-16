@@ -1,0 +1,32 @@
+[package]
+name = "mcpower-app"
+version = "0.1.0"
+description = "MCPower desktop application (Tauri + Svelte)"
+edition = "2021"
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.11.2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-store = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+engine-app-spec     = { path = "../../../crates/engine-app-spec" }
+engine-orchestrator = { path = "../../../crates/engine-orchestrator" }
+parking_lot         = "0.12"
+uuid                = { version = "1", features = ["v4"] }

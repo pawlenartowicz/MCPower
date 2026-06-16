@@ -1,0 +1,2 @@
+case               mode     n  n_sims  elapsed_s fits_per_sec   conv   power wasm_tax  vs_baseline  gate
+ols_multi          off    200   10000      0.247        40551  1.000   0.928    1.43x  1.00x        hash=

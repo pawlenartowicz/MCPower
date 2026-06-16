@@ -1,0 +1,2 @@
+case               mode     n  n_sims  elapsed_s fits_per_sec   conv   power  vs_baseline
+glm_multi          off    200   10000      0.592        16890  1.000   0.694  0.99x

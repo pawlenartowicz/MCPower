@@ -1,0 +1,43 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 366926
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    34.07%  [.] _dl_relocate_object_no_relro
+    34.07%  [.] do_tunable_update_val
+    31.87%  [.] sysmalloc
+
+
+# Samples: 13K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 7560153063
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    32.98%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+    23.77%  [.] engine_core::glmm::laplace_deviance
+    14.03%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     6.16%  [.] pulp::x86::v3::V3::vectorize::imp
+     5.52%  [.] pulp::x86::v3::V3::vectorize::imp
+     5.42%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     3.15%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.64%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.52%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.49%  [.] libpulp_v0_22_2_ld_b32s_1111111100000000
+     0.49%  [.] __memset_avx2_unaligned_erms
+     0.46%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.38%  [.] bobyqa::trustregion::trsbox
+     0.37%  [.] bobyqa::linalg::matprod12_into
+     0.34%  [.] bobyqa::linalg::matprod21_into
+     0.32%  [.] gemm_v0_gemm_microkernel_f64_simd256_m12_n4
+
+
+#
+# (Tip: Order by the overhead of source file name and line number: perf report -s srcline)
+#

@@ -1,0 +1,122 @@
+name: CI
+
+# One workflow, four parallel jobs — one per distribution channel of the
+# "one engine, four ports" workspace. The Rust engine is the load-bearing
+# contract every port binds to, so it gates first; each port job rebuilds the
+# engine for its own host (PyO3 / wasm-bindgen / extendr) behind a cargo cache.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Newer pushes supersede in-flight runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Rust engine: fmt + clippy + the ~109 #[test] across 7 crates ──────────
+  rust:
+    name: Rust engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # dhat bounded-allocation gates assert exact alloc counts; faer/rayon
+      # multi-thread jitter perturbs them, so pin the pool to one thread.
+      RAYON_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+
+  # ── Python port: native release engine via maturin, then pytest ───────────
+  python:
+    name: Python port
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build engine + run pytest
+        working-directory: ports/py
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install maturin numpy msgpack pandas pytest
+          maturin develop --release
+          pytest tests/
+
+  # ── WASM port: build the engine to wasm (+ relaxed-simd strip), then vitest ─
+  wasm:
+    name: WASM port
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: ports/wasm/pnpm-lock.yaml
+      - name: Install, build wasm, run vitest
+        working-directory: ports/wasm
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:wasm
+          pnpm test
+
+  # ── R port: install the package (1 release compile), testthat, then the
+  #    fast L3 regression gate against the frozen R-SOTA goldens. ────────────
+  r:
+    name: R port + L3 regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # The package build does a full release compile of the engine staticlib;
+      # cap parallelism so a GitHub-hosted runner doesn't OOM (exit 137).
+      CARGO_BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: Install R dependencies
+        # Imports + testthat + tibble only. Heavy Suggests (V8, vegawidget,
+        # rsvg, png) are absent on purpose — the report/plot tests skip via
+        # skip_if_not_installed, so they don't need their system libs here.
+        run: |
+          Rscript -e 'install.packages(c("R6","jsonlite","cli","htmltools","testthat","tibble"))'
+      - name: Install mcpower
+        working-directory: ports/r
+        run: R CMD INSTALL --no-multiarch .
+      - name: testthat
+        working-directory: ports/r
+        run: Rscript -e 'library(mcpower); testthat::test_dir("tests/testthat", stop_on_failure = TRUE)'
+      - name: L3 regression gate
+        working-directory: validation
+        run: Rscript regression.R

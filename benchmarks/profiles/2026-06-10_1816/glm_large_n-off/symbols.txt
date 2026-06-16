@@ -1,0 +1,39 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378153
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.89%  [.] _nl_normalize_codeset
+    33.06%  [.] _dl_relocate_object_no_relro
+    33.06%  [.] strlen
+
+
+# Samples: 12K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 6673926025
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    50.69%  [.] engine_core::data_gen::generate_sim_data
+    12.48%  [.] engine_core::glm::glm_irls_fit
+     9.81%  [.] engine_core::rng::SimRng::next_u32
+     6.73%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     4.91%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     3.68%  [.] __ieee754_exp_fma
+     3.50%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m4_n4
+     2.52%  [.] gemm_v0_gemm_pack_f64_simd256_m4
+     2.03%  [.] exp@@GLIBC_2.29
+     1.88%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.47%  [.] __memset_avx2_unaligned_erms
+     0.33%  [.] private_gemm_x86::gemm::{{closure}}::{{closure}}
+
+
+#
+# (Tip: To compare hot regions in two workloads use perf record -b -o file ... ; perf diff --stream file1 file2)
+#

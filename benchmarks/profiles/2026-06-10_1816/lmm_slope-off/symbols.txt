@@ -1,0 +1,54 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 366723
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    34.09%  [.] get_common_cache_info.constprop.0
+    34.09%  [k] 0xffffffff97201988
+    31.83%  [.] strcmp
+
+
+# Samples: 5K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 2823856702
+#
+# Overhead  Symbol                                                                                                                                             
+# ........  ...................................................................................................................................................
+#
+    40.12%  [.] engine_core::lmm::reml_deviance
+    11.85%  [.] engine_core::data_gen::generate_sim_data
+     6.81%  [.] engine_core::lmm::LmmSuffStats::add_rows_multi
+     5.46%  [.] bobyqa::linalg::matprod12_into
+     4.22%  [.] bobyqa::trustregion::trsbox
+     3.99%  [.] engine_core::rng::SimRng::next_u32
+     3.07%  [.] bobyqa::geometry::geostep
+     2.90%  [.] bobyqa::linalg::matprod21_into
+     2.65%  [.] __ieee754_log_fma
+     2.24%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.19%  [.] bobyqa::update::updateh
+     2.05%  [.] bobyqa::bobyqb::bobyqb
+     1.55%  [.] bobyqa::powalg::calvlag_noadd
+     1.44%  [.] bobyqa::powalg::hess_mul_into
+     1.27%  [.] engine_core::data_gen::draw_residual
+     0.86%  [.] __memset_avx2_unaligned_erms
+     0.58%  [.] bobyqa::geometry::setdrop_tr
+     0.47%  [.] engine_core::critvals::betacf
+     0.44%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.42%  [.] bobyqa::powalg::calden_into
+     0.42%  [.] bobyqa::powalg::calvlag_and_den_into
+     0.38%  [.] bobyqa::powalg::beta_from_noadd_vlag
+     0.36%  [.] bobyqa::update::updateq
+     0.35%  [.] bobyqa::bobyqb::errbd
+     0.33%  [.] bobyqa::bobyqb::shiftbase
+     0.31%  [.] bobyqa::update::tryqalt
+     0.31%  [.] __memmove_avx_unaligned_erms
+
+
+#
+# (Tip: To change sampling frequency to 100 Hz: perf record -F 100)
+#

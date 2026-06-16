@@ -1,0 +1,45 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 366591
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    34.10%  [.] _dl_new_object
+    34.10%  [.] _dl_relocate_object_no_relro
+    31.80%  [.] syscall
+
+
+# Samples: 11K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 6384937444
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    22.79%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m12_n4
+    21.97%  [.] engine_core::glmm::laplace_deviance
+    13.29%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n4
+     9.35%  [.] gemm_v0_gemm_pack_f64_simd256_m12
+     6.53%  [.] pulp::x86::v3::V3::vectorize::imp
+     5.69%  [.] pulp::x86::v3::V3::vectorize::imp
+     3.66%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     3.32%  [.] pulp::x86::v3::V3::vectorize::imp
+     2.57%  [.] gemm_v0_gemm_pack_f64_simd256_m8
+     1.47%  [.] gemm_v0_gemm_microkernel_f64_simd256_load_m8_n2
+     0.65%  [.] faer::linalg::triangular_solve::solve_lower_triangular_in_place_imp
+     0.61%  [.] __memset_avx2_unaligned_erms
+     0.59%  [.] bobyqa::linalg::matprod12_into
+     0.50%  [.] bobyqa::trustregion::trsbox
+     0.47%  [.] bobyqa::update::updateh
+     0.44%  [.] bobyqa::linalg::matprod21_into
+     0.44%  [.] faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp
+     0.35%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+
+
+#
+# (Tip: To see call chains by final symbol taking CPU time (bottom up) use perf report -G)
+#

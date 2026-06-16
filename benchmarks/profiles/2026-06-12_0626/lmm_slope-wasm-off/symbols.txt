@@ -1,0 +1,61 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol             
+# ........  ...................
+#
+    50.00%  [.] __strncasecmp_l
+    50.00%  [.] _dl_new_object
+
+
+# Samples: 15K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 8169810709
+#
+# Overhead  Symbol                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+# ........  ...................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    19.72%  [.] JS:engine_core::lmm::reml_deviance::h928aa05b27e013c3-19-turbofan
+     5.62%  [.] JS:nano_gemm::naive_millikernel::h583ed206f9b14fe8-228-turbofan
+     5.52%  [.] JS:engine_core::lmm::LmmSuffStats::add_rows_multi::h24ec844efa1f124d-60-turbofan
+     5.44%  [.] JS:compiler_builtins[40f58339702e5617]::math::partial_availability::log-806-turbofan
+     4.09%  [.] JS:bobyqa::linalg::matprod12_into::ha1abf966d3dcd23b-579-turbofan
+     3.27%  [.] JS:bobyqa::trustregion::trsbox::h39f46f4fa14afa02-12-turbofan
+     3.27%  [.] JS:bobyqa::linalg::matprod21_into::h226e1b944ec7e274-276-turbofan
+     2.67%  [.] JS:engine_core::batch::run_one_sim::h0b2f18fa70940de2-5-turbofan
+     2.50%  [.] JS:bobyqa::geometry::geostep::h942e3ec593b085d8-9-turbofan
+     2.26%  [.] JS:bobyqa::update::updateh::h4e7ce4d0d14e8fc1-51-turbofan
+     2.18%  [.] JS:engine_core::rng::fill_normal_column::hca4842986380a6e1-240-turbofan
+     1.88%  [.] JS:engine_core::rng::fill_words::ha145618492a4c537-327-turbofan
+     1.70%  [.] JS:faer::linalg::cholesky::ldlt::factor::cholesky_recursion_right_looking::h4c150a16b6ba23d8-28-turbofan
+     1.30%  [.] JS:engine_core::lmm::fit_lmm::h92caa1f2ec3d6c88-55-turbofan
+     1.21%  [.] JS:fmax-1725-turbofan
+     1.18%  [.] JS:bobyqa::powalg::calvlag_noadd::h03451ba528816dc3-289-turbofan
+     1.16%  [.] v8::internal::wasm::memory_fill_wrapper(unsigned long, unsigned int, unsigned long, unsigned char, unsigned long)
+     0.74%  [.] __memmove_avx_unaligned_erms
+     0.73%  [.] JS:bobyqa::powalg::hess_mul_into::h87c902b5ac921064-462-turbofan
+     0.72%  [.] __memset_avx2_unaligned_erms
+     0.68%  [.] v8::internal::Scanner::Next()
+     0.59%  [.] JS:bobyqa::geometry::setdrop_tr::h1fa773a20d4669dd-158-turbofan
+     0.52%  [.] JS:engine_core::lmm::reml_deviance::h928aa05b27e013c3-19-liftoff
+     0.42%  [.] v8::internal::compiler::Scheduler::ScheduleLate()
+     0.42%  [.] JS:bobyqa::bobyqb::errbd::h410971167f5ac59f-134-turbofan
+     0.42%  [.] JS:bobyqa::powalg::calden_into::h0ce86718c9ce0343-305-turbofan
+     0.38%  [.] JS:fmin-1726-turbofan
+     0.38%  [.] v8::internal::wasm::memory_copy_wrapper(unsigned long, unsigned int, unsigned int, unsigned long, unsigned long, unsigned long)
+     0.37%  [.] <core::hash::sip::Hasher<core::hash::sip::Sip13Rounds> as core::hash::Hasher>::write
+     0.35%  [.] JS:bobyqa::powalg::beta_from_noadd_vlag::h248db092959c7298-249-turbofan
+     0.32%  [.] JS:nano_gemm::naive_millikernel::h583ed206f9b14fe8-228-liftoff
+     0.32%  [.] v8::internal::compiler::TopLevelLiveRange::GetChildCovers(v8::internal::compiler::LifetimePosition)
+     0.31%  [.] JS:faer::mat::matmut::<impl faer::mat::generic::Mat<Inner>>::copy_from_triangular_lower::imp::h206096f64b59e0bd-221-turbofan
+     0.31%  [.] JS:faer::linalg::matmul::triangular::accum_lower::h2dcef3b799e58882-85-turbofan
+     0.31%  [.] _int_malloc
+
+
+#
+# (Tip: To compute metrics for samples use perf record -e '{cycles,instructions}' ... ; perf script -F +metric)
+#

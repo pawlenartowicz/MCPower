@@ -1,0 +1,39 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 249998
+#
+# Overhead  Symbol                         
+# ........  ...............................
+#
+    50.00%  [.] _dl_process_pt_gnu_property
+    50.00%  [.] strcmp
+
+
+# Samples: 48K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 26257151311
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    62.66%  [.] engine_core::glmm::laplace_deviance
+    21.96%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.97%  [.] bobyqa::linalg::matprod12_into
+     1.83%  [.] bobyqa::linalg::matprod21_into
+     1.73%  [.] bobyqa::trustregion::trsbox
+     1.68%  [.] bobyqa::update::updateh
+     1.22%  [.] bobyqa::geometry::geostep
+     0.93%  [.] __ieee754_log_fma
+     0.70%  [.] engine_core::data_gen::generate_sim_data
+     0.59%  [.] bobyqa::powalg::calvlag_noadd
+     0.59%  [.] bobyqa::bobyqb::bobyqb
+     0.56%  [.] engine_core::glmm::glmm_block_solve
+     0.46%  [.] bobyqa::powalg::hess_mul_into
+
+
+#
+# (Tip: System-wide collection from all CPUs: perf record -a)
+#

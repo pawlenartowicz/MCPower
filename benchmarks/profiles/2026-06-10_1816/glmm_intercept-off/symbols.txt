@@ -1,0 +1,44 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377812
+#
+# Overhead  Symbol                          
+# ........  ................................
+#
+    33.83%  [.] __strncmp_avx2
+    33.08%  [.] __tunable_get_val
+    33.08%  [.] _dl_relocate_object_no_relro
+
+
+# Samples: 15K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 8371896200
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    54.21%  [.] engine_core::glmm::laplace_deviance
+    30.29%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     1.99%  [.] engine_core::data_gen::generate_sim_data
+     1.94%  [.] bobyqa::linalg::matprod12_into
+     1.51%  [.] bobyqa::trustregion::trsbox
+     1.07%  [.] bobyqa::linalg::matprod21_into
+     0.91%  [.] bobyqa::geometry::geostep
+     0.76%  [.] engine_core::glmm::glmm_block_solve
+     0.70%  [.] bobyqa::update::updateh
+     0.62%  [.] bobyqa::powalg::calvlag_noadd
+     0.60%  [.] bobyqa::bobyqb::bobyqb
+     0.58%  [.] __ieee754_log_fma
+     0.49%  [.] engine_core::glmm::fit_glmm
+     0.48%  [.] engine_core::rng::SimRng::next_u32
+     0.41%  [.] bobyqa::powalg::hess_mul_into
+     0.35%  [.] engine_core::critvals::chi2_ppf
+     0.34%  [.] __ieee754_exp_fma
+
+
+#
+# (Tip: Order by the overhead of source file name and line number: perf report -s srcline)
+#

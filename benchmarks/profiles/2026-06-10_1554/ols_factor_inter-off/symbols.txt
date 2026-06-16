@@ -1,0 +1,35 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378541
+#
+# Overhead  Symbol         
+# ........  ...............
+#
+    33.96%  [.] _int_malloc
+    33.02%  [.] do_lookup_x
+    33.02%  [.] strlen
+
+
+# Samples: 2K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 1591923821
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    48.17%  [.] engine_core::data_gen::generate_sim_data
+    30.06%  [.] engine_core::ols::OlsSuffStats::add_rows
+    10.12%  [.] engine_core::rng::SimRng::next_u32
+     5.78%  [.] engine_core::data_gen::draw_residual
+     1.13%  [.] engine_core::ols::fit_suff_stats_t_sq
+     0.84%  [.] engine_core::critvals::betacf
+     0.82%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.34%  [.] engine_core::batch::run_one_sim
+
+
+#
+# (Tip: To show information about system the samples were collected on use perf report --header)
+#

@@ -1,0 +1,40 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 378929
+#
+# Overhead  Symbol           Source:Line      
+# ........  ...............  .................
+#
+    34.03%  [.] _int_malloc  malloc.c:4592
+    32.99%  [.] do_lookup_x  dl-lookup.c:420
+    32.99%  [.] strlen       strlen-sse2.S:142
+
+
+# Samples: 52K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 28443338712
+#
+# Overhead  Symbol                                                                                               Source:Line                                
+# ........  ...................................................................................................  ...........................................
+#
+    45.03%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:772
+    28.71%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:395
+     7.02%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:410
+     3.65%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:385
+     2.94%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:404
+     2.71%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall                                                       simd_transcendental.rs:0
+     1.63%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:0
+     1.19%  [.] engine_core::glmm::laplace_deviance                                                              cmp.rs:1916
+     0.69%  [.] engine_core::glmm::laplace_deviance                                                              range.rs:0
+     0.46%  [.] engine_core::glmm::laplace_deviance                                                              matref.rs:399
+     0.46%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:387
+     0.45%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:309
+     0.31%  [.] engine_core::glmm::laplace_deviance                                                              glmm.rs:384
+
+
+#
+# (Tip: For hierarchical output, try: perf report --hierarchy)
+#

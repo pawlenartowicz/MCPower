@@ -1,0 +1,46 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 3  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 377212
+#
+# Overhead  Symbol                               
+# ........  .....................................
+#
+    33.72%  [.] __init_misc
+    33.14%  [.] do_lookup_x
+    33.14%  [.] get_common_cache_info.constprop.0
+
+
+# Samples: 10K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 5704948582
+#
+# Overhead  Symbol                                                                                             
+# ........  ...................................................................................................
+#
+    23.45%  [.] engine_core::data_gen::generate_sim_data
+    15.78%  [.] engine_core::ols::OlsSuffStats::add_rows
+    11.58%  [.] engine_core::distributions::sample_t
+    10.30%  [.] engine_core::data_gen::draw_residual
+     7.69%  [.] engine_core::rng::fill_words
+     7.24%  [.] engine_core::rng::fill_normal_column
+     4.98%  [.] engine_core::philox::philox4x32_10
+     4.46%  [.] __ieee754_exp_fma
+     4.28%  [.] __ieee754_log_fma
+     3.21%  [.] exp@@GLIBC_2.29
+     1.47%  [.] pulp::x86::v3::V3::vectorize::imp_fastcall
+     0.62%  [.] engine_core::critvals::betacf
+     0.62%  [.] __exp_finite@plt
+     0.59%  [.] log@@GLIBC_2.29
+     0.53%  [.] engine_core::ols::fit_suff_stats_t_sq
+     0.51%  [.] round
+     0.41%  [.] pulp::x86::v3::V3::vectorize::imp
+     0.31%  [.] __memmove_avx_unaligned_erms
+     0.31%  [.] __log_finite@plt
+
+
+#
+# (Tip: To see callchains in a more compact form: perf report -g folded)
+#
