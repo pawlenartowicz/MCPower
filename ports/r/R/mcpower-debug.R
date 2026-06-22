@@ -61,10 +61,12 @@ MCPowerDebug <- R6::R6Class(
     #' Generate the design matrix + outcome for sim-0.
     #'
     #' Returns a list with:
+    #' \describe{
     #'   \item{design}{numeric matrix (nrow = .debug_n, ncol = n_predictors)}
     #'   \item{columns}{character vector of column names}
     #'   \item{outcome}{numeric vector of length .debug_n}
     #'   \item{cluster_ids}{integer vector or NULL}
+    #' }
     create_data = function() {
       rep <- private$.debug(data = TRUE)
       dsgn <- rep$data$design
@@ -87,11 +89,13 @@ MCPowerDebug <- R6::R6Class(
     #'   (numeric, length nrow), and optionally $cluster_ids (integer or NULL).
     #'   $columns is ignored (the engine re-labels positionally).
     #' Returns a list with:
+    #' \describe{
     #'   \item{betas}{numeric, length ncol (aligned to design_columns)}
     #'   \item{design_columns}{character, length ncol}
     #'   \item{converged}{logical}
     #'   \item{targets}{list of per-target lists (beta, se, statistic,
     #'     critical_value, target_index, target_label, df, two_sided, ...)}
+    #' }
     load_data = function(d) {
       if (!private$applied) private$apply()
       blob <- private$build_contract_bytes(self$.debug_scenario)

@@ -6,8 +6,13 @@ import { test, expect } from '@playwright/test';
 test('a failed run shows the error card with the engine message and a working copy button', async ({
   page,
   context,
+  browserName,
 }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // Clipboard read-back is a Chromium-only capability in Playwright automation;
+  // firefox/webkit don't support the `clipboard-read` permission and will throw.
+  if (browserName === 'chromium') {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  }
   await page.goto('/');
 
   const formula = page.getByPlaceholder(/Write your formula/i);
@@ -27,7 +32,12 @@ test('a failed run shows the error card with the engine message and a working co
   await expect(page.getByText(/see console/)).toHaveCount(0);
 
   // Copy details puts the full engine text on the clipboard (the bit once lost to console.error).
+  // Button click runs on every browser — verifies it renders and is clickable without crashing.
   await page.getByRole('button', { name: /Copy details/i }).click();
-  const clip = await page.evaluate(() => navigator.clipboard.readText());
-  expect(clip).toContain('only one observed level');
+  // Clipboard read-back is a Chromium-only capability in Playwright automation;
+  // firefox/webkit don't support the `clipboard-read` permission.
+  if (browserName === 'chromium') {
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clip).toContain('only one observed level');
+  }
 });

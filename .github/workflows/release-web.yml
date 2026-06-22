@@ -1,0 +1,84 @@
+name: Release (web)
+
+# Tag-triggered production deploy of mcpower.app. Replaces ci.yml's old
+# deploy-on-merge job: production now updates ONLY on a web-* tag (CLAUDE.md §5),
+# never on a merge to main. Gated on the full port matrix (checks -> ci.yml) plus
+# a cross-browser UI e2e (firefox + webkit) before scripts/deploy-site.sh
+# --production rebuilds the wasm app and uploads to Cloudflare Pages.
+on:
+  push:
+    tags:
+      - 'web-*'
+
+# A deploy must finish even if a later tag lands — never cancel it.
+concurrency:
+  group: web-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Full port matrix as a release gate — one copy, reused from ci.yml.
+  checks:
+    name: Full port matrix (CI)
+    uses: ./.github/workflows/ci.yml
+
+  # Cross-browser UI gate: firefox + webkit only (chromium is already covered by
+  # the checks matrix). Runs in parallel with `checks`. Mocked engine (VITE_E2E
+  # seam) — UI/CSS/JS cross-browser coverage, NOT real-WASM.
+  e2e-cross:
+    name: Cross-browser e2e (firefox + webkit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ports/app/pnpm-lock.yaml
+      - name: Install
+        working-directory: ports/app
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright firefox + webkit
+        working-directory: ports/app
+        run: pnpm exec playwright install --with-deps firefox webkit
+      - name: e2e (firefox + webkit)
+        working-directory: ports/app
+        run: pnpm test:e2e
+        env:
+          E2E_BROWSERS: firefox,webkit
+
+  # Production deploy — the ex-ci.yml deploy job's steps, verbatim. The toolchain
+  # mirrors the wasm job (Rust + wasm32 target + wasm-pack) because
+  # deploy-site.sh --production rebuilds the wasm app from scratch (and aborts on
+  # build failure under set -euo pipefail, so this step self-gates on that build).
+  deploy:
+    name: Deploy to production (mcpower.app)
+    needs: [checks, e2e-cross]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ports/app/pnpm-lock.yaml
+      - name: Install app deps
+        working-directory: ports/app
+        run: pnpm install --frozen-lockfile
+      - name: Build + deploy to production
+        run: scripts/deploy-site.sh --production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

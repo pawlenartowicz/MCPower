@@ -17,7 +17,8 @@
     "format": "biome format --write src",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:bootfail": "playwright test --config playwright.bootfail.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",

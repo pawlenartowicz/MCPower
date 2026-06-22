@@ -20,6 +20,7 @@ on:
       - 'crates/engine-wasm/**'
       - '.github/workflows/app-cross-platform.yml'
   workflow_dispatch:                       # manual / pre-release "run it once"
+  workflow_call:                           # reusable gate for release-app.yml
 
 concurrency:
   group: app-xplat-${{ github.ref }}

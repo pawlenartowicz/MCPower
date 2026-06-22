@@ -84,10 +84,12 @@ describes the same simulated run.
 Generate the design matrix + outcome for sim-0.
 
 Returns a list with:
+\describe{
 \item{design}{numeric matrix (nrow = .debug_n, ncol = n_predictors)}
 \item{columns}{character vector of column names}
 \item{outcome}{numeric vector of length .debug_n}
 \item{cluster_ids}{integer vector or NULL}
+}
 Fit a provided dataset with the configured solver (the data -> results
 path). Inverse of create_data(): pass the list create_data() returns (or
 any list with the same shape) and get MCPower's own betas/se/statistic/
@@ -120,18 +122,20 @@ critical_value back.}
 (numeric, length nrow), and optionally $cluster_ids (integer or NULL).
 $columns is ignored (the engine re-labels positionally).
 Returns a list with:
+\describe{
 \item{betas}{numeric, length ncol (aligned to design_columns)}
 \item{design_columns}{character, length ncol}
 \item{converged}{logical}
 \item{targets}{list of per-target lists (beta, se, statistic,
 critical_value, target_index, target_label, df, two_sided, ...)}
+}
 Debug-only: attach extra grouping factors (crossed / nested random
 intercepts) to the pending cluster spec, in the contract's serde JSON
 shape, e.g.
 list(list(relation = list(Crossed = list(n_clusters = 12L)),
 tau_squared = 0.15))
 Call AFTER set_cluster(). Validation tooling for the engine surface;
-the user-facing API lands at Pass B.}
+the user-facing API is not yet exposed.}
 }
 \if{html}{\out{</div>}}
 }
@@ -154,7 +158,7 @@ more list(column=<0-based generation col>, variance=, corr_with_intercept=,
 corr_with=<numeric vector of correlations with EARLIER slopes; numeric(0)
 for the first slope>).
 Call AFTER set_cluster(). Validation tooling for the engine surface;
-the user-facing API lands at Pass B.}
+the user-facing API is not yet exposed.}
 }
 \if{html}{\out{</div>}}
 }
