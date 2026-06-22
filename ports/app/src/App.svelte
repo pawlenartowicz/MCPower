@@ -36,7 +36,9 @@ onMount(async () => {
 // blocking message instead of the raw CompileError leaking out as a bogus
 // formula-parse error. Any engine-init failure (not just relaxed-SIMD) lands here.
 onMount(async () => {
-  if (import.meta.env.VITE_TARGET !== 'wasm') return;
+  // VITE_BOOT_FAIL is an e2e-only forced-degradation hatch (statically stripped
+  // from production builds, where the env is unset) — see boot-probe-degradation.spec.ts.
+  if (import.meta.env.VITE_TARGET !== 'wasm' && !import.meta.env.VITE_BOOT_FAIL) return;
   try {
     await parseFormula('y ~ x');
   } catch (e) {

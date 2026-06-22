@@ -1,21 +1,20 @@
-name: Release
+name: Release (PyPI)
 
-# Tag-triggered PyPI release for the new Rust-engine Python port (ports/py).
-# Adapted from the v1 flat-layout release.yml (origin/main): same job spine
-# (version-check → build_wheels → publish-pypi → github-release) and the same
-# trusted-publish job. Two structural changes for the new layout:
+# Tag-triggered PyPI release for the Rust-engine Python port (ports/py).
+# Job spine: checks (full CI matrix) + version-check -> build_wheels ->
+# publish-testpypi (gate) -> publish-pypi -> github-release.
 #
 #   * abi3 (abi3-py310) means ONE wheel per platform, not a per-Python matrix —
 #     the matrix is the platforms only.
 #   * The engine crates live OUTSIDE ports/py (pyproject `manifest-path` reaches
-#     `../../crates`). cibuildwheel mounts only the package dir into its
-#     manylinux container, so the path dep cannot resolve there; PyO3/maturin-action
+#     `../../crates`). cibuildwheel mounts only the package dir; maturin-action
 #     mounts the whole $GITHUB_WORKSPACE, so `../../crates` resolves. Hence
 #     maturin-action, not cibuildwheel, here.
 #
-# Filename `release.yml` + `environment: pypi` are load-bearing: PyPI trusted
-# publishing matches on repo + workflow filename + environment, so keeping both
-# reuses the existing `mcpower` publisher binding (CLAUDE.md §5, spec A2).
+# Renamed from `release.yml` -> `release-py.yml` (CLAUDE.md §5). PyPI trusted
+# publishing matches on repo + workflow FILENAME + environment, so the operator
+# MUST update the `mcpower` publisher binding to this filename and add a TestPyPI
+# binding (+ a `testpypi` GitHub environment) — see the spec's §7 operator actions.
 
 on:
   push:
@@ -26,6 +25,11 @@ on:
       - '!py-*dev*'
 
 jobs:
+  # Full port matrix as a release gate — one copy, reused from ci.yml.
+  checks:
+    name: Full port matrix (CI)
+    uses: ./.github/workflows/ci.yml
+
   version-check:
     name: Verify tag matches package version
     runs-on: ubuntu-latest
@@ -57,7 +61,7 @@ jobs:
 
   build_wheels:
     name: Build & test wheel (${{ matrix.target }} on ${{ matrix.os }})
-    needs: [version-check]
+    needs: [checks, version-check]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -140,9 +144,62 @@ jobs:
   # without extra `[tool.maturin] include` work, and PyPI doesn't require an
   # sdist (spec A2 — wheels-only for the first release).
 
+  # TestPyPI gate: publish to test.pypi.org, then install-from-index round-trip +
+  # full suite before the real PyPI publish. Additive to build_wheels' in-job
+  # "Test wheel" (that tests a local file; this tests the published index).
+  publish-testpypi:
+    name: Publish to TestPyPI (gate)
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p dist-flat
+          find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
+          echo "Files to upload:"
+          ls -la dist-flat/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist-flat/
+          # A re-run of the same version must not hard-fail on "file already exists".
+          skip-existing: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Smoke-install from TestPyPI and run the suite
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/py-}"
+          # TestPyPI's index/CDN lags the upload, so the just-published version can
+          # 404 for seconds-to-minutes. Retry the mcpower install (numpy/pandas come
+          # from real PyPI via --extra-index-url and don't need the wait); fail loudly
+          # if it never propagates. Caps at ~2.5 min — enough for propagation without
+          # stalling the release.
+          for i in $(seq 1 10); do
+            python -m pip install --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ "mcpower==$TAG_VERSION" && break
+            [ "$i" = 10 ] && { echo "::error::mcpower==$TAG_VERSION never appeared on TestPyPI after 10 tries"; exit 1; }
+            echo "TestPyPI not ready (attempt $i) — waiting 15s"; sleep 15
+          done
+          python -m pip install pytest numpy pandas
+          cd "$RUNNER_TEMP" && python -m pytest "$GITHUB_WORKSPACE/ports/py/tests" -q
+
   publish-pypi:
     name: Publish to PyPI
-    needs: [build_wheels]
+    needs: [publish-testpypi]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

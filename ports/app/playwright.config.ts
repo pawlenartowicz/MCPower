@@ -1,7 +1,22 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// E2E_BROWSERS selects which browser projects run (comma-separated subset of
+// chromium,firefox,webkit). Default chromium-only keeps every existing caller —
+// ci.yml's `app` job and app-cross-platform — byte-unaffected; release-web sets
+// E2E_BROWSERS=firefox,webkit for its cross-browser UI gate.
+const E2E_BROWSERS = (process.env['E2E_BROWSERS'] ?? 'chromium').split(',');
+
+const allProjects = [
+  { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+  { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+  { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+];
+
 export default defineConfig({
   testDir: './tests/e2e',
+  // The boot-probe degradation spec only validates under a VITE_BOOT_FAIL server,
+  // so it runs solely via playwright.bootfail.config.ts — never the normal run.
+  testIgnore: ['**/boot-probe-degradation.spec.ts'],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
@@ -28,5 +43,5 @@ export default defineConfig({
     timeout: 60_000,
     env: { VITE_E2E: 'true' },
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: allProjects.filter((p) => E2E_BROWSERS.includes(p.name)),
 });

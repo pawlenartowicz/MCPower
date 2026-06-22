@@ -165,6 +165,12 @@ export async function onProgress(_listener: (e: ProgressEvent) => void): Promise
 }
 
 export async function parseFormula(formula: string): Promise<FormulaParse> {
+  // Boot-probe degradation hook: under VITE_BOOT_FAIL the App.svelte engine probe
+  // calls this once at boot — throw so the blocking CrashModal path is exercised
+  // end-to-end (the normal mock never throws here).
+  if (import.meta.env.VITE_BOOT_FAIL === 'true') {
+    throw new Error('relaxed-simd: invalid extended simd op 271 (simulated)');
+  }
   const state = stubParseFormula(formula);
   if (state.error !== null) throw new Error(state.error);
   return state.result!;
