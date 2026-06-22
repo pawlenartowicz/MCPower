@@ -1,8 +1,9 @@
 name: Release (app)
 
 # Tag-triggered desktop installer build for the Tauri port (ports/app), uploaded
-# to a DRAFT GitHub Release on app-* tag push. v1 ships UNSIGNED; the draft +
-# manual-publish step is the safety gate. Now ALSO gated on the full port matrix
+# to a PUBLISHED GitHub Release on app-* tag push. v1 ships UNSIGNED; the release
+# gates below (full port matrix + Win/macOS suite + version-check) are the safety
+# gate. Now ALSO gated on the full port matrix
 # (checks -> ci.yml) AND the Windows/macOS suite (checks-xplat ->
 # app-cross-platform.yml): app-cross-platform is path-filtered to app PRs, so a
 # tag cut from a commit where it never ran could otherwise ship installers with
@@ -133,10 +134,10 @@ jobs:
         with:
           projectPath: ports/app
           args: ${{ matrix.args }}
-          # On a tag push these create the draft release; on workflow_dispatch
+          # On a tag push these create the published release; on workflow_dispatch
           # github.ref is a branch, so they resolve to '' and tauri-action runs
           # build-only (its documented dry-run mode).
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false

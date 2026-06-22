@@ -157,6 +157,12 @@ jobs:
       id-token: write
 
     steps:
+      # Checkout FIRST — the smoke step runs the test suite from
+      # $GITHUB_WORKSPACE/ports/py/tests, which only exists if the repo is
+      # present. (download-artifact below populates dist/; checkout's default
+      # clean would wipe it, so it must come before the download.)
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist/
