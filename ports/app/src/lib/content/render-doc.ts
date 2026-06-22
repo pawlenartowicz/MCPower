@@ -95,7 +95,7 @@ function stripFrontmatter(md: string): string {
 /** True iff some heading in `md` slugifies to `anchor` — the broken-anchor detector. */
 export function hasHeading(md: string, anchor: string): boolean {
   return stripFrontmatter(md)
-    .split('\n')
+    .split(/\r?\n/) // CRLF-safe: Windows git autocrlf checks docs out with \r\n
     .some((line) => {
       const t = headingText(line);
       return t !== null && slugify(t) === anchor;
@@ -111,7 +111,7 @@ export function hasHeading(md: string, anchor: string): boolean {
  * itself non-empty, so use hasHeading — not emptiness — to detect a broken anchor).
  */
 export function firstParagraph(md: string, anchor?: string): string {
-  const lines = stripFrontmatter(md).split('\n');
+  const lines = stripFrontmatter(md).split(/\r?\n/); // CRLF-safe, mirrors hasHeading
   let i = 0;
   if (anchor) {
     const idx = lines.findIndex((line) => {

@@ -60,6 +60,9 @@ describe('hasHeading', () => {
   it('is false when no heading matches', () => {
     expect(hasHeading(md, 'nope')).toBe(false);
   });
+  it('matches headings in CRLF-checked-out docs (Windows git autocrlf)', () => {
+    expect(hasHeading(md.replace(/\n/g, '\r\n'), 'the-icc')).toBe(true);
+  });
 });
 
 describe('firstParagraph', () => {
@@ -90,5 +93,10 @@ describe('firstParagraph', () => {
 
   it('strips a leading frontmatter block', () => {
     expect(firstParagraph('---\ntitle: x\n---\n\n# T\n\nBody para.')).toBe('Body para.');
+  });
+
+  it('resolves anchors in CRLF-checked-out docs (Windows git autocrlf)', () => {
+    const md = '# T\n\nIntro.\n\n## The ICC\n\nICC para.\n\nmore'.replace(/\n/g, '\r\n');
+    expect(firstParagraph(md, 'the-icc')).toBe('ICC para.');
   });
 });
