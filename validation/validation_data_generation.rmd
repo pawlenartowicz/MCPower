@@ -1,0 +1,495 @@
+---
+output:
+  md_document:
+    variant: gfm+tex_math_dollars
+---
+
+# MCPower — Validating the Data Generator
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+suppressPackageStartupMessages(library(lme4))
+# Run with the working directory set to mcpower/validation/ (rmarkdown::render
+# does this automatically from the .rmd's location).
+source("common.R")    # build_model, content_hash, parsers, fit_sota, var_components
+source("tolerances.R")# DGP_TOL — the central A<->B gates
+source("formulas.R")  # CASES — the catalogue of formulas to validate
+
+# --- How many times each formula is regenerated -------------------------------
+K_FAST <- 1600L  # ordinary + logistic models (matches the OLS simulation default)
+K_LME  <- 800L   # mixed models (matches the mixed-model default; lmer is slower)
+# A<->B gates, sourced centrally from tolerances.R (one moment_abs covers every
+# absolute moment check; var_rel for the variance; bias_fdr_q/bias_logit_abs for
+# beta recovery — split by family, see recovery_decision/beta_rows below).
+BANDS  <- list(pred_mean = DGP_TOL$moment_abs, pred_sd = DGP_TOL$moment_abs,
+               corr = DGP_TOL$moment_abs, prop = DGP_TOL$moment_abs,
+               var_rel = DGP_TOL$var_rel, icc = DGP_TOL$moment_abs,
+               icc_marginal = DGP_TOL$icc_marginal_abs)
+
+# --- Generate one formula's data K times; collect statistics + fitted estimates
+simulate_case <- function(case) {
+  fam <- case$family
+  K   <- if (fam == "lme") K_LME else K_FAST
+  m   <- build_model(case)
+  m$.debug_n <- as.integer(case$n); m$.debug_n_sims <- 1L
+  pc <- parse_correlation(case); pf <- parse_factor_props(case)
+
+  m$.debug_seed <- as.numeric(case$seed + 1L)        # probe draw: learn columns
+  d0    <- m$create_data(); cols <- d0$columns
+  p     <- length(cols)
+  col_idx <- which(grepl("^col_", cols))
+  # A 2-level factor becomes a binary col_ column; keep only genuinely continuous
+  # col_ columns (>2 distinct values) for the average/spread checks.
+  cont    <- col_idx[vapply(col_idx, function(i) length(unique(d0$design[, i])) > 2L, logical(1))]
+  dummy   <- which(grepl("^factor_dummy_", cols))
+
+  betas <- matrix(NA_real_, K, p); ses <- matrix(NA_real_, K, p)
+  cmean <- matrix(NA_real_, K, length(cont)); csd <- matrix(NA_real_, K, length(cont))
+  corr  <- if (!is.null(pc)) numeric(K) else NULL
+  props <- if (!is.null(pf)) matrix(NA_real_, K, length(pf)) else NULL
+  rvar  <- if (fam != "logit") numeric(K) else NULL
+  icc   <- if (!is.null(case$cluster)) numeric(K) else NULL
+  micc  <- if (!is.null(case$cluster)) numeric(K) else NULL  # observed (marginal) ICC of raw outcome
+  pmarg <- if (!is.null(case$cluster)) numeric(K) else NULL  # predicted marginal ICC (same-draw components)
+  tb    <- true_beta_vector(case, cols)                      # true betas (for Var(Xbeta))
+
+  for (k in seq_len(K)) {
+    m$.debug_seed <- as.numeric(case$seed + k)        # fresh random noise each draw
+    d <- m$create_data()
+    for (i in seq_along(cont)) {
+      x <- d$design[, cont[i]]; cmean[k, i] <- mean(x); csd[k, i] <- stats::sd(x)
+    }
+    if (!is.null(pc)) corr[k] <- stats::cor(d$design[, pc$cols[1]], d$design[, pc$cols[2]])
+    if (!is.null(pf)) {
+      dm <- d$design[, dummy, drop = FALSE]
+      props[k, ] <- c(mean(rowSums(dm) == 0), colMeans(dm))
+    }
+    if (fam == "ols") {
+      fr <- stats::lm.fit(d$design, d$outcome)
+      rvar[k] <- sum(fr$residuals^2) / (length(d$outcome) - p)
+    }
+    if (!is.null(case$cluster)) {
+      xb <- as.numeric(d$design %*% tb)
+      # Conditional ICC tau^2/(tau^2+sigma^2) from TRUE-beta residuals: removing
+      # the fixed part with the known betas (not a cluster-naive OLS fit) keeps the
+      # between component from being deflated on factor designs whose dummies have
+      # high-variance cluster means (see common.R var_components).
+      v <- var_components(d$outcome - xb, d$cluster_ids)
+      icc[k] <- v$icc; rvar[k] <- v$within
+      # Marginal (observed) ICC: the raw outcome's between/within (fixed part left
+      # IN) -> below the conditional ICC because Var(Xbeta) inflates the total.
+      micc[k] <- var_components(d$outcome, d$cluster_ids)$icc
+      # Predicted marginal from the SAME draw: compose the budget from this draw's
+      # conditional components (between = tau^2, within = sigma^2) PLUS the fixed
+      # part's OWN between/within split. Var(Xbeta) is NOT all within-cluster when
+      # a factor's level mix varies across clusters, so its between part joins the
+      # numerator; for continuous predictors between(Xbeta) ~ 0 and this reduces to
+      # tau^2/(tau^2+sigma^2+Var(Xbeta)).
+      vx       <- var_components(xb, d$cluster_ids)
+      pmarg[k] <- (v$between + vx$between) /
+                  (v$between + vx$between + v$within + vx$within)
+    }
+    f <- fit_sota(fam, d$design, d$outcome, d$cluster_ids)
+    betas[k, ] <- f$beta; ses[k, ] <- f$se
+  }
+  list(case = case, K = K, cols = cols, terms = term_labels(case, cols),
+       cont = cont, dummy = dummy, pc = pc, pf = pf,
+       betas = betas, ses = ses, cmean = cmean, csd = csd,
+       corr = corr, props = props, rvar = rvar, icc = icc,
+       micc = micc, pmarg = pmarg, true_beta = tb)
+}
+
+# --- Plain-language renderings of a formula -----------------------------------
+# The true model as an equation, e.g. "y = 0.25·x1 + 0.10·x2 + noise".
+model_equation <- function(case) {
+  e <- parse_effects(case$effects)
+  parts <- vapply(seq_along(e), function(i)
+    sprintf("%s %g·%s", if (e[i] < 0) "−" else "+", abs(e[i]), names(e)[i]), character(1))
+  body <- paste(parts, collapse = " ")
+  if (case$family == "logit") {
+    sprintf("log-odds(y = 1) = logit(%.2f) %s", case$baseline_probability, body)
+  } else if (case$family == "lme") {
+    sprintf("y = %s + per-%s random intercept (ICC %.2f) + noise",
+            sub("^\\+ ", "", body), case$cluster$var, case$cluster$ICC)
+  } else {
+    sprintf("y = %s + noise", sub("^\\+ ", "", body))
+  }
+}
+
+family_long <- function(f) switch(f,
+  ols = "ordinary least squares (R's `lm`)",
+  logit = "logistic regression (R's `glm`)",
+  lme = "linear mixed model (`lme4::lmer`)")
+
+factor_props_of <- function(case, f) {
+  decls <- unlist(strsplit(case$variable_types, ";"))
+  d <- decls[grepl(paste0("^\\s*", f, "\\s*="), decls)][1]
+  mm <- regmatches(d, regexpr("factor,([^)]*)", d))
+  as.numeric(trimws(strsplit(sub("factor,", "", mm), ",")[[1]]))
+}
+
+build_description <- function(case) {
+  cont <- continuous_names(case); fac <- factor_names(case); pieces <- character(0)
+  if (length(cont))
+    pieces <- c(pieces, sprintf("%s (%s) drawn from a standard normal (mean 0, sd 1)",
+      if (length(cont) == 1) "one continuous predictor" else paste(length(cont), "continuous predictors"),
+      paste0("`", cont, "`", collapse = ", ")))
+  if (!is.null(case$correlations)) {
+    pc <- parse_correlation(case)
+    pieces <- c(pieces, sprintf("`%s` and `%s` correlated at %.2f",
+      pc$vars[1], pc$vars[2], pc$rho))
+  }
+  for (f in fac) {
+    pr <- factor_props_of(case, f)
+    pieces <- c(pieces, sprintf("a %d-level factor `%s` at proportions %s",
+      length(pr), f, paste0(round(100 * pr), "%", collapse = "/")))
+  }
+  outcome <- switch(case$family,
+    ols  = "The outcome is the formula above plus standard-normal noise.",
+    logit= sprintf("The outcome is 1 or 0, drawn at the logistic probability of the formula above (baseline rate %d%%).",
+                   round(100 * case$baseline_probability)),
+    lme  = sprintf(paste0("The outcome is the formula above, plus a shared offset for each of the %d clusters ",
+                   "(%d observations each, sized to an intra-cluster correlation of %.2f), plus standard-normal noise."),
+                   case$cluster$n_clusters, case$cluster$cluster_size, case$cluster$ICC))
+  sprintf("**How it's built:** %s. %s Sample size %d, random seed %d.",
+          paste(pieces, collapse = "; "), outcome, case$n, case$seed)
+}
+
+# --- Per-formula result tables ------------------------------------------------
+desc_rows <- function(s) {
+  rows <- list()
+  add <- function(property, requested, vals, band, kind) {
+    avg <- mean(vals); off <- abs(avg - requested)
+    ok  <- if (kind == "rel") off <= band * abs(requested) else off <= band
+    rows[[length(rows) + 1L]] <<- data.frame(
+      `What we check`      = property,
+      `Requested`          = requested,
+      `Average over draws` = avg,
+      `Allowed difference` = if (kind == "rel") sprintf("within %g%%", band * 100) else sprintf("within %g", band),
+      `Result`             = if (ok) "OK" else "OFF",
+      check.names = FALSE)
+  }
+  for (i in seq_along(s$cont)) {
+    add(sprintf("average of %s",      s$terms[s$cont[i]]), 0, s$cmean[, i], BANDS$pred_mean, "abs")
+    add(sprintf("std. deviation of %s", s$terms[s$cont[i]]), 1, s$csd[, i], BANDS$pred_sd, "abs")
+  }
+  if (!is.null(s$corr))
+    add(sprintf("correlation of %s", paste(s$pc$vars, collapse = " and ")), s$pc$rho, s$corr, BANDS$corr, "abs")
+  if (!is.null(s$pf))
+    for (j in seq_along(s$pf))
+      add(sprintf("proportion in level %d", j - 1L), s$pf[j], s$props[, j], BANDS$prop, "abs")
+  if (!is.null(s$rvar))
+    add(if (!is.null(s$case$cluster)) "within-cluster variance" else "noise variance", 1, s$rvar, BANDS$var_rel, "rel")
+  if (!is.null(s$icc))
+    add("intra-cluster correlation (ICC)", s$case$cluster$ICC, s$icc, BANDS$icc, "abs")
+  if (!is.null(s$micc))
+    # The set ICC is the CONDITIONAL ICC tau^2/(tau^2+sigma^2); the raw outcome's
+    # (marginal) ICC is lower because the fixed part adds Var(Xbeta) to the total.
+    # s$pmarg is the per-draw prediction composing tau^2, sigma^2 and the fixed
+    # part's between/within split (simulate_case); we check the K-draw mean of the
+    # observed marginal lands on it -- i.e. the variance budget composes.
+    add("observed (marginal) ICC vs predicted", mean(s$pmarg), s$micc, BANDS$icc_marginal, "abs")
+  do.call(rbind, rows)
+}
+
+# Global A<->B recovery decision. OLS/LME: pool every coefficient's two-sided
+# z-of-the-mean p-value across ALL such cases and control the FDR via
+# Benjamini-Hochberg at DGP_TOL$bias_fdr_q (a single hard per-coef z-gate over
+# ~103 coefficients would abort ~all clean renders on noise). logit: absolute band
+# (its finite-sample bias is systematic, not a detectable-vs-null effect).
+recovery_decision <- function(RES) {
+  rows <- do.call(rbind, lapply(RES, function(s) {
+    mb <- colMeans(s$betas); sb <- apply(s$betas, 2, stats::sd)
+    z  <- (mb - s$true_beta) / (sb / sqrt(s$K))
+    data.frame(key = paste(s$case$label, s$terms, sep = "::"),
+               family = s$case$family, z = z,
+               absdiff = abs(mb - s$true_beta),
+               stringsAsFactors = FALSE)
+  }))
+  off <- logical(nrow(rows))
+  is_logit <- rows$family == "logit"
+  off[is_logit]  <- rows$absdiff[is_logit] > DGP_TOL$bias_logit_abs
+  p <- 2 * stats::pnorm(-abs(rows$z[!is_logit]))            # two-sided; ~Uniform under clean DGP
+  off[!is_logit] <- stats::p.adjust(p, method = "BH") <= DGP_TOL$bias_fdr_q
+  setNames(off, rows$key)
+}
+
+beta_rows <- function(s, off = RECOVERY_OFF) {
+  mb <- colMeans(s$betas); sb <- apply(s$betas, 2, stats::sd)
+  z  <- (mb - s$true_beta) / (sb / sqrt(s$K))
+  keys   <- paste(s$case$label, s$terms, sep = "::")
+  result <- ifelse(off[keys], "OFF", "OK")
+  data.frame(
+    `Term`                  = s$terms,
+    `True value`            = s$true_beta,
+    `Recovered (average)`   = mb,
+    `Spread across draws`   = sb,
+    `Std. errors from true` = z,
+    `Result`                = result,
+    check.names = FALSE, row.names = NULL)
+}
+
+recovery_note <- function(s) {
+  br <- beta_rows(s); eff <- br[br$Term != "intercept", ]
+  bad <- eff[eff$Result != "OK", ]
+  msg <- if (nrow(bad)) {
+    if (s$case$family == "logit")
+      sprintf(paste0("A few coefficients sit slightly off the true value (%s). This is the small, well-known ",
+              "finite-sample bias of logistic-regression estimates — expected, not a generator fault."),
+              paste(bad$Term, collapse = ", "))
+    else
+      sprintf(paste0("Some coefficients were flagged by the pooled Benjamini-Hochberg recovery gate (%s) — ",
+              "worth investigating."),
+              paste(bad$Term, collapse = ", "))
+  } else {
+    "Every coefficient is centred on its true value — the formula holds in the generated data."
+  }
+  if (!is.null(s$pc))
+    msg <- c(msg, sprintf(paste0("Because `%s` and `%s` are correlated (%.2f), their estimates vary more from ",
+            "draw to draw; that wider spread is the expected effect of collinearity, not a problem."),
+            s$pc$vars[1], s$pc$vars[2], s$pc$rho))
+  paste(msg, collapse = " ")
+}
+
+# Conditional-vs-marginal ICC explainer, emitted for cluster cases only (next to
+# the two ICC rows). Frames the gap as expected, like the logistic-bias note.
+icc_note <- function(s) {
+  if (is.null(s$micc)) return(NULL)
+  paste0(
+    "The intra-cluster correlation you set is the **conditional** ICC — the ",
+    "correlation between two observations in the same cluster *after accounting ",
+    "for the predictors* — and the generator recovers it (the \"intra-cluster ",
+    "correlation (ICC)\" row above). The **observed (marginal) ICC** of the raw ",
+    "outcome is lower, because the predictors explain part of the total variance; ",
+    "the stronger the fixed effects, the larger the gap. This is the standard ",
+    "conditional-vs-marginal distinction — expected and correct, not a generation ",
+    "fault — and the \"observed (marginal) ICC vs predicted\" row confirms the ",
+    "observed value lands on what that distinction predicts.")
+}
+
+plot_recovery <- function(s) {
+  eff <- which(s$cols != "intercept")
+  op  <- graphics::par(mfrow = c(1, length(eff)), mar = c(4, 4, 2.5, 1)); on.exit(graphics::par(op))
+  for (j in eff) {
+    b <- s$betas[, j]
+    graphics::hist(b, breaks = 40, col = "grey85", border = "white",
+                   main = s$terms[j], xlab = "recovered coefficient")
+    graphics::abline(v = s$true_beta[j], col = "red",  lwd = 2)
+    graphics::abline(v = mean(b),        col = "blue", lwd = 2, lty = 2)
+  }
+}
+
+# Regenerating the saved dataset from its seed must reproduce its fingerprint.
+hash_check <- function(case) {
+  saved <- readRDS(file.path("data", paste0(case$label, ".rds")))
+  m <- build_model(case)
+  m$.debug_n <- as.integer(case$n); m$.debug_n_sims <- 1L; m$.debug_seed <- as.numeric(case$seed)
+  d <- m$create_data()
+  list(ok = identical(content_hash(d$design, d$outcome, d$cluster_ids), saved$hash))
+}
+```
+
+# What this report shows
+
+MCPower answers power-analysis questions by **generating synthetic datasets** from
+a formula you specify — for example *"the outcome `y` equals `0.25 × x1` plus
+random noise"* — and then simulating your analysis on those datasets many times.
+Everything downstream depends on one thing being true: **the data it generates
+must actually embody the formula you asked for.** If the generator is even
+slightly wrong, every power number built on top of it is wrong too.
+
+This report checks exactly that. For each supported formula we *chose* the true
+coefficients, so we know the right answer in advance. The question is simple:
+
+> When an independent, standard statistical analysis is run on MCPower's
+> generated data, does it recover the true numbers we put in?
+
+If it does — consistently, across every supported kind of model — the generator
+is faithful.
+
+## How the data is generated
+
+For each formula MCPower builds a dataset of `n` rows:
+
+- **continuous predictors** are drawn from a standard normal distribution
+  (average 0, standard deviation 1);
+- **categorical predictors (factors)** are assigned at the requested proportions
+  (a 2-level factor becomes a single 0/1 column; a 3-level factor becomes two);
+- **clustered (mixed-effects) data** groups the rows and gives each group a shared
+  random offset, sized to hit the requested **intra-cluster correlation (ICC)** —
+  specifically the *conditional* ICC, the correlation that remains after the
+  predictors are accounted for (the raw outcome's *marginal* ICC is lower whenever
+  the predictors explain variance);
+- the **outcome** is computed from the true formula and coefficients, then random
+  variation is added — standard-normal noise for ordinary regression, a 0/1 draw
+  at the model's probability for logistic regression, a cluster offset plus noise
+  for mixed models.
+
+A single dataset is noisy, so we never judge from one. Instead each formula is
+**regenerated many times with fresh random noise** — `r format(K_FAST, big.mark=",")`
+times for ordinary and logistic models, `r format(K_LME, big.mark=",")` for mixed
+models — and we look at the *distribution* of results across all of those draws.
+
+## The three checks
+
+**1. Data checks.** The basic statistics of the generated data should match what
+was requested: predictor averages near 0, standard deviations near 1, the
+requested correlations and factor proportions, the noise variance, and the ICC.
+We **average each statistic over all draws** (which cancels the random scatter of
+any single dataset) and require it to land within a small fixed tolerance of the
+requested value.
+
+**2. Coefficient recovery** — the headline check: *is the formula actually true
+in the data?* For every generated dataset we fit a completely **independent,
+standard model in R** (`lm`, `glm`, or `lme4::lmer`) and read off the estimated
+coefficients. Averaged over all draws, each estimate should land on the true
+value we put in. We measure how far the average estimate is from the truth in
+units of its own **standard error** (the estimate's draw-to-draw scatter divided
+by the square root of the number of draws). For OLS and mixed-effects models, the
+~103 per-coefficient z-scores are pooled across all cases and the
+**false-discovery rate** is controlled via Benjamini-Hochberg at q = `r DGP_TOL$bias_fdr_q`
+(a fixed per-coefficient z-threshold below ~4 would abort nearly every clean
+render on sampling noise alone). For logistic regression we use an **absolute
+band** instead (|mean − true| ≤ `r DGP_TOL$bias_logit_abs`), because logistic
+MLE's finite-sample bias swamps the z-score at this K — see below.
+
+**3. File reproduces.** The dataset saved to disk for each formula is regenerated
+from its random seed, and its content fingerprint (a SHA-256 hash) is compared to
+the saved one. A mismatch would mean the generator's output had drifted, so any
+later comparison against the saved file would be meaningless.
+
+## The thresholds
+
+| What we check | Requested value | Allowed difference |
+|---|---|---|
+| average of each continuous predictor | 0 | within `r BANDS$pred_mean` |
+| standard deviation of each predictor | 1 | within `r BANDS$pred_sd` |
+| correlation between predictors | the value you set | within `r BANDS$corr` |
+| factor level proportions | the values you set | within `r BANDS$prop` |
+| noise / within-cluster variance | 1 | within `r BANDS$var_rel * 100`% |
+| intra-cluster correlation (ICC), conditional | the value you set | within `r BANDS$icc` |
+| observed (marginal) ICC vs predicted | τ²/(τ²+σ²+Var(Xβ)) | within `r BANDS$icc_marginal` |
+| **coefficient recovery (OLS/LME)** | the true coefficient | pooled BH-FDR ≤ **`r DGP_TOL$bias_fdr_q`** across all cases |
+| **coefficient recovery (logit)** | the true coefficient | absolute difference within **`r DGP_TOL$bias_logit_abs`** |
+
+The data-check tolerances are tight because they apply to the *average over all
+draws*, not to a single dataset — averaging thousands of draws removes the random
+scatter, so anything outside these bands signals a real generation problem.
+
+**A note on logistic regression.** Logistic-regression estimates carry a small,
+well-known *finite-sample bias*: with a limited number of rows the
+maximum-likelihood estimate is slightly off even when everything is correct. With
+this many draws that tiny bias becomes statistically visible (the logistic models
+below show recovery distances running a bit higher, around 3–4 standard errors),
+but it stays within tolerance at the sample sizes used here. It is an expected
+statistical artefact, not a flaw in the generator.
+
+**Bias vs. spread.** For each formula we report two different things separately.
+*Bias* is whether the **average** estimate is off the true value (a centring
+problem). *Spread* is how much the estimates **vary** from draw to draw. When two
+predictors are correlated, their estimates naturally vary more — collinearity
+inflates the spread. That wider spread is expected and correct; it is not a
+failure, and we say so wherever it appears.
+
+```{r compute}
+RES  <- stats::setNames(lapply(CASES, simulate_case), names(CASES))
+HASH <- stats::setNames(lapply(CASES, hash_check),    names(CASES))
+RECOVERY_OFF <- recovery_decision(RES)
+```
+
+# Results at a glance
+
+Every row is one formula with one set of true coefficients. "Data checks" and
+"Coefficient recovery" summarise the per-formula detail that follows.
+
+```{r summary}
+summ <- data.frame(
+  `Formula`              = vapply(RES, function(s) sprintf("`%s`", s$case$formula), character(1)),
+  `True coefficients`    = vapply(RES, function(s) sprintf("`%s`", s$case$effects), character(1)),
+  `n`                    = vapply(RES, function(s) as.integer(s$case$n), integer(1)),
+  `Data checks`          = vapply(RES, function(s) if (all(desc_rows(s)$Result == "OK")) "all OK" else "review", character(1)),
+  `Coefficient recovery` = vapply(RES, function(s) if (all(beta_rows(s)$Result == "OK")) "all OK" else "review", character(1)),
+  `File reproduces`      = vapply(names(RES), function(l) if (HASH[[l]]$ok) "yes" else "NO", character(1)),
+  row.names = NULL, check.names = FALSE)
+knitr::kable(summ)
+```
+
+```{r overall, results='asis'}
+all_ok <- all(vapply(RES, function(s) all(desc_rows(s)$Result == "OK") && all(beta_rows(s)$Result == "OK"), logical(1))) &&
+          all(vapply(HASH, function(h) h$ok, logical(1)))
+cat(if (all_ok)
+  sprintf(paste0("> **All %d formulas pass all three checks.** The generated data matches the requested ",
+          "statistics, an independent R model recovers every true coefficient, and every saved dataset ",
+          "reproduces from its seed.\n"), length(RES))
+  else "> **Some formulas need review** — see the per-formula detail below.\n")
+stopifnot(all_ok)   # G5
+```
+
+# Formula-by-formula detail
+
+```{r per-formula, results='asis'}
+# One asis section per formula: heading is the true equation, then the build
+# recipe, the data checks, the coefficient-recovery table + plot, and the file
+# fingerprint check. The recovery plots are written into the published docs tree
+# (../web/documentation/validation/figures/, beside this report's HTML) and referenced
+# by a relative "figures/<lbl>.png" src — which resolves to /validation/figures/...
+# at the served leyline page (UGCPolicy drops data: URIs, so they can't be inlined).
+figdir_src <- "figures"
+figdir_out <- file.path("..", "web", "documentation", "validation", figdir_src)
+dir.create(figdir_out, recursive = TRUE, showWarnings = FALSE)
+png_type <- if (capabilities("cairo")) "cairo" else "Xlib"
+
+for (lbl in names(RES)) {
+  s <- RES[[lbl]]; case <- s$case; h <- HASH[[lbl]]
+  cat(sprintf("\n## %s\n\n", model_equation(case)))
+  cat(sprintf("R formula `%s` &middot; %s &middot; n = %d &middot; saved as `data/%s.rds`\n\n",
+              case$formula, family_long(case$family), case$n, lbl))
+  cat(build_description(case), "\n\n")
+
+  cat("**Data checks** — statistics of the generated data, averaged over all draws, vs. what was requested:\n\n")
+  cat(knitr::kable(desc_rows(s), digits = 4, format = "pipe"), sep = "\n"); cat("\n\n")
+
+  cat("**Coefficient recovery** — an independent R model fitted to each generated dataset; the average estimate should land on the true value:\n\n")
+  cat(knitr::kable(beta_rows(s), digits = 4, format = "pipe"), sep = "\n"); cat("\n\n")
+
+  cat(recovery_note(s), "\n\n")
+  icn <- icc_note(s); if (!is.null(icn)) cat(icn, "\n\n")
+
+  fw <- max(4, 2.6 * sum(s$cols != "intercept"))
+  fpath <- file.path(figdir_out, paste0(lbl, ".png"))
+  grDevices::png(fpath, width = fw * 110, height = 320, res = 96, type = png_type)
+  plot_recovery(s)
+  grDevices::dev.off()
+  cat(sprintf("![Recovered coefficients for %s over %d datasets.](%s)\n\n",
+              case$formula, s$K, file.path(figdir_src, paste0(lbl, ".png"))))
+  cat(sprintf("*Each panel: the spread of one recovered coefficient across %d generated datasets. Red line = the true value, blue dashed = the average estimate. File reproduces from seed: **%s**.*\n\n",
+              s$K, if (h$ok) "yes" else "NO"))
+}
+```
+
+# How this was produced
+
+```{r provenance}
+prov <- data.frame(
+  item  = c("Report generated", "R version", "mcpower", "lme4",
+            "Draws per formula (ordinary / logistic)", "Draws per formula (mixed)",
+            "Recovery threshold", "Formulas validated"),
+  value = c(format(Sys.Date(), "%e %B %Y"), R.version.string,
+            as.character(utils::packageVersion("mcpower")),
+            as.character(utils::packageVersion("lme4")),
+            format(K_FAST, big.mark = ","), format(K_LME, big.mark = ","),
+            sprintf("OLS/LME: pooled BH-FDR ≤ %g (Benjamini-Hochberg); logit: |mean−true| ≤ %g (absolute)",
+                    DGP_TOL$bias_fdr_q, DGP_TOL$bias_logit_abs), as.character(length(RES))),
+  check.names = FALSE)
+knitr::kable(prov)
+```
+
+The datasets are generated by `mcpower/validation/data_generation.r` from the
+formula catalogue in `mcpower/validation/formulas.R`; this report regenerates
+them many times over and runs the checks above. To reproduce it, from the
+repository root:
+
+```r
+rmarkdown::render("mcpower/validation/validation_data_generation.rmd",
+                  output_dir = "mcpower/web/documentation/validation")
+```

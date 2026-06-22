@@ -1,0 +1,31 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "plant_biomass = rainfall + soil_nitrogen",
+    "variables": [
+      { "name": "rainfall", "kind": "continuous" },
+      { "name": "soil_nitrogen", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "rainfall", "value": 0.25 },
+      { "name": "soil_nitrogen", "value": 0.10 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 200 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

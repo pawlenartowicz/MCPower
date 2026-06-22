@@ -1,0 +1,31 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "yield = nitrogen + nitrogen:water",
+    "variables": [
+      { "name": "nitrogen", "kind": "continuous" },
+      { "name": "water", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "nitrogen", "value": 0.4 },
+      { "name": "nitrogen:water", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 200 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

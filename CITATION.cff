@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: "MCPower: power analysis by simulation"
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+authors:
+  - given-names: Paweł
+    family-names: Lenartowicz
+    email: pawellenartowicz@europe.com
+    orcid: "https://orcid.org/0000-0002-6906-7217"
+repository-code: "https://github.com/pawlenartowicz/mcpower"
+url: "https://mcpower.app"
+abstract: >-
+  MCPower is a Monte Carlo power-analysis tool: power and sample-size search by
+  simulation for any design from t-tests to mixed models, across OLS, GLM,
+  mixed-effects, and ANOVA. A single native Rust engine powers Python, R,
+  desktop, and in-browser interfaces.
+keywords:
+  - power-analysis
+  - sample-size
+  - statistics
+  - simulation
+  - monte-carlo
+  - regression
+  - mixed-models
+  - lmm
+  - glmm
+  - multilevel-models
+license: GPL-3.0-or-later
+doi: 10.5281/zenodo.16502734
+version: 1.0.0

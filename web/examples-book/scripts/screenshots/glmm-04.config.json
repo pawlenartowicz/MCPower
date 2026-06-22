@@ -1,0 +1,41 @@
+{
+  "outcomeKind": "binary",
+  "config": {
+    "family": "mixed",
+    "formula": "species_present = temperature + (1 + temperature|site)",
+    "variables": [
+      { "name": "temperature", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "temperature", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 400 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 800,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "cluster": {
+      "clusterName": "site",
+      "icc": 0.1,
+      "dimKind": "n_clusters",
+      "nClusters": 40,
+      "clusterSize": 10,
+      "binaryOutcome": true,
+      "baselineProbability": 0.3,
+      "extraGroupings": [],
+      "slopes": [
+        { "predictorName": "temperature", "slopeVariance": 0.15, "slopeInterceptCorr": 0.0 }
+      ]
+    }
+  }
+}

@@ -1,0 +1,69 @@
+name: App cross-platform
+
+# Runs the desktop app's FULL test suite (vitest frontend + Playwright e2e +
+# Rust shell) on the two OSes ci.yml does not cover: Windows + macOS. Linux is
+# already fully covered by ci.yml (frontend in its `app` job, the mcpower-app
+# Rust shell in the `rust` job's `cargo test --workspace`), so it has no leg
+# here. The Rust shell is the only OS-specific layer — it compiles against each
+# host's native webview (WebView2 on Windows, WKWebView on macOS) — but vitest
+# and e2e use a mocked engine, so no Tauri bundle or wasm build is needed.
+#
+# Path-filtered + a separate workflow on purpose: the cold Tauri compiles
+# (~10–20 min/leg) only run when app code or its Rust-shell dep crates change,
+# keeping engine-only PRs and ci.yml's fast Linux signal unburdened.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ports/app/**'
+      - 'crates/engine-app-spec/**'
+      - 'crates/engine-wasm/**'
+      - '.github/workflows/app-cross-platform.yml'
+  workflow_dispatch:                       # manual / pre-release "run it once"
+
+concurrency:
+  group: app-xplat-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  app:
+    name: App port (${{ matrix.os }})
+    strategy:
+      fail-fast: false                     # one OS failing must not cancel the other
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30                     # cold Tauri compile is slow (~10–20 min)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ports/app/pnpm-lock.yaml
+      - name: Install
+        working-directory: ports/app
+        run: pnpm install --frozen-lockfile
+      - name: vitest
+        working-directory: ports/app
+        run: pnpm test
+      # No --with-deps: that apt path is Linux-only and there is no Linux leg.
+      - name: Install Playwright Chromium
+        working-directory: ports/app
+        run: pnpm exec playwright install chromium
+      - name: e2e (Playwright)
+        working-directory: ports/app
+        run: pnpm test:e2e
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The Rust shell — the only OS-specific layer, real native engine via
+      # engine-app-spec. Runs from the repo root, where the workspace Cargo.toml
+      # lives (working-directory above only applies to the pnpm steps).
+      - name: Rust shell tests
+        run: cargo test -p mcpower-app

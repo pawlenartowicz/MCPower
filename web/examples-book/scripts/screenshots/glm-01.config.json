@@ -1,0 +1,29 @@
+{
+  "outcomeKind": "binary",
+  "config": {
+    "family": "regression",
+    "formula": "relapse = biomarker_level",
+    "variables": [
+      { "name": "biomarker_level", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "biomarker_level", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 200 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.3
+  }
+}

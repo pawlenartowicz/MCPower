@@ -1,0 +1,40 @@
+{
+  "outcomeKind": "binary",
+  "config": {
+    "family": "mixed",
+    "formula": "symptom_present = month + treatment + (1|patient)",
+    "variables": [
+      { "name": "treatment", "kind": "binary", "binaryProportion": 0.5 }
+    ],
+    "effects": [
+      { "name": "treatment", "value": 0.5 },
+      { "name": "month", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 300 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 800,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "cluster": {
+      "clusterName": "patient",
+      "icc": 0.1,
+      "dimKind": "n_clusters",
+      "nClusters": 50,
+      "clusterSize": 10,
+      "binaryOutcome": true,
+      "baselineProbability": 0.2,
+      "extraGroupings": [],
+      "slopes": []
+    }
+  }
+}

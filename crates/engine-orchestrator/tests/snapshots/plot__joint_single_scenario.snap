@@ -1,0 +1,101 @@
+---
+source: crates/engine-orchestrator/tests/plot.rs
+expression: "parse(&joint_detection_curve_spec(&joint_single(), &opts))"
+---
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "k": 1,
+        "n": 50,
+        "p": 0.2,
+        "scenario": "optimistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 50,
+        "p": 0.05,
+        "scenario": "optimistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 100,
+        "p": 0.6,
+        "scenario": "optimistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 100,
+        "p": 0.2,
+        "scenario": "optimistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 200,
+        "p": 0.95,
+        "scenario": "optimistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 200,
+        "p": 0.6,
+        "scenario": "optimistic",
+        "series": ">= 2 of 2"
+      }
+    ]
+  },
+  "height": 240.0,
+  "layer": [
+    {
+      "encoding": {
+        "color": {
+          "field": "series",
+          "title": "Joint detection",
+          "type": "nominal"
+        },
+        "x": {
+          "field": "n",
+          "title": "N",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "p",
+          "scale": {
+            "domain": [
+              0,
+              1
+            ]
+          },
+          "title": "P(detect >= k)",
+          "type": "quantitative"
+        }
+      },
+      "mark": {
+        "point": true,
+        "type": "line"
+      }
+    },
+    {
+      "encoding": {
+        "y": {
+          "datum": 0.8,
+          "type": "quantitative"
+        }
+      },
+      "mark": {
+        "strokeDash": [
+          4,
+          4
+        ],
+        "type": "rule"
+      }
+    }
+  ],
+  "width": 360.0
+}

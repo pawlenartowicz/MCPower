@@ -1,0 +1,32 @@
+{
+  "expected": {
+    "errors": [],
+    "items": [
+      {
+        "key": {
+          "name": "x1"
+        },
+        "value": {
+          "effect": 0.5
+        }
+      },
+      {
+        "key": {
+          "name": "x2"
+        },
+        "value": {
+          "effect": -0.3
+        }
+      }
+    ]
+  },
+  "input": "x1=0.5, x2=-0.3",
+  "kind": "effect",
+  "known": {
+    "interaction_terms": [],
+    "predictors": [
+      "x1",
+      "x2"
+    ]
+  }
+}

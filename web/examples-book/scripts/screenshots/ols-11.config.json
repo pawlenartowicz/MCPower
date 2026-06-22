@@ -1,0 +1,32 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "wage = gender * experience_years",
+    "variables": [
+      { "name": "gender", "kind": "binary", "binaryProportion": 0.5 },
+      { "name": "experience_years", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "gender", "value": 0.5 },
+      { "name": "experience_years", "value": 0.25 },
+      { "name": "gender:experience_years", "value": 0.2 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 300 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

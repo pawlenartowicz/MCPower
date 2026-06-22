@@ -1,0 +1,37 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "mixed",
+    "formula": "systolic_bp = phase + (1|patient)",
+    "variables": [
+      { "name": "phase", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "phase", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 200 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 800,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "cluster": {
+      "clusterName": "patient",
+      "icc": 0.3,
+      "dimKind": "n_clusters",
+      "nClusters": 40,
+      "clusterSize": 30,
+      "extraGroupings": [],
+      "slopes": []
+    }
+  }
+}

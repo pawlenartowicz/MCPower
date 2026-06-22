@@ -1,0 +1,41 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "mixed",
+    "formula": "seedling_height = fertilizer * week + (1 + week | seedling)",
+    "variables": [
+      { "name": "fertilizer", "kind": "binary", "binaryProportion": 0.5 }
+    ],
+    "effects": [
+      { "name": "fertilizer", "value": 0.5 },
+      { "name": "week", "value": 0.25 },
+      { "name": "fertilizer:week", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 480 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 800,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "cluster": {
+      "clusterName": "seedling",
+      "icc": 0.3,
+      "dimKind": "n_clusters",
+      "nClusters": 60,
+      "clusterSize": 30,
+      "extraGroupings": [],
+      "slopes": [
+        { "predictorName": "week", "slopeVariance": 0.05, "slopeInterceptCorr": 0.3 }
+      ]
+    }
+  }
+}

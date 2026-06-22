@@ -1,0 +1,29 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "anova",
+    "formula": "pain_reduction = treatment",
+    "variables": [
+      { "name": "treatment", "kind": "factor", "nLevels": 3, "levelProportions": [1, 1, 1], "role": "factor" }
+    ],
+    "effects": [
+      { "name": "treatment[2]", "value": 0.5 },
+      { "name": "treatment[3]", "value": 0.5 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "effects", "names": [] },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 180 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "holm",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    }
+  }
+}

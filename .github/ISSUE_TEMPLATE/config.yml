@@ -1,0 +1,7 @@
+# Keep the structured Bug report form as the only guided template, but still
+# allow free-form issues for questions/feature requests.
+blank_issues_enabled: true
+contact_links:
+  - name: No GitHub account? Report via the form
+    url: https://mcpower.app/report
+    about: Report a bug without a GitHub account — the form funnels into these same issues.

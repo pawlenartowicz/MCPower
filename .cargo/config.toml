@@ -1,0 +1,11 @@
+# wasm SIMD128 baseline raise (GLMM/GLM Phase 4). `wasm32-unknown-unknown` ships
+# simd128 OFF and wasm has no runtime feature detection, so without this flag pulp
+# compiles the scalar fallback for the fit-path transcendentals and the browser win
+# is zero. This is the deployment target built by `wasm-pack build crates/engine-wasm`
+# (ports/wasm). Deliberate: all current browsers support wasm SIMD128.
+#
+# Scope note: only `wasm32-unknown-unknown` (the engine-wasm cdylib). The native
+# host build and engine-core's `wasm32-wasip1` determinism tests are different
+# targets and are unaffected.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

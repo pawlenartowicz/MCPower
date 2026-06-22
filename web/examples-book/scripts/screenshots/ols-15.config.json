@@ -1,0 +1,32 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "job_satisfaction = gender * sector",
+    "variables": [
+      { "name": "gender", "kind": "binary", "binaryProportion": 0.5 },
+      { "name": "sector", "kind": "binary", "binaryProportion": 0.5 }
+    ],
+    "effects": [
+      { "name": "gender", "value": 0.5 },
+      { "name": "sector", "value": 0.5 },
+      { "name": "gender:sector", "value": 0.5 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 200 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

@@ -1,0 +1,119 @@
+---
+source: crates/engine-orchestrator/tests/plot.rs
+expression: "parse(&sample_size_curve_spec(&ssr_grid_below_target(),\n&PlotOptions::default()))"
+---
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "ci_hi": 0.45,
+        "ci_lo": 0.37,
+        "n": 50,
+        "power": 0.41,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.26,
+        "ci_lo": 0.18,
+        "n": 50,
+        "power": 0.22,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.58,
+        "ci_lo": 0.5,
+        "n": 100,
+        "power": 0.54,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.39,
+        "ci_lo": 0.31,
+        "n": 100,
+        "power": 0.35,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.69,
+        "ci_lo": 0.63,
+        "n": 150,
+        "power": 0.66,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.55,
+        "ci_lo": 0.47,
+        "n": 150,
+        "power": 0.51,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.75,
+        "ci_lo": 0.71,
+        "n": 200,
+        "power": 0.73,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.65,
+        "ci_lo": 0.59,
+        "n": 200,
+        "power": 0.62,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      }
+    ]
+  },
+  "height": 240.0,
+  "layer": [
+    {
+      "encoding": {
+        "detail": {
+          "field": "series",
+          "type": "nominal"
+        },
+        "strokeDash": {
+          "field": "target",
+          "type": "nominal"
+        },
+        "x": {
+          "field": "n",
+          "title": "Sample size (N)",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "power",
+          "scale": {
+            "domain": [
+              0,
+              1
+            ]
+          },
+          "title": "Power",
+          "type": "quantitative"
+        }
+      },
+      "mark": {
+        "point": true,
+        "type": "line"
+      }
+    }
+  ],
+  "width": 360.0
+}

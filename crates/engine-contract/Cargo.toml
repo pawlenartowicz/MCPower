@@ -1,0 +1,22 @@
+[package]
+name = "engine-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false           # internal engine crate — channels are PyPI/CRAN/GH/web, never crates.io
+
+[lints]
+workspace = true
+
+[features]
+test-fixtures = []
+
+[dependencies]
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror  = "2"
+
+[dev-dependencies]
+engine-contract = { path = ".", features = ["test-fixtures"] }
+rmp-serde  = "1"

@@ -1,0 +1,27 @@
+{
+  "expected": {
+    "errors": [],
+    "items": [
+      {
+        "key": {
+          "pair": [
+            "x1",
+            "x2"
+          ]
+        },
+        "value": {
+          "correlation": 0.4
+        }
+      }
+    ]
+  },
+  "input": "corr(x2,x1)=0.4",
+  "kind": "correlation",
+  "known": {
+    "interaction_terms": [],
+    "predictors": [
+      "x1",
+      "x2"
+    ]
+  }
+}

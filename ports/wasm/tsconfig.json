@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "strict": true,
+    "declaration": true,
+    "outDir": "dist",
+    "skipLibCheck": true,
+    "types": ["vite/client"],
+    "paths": { "$configs/*": ["../../configs/*"] }
+  },
+  "include": ["src", "tests"]
+}

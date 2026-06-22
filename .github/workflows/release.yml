@@ -1,0 +1,192 @@
+name: Release
+
+# Tag-triggered PyPI release for the new Rust-engine Python port (ports/py).
+# Adapted from the v1 flat-layout release.yml (origin/main): same job spine
+# (version-check → build_wheels → publish-pypi → github-release) and the same
+# trusted-publish job. Two structural changes for the new layout:
+#
+#   * abi3 (abi3-py310) means ONE wheel per platform, not a per-Python matrix —
+#     the matrix is the platforms only.
+#   * The engine crates live OUTSIDE ports/py (pyproject `manifest-path` reaches
+#     `../../crates`). cibuildwheel mounts only the package dir into its
+#     manylinux container, so the path dep cannot resolve there; PyO3/maturin-action
+#     mounts the whole $GITHUB_WORKSPACE, so `../../crates` resolves. Hence
+#     maturin-action, not cibuildwheel, here.
+#
+# Filename `release.yml` + `environment: pypi` are load-bearing: PyPI trusted
+# publishing matches on repo + workflow filename + environment, so keeping both
+# reuses the existing `mcpower` publisher binding (CLAUDE.md §5, spec A2).
+
+on:
+  push:
+    tags:
+      # py-* per CLAUDE.md §5. The current line ships 1.0.0aN pre-releases, so
+      # — unlike main — a/b/rc tags are NOT excluded; only dev tags are.
+      - 'py-*'
+      - '!py-*dev*'
+
+jobs:
+  version-check:
+    name: Verify tag matches package version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check version consistency
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/py-}"
+          PKG_VERSION=$(python -c "
+          import re
+          with open('ports/py/pyproject.toml') as f:
+              content = f.read()
+          match = re.search(r'version\s*=\s*\"([^\"]+)\"', content)
+          print(match.group(1))
+          ")
+          echo "Tag version: $TAG_VERSION"
+          echo "Package version: $PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match ports/py/pyproject.toml version ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "Versions match."
+
+  build_wheels:
+    name: Build & test wheel (${{ matrix.target }} on ${{ matrix.os }})
+    needs: [version-check]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # One abi3 wheel per platform. Native runners per arch (macos-13 = Intel,
+        # macos-14 = Apple Silicon) so every wheel is built and tested on its own
+        # hardware — no cross-arch wheel ships untested.
+        include:
+          - { os: ubuntu-latest, target: x86_64, manylinux: '2_28' }
+          - { os: macos-13,      target: x86_64 }
+          - { os: macos-14,      target: aarch64 }
+          - { os: windows-latest, target: x64 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Strip `test-bridge` from the release wheel: it stays in pyproject's
+      # default `[tool.maturin] features` so dev CI (`maturin develop`) keeps
+      # building the build_contract_from_json / panic_for_test back-doors, but
+      # the published wheel must not carry them (spec A1.1). maturin unions CLI
+      # features with the pyproject list, so it cannot subtract — edit the file.
+      - name: Strip test-bridge feature for release build
+        shell: bash
+        run: sed -i.bak 's/, "test-bridge"//' ports/py/pyproject.toml && rm -f ports/py/pyproject.toml.bak
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          # manylinux only applies to the Linux build; falls back to `auto`
+          # (a no-op) on the macOS/Windows matrix entries that omit it.
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          working-directory: ports/py
+          # --out dist → ports/py/dist; manifest-path (→ ../../crates) is read
+          # from pyproject, and maturin-action mounts the full workspace so it
+          # resolves inside the manylinux container.
+          args: --release --out dist
+
+      # The new abi3 module is mcpower/_engine.<abi3 tag>.{so,pyd,dylib} — the
+      # rename from v1's `mcpower_native`. Pure-Python zip inspection so the
+      # check runs identically on Linux/macOS/Windows runners.
+      - name: Verify native extension in wheel
+        shell: bash
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheels = glob.glob("ports/py/dist/*.whl")
+          assert wheels, "no wheel built"
+          for whl in wheels:
+              names = zipfile.ZipFile(whl).namelist()
+              if not any("_engine" in n for n in names):
+                  sys.exit(f"::error::native extension (_engine) missing from {whl}")
+              print(f"  _engine present in {whl}")
+          PY
+
+      # Install and test the BUILT wheel (not a maturin-develop tree). Run from a
+      # scratch dir with an absolute tests path so `import mcpower` resolves to the
+      # installed wheel, never the ports/py source tree (which has no compiled
+      # _engine). The two test-bridge tests self-skip via getattr/hasattr guards,
+      # so a bridge-less wheel needs no explicit deselection.
+      - name: Test wheel
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ports/py/dist/*.whl
+          python -m pip install pytest numpy pandas
+          cd "$RUNNER_TEMP"
+          python -m pytest "$GITHUB_WORKSPACE/ports/py/tests" -v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: ports/py/dist/*.whl
+
+  # No build_sdist: maturin sdist can't bundle the out-of-tree workspace crates
+  # without extra `[tool.maturin] include` work, and PyPI doesn't require an
+  # sdist (spec A2 — wheels-only for the first release).
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build_wheels]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p dist-flat
+          find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
+          echo "Files to upload:"
+          ls -la dist-flat/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-flat/
+
+  github-release:
+    name: Create GitHub Release
+    needs: [publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p dist-flat
+          find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-flat/*
+          generate_release_notes: true
+          draft: false

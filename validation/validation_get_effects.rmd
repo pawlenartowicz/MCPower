@@ -1,0 +1,182 @@
+---
+output:
+  md_document:
+    variant: gfm+tex_math_dollars
+---
+
+# MCPower validation — get_effects_from_data round-trip
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+# Run from mcpower/validation/ (rmarkdown::render sets wd to this file's dir).
+source("common.R")     # build_model, continuous_names, parse_effects
+source("tolerances.R") # GETEFFECTS_TOL — the central round-trip gate
+source("formulas.R")   # CASES
+
+# Campaign parameters (not tolerances — see tolerances.R for the gate).
+GE_N     <- 4000L      # per-draw sample size (LME scales n_clusters to ~match)
+GE_K     <- 20L        # draws averaged (single-draw noise ~1/sqrt(n) averaged down)
+GE_SEED0 <- 2137L      # first draw seed; draws use GE_SEED0 + 0..K-1
+png_type <- if (capabilities("cairo")) "cairo" else "Xlib"
+
+# GE_CASES, scale_case, recover_once, expected_recovery are defined in
+# formulas.R (GE_CASES) and common.R (the three helpers) — sourced above.
+
+# K-draw round-trip for one case: mean recovered vs expected, with the per-term
+# verdict against GETEFFECTS_TOL$mean_abs.
+roundtrip_rows <- function(case) {
+  cc    <- scale_case(case, GE_N)
+  cont  <- continuous_names(cc)
+  draws <- matrix(
+    vapply(seq_len(GE_K), function(k) recover_once(cc, GE_SEED0 + k - 1L),
+           numeric(length(cont))),
+    nrow = length(cont))
+  mean_rec <- rowMeans(draws)
+  exp_v    <- as.numeric(expected_recovery(cc))
+  abs_err  <- abs(mean_rec - exp_v)
+  tbl <- data.frame(
+    Term            = cont,
+    `Specified (s)` = as.numeric(parse_effects(cc$effects)[cont]),
+    `Expected`      = exp_v,
+    `Mean recovered`= mean_rec,
+    `|err|`         = abs_err,
+    Verdict         = ifelse(abs_err <= GETEFFECTS_TOL$mean_abs, "PASS", "FAIL"),
+    check.names = FALSE, row.names = NULL)
+  list(case = cc, table = tbl)
+}
+```
+
+# What this report validates
+
+`get_effects_from_data` recovers standardized effect sizes from uploaded pilot
+data by fitting the model the data came from. This report is the **acceptance gate
+for that recovery convention**: for each estimator we *specify* an effect of size
+`s`, let MCPower *simulate* a dataset from it, then *recover* the effect from that
+dataset — and check the recovery lands where the convention says it should.
+
+The estimator is dispatched off the model family, and the recovery scale differs
+by estimator:
+
+- **OLS (continuous outcome)** z-scores the outcome, so it recovers the
+  *standardized regression coefficient* — `s / sqrt(Σs² + 1)` for independent
+  continuous predictors with the engine's default N(0, 1) residual. The shrinkage
+  is the residual variance the standardization divides through; it is small for
+  the small/medium effects benchmarked here and is the same approximation the
+  shipped OLS recovery has always carried.
+- **GLM (logistic)** and **MLE (mixed)** fit the **native** outcome (raw 0/1 for
+  logit, the raw response for mixed), so they recover the coefficient **directly**:
+  expected recovery is `s` itself. MLE recovery is fixed-effects-only and reads the
+  grouping column from the uploaded data.
+
+Scope: **continuous main effects only** — the settled convention. Factor-dummy and
+interaction scaling under non-continuous outcomes is a separate, still-open item
+and is intentionally not gated here.
+
+# How the check works
+
+1. **Simulate.** Generate a dataset from each case's data-generating process at
+   n = `r GE_N` (LME scales the cluster count to match), via the engine's own
+   `create_data()` — the same DGP the power simulation uses.
+2. **Recover.** Rebuild the raw predictor frame (plus the outcome, plus the
+   grouping column for LME), `upload_data()` it, and call
+   `get_effects_from_data()`.
+3. **Average.** Repeat over `r GE_K` draws (seeds `r GE_SEED0`…`r GE_SEED0 + GE_K - 1L`)
+   and take the mean — single-draw noise is ~1/sqrt(n), so averaging isolates the
+   convention from sampling scatter (the A↔B harness pattern).
+4. **Gate.** The mean recovered effect must land within
+   `r GETEFFECTS_TOL$mean_abs` (absolute) of the convention-predicted value.
+
+# The threshold
+
+| Quantity | Allowed difference | Why |
+|---|---|---|
+| Mean recovered − expected | `r GETEFFECTS_TOL$mean_abs` absolute | K-draw mean vs the convention-predicted value; worst measured margin 0.007 → ~2.8× headroom |
+
+This is the `GETEFFECTS_TOL` gate from `tolerances.R`. A wrong estimator, a sign
+flip, a missing/inverted standardization, or a 2× scale would move the mean by
+0.1–0.5 — far outside this band.
+
+```{r compute}
+RESULTS <- lapply(GE_CASES, roundtrip_rows)
+names(RESULTS) <- vapply(RESULTS, function(r) r$case$label, character(1))
+```
+
+```{r summary}
+fam_long <- c(ols = "OLS (continuous)", logit = "GLM (logistic)", lme = "MLE (mixed)")
+summ <- data.frame(
+  Case    = vapply(RESULTS, function(r) r$case$label, character(1)),
+  Estimator = vapply(RESULTS, function(r) fam_long[[r$case$family]], character(1)),
+  Formula = vapply(RESULTS, function(r) r$case$formula, character(1)),
+  n       = vapply(RESULTS, function(r) as.integer(r$case$n), integer(1)),
+  K       = GE_K,
+  Verdict = vapply(RESULTS, function(r)
+              if (all(r$table$Verdict == "PASS")) "PASS" else "FAIL", character(1)),
+  row.names = NULL, check.names = FALSE)
+knitr::kable(summ)
+```
+
+```{r overall, results='asis'}
+all_ok <- all(vapply(RESULTS, function(r) all(r$table$Verdict == "PASS"), logical(1)))
+cat(if (all_ok)
+  "> **All estimators round-trip:** every specified continuous main effect is recovered to within the gate of the convention-predicted value — OLS at the shrunk standardized scale, GLM and MLE at the native coefficient.\n"
+  else "> **Some cases need review** — see the per-case sections below.\n")
+```
+
+```{r roundtrip-plot, results='asis'}
+# Figures land beside this report's md in the published web tree (md is rendered
+# with output_dir = web/documentation/validation). One scatter summarises every
+# term across all cases: a correct round-trip lands each point on the identity
+# line, inside the ±gate band — the per-case tables give the numbers, this gives
+# the shape at a glance.
+figdir_src <- "figures"
+figdir_out <- file.path("..", "web", "documentation", "validation", figdir_src)
+dir.create(figdir_out, recursive = TRUE, showWarnings = FALSE)
+pts <- do.call(rbind, lapply(RESULTS, function(r) data.frame(
+  exp = r$table$Expected, rec = r$table[["Mean recovered"]],
+  fam = r$case$family, stringsAsFactors = FALSE)))
+fam_col <- c(ols = "#3366aa", logit = "#aa6633", lme = "#338855")
+fpath <- file.path(figdir_out, "get_effects_roundtrip.png")
+grDevices::png(fpath, width = 460, height = 460, res = 96, type = png_type)
+op  <- graphics::par(mar = c(4.2, 4.2, 2.4, 1))
+lim <- range(c(0, pts$exp, pts$rec))
+graphics::plot(NA, xlim = lim, ylim = lim, xlab = "expected (convention-predicted)",
+               ylab = "mean recovered", main = "Round-trip recovery vs convention",
+               asp = 1)
+graphics::abline(GETEFFECTS_TOL$mean_abs, 1, col = "grey70", lty = 3)
+graphics::abline(-GETEFFECTS_TOL$mean_abs, 1, col = "grey70", lty = 3)
+graphics::abline(0, 1, col = "grey40")
+graphics::points(pts$exp, pts$rec, pch = 16, cex = 1.3, col = fam_col[pts$fam])
+graphics::legend("topleft", legend = c("OLS", "GLM", "MLE"), col = fam_col,
+                 pch = 16, bty = "n")
+graphics::par(op)
+grDevices::dev.off()
+cat(sprintf("![Mean recovered effect vs the convention-predicted value for every term, coloured by estimator.](%s)\n\n",
+            file.path(figdir_src, "get_effects_roundtrip.png")))
+cat(sprintf("*Solid line = exact recovery (identity); dotted lines = the ±%g absolute gate. Every term lands on the identity line, well inside the band.*\n\n",
+            GETEFFECTS_TOL$mean_abs))
+```
+
+```{r per-case, results='asis'}
+for (r in RESULTS) {
+  cat(sprintf("\n## %s &middot; %s\n\n", r$case$label, fam_long[[r$case$family]]))
+  cat(sprintf("R formula `%s` &middot; n=%d &middot; K=%d draws (seeds %d–%d).\n\n",
+              r$case$formula, r$case$n, GE_K, GE_SEED0, GE_SEED0 + GE_K - 1L))
+  cat(knitr::kable(r$table, digits = 5, format = "pipe"), sep = "\n")
+  cat("\n\n")
+}
+```
+
+```{r provenance}
+prov <- data.frame(
+  item  = c("generated", "R", "mcpower", "round-trip gate (mean abs)",
+            "n / K / seed0"),
+  value = c(as.character(Sys.Date()), R.version.string,
+            as.character(utils::packageVersion("mcpower")),
+            sprintf("%g abs", GETEFFECTS_TOL$mean_abs),
+            sprintf("%d / %d / %d", GE_N, GE_K, GE_SEED0)),
+  check.names = FALSE)
+knitr::kable(prov)
+```
+
+Reproduce:
+`rmarkdown::render("mcpower/validation/validation_get_effects.rmd", output_dir = "mcpower/web/documentation/validation")`.

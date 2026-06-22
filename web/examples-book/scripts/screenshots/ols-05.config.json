@@ -1,0 +1,37 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "growth_rate = temperature * moisture * soil_ph",
+    "variables": [
+      { "name": "temperature", "kind": "continuous" },
+      { "name": "moisture", "kind": "continuous" },
+      { "name": "soil_ph", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "temperature", "value": 0.25 },
+      { "name": "moisture", "value": 0.25 },
+      { "name": "soil_ph", "value": 0.25 },
+      { "name": "temperature:moisture", "value": 0.10 },
+      { "name": "temperature:soil_ph", "value": 0.10 },
+      { "name": "moisture:soil_ph", "value": 0.10 },
+      { "name": "temperature:moisture:soil_ph", "value": 0.10 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 300 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

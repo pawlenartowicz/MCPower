@@ -1,0 +1,33 @@
+{
+  "outcomeKind": "binary",
+  "config": {
+    "family": "regression",
+    "formula": "employed = years_education + age + gender",
+    "variables": [
+      { "name": "years_education", "kind": "continuous" },
+      { "name": "age", "kind": "continuous" },
+      { "name": "gender", "kind": "binary", "binaryProportion": 0.5 }
+    ],
+    "effects": [
+      { "name": "years_education", "value": 0.25 },
+      { "name": "age", "value": 0.2 },
+      { "name": "gender", "value": 0.5 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 400 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.25
+  }
+}

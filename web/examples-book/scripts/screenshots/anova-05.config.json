@@ -1,0 +1,37 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "seed_yield = watering * nitrogen * light",
+    "variables": [
+      { "name": "watering", "kind": "binary", "binaryProportion": 0.5 },
+      { "name": "nitrogen", "kind": "binary", "binaryProportion": 0.5 },
+      { "name": "light", "kind": "binary", "binaryProportion": 0.5 }
+    ],
+    "effects": [
+      { "name": "watering", "value": 0.5 },
+      { "name": "nitrogen", "value": 0.5 },
+      { "name": "light", "value": 0.5 },
+      { "name": "watering:nitrogen", "value": 0.5 },
+      { "name": "watering:light", "value": 0.5 },
+      { "name": "nitrogen:light", "value": 0.5 },
+      { "name": "watering:nitrogen:light", "value": 0.5 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 320 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

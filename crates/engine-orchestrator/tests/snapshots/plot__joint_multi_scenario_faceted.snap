@@ -1,0 +1,239 @@
+---
+source: crates/engine-orchestrator/tests/plot.rs
+expression: "parse(&joint_detection_curve_spec(&multi_scenario_grid(), &opts))"
+---
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "k": 1,
+        "n": 50,
+        "p": 0.6,
+        "scenario": "optimistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 50,
+        "p": 0.25,
+        "scenario": "optimistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 100,
+        "p": 0.8,
+        "scenario": "optimistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 100,
+        "p": 0.45,
+        "scenario": "optimistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 150,
+        "p": 0.92,
+        "scenario": "optimistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 150,
+        "p": 0.65,
+        "scenario": "optimistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 200,
+        "p": 0.97,
+        "scenario": "optimistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 200,
+        "p": 0.8,
+        "scenario": "optimistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 50,
+        "p": 0.45,
+        "scenario": "realistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 50,
+        "p": 0.15,
+        "scenario": "realistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 100,
+        "p": 0.7,
+        "scenario": "realistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 100,
+        "p": 0.32,
+        "scenario": "realistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 150,
+        "p": 0.85,
+        "scenario": "realistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 150,
+        "p": 0.5,
+        "scenario": "realistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 200,
+        "p": 0.93,
+        "scenario": "realistic",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 200,
+        "p": 0.63,
+        "scenario": "realistic",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 50,
+        "p": 0.35,
+        "scenario": "doomer",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 50,
+        "p": 0.08,
+        "scenario": "doomer",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 100,
+        "p": 0.58,
+        "scenario": "doomer",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 100,
+        "p": 0.22,
+        "scenario": "doomer",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 150,
+        "p": 0.72,
+        "scenario": "doomer",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 150,
+        "p": 0.34,
+        "scenario": "doomer",
+        "series": ">= 2 of 2"
+      },
+      {
+        "k": 1,
+        "n": 200,
+        "p": 0.82,
+        "scenario": "doomer",
+        "series": ">= 1 of 2"
+      },
+      {
+        "k": 2,
+        "n": 200,
+        "p": 0.42,
+        "scenario": "doomer",
+        "series": ">= 2 of 2"
+      }
+    ]
+  },
+  "facet": {
+    "columns": 3,
+    "field": "scenario",
+    "sort": [
+      "optimistic",
+      "realistic",
+      "doomer"
+    ],
+    "type": "nominal"
+  },
+  "spec": {
+    "height": 240.0,
+    "layer": [
+      {
+        "encoding": {
+          "color": {
+            "field": "series",
+            "title": "Joint detection",
+            "type": "nominal"
+          },
+          "x": {
+            "field": "n",
+            "title": "N",
+            "type": "quantitative"
+          },
+          "y": {
+            "field": "p",
+            "scale": {
+              "domain": [
+                0,
+                1
+              ]
+            },
+            "title": "P(detect >= k)",
+            "type": "quantitative"
+          }
+        },
+        "mark": {
+          "point": true,
+          "type": "line"
+        }
+      },
+      {
+        "encoding": {
+          "y": {
+            "datum": 0.8,
+            "type": "quantitative"
+          }
+        },
+        "mark": {
+          "strokeDash": [
+            4,
+            4
+          ],
+          "type": "rule"
+        }
+      }
+    ],
+    "width": 200.0
+  }
+}

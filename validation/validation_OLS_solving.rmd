@@ -1,0 +1,150 @@
+---
+output:
+  md_document:
+    variant: gfm+tex_math_dollars
+---
+
+# MCPower validation — OLS solver (data → results)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+# Run from mcpower/validation/ (rmarkdown::render sets wd to this file's dir).
+source("common.R")     # build_model, fit_sota, fit_mcpower, solving_rows, hash_check, ...
+source("tolerances.R") # SOLVING_TOL — the central B<->C gate
+source("formulas.R")   # CASES
+OLS_CASES <- Filter(function(c) c$family == "ols", CASES)
+DATA_DIR  <- "data"
+
+png_type <- if (capabilities("cairo")) "cairo" else "Xlib"
+
+family_long <- function(case) "ordinary least squares (continuous outcome)"
+
+model_equation <- function(case) {
+  e  <- parse_effects(case$effects)
+  rhs <- paste(sprintf("%.2f·%s", e, names(e)), collapse = " + ")
+  sprintf("y = %s + noise", rhs)
+}
+```
+
+# What this report shows
+
+MCPower generates a dataset from a formula, then **fits it back** to recover the
+coefficients. This report checks the *fitting* half: given one fixed dataset, does
+MCPower's own solver return the same numbers a trusted, independent R fit returns?
+
+For each formula we take the exact bytes MCPower saved (the same design matrix and
+outcome, byte-for-byte), fit them two ways —
+
+- **R (the reference):** `stats::lm` through the origin on the design matrix, the
+  textbook least-squares solution.
+- **MCPower:** the engine's own `load_data()` path, which runs the *same* solver the
+  power simulation uses.
+
+— and compare the fitted coefficients, the test statistics, and the decision
+threshold. Because both fit the identical bytes, sampling noise cancels: any
+difference is a solver discrepancy, and the allowed differences are tiny.
+
+# How the check works
+
+1. **Provenance.** Re-generate the dataset from the committed seed and confirm its
+   content hash matches the saved file — proof the bytes haven't drifted.
+2. **B (R) vs C (MCPower)** on those bytes: coefficients, the marginal *t*
+   statistics, and the critical value.
+3. **C vs A** (a readable sanity overlay): MCPower's recovered coefficients next to
+   the formula's true values.
+
+# The thresholds
+
+| Quantity | Allowed difference | Why |
+|---|---|---|
+| Coefficient (β) | `r SOLVING_TOL$estimate_rel_ols` relative | exact normal equations; observed worst agreement ≈1.2e-12 |
+| Statistic (*t*) | `r SOLVING_TOL$estimate_rel_ols` relative | derived from the same β and variance |
+| Critical value | `r SOLVING_TOL$crit_abs` absolute | `qt` quantile agreement ~1e-15 |
+
+These are the B↔C gates from `tolerances.R`. OLS is closed-form, so it gets the
+**tight** `estimate_rel_ols` band — set just above the measured worst agreement
+(≈1.2e-12) so a real solver regression would trip it. The iterative GLM/MLE fits
+use the looser `estimate_rel_iter` band in their own reports; the per-formula
+tables below show OLS's actual margin.
+
+```{r compute}
+RESULTS <- lapply(OLS_CASES, function(case) {
+  saved <- readRDS(file.path(DATA_DIR, paste0(case$label, ".rds")))
+  hc    <- hash_check(case)                    # provenance (common.R)
+  sota  <- sota_side(case, saved)
+  mc    <- mcpower_side(case, saved)
+  sr    <- compare_sides(case, sota, mc, saved)
+  list(case = case, saved = saved, hash_ok = hc$ok, sota = sota,
+       table = sr$table, converged = sr$converged)
+})
+names(RESULTS) <- vapply(OLS_CASES, function(c) c$label, character(1))
+```
+
+```{r summary}
+summ <- data.frame(
+  Formula  = vapply(RESULTS, function(r) r$case$formula, character(1)),
+  n        = vapply(RESULTS, function(r) as.integer(r$case$n), integer(1)),
+  `B↔C`    = vapply(RESULTS, function(r)
+               if (all(r$table$Verdict == "PASS")) "PASS" else "FAIL", character(1)),
+  Converged= vapply(RESULTS, function(r) if (r$converged) "yes" else "NO", character(1)),
+  Reproduces = vapply(RESULTS, function(r) if (r$hash_ok) "yes" else "NO", character(1)),
+  row.names = NULL, check.names = FALSE)
+knitr::kable(summ)
+```
+
+```{r overall, results='asis'}
+all_ok <- all(vapply(RESULTS, function(r)
+  all(r$table$Verdict == "PASS") && r$converged && r$hash_ok, logical(1)))
+cat(if (all_ok)
+  "> **All OLS formulas pass:** MCPower's solver matches R to machine precision on every saved dataset, and every file reproduces from its seed.\n"
+  else "> **Some formulas need review** — see the per-formula sections below.\n")
+stopifnot(all_ok)   # G5: render fails on any FAIL, no silent green HTML
+```
+
+```{r agreement-plot, results='asis'}
+# Figures land beside this report's md in the published web tree; the md is
+# rendered with output_dir = web/documentation/validation, so a relative
+# "figures/<x>.png" src resolves at the served page (mirrors data_generation.rmd).
+figdir_src <- "figures"
+figdir_out <- file.path("..", "web", "documentation", "validation", figdir_src)
+dir.create(figdir_out, recursive = TRUE, showWarnings = FALSE)
+fpath <- file.path(figdir_out, "ols_agreement.png")
+grDevices::png(fpath, width = 780, height = 280, res = 96, type = png_type)
+plot_solver_agreement(RESULTS, SOLVING_TOL$estimate_rel_ols,
+                      sprintf("%g rel", SOLVING_TOL$estimate_rel_ols))
+grDevices::dev.off()
+cat(sprintf("![B↔C relative agreement of every coefficient and statistic across all OLS formulas, against the tolerance gate.](%s)\n\n",
+            file.path(figdir_src, "ols_agreement.png")))
+cat("*Each point is one fitted quantity on one saved dataset; the red line is the gate. Every β and statistic agrees with R orders of magnitude inside tolerance — exact (bit-identical) matches pile up at the left floor.*\n\n")
+```
+
+```{r golden-freeze}
+# Freeze R-SOTA's B side for every case (campaign is the sole golden producer).
+invisible(lapply(RESULTS, function(r) write_golden(r$case, r$saved, r$sota)))
+```
+
+```{r per-formula, results='asis'}
+for (r in RESULTS) {
+  cat(sprintf("\n## %s\n\n", model_equation(r$case)))
+  cat(sprintf("R formula `%s` &middot; %s &middot; n=%d, seed=%d. ",
+              r$case$formula, family_long(r$case), r$case$n, r$case$seed))
+  cat(sprintf("File reproduces from seed: **%s**.\n\n",
+              if (r$hash_ok) "yes" else "NO"))
+  cat(knitr::kable(compact_solver_table(r$table), digits = 6, format = "pipe"), sep = "\n")
+  cat("\n\n")
+}
+```
+
+```{r provenance}
+prov <- data.frame(
+  item  = c("generated", "R", "mcpower", "OLS solving bands (beta/stat rel · crit abs)"),
+  value = c(as.character(Sys.Date()), R.version.string,
+            as.character(utils::packageVersion("mcpower")),
+            sprintf("%g rel / %g rel / %g abs", SOLVING_TOL$estimate_rel_ols,
+                    SOLVING_TOL$estimate_rel_ols, SOLVING_TOL$crit_abs)),
+  check.names = FALSE)
+knitr::kable(prov)
+```
+
+Reproduce: `Rscript mcpower/validation/data_generation.r` then
+`rmarkdown::render("mcpower/validation/validation_OLS_solving.rmd", output_dir = "mcpower/web/documentation/validation")`.

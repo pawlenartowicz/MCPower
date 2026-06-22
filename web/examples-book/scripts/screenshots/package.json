@@ -1,0 +1,10 @@
+{
+  "name": "examples-book-screenshots",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Web-ignored Playwright harness: captures one ConfigPanel screenshot per examples-book example.",
+  "dependencies": {
+    "playwright": "^1.60.0"
+  }
+}

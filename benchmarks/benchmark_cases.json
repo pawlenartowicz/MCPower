@@ -1,0 +1,25 @@
+{
+  "defaults": {
+    "ols":   { "n": {"from": 20,  "to": 200,  "by": 20},  "n_sims": {"mcpower": 10000, "best": 500, "naive": 100, "tool": 100}, "target_power": 0.80 },
+    "logit": { "n": {"from": 50,  "to": 500,  "by": 50},  "n_sims": {"mcpower": 10000, "best": 500, "naive": 100, "tool": 100}, "target_power": 0.80, "max_failed_frac": 0.25, "baseline_p": 0.3 },
+    "lme":   { "n": {"from": 100, "to": 1000, "by": 100}, "n_sims": {"mcpower": 10000, "best": 60,  "naive": 30,  "tool": 30},  "target_power": 0.80, "max_failed_frac": 0.25 },
+    "glmm":  { "n": {"from": 100, "to": 1000, "by": 100}, "n_sims": {"mcpower": 1000,  "best": 60,  "naive": 30,  "tool": 30},  "target_power": 0.80, "max_failed_frac": 0.25, "baseline_p": 0.3 }
+  },
+  "cases": [
+    { "id": "ols_simple",       "family": "ols",   "formula": "y = x1",             "effects": "x1=0.27",                   "targets": ["x1"],        "n": {"from": 20, "to": 140, "by": 10}, "tool": "simglm" },
+    { "id": "ols_multi",        "family": "ols",   "formula": "y = x1+x2+x3+x4+x5", "effects": "x1=0.25, x2=0.25",          "targets": ["x1", "x2"],  "n": {"from": 20, "to": 170, "by": 15}, "tool": "simglm" },
+    { "id": "ols_large_n",      "family": "ols",   "formula": "y = x1+x2+x3",       "effects": "x1=0.07, x2=0.07",          "targets": ["x1", "x2"],  "n": {"from": 300, "to": 2100, "by": 200}, "tool": "simglm" },
+    { "id": "ols_correlated",   "family": "ols",   "formula": "y = x1+x2+x3",       "effects": "x1=0.30, x2=0.30",          "correlations": "corr(x1,x2)=0.4", "targets": ["x1", "x2"], "n": {"from": 30, "to": 140, "by": 10}, "tool": null },
+    { "id": "anova_2x2",        "family": "ols",   "formula": "y = f1*f2",          "effects": "f1[2]=0.5, f2[2]=0.5, f1[2]:f2[2]=0.5", "variable_types": {"f1": "(factor,0.5,0.5)", "f2": "(factor,0.5,0.5)"}, "targets": ["f1[2]"], "n": {"from": 40, "to": 540, "by": 50}, "n_sims": {"tool": 1000}, "tool": "superpower" },
+    { "id": "anova_oneway4",    "family": "ols",   "formula": "y = f",              "effects": "f[2]=0.5, f[3]=0.5, f[4]=0.5", "variable_types": {"f": "(factor,0.25,0.25,0.25,0.25)"}, "targets": ["f[2]"], "n": {"from": 40, "to": 340, "by": 30}, "tool": "superpower" },
+    { "id": "glm_simple",       "family": "logit", "formula": "y = x1",             "effects": "x1=0.4",                    "targets": ["x1"],        "n": {"from": 30, "to": 280, "by": 20}, "tool": "simglm" },
+    { "id": "glm_multi",        "family": "logit", "formula": "y = x1+x2+x3+x4+x5", "effects": "x1=0.4, x2=0.4",            "targets": ["x1", "x2"],  "n": {"from": 30, "to": 280, "by": 20}, "tool": "simglm" },
+    { "id": "glm_rare",         "family": "logit", "formula": "y = x1+x2",          "effects": "x1=1.0, x2=1.0",            "baseline_p": 0.05, "targets": ["x1", "x2"], "n": {"from": 40, "to": 170, "by": 15}, "tool": "simglm" },
+    { "id": "lme_simple",       "family": "lme",   "formula": "y ~ x1 + (1|g)",            "effects": "x1=0.15",            "cluster": {"var": "g", "ICC": 0.2, "n_clusters": 20},  "targets": ["x1"], "tool": "simr" },
+    { "id": "lme_multi",        "family": "lme",   "formula": "y ~ x1+x2+x3+x4+x5 + (1|g)", "effects": "x1=0.15, x2=0.15", "cluster": {"var": "g", "ICC": 0.2, "n_clusters": 20},  "targets": ["x1", "x2"], "tool": "simr" },
+    { "id": "lme_factor_inter", "family": "lme",   "formula": "y ~ x1 + f + x1:f + (1|g)", "effects": "x1=0.2, f[2]=0.5, x1:f[2]=0.3", "variable_types": {"f": "(factor,0.5,0.5)"}, "cluster": {"var": "g", "ICC": 0.2, "n_clusters": 20}, "targets": ["x1"], "tool": "simr" },
+    { "id": "glmm_simple",      "family": "glmm",  "formula": "y ~ x1 + (1|g)",            "effects": "x1=0.5",                    "cluster": {"var": "g", "ICC": 0.2, "n_clusters": 20}, "targets": ["x1"],       "tool": null },
+    { "id": "glmm_slope",       "family": "glmm",  "formula": "y ~ x1 + (1 + x1|g)",       "effects": "x1=0.5",                    "cluster": {"var": "g", "ICC": 0.2, "n_clusters": 20, "random_slopes": ["x1"],       "slope_variance": 0.1, "slope_intercept_corr": 0.0}, "targets": ["x1"],       "tool": null },
+    { "id": "glmm_multislope",  "family": "glmm",  "formula": "y ~ x1 + x2 + (1 + x1 + x2|g)", "effects": "x1=0.5, x2=0.5",        "cluster": {"var": "g", "ICC": 0.2, "n_clusters": 30, "random_slopes": ["x1", "x2"], "slope_variance": 0.1, "slope_intercept_corr": 0.0}, "targets": ["x1", "x2"], "n": {"from": 150, "to": 1500, "by": 150}, "tool": null }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "mixed",
+    "formula": "pain_score = treatment * week + (1|patient)",
+    "variables": [
+      { "name": "treatment", "kind": "binary", "binaryProportion": 0.5 },
+      { "name": "week", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "treatment", "value": 0.2 },
+      { "name": "week", "value": 0.25 },
+      { "name": "treatment:week", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 300 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 800,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "cluster": {
+      "clusterName": "patient",
+      "icc": 0.5,
+      "dimKind": "n_clusters",
+      "nClusters": 60,
+      "clusterSize": 30,
+      "extraGroupings": [],
+      "slopes": []
+    }
+  }
+}

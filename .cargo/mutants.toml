@@ -1,0 +1,41 @@
+# cargo-mutants config — on-request L1/L2 fragility DIAGNOSTIC.
+#
+# Lives at .cargo/mutants.toml because that is the path cargo-mutants
+# auto-discovers (so a bare `cargo mutants` from the workspace root picks it up;
+# no --config needed).
+#
+# This is a diagnostic, NOT a gate: there is no surviving-mutant-count floor and
+# it never runs in CI (see docs/design/testing-charter.md and the
+# no-coverage-floor-gates rule). Run it by hand before a release to surface tests
+# that would still pass if load-bearing numeric/merge logic were broken — the
+# charter's bar ("if the logic could be broken and the test would still pass, the
+# test is wrong") is exactly the definition of a surviving mutant.
+#
+# Scope: only the load-bearing modules of the two numeric/aggregation crates,
+# where a flipped comparison or wrong constant is most expensive (hot loop, model
+# fits, aggregation, merge, grid, isotonic fit). Mutation on plumbing is noise, so
+# everything else is deliberately excluded.
+#
+# Patterns use the `**/`-prefixed form cargo-mutants matches against the path
+# relative to the workspace root (a bare `crates/.../foo.rs` does NOT match).
+# Each filename is unique within its crate, so the prefix glob is unambiguous.
+examine_globs = [
+    "**/engine-core/src/batch.rs",   # run_batch hot loop + result buffers
+    "**/engine-core/src/glm.rs",     # IRLS / Wald
+    "**/engine-core/src/glmm.rs",    # Laplace / PIRLS
+    "**/engine-core/src/lme.rs",     # profiled-deviance / Brent
+    "**/engine-core/src/lmm.rs",     # general REML / BOBYQA
+    "**/engine-orchestrator/src/aggregation.rs", # Wilson CI, power/count vectors
+    "**/engine-orchestrator/src/merge.rs",       # worker-pool pooling (WASM path)
+    "**/engine-orchestrator/src/grid.rs",        # sample-size grid walk
+    "**/engine-orchestrator/src/fit.rs",         # gate, PAVA isotonic, band inversion
+]
+
+# The hot loop and θ-search legitimately run long; without head-room a slow-but-
+# correct mutant is mis-reported as TIMEOUT instead of being triaged. 5× baseline.
+timeout_multiplier = 5.0
+
+# exclude_re: populate ONLY with mutants confirmed equivalent during a triage pass
+# (e.g. a constant any stochastic tolerance absorbs). Recorded per run, never a
+# pass/fail floor. Left empty until the first full triage classifies equivalents.
+exclude_re = []

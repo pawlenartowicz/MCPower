@@ -1,0 +1,104 @@
+---
+source: crates/engine-orchestrator/tests/plot.rs
+expression: "parse(&power_at_n_spec(&multi_scenario(), &PlotOptions::default()))"
+---
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "ci_hi": 0.86,
+        "ci_lo": 0.8,
+        "power": 0.83,
+        "scenario": "optimistic",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.74,
+        "ci_lo": 0.67,
+        "power": 0.71,
+        "scenario": "optimistic",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.75,
+        "ci_lo": 0.69,
+        "power": 0.72,
+        "scenario": "realistic",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.59,
+        "ci_lo": 0.51,
+        "power": 0.55,
+        "scenario": "realistic",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.55,
+        "ci_lo": 0.47,
+        "power": 0.51,
+        "scenario": "doomer",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.38,
+        "ci_lo": 0.3,
+        "power": 0.34,
+        "scenario": "doomer",
+        "target": "target_2"
+      }
+    ]
+  },
+  "height": 112.0,
+  "layer": [
+    {
+      "encoding": {
+        "color": {
+          "field": "scenario",
+          "sort": [
+            "optimistic",
+            "realistic",
+            "doomer"
+          ],
+          "type": "nominal"
+        },
+        "x": {
+          "field": "power",
+          "scale": {
+            "domain": [
+              0,
+              1
+            ]
+          },
+          "title": "Power",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "target",
+          "scale": {
+            "paddingInner": 0.18181818181818185,
+            "paddingOuter": 0
+          },
+          "title": "Effect",
+          "type": "nominal"
+        },
+        "yOffset": {
+          "field": "scenario",
+          "scale": {
+            "paddingInner": 0,
+            "paddingOuter": 0
+          },
+          "sort": [
+            "optimistic",
+            "realistic",
+            "doomer"
+          ],
+          "type": "nominal"
+        }
+      },
+      "mark": "bar"
+    }
+  ],
+  "width": 360.0
+}

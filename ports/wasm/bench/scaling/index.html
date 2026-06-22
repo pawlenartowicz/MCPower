@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MCPower WASM worker-pool scaling</title>
+</head>
+<body>
+  <h1>Worker-pool scaling — 1…16 workers</h1>
+  <p>Real-Chrome measurement of postMessage + merge overhead. Reports scaling
+     <em>ratios</em> only — never absolute fits/sec, never mixed into the
+     per-case wasm-tax rows. <code>ols_multi</code> = fastest case (overhead
+     share); <code>glmm_intercept</code> = compute-dominated (real scaling).</p>
+  <select id="case">
+    <option value="glmm_intercept" selected>glmm_intercept (heavy, 800 sims)</option>
+    <option value="ols_multi">ols_multi (fast, 10k sims)</option>
+  </select>
+  <button id="run">Run</button>
+  <button id="run-default">Run default-route latency (warm vs cold)</button>
+  <pre id="out">idle</pre>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

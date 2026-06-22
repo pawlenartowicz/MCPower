@@ -1,0 +1,31 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "blood_pressure = treatment + baseline_bp",
+    "variables": [
+      { "name": "treatment", "kind": "binary", "binaryProportion": 0.5 },
+      { "name": "baseline_bp", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "treatment", "value": 0.5 },
+      { "name": "baseline_bp", "value": 0.4 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 120 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

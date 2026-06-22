@@ -1,0 +1,160 @@
+---
+source: crates/engine-orchestrator/tests/plot.rs
+expression: "parse(&sample_size_curve_spec(&ssr_grid(), &opts))"
+---
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "ci_hi": 0.55,
+        "ci_lo": 0.47,
+        "n": 50,
+        "power": 0.51,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.36,
+        "ci_lo": 0.28,
+        "n": 50,
+        "power": 0.32,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.78,
+        "ci_lo": 0.7,
+        "n": 100,
+        "power": 0.74,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.59,
+        "ci_lo": 0.51,
+        "n": 100,
+        "power": 0.55,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.89,
+        "ci_lo": 0.83,
+        "n": 150,
+        "power": 0.86,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.75,
+        "ci_lo": 0.67,
+        "n": 150,
+        "power": 0.71,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      },
+      {
+        "ci_hi": 0.95,
+        "ci_lo": 0.91,
+        "n": 200,
+        "power": 0.93,
+        "scenario": "optimistic",
+        "series": "optimistic · target_1",
+        "target": "target_1"
+      },
+      {
+        "ci_hi": 0.85,
+        "ci_lo": 0.79,
+        "n": 200,
+        "power": 0.82,
+        "scenario": "optimistic",
+        "series": "optimistic · target_2",
+        "target": "target_2"
+      }
+    ]
+  },
+  "height": 240.0,
+  "layer": [
+    {
+      "encoding": {
+        "detail": {
+          "field": "series",
+          "type": "nominal"
+        },
+        "strokeDash": {
+          "field": "target",
+          "type": "nominal"
+        },
+        "x": {
+          "field": "n",
+          "title": "Sample size (N)",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "power",
+          "scale": {
+            "domain": [
+              0,
+              1
+            ]
+          },
+          "title": "Power",
+          "type": "quantitative"
+        }
+      },
+      "mark": {
+        "point": true,
+        "type": "line"
+      }
+    },
+    {
+      "encoding": {
+        "detail": {
+          "field": "series",
+          "type": "nominal"
+        },
+        "x": {
+          "field": "n",
+          "title": "Sample size (N)",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "ci_lo",
+          "title": "Power",
+          "type": "quantitative"
+        },
+        "y2": {
+          "field": "ci_hi"
+        }
+      },
+      "mark": {
+        "opacity": 0.2,
+        "type": "errorband"
+      }
+    },
+    {
+      "encoding": {
+        "y": {
+          "datum": 0.8,
+          "type": "quantitative"
+        }
+      },
+      "mark": {
+        "strokeDash": [
+          4,
+          4
+        ],
+        "type": "rule"
+      }
+    }
+  ],
+  "title": "Power vs sample size",
+  "width": 360.0
+}

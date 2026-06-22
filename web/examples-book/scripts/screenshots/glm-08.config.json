@@ -1,0 +1,37 @@
+{
+  "outcomeKind": "binary",
+  "config": {
+    "family": "regression",
+    "formula": "germinated = light * moisture * temperature",
+    "variables": [
+      { "name": "light", "kind": "continuous" },
+      { "name": "moisture", "kind": "continuous" },
+      { "name": "temperature", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "light", "value": 0.25 },
+      { "name": "moisture", "value": 0.25 },
+      { "name": "temperature", "value": 0.25 },
+      { "name": "light:moisture", "value": 0.1 },
+      { "name": "light:temperature", "value": 0.1 },
+      { "name": "moisture:temperature", "value": 0.1 },
+      { "name": "light:moisture:temperature", "value": 0.1 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 600 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.3
+  }
+}

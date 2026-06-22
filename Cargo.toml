@@ -1,0 +1,41 @@
+[workspace]
+members = [
+    "crates/engine-contract",
+    "crates/engine-core",
+    "crates/engine-orchestrator",
+    "crates/engine-spec-builder",
+    "crates/engine-py",
+    "crates/engine-r",
+    "crates/engine-app-spec",
+    "crates/engine-wasm",
+    "ports/app/src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"              # single source for the eight internal engine-* crates (all publish=false);
+                              # ports version independently
+edition = "2021"
+rust-version = "1.85"          # floor set by the bobyqa dep (edition 2024, MSRV 1.85);
+                               # the workspace's own needs (`#[expect]`, lint `reason =`) stop at 1.81
+license = "GPL-3.0-or-later"
+
+[workspace.lints.rust]
+# Baseline for all members; the pure-Rust engine crates harden to `forbid`
+# via `#![forbid(unsafe_code)]` in their lib.rs. The FFI adapters
+# (engine-py/-r/-wasm, ports/app/src-tauri) keep this `warn` — their only
+# `unsafe` is external-macro-generated and does not fire the lint.
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+# Group priority -1 lets item-level `#[allow(clippy::…)]`/`#[expect(clippy::…)]`
+# (priority 0) override. `deny` makes clippy::all a correctness gate: a new
+# finding fails a plain `cargo clippy`/`cargo build` (clippy), not just CI.
+all = { level = "deny", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+debug = false
+panic = "unwind"      # explicit — FFI adapters need unwind for clean host-exception surface

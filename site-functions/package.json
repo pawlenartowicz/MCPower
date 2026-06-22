@@ -1,0 +1,12 @@
+{
+  "name": "mcpower-site-functions",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Pages Functions for mcpower.app (deployed via scripts/deploy-site.sh).",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.6"
+  }
+}

@@ -1,0 +1,130 @@
+name: App release
+
+# Tag-triggered desktop installer build for the Tauri port (ports/app), uploaded
+# to a DRAFT GitHub Release on APP-* tag push. v1 ships UNSIGNED; the draft +
+# manual-publish step is the safety gate, so this is build-only — the port test
+# suites already ran on the main commit the tag is cut from (CLAUDE.md §5).
+#
+# Mirrors release.yml's tag -> version-check -> build-matrix -> release spine.
+# workflow_dispatch builds all three legs WITHOUT publishing (a dry run): the
+# release-creating tauri-action inputs are gated on a tag ref, so on a manual
+# dispatch tagName is empty and tauri-action only builds (its documented
+# build-only mode — omit tagName/releaseName).
+
+on:
+  push:
+    tags:
+      - 'APP-*'
+  workflow_dispatch: {}
+
+# A release run must finish even if a later push lands — never cancel it.
+concurrency:
+  group: app-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # Cheap guard, tag pushes only: tauri names the RELEASE from the tag
+  # (github.ref_name) but the ASSET filenames from tauri.conf.json's version, so
+  # a forgotten version bump ships APP-1.2.0 holding MCPower_1.0.0_* assets
+  # silently. package.json carries no version field, so tauri.conf.json is the
+  # one load-bearing source. Skipped on workflow_dispatch (no tag).
+  version-check:
+    name: Verify tag matches app version
+    if: startsWith(github.ref, 'refs/tags/APP-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/APP-}"
+          CONF_VERSION=$(jq -r .version ports/app/src-tauri/tauri.conf.json)
+          echo "Tag version: $TAG_VERSION"
+          echo "tauri.conf.json version: $CONF_VERSION"
+          if [ "$TAG_VERSION" != "$CONF_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match ports/app/src-tauri/tauri.conf.json version ($CONF_VERSION)"
+            exit 1
+          fi
+          echo "Versions match."
+
+  release:
+    name: Build installers (${{ matrix.os }})
+    needs: [version-check]
+    # Run on a tag (version-check succeeded) OR on workflow_dispatch (version-check
+    # was skipped, so it never ran) — only a real version-check FAILURE blocks the
+    # build. Without this, a skipped needs-dependency would skip this job too.
+    if: ${{ always() && needs.version-check.result != 'failure' && needs.version-check.result != 'cancelled' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux on the older glibc/webkit floor so the bundles run on the widest
+          # range of distros (release leg legitimately differs from ci.yml's test
+          # leg, which uses ubuntu-latest). Bundles: .deb, .rpm, .AppImage.
+          - os: ubuntu-22.04
+            args: ''
+          # Bundles: .msi + .exe (NSIS).
+          - os: windows-latest
+            args: ''
+          # Universal binary so one .dmg runs on Apple Silicon + Intel.
+          - os: macos-latest
+            args: '--target universal-apple-darwin'
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same Tauri system-dep list as ci.yml's rust job (webkit2gtk-4.1 is the
+      # Tauri v2 / 22.04 pair).
+      - name: Tauri system deps
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The runner's native arch is aarch64; add the Intel slice for the
+      # universal-apple-darwin build.
+      - name: Add x86_64 macOS target
+        if: matrix.os == 'macos-latest'
+        run: rustup target add x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ports/app/pnpm-lock.yaml
+
+      # tauri-action runs `tauri build` (which runs beforeBuildCommand: pnpm
+      # build), but does NOT install deps — do that here first.
+      - name: Install app deps
+        working-directory: ports/app
+        run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: ports/app
+          args: ${{ matrix.args }}
+          # On a tag push these create the draft release; on workflow_dispatch
+          # github.ref is a branch, so they resolve to '' and tauri-action runs
+          # build-only (its documented dry-run mode).
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseDraft: true
+          prerelease: false

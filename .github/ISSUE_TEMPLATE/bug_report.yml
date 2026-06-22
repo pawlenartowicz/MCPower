@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a bug or unexpected behaviour in MCPower.
+title: "[Bug]: "
+labels: ["bug"]
+# Field layout mirrors web/site/report (the account-less web form) so both intake
+# routes produce the same issue shape — change the two together.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. First, please make sure
+        you're on the latest version — your bug may already be fixed.
+
+        No GitHub account? Use the form instead → https://mcpower.app/report
+  - type: dropdown
+    id: port
+    attributes:
+      label: Port
+      description: Which MCPower surface were you using?
+      options:
+        - Python
+        - R
+        - Desktop app
+        - Web app
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: MCPower version (e.g. `1.0.0`). `mcpower.__version__` in Python, `packageVersion("mcpower")` in R, or the About dialog in the app.
+      placeholder: "1.0.0"
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: Operating system / browser
+      description: OS for Python/R/desktop (e.g. Windows 11, macOS 14), or browser for the web app (e.g. Chrome 120, Safari 17).
+      placeholder: "e.g. Windows 11, or Chrome 120 for the web app"
+    validations:
+      required: false
+  - type: textarea
+    id: what-you-did
+    attributes:
+      label: What you did
+      description: Steps to reproduce — ideally a minimal example (the formula, the `set_*` calls, the data).
+      placeholder: |
+        model = MCPower("y ~ x1 + x2")
+        model.set_effects(...)
+        model.find_power(sample_size=100)
+    validations:
+      required: true
+  - type: textarea
+    id: expected-vs-actual
+    attributes:
+      label: Expected vs actual
+      description: What did you expect to happen, and what happened instead? Paste any error message in full.
+    validations:
+      required: true

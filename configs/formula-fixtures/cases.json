@@ -1,0 +1,654 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "001_ols_simple",
+      "formula": "y ~ x1 + x2",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "002_star_expansion",
+      "formula": "y ~ x1*x2*x3",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          },
+          {
+            "kind": "main",
+            "name": "x3"
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2"
+            ]
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x3"
+            ]
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x2",
+              "x3"
+            ]
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2",
+              "x3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "003_colon_interaction",
+      "formula": "y ~ x1 + x2 + x1:x2",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "004_random_intercept",
+      "formula": "y ~ x + (1|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "intercept",
+            "parent": null
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "005_random_slope_one_var",
+      "formula": "y ~ x + (1+x|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "slope",
+            "vars": [
+              "x"
+            ]
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "006_random_slope_multi",
+      "formula": "y ~ x + z + (1+x+z|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x",
+          "z"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "slope",
+            "vars": [
+              "x",
+              "z"
+            ]
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          },
+          {
+            "kind": "main",
+            "name": "z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "007_nested",
+      "formula": "y ~ x + (1|A/B)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x"
+        ],
+        "random_effects": [
+          {
+            "group": "A",
+            "kind": "intercept",
+            "parent": null
+          },
+          {
+            "group": "A:B",
+            "kind": "intercept",
+            "parent": "A"
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "008_default_dep",
+      "formula": "x1 + x2",
+      "expected": {
+        "dependent": "explained_variable",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "009_equals_separator",
+      "formula": "y = x1 + x2",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "010_re_only_no_fixed",
+      "formula": "y ~ (1|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "intercept",
+            "parent": null
+          }
+        ],
+        "terms": []
+      }
+    },
+    {
+      "id": "011_star_two",
+      "formula": "y ~ x1*x2",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "012_mixed_star_colon",
+      "formula": "y ~ a*b + c:d",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "a"
+          },
+          {
+            "kind": "main",
+            "name": "b"
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "a",
+              "b"
+            ]
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "c",
+              "d"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "013_colon_three_way",
+      "formula": "y ~ x1:x2:x3",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2",
+              "x3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "014_dup_main",
+      "formula": "y ~ x1 + x1 + x2",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "015_star_plus_main",
+      "formula": "y ~ x1*x2 + z",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2",
+          "z"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2"
+            ]
+          },
+          {
+            "kind": "main",
+            "name": "z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "016_intercept_and_slope_same_group",
+      "formula": "y ~ x + (1|g) + (1+x|g)",
+      "error": "duplicate grouping variable: g"
+    },
+    {
+      "id": "017_two_groups",
+      "formula": "y ~ x + (1|g) + (1|h)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "intercept",
+            "parent": null
+          },
+          {
+            "group": "h",
+            "kind": "intercept",
+            "parent": null
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "018_star_with_re",
+      "formula": "y ~ x1*x2 + (1|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "intercept",
+            "parent": null
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "019_nested_with_fixed",
+      "formula": "y ~ x + z + (1|school/class)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x",
+          "z"
+        ],
+        "random_effects": [
+          {
+            "group": "school",
+            "kind": "intercept",
+            "parent": null
+          },
+          {
+            "group": "school:class",
+            "kind": "intercept",
+            "parent": "school"
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          },
+          {
+            "kind": "main",
+            "name": "z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "020_slope_on_interaction_var",
+      "formula": "y ~ x1 + x2 + x1:x2 + (1+x1|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "slope",
+            "vars": [
+              "x1"
+            ]
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          },
+          {
+            "kind": "interaction",
+            "vars": [
+              "x1",
+              "x2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "021_multivar_slope_and_intercept",
+      "formula": "y ~ x + z + (1|g) + (1+x+z|h)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x",
+          "z"
+        ],
+        "random_effects": [
+          {
+            "group": "h",
+            "kind": "slope",
+            "vars": [
+              "x",
+              "z"
+            ]
+          },
+          {
+            "group": "g",
+            "kind": "intercept",
+            "parent": null
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          },
+          {
+            "kind": "main",
+            "name": "z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "022_implicit_intercept_slope",
+      "formula": "y ~ x + (x|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "slope",
+            "vars": [
+              "x"
+            ]
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "err_bad_identifier",
+      "formula": "y ~ 1x",
+      "error": "formula syntax error"
+    },
+    {
+      "id": "err_duplicate_group",
+      "formula": "y ~ x + (1|g) + (1|g)",
+      "error": "duplicate grouping variable: g"
+    },
+    {
+      "id": "err_empty",
+      "formula": "",
+      "error": "formula is empty"
+    },
+    {
+      "id": "err_term_removal",
+      "formula": "y ~ x1 - x2",
+      "error": "term removal with '-'"
+    },
+    {
+      "id": "err_intercept_suppression_zero",
+      "formula": "y ~ x + (0+x|g)",
+      "error": "intercept suppression"
+    },
+    {
+      "id": "err_intercept_suppression_minus_one",
+      "formula": "y ~ x + (-1+x|g)",
+      "error": "intercept suppression"
+    }
+  ]
+}

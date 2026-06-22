@@ -1,0 +1,26 @@
+[package]
+name = "engine-app-spec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Host-agnostic AppSpec, assembler, drivers, and ProgressEmitter shared by the MCPower Tauri and WASM adapters"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+engine-contract     = { path = "../engine-contract" }
+engine-core         = { path = "../engine-core" }
+engine-orchestrator = { path = "../engine-orchestrator" }
+engine-spec-builder = { path = "../engine-spec-builder" }
+serde               = { version = "1", features = ["derive"] }
+serde_json          = "1"
+thiserror           = "2"
+
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }

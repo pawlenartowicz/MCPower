@@ -1,0 +1,215 @@
+name: CI
+
+# One workflow, four parallel jobs — one per distribution channel of the
+# "one engine, four ports" workspace. The Rust engine is the load-bearing
+# contract every port binds to, so it gates first; each port job rebuilds the
+# engine for its own host (PyO3 / wasm-bindgen / extendr) behind a cargo cache.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+# Newer pushes supersede in-flight runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Rust engine: fmt + clippy + the ~109 #[test] across 7 crates ──────────
+  rust:
+    name: Rust engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # dhat bounded-allocation gates assert exact alloc counts; faer/rayon
+      # multi-thread jitter perturbs them, so pin the pool to one thread.
+      RAYON_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      # The workspace includes the Tauri shell (mcpower-app), which pulls in
+      # glib/GTK/WebKit. Install their dev libs so --workspace can compile and
+      # test it. webkit2gtk-4.1 (not 4.0) is the Tauri v2 / Ubuntu 24.04 pair.
+      - name: Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # engine-r is a default workspace member, so --workspace clippy/test
+      # compiles its extendr-api build script, which panics (NotPresent) unless
+      # R is discoverable. Set up R here just as the dedicated `r` job does.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets
+      - name: test
+        run: cargo test --workspace
+
+  # ── Python port: native release engine via maturin, then pytest ───────────
+  python:
+    name: Python port
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build engine + run pytest
+        working-directory: ports/py
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install maturin numpy msgpack pandas pytest tqdm
+          maturin develop --release
+          pytest tests/
+
+  # ── WASM port: build the engine to wasm (+ relaxed-simd strip), then vitest ─
+  wasm:
+    name: WASM port
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ports/wasm/pnpm-lock.yaml
+      - name: Install, build wasm, run vitest
+        working-directory: ports/wasm
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:wasm
+          pnpm test
+
+  # ── R port: install the package (1 release compile), testthat, then the
+  #    fast L3 regression gate against the frozen R-SOTA goldens. ────────────
+  r:
+    name: R port + L3 regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # The package build does a full release compile of the engine staticlib;
+      # cap parallelism so a GitHub-hosted runner doesn't OOM (exit 137).
+      CARGO_BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: Install R dependencies
+        # Imports + testthat + tibble only. Heavy Suggests (V8, vegawidget,
+        # rsvg, png) are absent on purpose — the report/plot tests skip via
+        # skip_if_not_installed, so they don't need their system libs here.
+        run: |
+          Rscript -e 'install.packages(c("R6","jsonlite","cli","htmltools","testthat","tibble"))'
+      - name: Install mcpower
+        working-directory: ports/r
+        run: R CMD INSTALL --no-multiarch .
+      - name: testthat
+        working-directory: ports/r
+        run: Rscript -e 'library(mcpower); testthat::test_dir("tests/testthat", stop_on_failure = TRUE)'
+      - name: L3 regression gate
+        working-directory: validation
+        run: Rscript regression.R
+
+  # ── App port: the Svelte/Tauri frontend unit suite (55 vitest files, jsdom).
+  #    The engine is mocked (vi.mock + a source alias to ../wasm/src), so no
+  #    wasm build is needed here. The Rust shell crate (mcpower-app) is compiled
+  #    and its #[test]s run in the `rust` job above. ──────────────────────────
+  app:
+    name: App port (frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ports/app/pnpm-lock.yaml
+      - name: Install + run vitest
+        working-directory: ports/app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+      # e2e runs against the vite dev server (auto-started by playwright's
+      # webServer) with VITE_E2E=true — the engine is mocked (engine-e2e-mock),
+      # so no Tauri binary or wasm build is needed, just headless Chromium.
+      - name: Install Playwright Chromium
+        working-directory: ports/app
+        run: pnpm exec playwright install --with-deps chromium
+      - name: e2e (Playwright)
+        working-directory: ports/app
+        run: pnpm test:e2e
+
+  # ── Deploy: production push of mcpower.app on every green merge to main. ────
+  #    Gated twice — `needs` waits for all five port jobs, and the `if` limits it
+  #    to a push on main (a merged PR), never a PR build or a dev push — so broken
+  #    code can't reach production. Reuses scripts/deploy-site.sh --production:
+  #    that flag deploys to the Cloudflare "production" branch (main → mcpower.app)
+  #    regardless of CI's checked-out ref. wrangler authenticates straight from the
+  #    two env secrets (no `wrangler login`), and the script already passes
+  #    --commit-dirty. The toolchain mirrors the wasm job (Rust + wasm32 target +
+  #    wasm-pack) because --production rebuilds the wasm app from scratch.
+  deploy:
+    name: Deploy to production (mcpower.app)
+    needs: [rust, python, wasm, r, app]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ports/app/pnpm-lock.yaml
+      - name: Install app deps
+        working-directory: ports/app
+        run: pnpm install --frozen-lockfile
+      - name: Build + deploy to production
+        run: scripts/deploy-site.sh --production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -1,0 +1,30 @@
+{
+  "light": { "background": "#ffffff", "axis": { "labelColor": "#222", "titleColor": "#222" } },
+  "dark": { "background": "#1e1e1e", "axis": { "labelColor": "#ddd", "titleColor": "#ddd" } },
+  "print": {
+    "background": "#ffffff",
+    "font": "sans-serif",
+    "view": { "stroke": "transparent" },
+    "axis": {
+      "labelColor": "#000000",
+      "titleColor": "#000000",
+      "tickColor": "#000000",
+      "domainColor": "#000000",
+      "gridColor": "#dddddd"
+    },
+    "legend": { "labelColor": "#000000", "titleColor": "#000000" },
+    "range": {
+      "category": [
+        "#0072B2",
+        "#E69F00",
+        "#009E73",
+        "#D55E00",
+        "#56B4E9",
+        "#CC79A7",
+        "#F0E442",
+        "#000000"
+      ]
+    }
+  },
+  "wild": { "background": "#3a0066", "axis": { "labelColor": "#ffd700", "titleColor": "#ffd700" } }
+}

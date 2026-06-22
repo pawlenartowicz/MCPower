@@ -1,0 +1,35 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "hourly_wage = years_education + age + experience_years + tenure",
+    "variables": [
+      { "name": "years_education", "kind": "continuous" },
+      { "name": "age", "kind": "continuous" },
+      { "name": "experience_years", "kind": "continuous" },
+      { "name": "tenure", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "years_education", "value": 0.25 },
+      { "name": "age", "value": 0.20 },
+      { "name": "experience_years", "value": 0.30 },
+      { "name": "tenure", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 200 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

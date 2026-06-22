@@ -1,0 +1,33 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "cholesterol = age + bmi + exercise_hours",
+    "variables": [
+      { "name": "age", "kind": "continuous" },
+      { "name": "bmi", "kind": "continuous" },
+      { "name": "exercise_hours", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "age", "value": 0.25 },
+      { "name": "bmi", "value": 0.18 },
+      { "name": "exercise_hours", "value": 0.10 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 200 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

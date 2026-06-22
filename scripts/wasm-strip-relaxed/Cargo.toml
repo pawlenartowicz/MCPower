@@ -1,0 +1,21 @@
+[package]
+name = "wasm-strip-relaxed"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+walrus = "0.23"
+anyhow = "1"
+
+[[bin]]
+name = "strip"
+path = "src/main.rs"
+
+# Standalone workspace: keeps walrus + its dep tree (wasmparser, leb128, …) out
+# of the mcpower workspace's `cargo check --workspace` and shared lockfile. It
+# compiles only when the wasm build runs. Mirrors ports/r/src/rust/Cargo.toml,
+# which excludes itself from the workspace the same way (own [workspace], not a
+# parent `exclude`).
+[workspace]
+resolver = "2"

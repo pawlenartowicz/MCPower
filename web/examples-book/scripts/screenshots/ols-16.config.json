@@ -1,0 +1,34 @@
+{
+  "outcomeKind": "continuous",
+  "config": {
+    "family": "regression",
+    "formula": "recovery_days = dose * age + baseline_severity",
+    "variables": [
+      { "name": "dose", "kind": "continuous" },
+      { "name": "age", "kind": "continuous" },
+      { "name": "baseline_severity", "kind": "continuous" }
+    ],
+    "effects": [
+      { "name": "dose", "value": 0.30 },
+      { "name": "age", "value": 0.25 },
+      { "name": "dose:age", "value": 0.15 },
+      { "name": "baseline_severity", "value": 0.25 }
+    ],
+    "correlations": [],
+    "targetPower": 80,
+    "alpha": 0.05,
+    "tests": { "kind": "all" },
+    "reportOverall": true,
+    "contrasts": [],
+    "findPower": { "n": 220 },
+    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "advanced": {
+      "simulations": 1600,
+      "seed": 2137,
+      "correction": "none",
+      "maxFailedSimulations": 0.1,
+      "testFormulaOverride": ""
+    },
+    "baselineProbability": 0.2
+  }
+}

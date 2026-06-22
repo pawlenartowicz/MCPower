@@ -1,0 +1,44 @@
+{
+  "optimistic": {
+    "heterogeneity": 0.0,
+    "heteroskedasticity_ratio": 1.0,
+    "correlation_noise_sd": 0.0,
+    "sampled_factor_proportions": false,
+    "distribution_change_prob": 0.0,
+    "new_distributions": ["right_skewed", "left_skewed", "uniform"],
+    "random_effect_dist": "normal",
+    "random_effect_df": 5,
+    "icc_noise_sd": 0.0,
+    "residual_dists": ["high_kurtosis", "right_skewed"],
+    "residual_change_prob": 0.0,
+    "residual_df": 10
+  },
+  "realistic": {
+    "heterogeneity": 0.2,
+    "heteroskedasticity_ratio": 2.0,
+    "correlation_noise_sd": 0.15,
+    "sampled_factor_proportions": true,
+    "distribution_change_prob": 0.5,
+    "new_distributions": ["right_skewed", "left_skewed", "uniform"],
+    "random_effect_dist": "heavy_tailed",
+    "random_effect_df": 10,
+    "icc_noise_sd": 0.15,
+    "residual_dists": ["high_kurtosis", "right_skewed"],
+    "residual_change_prob": 0.5,
+    "residual_df": 8
+  },
+  "doomer": {
+    "heterogeneity": 0.4,
+    "heteroskedasticity_ratio": 4.0,
+    "correlation_noise_sd": 0.3,
+    "sampled_factor_proportions": true,
+    "distribution_change_prob": 0.8,
+    "new_distributions": ["right_skewed", "left_skewed", "uniform"],
+    "random_effect_dist": "heavy_tailed",
+    "random_effect_df": 5,
+    "icc_noise_sd": 0.3,
+    "residual_dists": ["high_kurtosis", "right_skewed"],
+    "residual_change_prob": 0.8,
+    "residual_df": 5
+  }
+}
