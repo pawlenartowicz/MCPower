@@ -66,13 +66,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One abi3 wheel per platform. Native runners per arch (macos-13 = Intel,
-        # macos-14 = Apple Silicon) so every wheel is built and tested on its own
-        # hardware — no cross-arch wheel ships untested.
+        # One abi3 wheel per platform, built and tested on its own hardware so no
+        # cross-arch wheel ships untested. macOS is Apple Silicon only (aarch64):
+        # the Intel macos-13 runner was retired Dec 2025, and GitHub sunsets Intel
+        # macOS runners entirely in Fall 2027 — `pip install mcpower` on an Intel
+        # Mac falls back to the sdist/source build.
         include:
           - { os: ubuntu-latest, target: x86_64, manylinux: '2_28' }
-          - { os: macos-13,      target: x86_64 }
-          - { os: macos-14,      target: aarch64 }
+          - { os: macos-latest,  target: aarch64 }
           - { os: windows-latest, target: x64 }
 
     steps:

@@ -112,7 +112,9 @@ from mcpower import MCPower, _engine
 _engine.set_n_threads({n_threads})
 m = MCPower("y = x1 + x2")
 m.set_effects("x1=0.5, x2=0.3")
-r = m.find_power(sample_size=100, n_sims=200, seed=42, progress_callback=False)
+# verbose=False: the report's Unicode (α, box-drawing) crashes a cp1252
+# subprocess stdout pipe on Windows CI; we only consume the JSON below.
+r = m.find_power(sample_size=100, n_sims=200, seed=42, progress_callback=False, verbose=False)
 print(json.dumps({{
     "power_uncorrected": r["power_uncorrected"],
     "power_corrected": r["power_corrected"],
@@ -266,7 +268,8 @@ _engine.set_n_threads({n_threads})
 m = MCPower("y = x", family="logit")
 m.set_baseline_probability(0.3)
 m.set_effects("x=0.5")
-r = m.find_power(sample_size=200, n_sims=500, seed=42, progress_callback=False)
+# verbose=False: see _THREAD_SCRIPT — avoids the Windows cp1252 pipe crash.
+r = m.find_power(sample_size=200, n_sims=500, seed=42, progress_callback=False, verbose=False)
 print(json.dumps({{
     "power_uncorrected": r["power_uncorrected"],
     "power_corrected": r["power_corrected"],
