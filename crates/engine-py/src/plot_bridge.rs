@@ -70,9 +70,12 @@ pub fn plot_html_template() -> String {
 
 // ── Shared parsing helpers ──────────────────────────────────────────────────
 
-fn first_row<'py, T: FromPyObject<'py>>(any: Bound<'py, PyAny>, label: &str) -> PyResult<T> {
+fn first_row<'py, T>(any: Bound<'py, PyAny>, label: &str) -> PyResult<T>
+where
+    T: for<'a> FromPyObject<'a, 'py, Error = PyErr>,
+{
     let outer = any
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyValueError::new_err(format!("{label} must be list-of-lists")))?;
     if outer.is_empty() {
         return Err(PyValueError::new_err(format!("{label} is empty")));
@@ -82,19 +85,19 @@ fn first_row<'py, T: FromPyObject<'py>>(any: Bound<'py, PyAny>, label: &str) -> 
 
 fn first_ci_row(any: Bound<'_, PyAny>, label: &str) -> PyResult<Vec<Ci>> {
     let outer = any
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyValueError::new_err(format!("{label} must be list-of-lists")))?;
     if outer.is_empty() {
         return Err(PyValueError::new_err(format!("{label} is empty")));
     }
     let row = outer.get_item(0)?;
     let row = row
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyValueError::new_err(format!("{label} inner row must be a list")))?;
     let mut out = Vec::with_capacity(row.len());
     for pair in row.iter() {
         let seq = pair
-            .downcast::<PySequence>()
+            .cast::<PySequence>()
             .map_err(|_| PyValueError::new_err("ci entry must be (lo, hi)"))?;
         let lo: f64 = seq.get_item(0)?.extract()?;
         let hi: f64 = seq.get_item(1)?.extract()?;
@@ -235,7 +238,7 @@ pub fn power_plot_set_json(
         .get_item("scenarios")?
         .ok_or_else(|| PyValueError::new_err("result dict missing `scenarios`"))?;
     let scenarios = scenarios_any
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyValueError::new_err("`scenarios` must be a list"))?;
     if scenarios.is_empty() {
         return Err(PyValueError::new_err("result has zero scenarios"));
@@ -243,7 +246,7 @@ pub fn power_plot_set_json(
     let mut out: Vec<PlotScenario> = Vec::with_capacity(scenarios.len());
     for item in scenarios.iter() {
         let d = item
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("each element of `scenarios` must be a dict"))?;
         let label: String = d
             .get_item("label")?
@@ -281,7 +284,7 @@ pub fn sample_size_plot_set_json(
         .get_item("scenarios")?
         .ok_or_else(|| PyValueError::new_err("result dict missing `scenarios`"))?;
     let scenarios = scenarios_any
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyValueError::new_err("`scenarios` must be a list"))?;
     if scenarios.is_empty() {
         return Err(PyValueError::new_err("result has zero scenarios"));
@@ -289,7 +292,7 @@ pub fn sample_size_plot_set_json(
     let mut out: Vec<PlotScenario> = Vec::with_capacity(scenarios.len());
     for item in scenarios.iter() {
         let d = item
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("each element of `scenarios` must be a dict"))?;
         let label: String = d
             .get_item("label")?

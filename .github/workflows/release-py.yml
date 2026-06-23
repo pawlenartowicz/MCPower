@@ -2,7 +2,13 @@ name: Release (PyPI)
 
 # Tag-triggered PyPI release for the Rust-engine Python port (ports/py).
 # Job spine: checks (full CI matrix) + version-check -> build_wheels ->
-# publish-testpypi (gate) -> publish-pypi -> github-release.
+# publish-testpypi (gate) -> publish-pypi.
+#
+# Deliberately NO github-release job: PyPI is the Python distribution channel,
+# and a `py-*` GitHub Release (draft:false, no prerelease flag) would hijack the
+# repo's "Latest" release from the `app-*` release that the downloads page
+# resolves via /releases/latest (web/site/downloads + the GH API). The app owns
+# GitHub Releases (CLAUDE.md §5); Python must not publish one.
 #
 #   * abi3 (abi3-py310) means ONE wheel per platform, not a per-Python matrix —
 #     the matrix is the platforms only.
@@ -228,29 +234,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist-flat/
-
-  github-release:
-    name: Create GitHub Release
-    needs: [publish-pypi]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist/
-
-      - name: Flatten artifacts
-        run: |
-          mkdir -p dist-flat
-          find dist/ -name "*.whl" -exec cp {} dist-flat/ \;
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist-flat/*
-          generate_release_notes: true
-          draft: false

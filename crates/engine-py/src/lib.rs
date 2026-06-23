@@ -15,16 +15,8 @@
 //!   - Progress / cancel flows through a Python callable
 //!     `fn(current: int, total: int) -> bool`.
 //!
-//! All heavy work happens inside `Python::allow_threads` so other Python
+//! All heavy work happens inside `Python::detach` so other Python
 //! threads can run in parallel during engine calls.
-
-// PyO3 0.22's `#[pyfunction]` expansion is flagged by newer rustc/clippy
-// (1.95+) as `useless_conversion` on every function's return type.
-// This is a known false positive from the macro expansion, not real code.
-#![expect(
-    clippy::useless_conversion,
-    reason = "PyO3 #[pyfunction] expansion emits return-type conversions clippy flags as useless"
-)]
 
 use pyo3::prelude::*;
 
@@ -59,8 +51,8 @@ fn find_power(
     sample_size: usize,
     n_sims: usize,
     base_seed: u64,
-    progress: Option<PyObject>,
-) -> PyResult<PyObject> {
+    progress: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
     let contracts = decode_contracts(contracts_bytes)?;
     let cancel = engine_orchestrator::CancellationToken::new();
     let mut sink = OrchestratorProgressSink::new(progress, &cancel);
@@ -68,7 +60,7 @@ fn find_power(
     // catch_unwind turns a Rust engine panic into an actionable RuntimeError
     // (with the report hint) instead of a bare PanicException — mirrors
     // engine-r's `run_engine` (progress.rs), change together.
-    let outcome = py.allow_threads(|| {
+    let outcome = py.detach(|| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             engine_orchestrator::find_power(
                 &contracts,
@@ -85,7 +77,7 @@ fn find_power(
         Err(payload) => return Err(crate::errors::panic_to_py(payload)),
     };
     let dict = power_result_to_pydict(py, &result)?;
-    Ok(dict.into_py(py))
+    Ok(dict)
 }
 
 /// Search for the sample size reaching `target_power` over `[lo, hi]` for every
@@ -111,8 +103,8 @@ fn find_sample_size(
     by_kind: Option<&str>,
     mode: Option<&str>,
     tol_n: Option<usize>,
-    progress: Option<PyObject>,
-) -> PyResult<PyObject> {
+    progress: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
     let contracts = decode_contracts(contracts_bytes)?;
     let cancel = engine_orchestrator::CancellationToken::new();
     let mut sink = OrchestratorProgressSink::new(progress, &cancel);
@@ -122,7 +114,7 @@ fn find_sample_size(
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
     // Panic boundary — see find_power (mirrors engine-r's run_engine).
-    let outcome = py.allow_threads(|| {
+    let outcome = py.detach(|| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             engine_orchestrator::find_sample_size(
                 &contracts,
@@ -141,7 +133,7 @@ fn find_sample_size(
         Err(payload) => return Err(crate::errors::panic_to_py(payload)),
     };
     let dict = sample_size_result_to_pydict(py, &result)?;
-    Ok(dict.into_py(py))
+    Ok(dict)
 }
 
 // Mirrors engine-r's `orchestrator_err` (progress.rs) — keep the error→host

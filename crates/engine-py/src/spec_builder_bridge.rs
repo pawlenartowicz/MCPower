@@ -18,13 +18,13 @@ pub fn build_contract_from_json(json: &str) -> PyResult<Vec<(String, Py<PyBytes>
         .map_err(|e| PyValueError::new_err(format!("invalid LinearSpec JSON: {e}")))?;
     let contracts = build_linear_contract(&spec).map_err(map_spec_error)?;
 
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let mut out = Vec::with_capacity(contracts.len());
         for c in contracts {
             let name = c.scenario.name.clone();
             let bytes = rmp_serde::to_vec_named(&c)
                 .map_err(|e| PyRuntimeError::new_err(format!("msgpack encode: {e}")))?;
-            out.push((name, PyBytes::new_bound(py, &bytes).into()));
+            out.push((name, PyBytes::new(py, &bytes).into()));
         }
         Ok(out)
     })
@@ -82,7 +82,7 @@ pub fn build_contract_from_spec(
         .map_err(|e| PyRuntimeError::new_err(format!("msgpack encode: {e}")))?;
     let skeleton_json = serde_json::to_string(&skeleton)
         .map_err(|e| PyRuntimeError::new_err(format!("skeleton encode: {e}")))?;
-    Python::with_gil(|py| Ok((names, PyBytes::new_bound(py, &bytes).into(), skeleton_json)))
+    Python::attach(|py| Ok((names, PyBytes::new(py, &bytes).into(), skeleton_json)))
 }
 
 /// Synthetic-distribution name → integer code table as a JSON object string.
@@ -160,9 +160,9 @@ use pyo3::types::PyDict;
 ///
 /// Raises `ValueError` on syntax errors or unsupported constructs.
 #[pyfunction]
-pub fn parse_formula(py: Python<'_>, input: &str) -> PyResult<PyObject> {
+pub fn parse_formula(py: Python<'_>, input: &str) -> PyResult<Py<PyAny>> {
     let parsed = rust_parse_formula(input).map_err(map_spec_error)?;
-    Ok(parsed_formula_to_pydict(py, &parsed)?.into())
+    Ok(parsed_formula_to_pydict(py, &parsed)?.into_any().unbind())
 }
 
 /// Parse an assignment string (variable types / correlations / effects) into a Python dict.
@@ -179,7 +179,7 @@ pub fn parse_assignments(
     input: &str,
     kind: &str,
     known: &Bound<'_, PyDict>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let kind_enum = match kind {
         "variable_type" => AssignmentKind::VariableType,
         "correlation" => AssignmentKind::Correlation,
@@ -199,14 +199,14 @@ pub fn parse_assignments(
         interaction_terms: &interaction_terms,
     };
     let parsed = rust_parse_assignments(input, kind_enum, &known_struct).map_err(map_spec_error)?;
-    Ok(assignments_to_pydict(py, &parsed)?.into())
+    Ok(assignments_to_pydict(py, &parsed)?.into_any().unbind())
 }
 
 fn parsed_formula_to_pydict<'py>(
     py: Python<'py>,
     p: &engine_spec_builder::ParsedFormula,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let d = PyDict::new_bound(py);
+    let d = PyDict::new(py);
     d.set_item("dependent", &p.dependent)?;
     d.set_item("predictors", &p.predictors)?;
     let terms: Vec<Bound<'py, PyDict>> = p
@@ -225,7 +225,7 @@ fn parsed_formula_to_pydict<'py>(
 }
 
 fn term_to_pydict<'py>(py: Python<'py>, t: &Term) -> PyResult<Bound<'py, PyDict>> {
-    let d = PyDict::new_bound(py);
+    let d = PyDict::new(py);
     match t {
         Term::Main { name } => {
             d.set_item("kind", "main")?;
@@ -240,7 +240,7 @@ fn term_to_pydict<'py>(py: Python<'py>, t: &Term) -> PyResult<Bound<'py, PyDict>
 }
 
 fn random_effect_to_pydict<'py>(py: Python<'py>, r: &RandomEffect) -> PyResult<Bound<'py, PyDict>> {
-    let d = PyDict::new_bound(py);
+    let d = PyDict::new(py);
     match r {
         RandomEffect::Intercept { group, parent } => {
             d.set_item("kind", "intercept")?;
@@ -264,7 +264,7 @@ fn assignments_to_pydict<'py>(
     py: Python<'py>,
     a: &engine_spec_builder::Assignments,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let d = PyDict::new_bound(py);
+    let d = PyDict::new(py);
     let items: Vec<Bound<'py, PyDict>> = a
         .items
         .iter()
@@ -281,8 +281,8 @@ fn assignment_item_to_pydict<'py>(
     key: &AssignmentKey,
     value: &AssignmentValue,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let d = PyDict::new_bound(py);
-    let key_d = PyDict::new_bound(py);
+    let d = PyDict::new(py);
+    let key_d = PyDict::new(py);
     match key {
         AssignmentKey::Name(n) => {
             key_d.set_item("name", n)?;
@@ -292,7 +292,7 @@ fn assignment_item_to_pydict<'py>(
         }
     }
     d.set_item("key", key_d)?;
-    let val_d = PyDict::new_bound(py);
+    let val_d = PyDict::new(py);
     match value {
         AssignmentValue::VariableType(v) => {
             val_d.set_item("variable_type", v)?;
@@ -300,7 +300,7 @@ fn assignment_item_to_pydict<'py>(
         AssignmentValue::VariableTypeWithParams { var_type, params } => {
             // Emit the legacy info dict the host's set_variable_type consumes:
             // {"type": ..., ["proportion"] | ["n_levels", "proportions"]}.
-            let info = PyDict::new_bound(py);
+            let info = PyDict::new(py);
             info.set_item("type", var_type)?;
             match params {
                 VarTypeParams::Bare => {}

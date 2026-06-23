@@ -14,6 +14,7 @@ use engine_orchestrator::{
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::IntoPyObjectExt;
 
 /// Decode the msgpack `Vec<SimulationContract>` blob produced by
 /// `_engine.build_contract_from_spec`. The Python frontend forwards this
@@ -41,13 +42,13 @@ pub fn decode_contracts(bytes: &[u8]) -> PyResult<Vec<SimulationContract>> {
 ///
 /// Mirrors engine-r's `CallbackState` (progress.rs) — keep the two in step.
 pub struct OrchestratorProgressSink<'cancel> {
-    py_callback: Option<PyObject>,
+    py_callback: Option<Py<PyAny>>,
     cancel: &'cancel engine_orchestrator::CancellationToken,
 }
 
 impl<'cancel> OrchestratorProgressSink<'cancel> {
     pub fn new(
-        py_callback: Option<PyObject>,
+        py_callback: Option<Py<PyAny>>,
         cancel: &'cancel engine_orchestrator::CancellationToken,
     ) -> Self {
         Self {
@@ -69,7 +70,7 @@ impl<'cancel> ProgressSink for OrchestratorProgressSink<'cancel> {
             } => (completed, total),
             _ => return,
         };
-        let should_continue = Python::with_gil(|py| match cb.call1(py, (current, total)) {
+        let should_continue = Python::attach(|py| match cb.call1(py, (current, total)) {
             Ok(ret) => ret.extract::<bool>(py).unwrap_or(true),
             Err(_) => false,
         });
@@ -112,78 +113,78 @@ pub fn sample_size_result_to_pydict<'py>(
 fn scenarios_envelope<'py, T>(
     py: Python<'py>,
     scenarios: &[(String, T)],
-    mut render: impl FnMut(&T, &str) -> PyResult<PyObject>,
+    mut render: impl FnMut(&T, &str) -> PyResult<Py<PyAny>>,
 ) -> PyResult<Py<PyAny>> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     for (label, value) in scenarios {
         dict.set_item(label, render(value, label)?)?;
     }
-    let outer = PyDict::new_bound(py);
+    let outer = PyDict::new(py);
     outer.set_item("scenarios", dict)?;
-    outer.set_item("comparison", PyDict::new_bound(py))?;
-    Ok(outer.into())
+    outer.set_item("comparison", PyDict::new(py))?;
+    Ok(outer.into_any().unbind())
 }
 
 /// Walk a `HostValue` into the Python object the host result shape expects.
-fn host_value_to_py(py: Python<'_>, hv: &HostValue) -> PyResult<PyObject> {
-    Ok(match hv {
-        HostValue::F64(x) => (*x).into_py(py),
+fn host_value_to_py(py: Python<'_>, hv: &HostValue) -> PyResult<Py<PyAny>> {
+    match hv {
+        HostValue::F64(x) => (*x).into_py_any(py),
         HostValue::OptF64(o) => match o {
-            Some(x) => (*x).into_py(py),
-            None => py.None(),
+            Some(x) => (*x).into_py_any(py),
+            None => Ok(py.None()),
         },
-        HostValue::Usize(n) => (*n).into_py(py),
+        HostValue::Usize(n) => (*n).into_py_any(py),
         HostValue::OptUsize(o) => match o {
-            Some(n) => (*n).into_py(py),
-            None => py.None(),
+            Some(n) => (*n).into_py_any(py),
+            None => Ok(py.None()),
         },
-        HostValue::VecF64(v) => v.clone().into_py(py),
-        HostValue::VecU64(v) => v.clone().into_py(py),
-        HostValue::VecStr(v) => v.clone().into_py(py),
-        HostValue::VecCi(cis) => ci_slice_to_pylist(py, cis)?.into_py(py),
+        HostValue::VecF64(v) => v.clone().into_py_any(py),
+        HostValue::VecU64(v) => v.clone().into_py_any(py),
+        HostValue::VecStr(v) => v.clone().into_py_any(py),
+        HostValue::VecCi(cis) => ci_slice_to_pylist(py, cis)?.into_py_any(py),
         HostValue::OptCi(o) => match o {
-            Some(ci) => PyTuple::new_bound(py, [ci.lo, ci.hi]).into_py(py),
-            None => py.None(),
+            Some(ci) => PyTuple::new(py, [ci.lo, ci.hi])?.into_py_any(py),
+            None => Ok(py.None()),
         },
-        HostValue::Str(s) => s.as_str().into_py(py),
+        HostValue::Str(s) => s.as_str().into_py_any(py),
         HostValue::Map(pairs) => {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             for (k, v) in pairs {
                 d.set_item(*k, host_value_to_py(py, v)?)?;
             }
-            d.into_py(py)
+            d.into_py_any(py)
         }
         HostValue::Seq(items) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for it in items {
                 list.append(host_value_to_py(py, it)?)?;
             }
-            list.into_py(py)
+            list.into_py_any(py)
         }
         HostValue::IndexMap(items) => {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             for (i, it) in items.iter().enumerate() {
                 d.set_item(i, host_value_to_py(py, it)?)?;
             }
-            d.into_py(py)
+            d.into_py_any(py)
         }
         HostValue::BoundaryHit { flat, rows, cols } => {
             // Nested list-of-rows (row-major), not a numpy array: keeps numpy an
             // optional *input* convenience rather than a hard runtime dependency.
-            let outer = PyList::empty_bound(py);
+            let outer = PyList::empty(py);
             for r in 0..*rows {
-                let row = PyList::new_bound(py, &flat[r * *cols..(r + 1) * *cols]);
+                let row = PyList::new(py, &flat[r * *cols..(r + 1) * *cols])?;
                 outer.append(row)?;
             }
-            outer.into_py(py)
+            outer.into_py_any(py)
         }
-    })
+    }
 }
 
 fn ci_slice_to_pylist<'py>(py: Python<'py>, cis: &[Ci]) -> PyResult<Bound<'py, PyList>> {
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for ci in cis {
-        list.append(PyTuple::new_bound(py, [ci.lo, ci.hi]))?;
+        list.append(PyTuple::new(py, [ci.lo, ci.hi])?)?;
     }
     Ok(list)
 }
@@ -250,14 +251,14 @@ pub fn fit_uploaded_data(
     )
     .map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))?;
 
-    let d = PyDict::new_bound(py);
+    let d = PyDict::new(py);
     d.set_item("betas", result.betas.clone())?;
     d.set_item("design_columns", result.design_columns.clone())?;
     d.set_item("converged", result.converged)?;
 
-    let targets_list = PyList::empty_bound(py);
+    let targets_list = PyList::empty(py);
     for t in &result.targets {
-        let td = PyDict::new_bound(py);
+        let td = PyDict::new(py);
         td.set_item("target_index", t.target_index)?;
         td.set_item("target_label", t.target_label.clone())?;
         td.set_item("beta", t.beta)?;
