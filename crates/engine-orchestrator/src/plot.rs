@@ -189,11 +189,11 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
     // effect lands on the same palette slot across this plot and the curve because both
     // emit effects in the same power-vector order.
     bar_enc["color"] = json!({ "field": "target", "type": "nominal" });
-    if scenario_order.is_some() {
+    if let Some(order) = &scenario_order {
         bar_enc["yOffset"] = json!({
             "field": "scenario", "type": "nominal",
             "scale": { "paddingInner": 0, "paddingOuter": 0 },
-            "sort": scenario_order.as_ref().unwrap(),
+            "sort": order,
         });
     }
     if multi && scenarios.len() <= POWER_FACET_THRESHOLD {
