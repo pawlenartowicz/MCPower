@@ -108,6 +108,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # R CMD INSTALL's final step byte-compiles + lazy-loads the package, which
+      # needs every load-time dependency present: the four Imports AND tibble —
+      # the NAMESPACE has `importFrom(tibble, as_tibble)`, so tibble must load even
+      # though it is a Suggests. (knitr's `S3method(knitr::knit_print,…)` is a
+      # delayed registration and is NOT needed at build time.) CRAN serves Win/Mac
+      # binaries, so no compile here. setup-r puts these on .libPaths(), where
+      # `R CMD INSTALL --library=rlib` also looks.
+      - name: Install R dependencies
+        shell: Rscript {0}
+        run: install.packages(c("R6","jsonlite","cli","htmltools","tibble"), repos="https://cloud.r-project.org")
+
       # Build the platform binary from the FULL checkout (path dep + configs/
       # resolve because siblings are on disk). --build emits the binary archive
       # into the CWD; --library keeps it off the runner's default lib.
@@ -126,7 +137,10 @@ jobs:
         shell: bash
         run: |
           VER="${GITHUB_REF#refs/tags/r-}"
-          MINOR=$(Rscript -e 'cat(sprintf("%s.%s", R.version$major, sub("\\..*","",R.version$minor)))')
+          # Backslash-free on purpose: a regex like sub("\\..*",…) loses one
+          # backslash through YAML->bash->Rscript and R then aborts on the illegal
+          # `\.` escape. strsplit(fixed=TRUE) needs no escape. minor "5.1" -> "5".
+          MINOR=$(Rscript -e 'cat(R.version$major, strsplit(R.version$minor, ".", fixed=TRUE)[[1]][1], sep=".")')
           echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
           # The binary archive R CMD INSTALL --build wrote into the CWD:
@@ -197,9 +211,11 @@ jobs:
           export PATH="/opt/R/${{ matrix.rver }}/bin:$PATH"
           VER="${GITHUB_REF#refs/tags/r-}"
           MINOR="${{ matrix.minor }}"
-          # Imports must be present for R CMD INSTALL's final load-test. Source
-          # install (a couple compile) — gcc ships in the manylinux image.
-          Rscript -e 'install.packages(c("R6","jsonlite","cli","htmltools"), repos="https://cloud.r-project.org")'
+          # All load-time deps must be present for R CMD INSTALL's lazy-load test:
+          # the four Imports AND tibble (NAMESPACE `importFrom(tibble, as_tibble)`
+          # forces it to load even though it is a Suggests). Source install (these
+          # compile) — gcc ships in the manylinux image.
+          Rscript -e 'install.packages(c("R6","jsonlite","cli","htmltools","tibble"), repos="https://cloud.r-project.org")'
           mkdir -p rlib idx out
           R CMD INSTALL --build --library="$PWD/rlib" ports/r
           BIN=$(ls mcpower_${VER}*.tar.gz)
