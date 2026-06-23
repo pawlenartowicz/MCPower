@@ -10,14 +10,37 @@ The browser build is the desktop app *without installing* — a way to reach the
 
 ## What each face can do
 
-| | App (desktop) | App (browser) | Python | R |
-|---|---|---|---|---|
-| **Install** | One installer (Windows/macOS/Linux) | None — open a link | `pip install mcpower` | `install.packages("mcpower")` |
-| **Upload row cap** | 1,000,000 rows | 10,000 rows | 1,000,000 rows | 1,000,000 rows |
-| **How you drive it** | Point and click | Point and click | Write a short script | Write a short script |
-| **What you save** | A saved session | A saved session | A `.py` script | A `.R` script |
-| **Works offline** | Yes | After first load | Yes | Yes |
-| **Plotting** | Built in, nothing to install | Built in, nothing to install | Built in (optional extras for export) | Built in (optional extras for export) |
+**App (desktop)**
+- **Install:** one installer (Windows/macOS/Linux)
+- **Upload row cap:** 1,000,000 rows
+- **How you drive it:** point and click
+- **What you save:** a saved session
+- **Works offline:** yes
+- **Plotting:** built in, nothing to install
+
+**App (browser)**
+- **Install:** none — open a link
+- **Upload row cap:** 10,000 rows
+- **How you drive it:** point and click
+- **What you save:** a saved session
+- **Works offline:** after first load
+- **Plotting:** built in, nothing to install
+
+**Python**
+- **Install:** `pip install mcpower`
+- **Upload row cap:** 1,000,000 rows
+- **How you drive it:** write a short script
+- **What you save:** a `.py` script
+- **Works offline:** yes
+- **Plotting:** built in (optional extras for export)
+
+**R**
+- **Install:** `install.packages("mcpower")`
+- **Upload row cap:** 1,000,000 rows
+- **How you drive it:** write a short script
+- **What you save:** a `.R` script
+- **Works offline:** yes
+- **Plotting:** built in (optional extras for export)
 
 The browser app's lower upload cap (10,000 vs 1,000,000 rows) is the one capability gap that follows from *where* it runs — a browser tab is a tighter memory budget than a desktop install. Everything else is the same engine, the same models, the same numbers. If your pilot dataset is larger than 10,000 rows, use the desktop app or a package rather than the browser.
 

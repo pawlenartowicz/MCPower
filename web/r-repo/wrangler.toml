@@ -1,0 +1,18 @@
+name = "mcpower-r-repo"
+main = "src/worker.js"
+compatibility_date = "2026-06-23"
+account_id = "dbb7228820ea5836b293338cf53ad3af"
+
+# r.mcpower.app is attached as a custom domain after first deploy (OPERATOR
+# ACTION below), or uncomment a route here once the zone DNS exists:
+# routes = [{ pattern = "r.mcpower.app", custom_domain = true }]
+
+[vars]
+GH_REPO = "pawlenartowicz/MCPower"
+# GH_TOKEN is a SECRET, set via `wrangler secret put GH_TOKEN` (not committed).
+
+# KV is OPTIONAL hardening (Appendix A). Launch resolves the release by
+# list-and-filter with per_page=100; bind this only if you adopt KV:
+# [[kv_namespaces]]
+# binding = "RELEASES"
+# id = "<kv-namespace-id>"

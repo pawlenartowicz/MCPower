@@ -1,0 +1,226 @@
+name: Release (R binaries)
+
+# Tag-triggered prebuilt-binary build for the R port (ports/r), uploaded to a
+# NON-LATEST GitHub Release on r-* tag push. The binaries are served by the
+# Cloudflare Worker at r.mcpower.app (see docs/plans/2026-06-23-r-binary-repo-impl.md).
+#
+# NON-LATEST is load-bearing: the downloads page resolves desktop installers off
+# /releases/latest two ways (no-JS hrefs + an api.github.com fetch), so an r-*
+# release that became "Latest" would break both. make_latest:false keeps the
+# app-* release "Latest". This is a NEW mechanism, not a copy of an existing
+# workflow: release-py.yml publishes to PyPI and creates no GitHub Release, and
+# release-app.yml lets its tauri-action release BE Latest (that's intended). No
+# current workflow uses softprops/action-gh-release or make_latest.
+#
+# Asset names carry the R minor (_R<m>): GitHub's asset namespace is flat, so the
+# 4.4 and 4.5 builds would otherwise collide on one mcpower_X.Y.Z.zip. The suffix
+# also tells the Worker which minors this release built.
+
+on:
+  push:
+    tags:
+      - 'r-*'
+      - '!r-*dev*'
+
+permissions:
+  contents: write
+
+# A release run must finish even if a later push lands — never cancel it.
+concurrency:
+  group: r-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Full port matrix as a release gate — one copy, reused from ci.yml (as the
+  # other release-* workflows do).
+  checks:
+    name: Full port matrix (CI)
+    uses: ./.github/workflows/ci.yml
+
+  version-check:
+    name: Verify tag matches package version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/r-}"
+          PKG_VERSION=$(grep -i '^Version:' ports/r/DESCRIPTION | sed 's/^[Vv]ersion:[[:space:]]*//')
+          echo "Tag version: $TAG_VERSION"
+          echo "DESCRIPTION version: $PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match ports/r/DESCRIPTION ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "Versions match."
+
+  # Create the release ONCE, born non-latest, with no assets. The build legs only
+  # UPLOAD to it. Never create the release inside the matrix — there is no
+  # deterministic "first leg", so two parallel legs both creating it would race.
+  create-release:
+    name: Create non-latest release
+    needs: [checks, version-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create (or reuse) the non-latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          make_latest: false   # keeps app-* as "Latest" — protects the downloads page
+          body: |
+            Prebuilt R binaries for MCPower.
+            Install:  install.packages("mcpower", repos = "https://r.mcpower.app")
+
+  build:
+    name: Build ${{ matrix.plat }} R-${{ matrix.r }}
+    needs: [create-release]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, r: release, plat: win, ext: zip, pkgtype: win.binary }
+          - { os: windows-latest, r: oldrel,  plat: win, ext: zip, pkgtype: win.binary }
+          - { os: macos-latest,   r: release, plat: mac, ext: tgz, pkgtype: mac.binary }
+          - { os: macos-latest,   r: oldrel,  plat: mac, ext: tgz, pkgtype: mac.binary }
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verify `oldrel` is the accepted token for setup-r@v2 (some versions want
+      # `oldrel-1`); a wrong token is a hard fail on two of the four native legs.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.r }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # extendr on Windows builds the x86_64-pc-windows-gnu target against the
+      # Rtools gcc toolchain that setup-r installs. (The fiddliest single leg —
+      # most likely to need iteration; see the spec's Risks.)
+      - name: Add windows-gnu Rust target
+        if: matrix.plat == 'win'
+        shell: bash
+        run: rustup target add x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Build the platform binary from the FULL checkout (path dep + configs/
+      # resolve because siblings are on disk). --build emits the binary archive
+      # into the CWD; --library keeps it off the runner's default lib.
+      - name: Build binary
+        shell: bash
+        run: |
+          mkdir -p rlib out
+          R CMD INSTALL --build --library="$PWD/rlib" ports/r
+
+      # Detect the R minor (e.g. 4.5) and stage a CRAN-named binary for indexing.
+      # write_PACKAGES must index the file under its CRAN name (mcpower_X.Y.Z.<ext>)
+      # so PACKAGES references the path the Worker reconstructs — the _R<m> suffix
+      # is added only for the flat GitHub asset upload, AFTER indexing.
+      - name: Stage + index
+        id: stage
+        shell: bash
+        run: |
+          VER="${GITHUB_REF#refs/tags/r-}"
+          MINOR=$(Rscript -e 'cat(sprintf("%s.%s", R.version$major, sub("\\..*","",R.version$minor)))')
+          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          # The binary archive R CMD INSTALL --build wrote into the CWD:
+          BIN=$(ls mcpower_${VER}*.${{ matrix.ext }})
+          mkdir -p idx
+          cp "$BIN" "idx/mcpower_${VER}.${{ matrix.ext }}"
+          Rscript -e 'tools::write_PACKAGES("idx", type="${{ matrix.pkgtype }}")'
+          # Flat asset names (post-index): binary gets _R<m>; PACKAGES gets .<plat>-<m>
+          cp "idx/mcpower_${VER}.${{ matrix.ext }}" "out/mcpower_${VER}_R${MINOR}.${{ matrix.ext }}"
+          cp "idx/PACKAGES"    "out/PACKAGES.${{ matrix.plat }}-${MINOR}"
+          cp "idx/PACKAGES.gz" "out/PACKAGES.${{ matrix.plat }}-${MINOR}.gz"
+          ls -la out
+
+      - name: Upload assets to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          make_latest: false   # repeated so an asset upload can't flip Latest
+          files: |
+            out/mcpower_${{ steps.stage.outputs.ver }}_R${{ steps.stage.outputs.minor }}.${{ matrix.ext }}
+            out/PACKAGES.${{ matrix.plat }}-${{ steps.stage.outputs.minor }}
+            out/PACKAGES.${{ matrix.plat }}-${{ steps.stage.outputs.minor }}.gz
+
+  # Linux legs run INSIDE a glibc-2.28 container (manylinux_2_28 = AlmaLinux 8), so
+  # they provision R+Rust themselves rather than using r-lib/actions/setup-r. They
+  # emit a binary-as-source tarball: a built package (no src/, NeedsCompilation: no)
+  # served at the CRAN *source* path, which R installs without compiling (proven in
+  # the Phase 0 spike — docs/plans/2026-06-23-r-binary-repo/phase0-findings.md).
+  #
+  # Unlike Win/Mac, the Worker CANNOT pick a per-minor Linux binary at request time:
+  # R's install User-Agent is a bare `libcurl/X` (no version/platform) and the
+  # /src/contrib path carries no minor. So the one-liner repo serves only the
+  # RELEASE Linux binary; the oldrel tarball is reachable via the manual-download
+  # page (/download/linux/...). Both minors are still built and uploaded here.
+  build-linux:
+    name: Build linux R-${{ matrix.r }}
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pin EXACT patch releases Posit publishes for centos-8; bump on release.
+          - { r: release, rver: '4.5.1', minor: '4.5' }
+          - { r: oldrel,  rver: '4.4.3', minor: '4.4' }
+    steps:
+      - uses: actions/checkout@v4
+
+      # Per-minor R from Posit's centos-8 builds — the DISTRO-SPECIFIC packages,
+      # which link glibc 2.28. (The portable Posit builds need glibc >= 2.34 and
+      # do NOT support RHEL 8 — using those would break the 2.28 floor.) Installs
+      # side-by-side under /opt/R/<rver>; we call that R explicitly so the matrix
+      # minor stays truthful.
+      - name: Install R ${{ matrix.rver }}
+        run: |
+          dnf -y install https://cdn.posit.co/r/centos-8/pkgs/R-${{ matrix.rver }}-1-1.x86_64.rpm
+          /opt/R/${{ matrix.rver }}/bin/R --version
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build binary + index
+        id: stage
+        shell: bash
+        run: |
+          export PATH="/opt/R/${{ matrix.rver }}/bin:$PATH"
+          VER="${GITHUB_REF#refs/tags/r-}"
+          MINOR="${{ matrix.minor }}"
+          # Imports must be present for R CMD INSTALL's final load-test. Source
+          # install (a couple compile) — gcc ships in the manylinux image.
+          Rscript -e 'install.packages(c("R6","jsonlite","cli","htmltools"), repos="https://cloud.r-project.org")'
+          mkdir -p rlib idx out
+          R CMD INSTALL --build --library="$PWD/rlib" ports/r
+          BIN=$(ls mcpower_${VER}*.tar.gz)
+          # Index the binary under its CRAN *source* name → NeedsCompilation: no
+          # falls out naturally (Phase 0 §3); the _linux_x86_64_R<m> suffix is for
+          # the flat GitHub asset namespace only, added after indexing.
+          cp "$BIN" "idx/mcpower_${VER}.tar.gz"
+          Rscript -e 'tools::write_PACKAGES("idx", type="source")'
+          cp "idx/mcpower_${VER}.tar.gz" "out/mcpower_${VER}_linux_x86_64_R${MINOR}.tar.gz"
+          cp "idx/PACKAGES"    "out/PACKAGES.src-${MINOR}"
+          cp "idx/PACKAGES.gz" "out/PACKAGES.src-${MINOR}.gz"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "minor=$MINOR" >> "$GITHUB_OUTPUT"
+          ls -la out
+
+      - name: Upload assets to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          make_latest: false
+          files: |
+            out/mcpower_${{ steps.stage.outputs.ver }}_linux_x86_64_R${{ steps.stage.outputs.minor }}.tar.gz
+            out/PACKAGES.src-${{ steps.stage.outputs.minor }}
+            out/PACKAGES.src-${{ steps.stage.outputs.minor }}.gz

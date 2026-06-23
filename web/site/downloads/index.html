@@ -111,11 +111,13 @@
         <article class="dl-card rise" style="--i: 4">
           <h2>R</h2>
           <div class="dl-body">
-            <p>From R-universe:</p>
+            <p>From r.mcpower.app (Windows · macOS · Linux binaries):</p>
             <div class="snippet">
-              <code>install.packages("mcpower", repos = "https://pawlenartowicz.r-universe.dev")</code>
+              <code>install.packages("mcpower", repos = "https://r.mcpower.app")</code>
               <button class="copy" type="button" aria-label="Copy install command">copy</button>
             </div>
+            <p class="os-fmt">Also on <a href="https://pawlenartowicz.r-universe.dev">R-universe</a>. Other systems (Intel Mac, older Linux, older R):
+            <code>remotes::install_github("pawlenartowicz/mcpower", subdir = "ports/r", build = FALSE)</code> — compiles the current source.</p>
           </div>
         </article>
       </section>

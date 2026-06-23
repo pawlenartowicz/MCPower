@@ -12,7 +12,17 @@ the same short workflow covers OLS, logistic, mixed, and factorial models.
 ## Install
 
 ```r
-install.packages("mcpower", repos = "https://pawlenartowicz.r-universe.dev")
+install.packages("mcpower", repos = "https://r.mcpower.app")
+```
+
+This installs a prebuilt binary on Windows, macOS, and Linux. Need a specific R
+version, an offline install, or the previous R release on Linux? See
+[[tutorial-r/manual-download|manual binary downloads]]. The package is also on
+[R-universe](https://pawlenartowicz.r-universe.dev). On other systems (Intel Mac,
+older Linux, older R) compile the current source instead:
+
+```r
+remotes::install_github("pawlenartowicz/mcpower", subdir = "ports/r", build = FALSE)
 ```
 
 ## A first analysis
