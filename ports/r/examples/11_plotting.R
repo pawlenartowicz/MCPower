@@ -102,8 +102,7 @@ save_plot(scen_curve, "power_scen.html")
 cat("  saved power_scen.html\n")
 
 cat(
-  "\nplot() opened charts in your browser (find_power.html, find_sample_size.html;",
-  "repeat calls get collision-suffixed names like find_power_2.html). HTML files",
-  "are written regardless of display availability.",
-  "PNG/SVG/PDF output requires optional renderers (vegawidget + V8 / rsvg).\n"
+  "\nplot() and save_plot() write self-contained HTML charts that open in any browser —",
+  "no extra packages needed. For PNG/SVG/PDF export instead, install:",
+  "install.packages(c('vegawidget', 'V8', 'rsvg')).\n"
 )
