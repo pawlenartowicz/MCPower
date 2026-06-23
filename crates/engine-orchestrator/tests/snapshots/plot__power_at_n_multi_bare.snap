@@ -55,7 +55,18 @@ expression: "parse(&power_at_n_spec(&multi_scenario(), &PlotOptions::default()))
     {
       "encoding": {
         "color": {
+          "field": "target",
+          "type": "nominal"
+        },
+        "fillOpacity": {
           "field": "scenario",
+          "scale": {
+            "range": [
+              1.0,
+              0.7,
+              0.4
+            ]
+          },
           "sort": [
             "optimistic",
             "realistic",

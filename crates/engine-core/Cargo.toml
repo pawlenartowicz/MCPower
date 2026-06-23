@@ -29,6 +29,18 @@ thread_local = "1.1"
 # here stops at <0.2.0, so a minor bump is never picked up silently.
 bobyqa = "0.1"
 
+# Counter-based Philox4x32-10 core extracted from this crate (was src/philox.rs
+# plus the splitmix64/u32_to_unit_f32 leaf helpers in rng.rs). Its output IS the
+# reproducibility contract: philox4x32_10 / splitmix64 / u32_to_unit_f32 are
+# byte-identical to the deleted local copies and golden_rng.rs pins the derived
+# stream, so a version that moved any output bit would break the goldens. The
+# 0.1.x line is frozen (KAT-pinned), so patches inside it are safe; the caret
+# stops below 0.2.0 so a minor bump is never picked up silently (same discipline
+# as bobyqa/pulp). default-features = false: only the no_std, zero-dep free
+# functions are used here, not the rand_core RngCore wrapper — keeps the dep
+# graph minimal and wasm-clean.
+rand_philox = { version = "0.1", default-features = false }
+
 # Portable SIMD (x86 AVX/AVX-512, wasm simd128, NEON, scalar fallback) for the
 # fit-path transcendentals (simd_transcendental.rs). Already in the tree
 # transitively via faer; declared direct so engine-core can call it. Exact-pinned

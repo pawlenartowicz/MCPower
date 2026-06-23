@@ -84,6 +84,10 @@ expression: "parse(&sample_size_curve_spec(&ssr_grid(), &opts))"
   "layer": [
     {
       "encoding": {
+        "color": {
+          "field": "target",
+          "type": "nominal"
+        },
         "detail": {
           "field": "series",
           "type": "nominal"

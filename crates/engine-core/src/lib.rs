@@ -28,7 +28,6 @@ pub mod lme;
 pub mod lmm;
 pub mod marginals;
 pub mod ols;
-pub mod philox;
 pub mod posthoc;
 pub mod rng;
 pub mod scenarios;

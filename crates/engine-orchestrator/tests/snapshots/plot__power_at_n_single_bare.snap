@@ -26,6 +26,10 @@ expression: "parse(&power_at_n_spec(&single_scenario(), &PlotOptions::default())
   "layer": [
     {
       "encoding": {
+        "color": {
+          "field": "target",
+          "type": "nominal"
+        },
         "x": {
           "field": "power",
           "scale": {

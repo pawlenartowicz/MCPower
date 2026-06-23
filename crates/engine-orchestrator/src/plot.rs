@@ -37,6 +37,10 @@ const CURVE_HEIGHT: f64 = 240.0;
 const FACET_PANEL_WIDTH: f64 = 200.0;
 /// Facet column count — 3 is the common scenario preset.
 const FACET_COLUMNS: u64 = 3;
+/// Above this scenario count, power-at-N facets into per-scenario panels instead
+/// of shading by opacity — faint shades stop being distinguishable (the rare 5+
+/// case). Mirrors the curve's per-scenario faceting.
+const POWER_FACET_THRESHOLD: usize = 4;
 
 /// Knobs shared by every plot emitter; `Default` = no title, no CI band, no
 /// target-power rule.
@@ -101,6 +105,21 @@ fn entry_label(point: &PlotPoint, i: usize) -> String {
     }
 }
 
+/// Per-scenario `fillOpacity` range, bold → faint, floor 0.4. Scenarios are an
+/// ordered set (optimistic → realistic → doomer for the presets); shade is a
+/// second *identity* channel (not magnitude). The n==2 case is widened to 0.6 so
+/// two scenarios stay clearly readable. Only called for 2..=POWER_FACET_THRESHOLD
+/// scenarios (more → facet, see power_at_n_spec).
+fn scenario_opacity_range(n: usize) -> Vec<f64> {
+    match n {
+        0 | 1 => vec![1.0],
+        2 => vec![1.0, 0.6],
+        _ => (0..n)
+            .map(|i| 1.0 - 0.6 * (i as f64) / ((n - 1) as f64))
+            .collect(),
+    }
+}
+
 /// Theme-naked Vega-Lite v5 horizontal bar chart, one bar per (scenario × target).
 /// Bars are flush within a scenario group with a ⅔-bar gap between target groups;
 /// the data-rect height is derived from the bar count (see [`BAR_THICKNESS`]).
@@ -139,31 +158,14 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
     // gap = ⅔t, groupband = S·t ⇒ paddingInner = (⅔)/(⅔ + S) = 2/(2 + 3S).
     let y_padding_inner = 2.0 / (2.0 + 3.0 * s);
 
-    // Precompute scenario display order (mean power descending) for multi-scenario.
-    // Vega-Lite layered specs do NOT honor aggregate {field,op,order} sort on
-    // yOffset/color — the shared-scale domain falls back to alphabetical. An
-    // explicit sort array IS honoured. Compute once and reuse for all layers.
-    let scenario_sort_array: Option<Value> = if multi {
-        let mut means: Vec<(&str, f64)> = scenarios
+    // Scenario order = host order (optimistic → realistic → doomer), reused for
+    // yOffset stacking and the fillOpacity ramp. Replaces the old mean-power sort
+    // (colour no longer keys on scenario, so power-ordering it is meaningless).
+    let scenario_order: Option<Value> = if multi {
+        Some(json!(scenarios
             .iter()
-            .map(|sc| {
-                let mean = sc
-                    .points
-                    .first()
-                    .map(|p| {
-                        if p.power.is_empty() {
-                            f64::NEG_INFINITY
-                        } else {
-                            p.power.iter().sum::<f64>() / p.power.len() as f64
-                        }
-                    })
-                    .unwrap_or(f64::NEG_INFINITY);
-                (sc.label.as_str(), mean)
-            })
-            .collect();
-        means.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let order: Vec<&str> = means.iter().map(|(label, _)| *label).collect();
-        Some(json!(order))
+            .map(|sc| sc.label.as_str())
+            .collect::<Vec<_>>()))
     } else {
         None
     };
@@ -178,15 +180,27 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
             "scale": { "paddingInner": y_padding_inner, "paddingOuter": 0 },
         },
     });
-    if let Some(ref sort_arr) = scenario_sort_array {
+    // Colour by effect (`target`), applied even for a single scenario. Deliberately
+    // NO explicit `scale.domain`: hosts relabel the `target` *data* values in place
+    // (`target_{idx}` → effect name) and leave the encoding alone, so a domain pinned
+    // to the engine's tokens would no longer match any data value — every mark would
+    // fall outside the scale and render with a null fill (invisible bars). Letting
+    // Vega derive the domain from the (relabelled) data keeps colour working; the same
+    // effect lands on the same palette slot across this plot and the curve because both
+    // emit effects in the same power-vector order.
+    bar_enc["color"] = json!({ "field": "target", "type": "nominal" });
+    if scenario_order.is_some() {
         bar_enc["yOffset"] = json!({
             "field": "scenario", "type": "nominal",
             "scale": { "paddingInner": 0, "paddingOuter": 0 },
-            "sort": sort_arr,
+            "sort": scenario_order.as_ref().unwrap(),
         });
-        bar_enc["color"] = json!({
+    }
+    if multi && scenarios.len() <= POWER_FACET_THRESHOLD {
+        bar_enc["fillOpacity"] = json!({
             "field": "scenario", "type": "nominal",
-            "sort": sort_arr,
+            "sort": scenario_order.as_ref().unwrap(),
+            "scale": { "range": scenario_opacity_range(scenarios.len()) },
         });
     }
     let mut layers: Vec<Value> = vec![json!({ "mark": "bar", "encoding": bar_enc })];
@@ -201,14 +215,19 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
             "x2": { "field": "ci_hi" },
             "y":  { "field": "target", "type": "nominal", "title": "Effect" },
         });
-        if let Some(ref sort_arr) = scenario_sort_array {
+        // Mirror the bar layer's effect colour (no pinned domain — see the bar block).
+        ci_enc["color"] = json!({ "field": "target", "type": "nominal" });
+        if let Some(ref sort_arr) = scenario_order {
             ci_enc["yOffset"] = json!({
                 "field": "scenario", "type": "nominal",
                 "sort": sort_arr,
             });
-            ci_enc["color"] = json!({
+        }
+        if multi && scenarios.len() <= POWER_FACET_THRESHOLD {
+            ci_enc["fillOpacity"] = json!({
                 "field": "scenario", "type": "nominal",
-                "sort": sort_arr,
+                "sort": scenario_order.as_ref().unwrap(),
+                "scale": { "range": scenario_opacity_range(scenarios.len()) },
             });
         }
         layers.push(json!({ "mark": "errorbar", "encoding": ci_enc }));
@@ -221,13 +240,25 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
         }));
     }
 
-    let mut spec = json!({
-        "$schema": SCHEMA,
-        "width": PANEL_WIDTH,
-        "height": height_px,
-        "data": { "values": values },
-        "layer": layers,
-    });
+    let mut spec = if multi && scenarios.len() > POWER_FACET_THRESHOLD {
+        json!({
+            "$schema": SCHEMA,
+            "data": { "values": values },
+            "facet": {
+                "field": "scenario", "type": "nominal", "columns": FACET_COLUMNS,
+                "sort": scenarios.iter().map(|sc| sc.label.as_str()).collect::<Vec<_>>(),
+            },
+            "spec": { "width": PANEL_WIDTH, "height": height_px, "layer": layers },
+        })
+    } else {
+        json!({
+            "$schema": SCHEMA,
+            "width": PANEL_WIDTH,
+            "height": height_px,
+            "data": { "values": values },
+            "layer": layers,
+        })
+    };
     if let Some(title) = &opts.title {
         spec["title"] = Value::String(title.clone());
     }
@@ -258,12 +289,12 @@ pub fn sample_size_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) ->
         .unwrap_or(false);
     let multi_target = n_targets + usize::from(has_overall) > 1;
 
-    // `detail` keys on `series`: inside a facet panel that is just the target
-    // (the scenario IS the panel), while single-panel mode prefixes the scenario
-    // so a multi-scenario single panel stays distinguishable. Targets are always
-    // distinguished by `strokeDash`, never colour — colour is reserved for the
-    // joint-detection panel so the composite `vconcat`'s shared colour scale
-    // stays clean (a second colour field here garbles the merged legend).
+    // Colour keys on the effect (`target`) with a pinned domain so each effect
+    // gets a stable palette slot shared with `power_at_n_spec`; `strokeDash` also
+    // keys on the effect as a redundant channel (overlap + colourblind/print). The
+    // joint/exactly-k panels are SEPARATE specs with their own colour scale — no
+    // shared-scale conflict in the engine (a host vconcat would need
+    // `resolve.scale.color = independent`; see the design spec).
     let series_of = |label: &str, target: &str| -> String {
         if multi_scenario {
             target.to_string()
@@ -320,6 +351,14 @@ pub fn sample_size_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) ->
     if multi_target {
         line_enc["strokeDash"] = json!({ "field": "target", "type": "nominal" });
     }
+    // Colour by effect (`target`), no pinned `scale.domain`: hosts relabel the `target`
+    // data values in place, so a domain pinned to the engine's tokens would no longer
+    // match the data and every line would lose its colour. Vega derives the domain from
+    // the relabelled data; because `strokeDash` also keys on `target` with no explicit
+    // domain, the two channels share one scale and one merged legend. Stable per-effect
+    // hue across this curve and the power bars comes from both emitting effects in the
+    // same power-vector order, not from a pinned domain.
+    line_enc["color"] = json!({ "field": "target", "type": "nominal" });
     let mut layers: Vec<Value> = vec![json!({
         "mark": { "type": "line", "point": true },
         "encoding": line_enc,
@@ -891,5 +930,165 @@ mod joint_curve_tests {
             "rule must not carry inline data"
         );
         assert_eq!(rule["encoding"]["y"]["datum"], json!(0.8));
+    }
+}
+
+#[cfg(test)]
+mod sample_size_curve_tests {
+    use super::*;
+
+    fn curve_pt(n: usize, power: Vec<f64>) -> PlotPoint {
+        let k = power.len();
+        PlotPoint {
+            n,
+            target_indices: (1..=k).collect(),
+            contrast_pairs: vec![],
+            ci: power
+                .iter()
+                .map(|&p| Ci {
+                    lo: p - 0.05,
+                    hi: p + 0.05,
+                })
+                .collect(),
+            power,
+            histogram: vec![],
+            overall_power: None,
+            overall_ci: None,
+        }
+    }
+
+    #[test]
+    fn curve_colors_by_effect_keeps_strokedash() {
+        let scenarios = vec![PlotScenario {
+            label: "s".into(),
+            points: vec![curve_pt(50, vec![0.3, 0.5]), curve_pt(100, vec![0.6, 0.8])],
+        }];
+        let v: serde_json::Value =
+            serde_json::from_str(&sample_size_curve_spec(&scenarios, &PlotOptions::default()))
+                .unwrap();
+        let line = &v["layer"][0];
+        assert_eq!(line["encoding"]["color"]["field"], json!("target"));
+        assert_eq!(line["encoding"]["strokeDash"]["field"], json!("target"));
+        // No pinned colour domain: hosts relabel the `target` data values, so an
+        // engine-token domain would no longer match the data and lines would lose
+        // their colour. Vega derives the domain from the (relabelled) data.
+        assert!(line["encoding"]["color"]["scale"].is_null());
+    }
+}
+
+#[cfg(test)]
+mod power_at_n_color_tests {
+    use super::*;
+
+    fn bars_scenario(label: &str, power: Vec<f64>) -> PlotScenario {
+        let n = power.len();
+        PlotScenario {
+            label: label.into(),
+            points: vec![PlotPoint {
+                n: 100,
+                target_indices: (1..=n).collect(),
+                contrast_pairs: vec![],
+                ci: power
+                    .iter()
+                    .map(|&p| Ci {
+                        lo: p - 0.05,
+                        hi: p + 0.05,
+                    })
+                    .collect(),
+                power,
+                histogram: vec![],
+                overall_power: None,
+                overall_ci: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn bars_color_by_effect_even_single_scenario() {
+        let scenarios = vec![bars_scenario("only", vec![0.5, 0.9])];
+        let v: serde_json::Value =
+            serde_json::from_str(&power_at_n_spec(&scenarios, &PlotOptions::default())).unwrap();
+        let bar = &v["layer"][0];
+        assert_eq!(bar["mark"], json!("bar"));
+        assert_eq!(bar["encoding"]["color"]["field"], json!("target"));
+        // No pinned colour domain (host relabels the `target` data values); a token
+        // domain would null out every bar's fill. See the curve test for the rationale.
+        assert!(bar["encoding"]["color"]["scale"].is_null());
+    }
+
+    #[test]
+    fn bars_shade_scenarios_bold_to_faint_in_host_order() {
+        let scenarios = vec![
+            bars_scenario("optimistic", vec![0.9, 0.95]),
+            bars_scenario("realistic", vec![0.7, 0.8]),
+            bars_scenario("doomer", vec![0.4, 0.5]),
+        ];
+        let v: serde_json::Value =
+            serde_json::from_str(&power_at_n_spec(&scenarios, &PlotOptions::default())).unwrap();
+        let bar = &v["layer"][0];
+        let fo = &bar["encoding"]["fillOpacity"];
+        assert_eq!(fo["field"], json!("scenario"));
+        // Host order preserved (NOT mean-power sorted).
+        assert_eq!(fo["sort"], json!(["optimistic", "realistic", "doomer"]));
+        let range = fo["scale"]["range"].as_array().unwrap();
+        assert_eq!(range[0], json!(1.0));
+        assert_eq!(range[2], json!(0.4));
+        // Effect colour still present.
+        assert_eq!(bar["encoding"]["color"]["field"], json!("target"));
+    }
+
+    #[test]
+    fn many_scenarios_facet_without_opacity() {
+        let scenarios: Vec<_> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|l| bars_scenario(l, vec![0.5, 0.6]))
+            .collect();
+        let v: serde_json::Value =
+            serde_json::from_str(&power_at_n_spec(&scenarios, &PlotOptions::default())).unwrap();
+        assert_eq!(v["facet"]["field"], json!("scenario"));
+        let bar = &v["spec"]["layer"][0];
+        assert!(bar["encoding"].get("fillOpacity").is_none());
+        assert_eq!(bar["encoding"]["color"]["field"], json!("target"));
+    }
+
+    #[test]
+    fn single_scenario_has_no_fillopacity() {
+        let scenarios = vec![bars_scenario("only", vec![0.5, 0.9])];
+        let v: serde_json::Value =
+            serde_json::from_str(&power_at_n_spec(&scenarios, &PlotOptions::default())).unwrap();
+        assert!(v["layer"][0]["encoding"].get("fillOpacity").is_none());
+    }
+
+    #[test]
+    fn bars_and_curve_color_by_target_without_pinned_domain() {
+        // Both plots colour by the same `target` field with no explicit domain, so the
+        // host's data relabelling drives both legends and the same effect lands on the
+        // same palette slot (both emit effects in power-vector order). A pinned token
+        // domain would survive in neither once the host rewrites the data values.
+        let bars = vec![bars_scenario("s", vec![0.5, 0.9])];
+        let vb: serde_json::Value =
+            serde_json::from_str(&power_at_n_spec(&bars, &PlotOptions::default())).unwrap();
+        let bar_color = &vb["layer"][0]["encoding"]["color"];
+        assert_eq!(bar_color["field"], json!("target"));
+        assert!(bar_color["scale"].is_null());
+
+        let curve = vec![PlotScenario {
+            label: "s".into(),
+            points: vec![PlotPoint {
+                n: 100,
+                target_indices: vec![1, 2],
+                contrast_pairs: vec![],
+                ci: vec![Ci { lo: 0.4, hi: 0.6 }, Ci { lo: 0.8, hi: 0.95 }],
+                power: vec![0.5, 0.9],
+                histogram: vec![],
+                overall_power: None,
+                overall_ci: None,
+            }],
+        }];
+        let vc: serde_json::Value =
+            serde_json::from_str(&sample_size_curve_spec(&curve, &PlotOptions::default())).unwrap();
+        let curve_color = &vc["layer"][0]["encoding"]["color"];
+        assert_eq!(curve_color["field"], json!("target"));
+        assert!(curve_color["scale"].is_null());
     }
 }

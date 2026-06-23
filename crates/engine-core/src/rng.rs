@@ -19,18 +19,15 @@
 // are documentation, not significance — keep them; do not let clippy truncate.
 #![allow(clippy::excessive_precision)]
 
-use crate::philox::philox4x32_10;
+use rand_philox::philox4x32_10;
 
-/// David Stafford's "Mix13" SplitMix64 finalizer — the same avalanche function
-/// used by Java's SplittableRandom. Callers supply their own pre-mix strategy
-/// for combining the seed inputs (xor+rotate for sim streams, Weyl add for
-/// scenario seeds).
-#[inline]
-pub fn splitmix64_finalize(mut z: u64) -> u64 {
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-    z ^ (z >> 31)
-}
+/// David Stafford's "Mix13" SplitMix64 finalizer — re-exported from `rand_philox`
+/// (was defined here; the byte-identical generic copy now lives in the crate).
+/// Kept under this name and path because `engine-orchestrator` (`find_power.rs`)
+/// and `bin/throughput.rs` import `engine_core::rng::splitmix64_finalize`.
+/// Callers supply their own pre-mix strategy (xor+rotate for sim streams, Weyl
+/// add for scenario seeds); `pcg_mix64` below is one such caller.
+pub use rand_philox::splitmix64 as splitmix64_finalize;
 
 /// Mix `(base_seed, sim_id)` into a 64-bit per-sim seed (the two Philox key words).
 ///
@@ -261,19 +258,12 @@ pub fn fill_normal_column(
     }
 }
 
-/// Map a Philox 32-bit word to an f32 uniform on the OPEN interval (0,1).
-/// 23-bit mantissa (`word >> 9`) centred by +0.5 so the result is never 0 or 1
-/// — Φ⁻¹ never sees a saturating argument. Floor ≈ 2⁻²⁴, cap ≈ 1−2⁻²⁴; this
-/// construction pins the tail reach (see the L1 reach test).
-///
-/// 23 bits rather than 24: in f32, values ≥ 2²³ = 8_388_608 have ULP ≥ 1.0,
-/// so `(max_24bit as f32) + 0.5` rounds to 2²⁴ and the result hits 1.0 exactly.
-/// In the range [2²², 2²³) the ULP is 0.5, so every half-integer is exactly
-/// representable and the +0.5 centering is guaranteed to stay below 1.0.
-#[inline]
-pub fn u32_to_unit_f32(word: u32) -> f32 {
-    ((word >> 9) as f32 + 0.5) * (1.0 / 8_388_608.0) // (x+0.5) · 2⁻²³
-}
+/// Map a Philox 32-bit word to an f32 uniform on the OPEN interval (0,1) —
+/// re-exported from `rand_philox` (was defined here; byte-identical). The 23-bit
+/// open-interval construction and its tail-reach reasoning are documented on the
+/// crate's item. All in-module callers (`next_uniform`, `fill_uniform_column`,
+/// `fill_normal_column`) resolve to this re-export unchanged.
+pub use rand_philox::u32_to_unit_f32;
 
 // ===== Frozen f32 inverse-CDF normal kernel ================================
 // Fitted + frozen by `scripts/fit_norm_inv_cdf.py` (scipy `norm.ppf`, graded on
@@ -598,7 +588,7 @@ mod tests {
 
     #[test]
     fn fill_words_matches_per_counter_philox() {
-        use crate::philox::philox4x32_10;
+        use rand_philox::philox4x32_10;
         let key = [0xdead_beef, 0x1234_5678];
         let mut out = vec![0u32; 1003]; // non-multiple of 16 and 4 → both tails
         fill_words(key, CLASS_XNORM, 7, &mut out);

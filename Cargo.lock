@@ -1184,6 +1184,7 @@ dependencies = [
  "faer",
  "libm",
  "pulp",
+ "rand_philox",
  "rayon",
  "rmp-serde",
  "serde",
@@ -3908,6 +3909,12 @@ dependencies = [
  "num-traits",
  "rand 0.9.4",
 ]
+
+[[package]]
+name = "rand_philox"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fd5ca897f8b5e3e5bc0d388d9a408605ec8ac3615ff79f556177c1e473b48e4"
 
 [[package]]
 name = "raw-cpuid"

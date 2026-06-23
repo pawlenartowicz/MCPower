@@ -36,6 +36,9 @@ playwright-report/
 # ─── Cloudflare Wrangler (site-functions / ports/app) ────────────────────
 .wrangler/
 
+# ─── insta snapshots (accepted *.snap are committed) ─────────────────────
+*.snap.new
+
 # ─── Editor / OS cruft ───────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json

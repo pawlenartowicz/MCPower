@@ -304,16 +304,12 @@ fn power_at_n_is_horizontal_with_power_sort() {
     assert_eq!(bar["y"]["scale"]["paddingInner"], 0.4);
     assert_eq!(bar["y"]["scale"]["paddingOuter"], 0);
 
-    // Multi: grouping moves to yOffset + color, both sorted by an explicit label
-    // array (mean power descending) so the layered spec renders in the correct
+    // Multi: grouping moves to yOffset + fillOpacity, both ordered by HOST order
+    // (the order scenarios are passed in) so the layered spec renders in the correct
     // order (Vega-Lite ignores aggregate {field,op,order} sort on yOffset/color
     // in a layered spec — an explicit array IS honoured).
     //
-    // Per-scenario means from multi_scenario():
-    //   "optimistic" : (0.83 + 0.71) / 2 = 0.77
-    //   "realistic"  : (0.72 + 0.55) / 2 = 0.635
-    //   "doomer"     : (0.51 + 0.34) / 2 = 0.425
-    // Descending order: ["optimistic", "realistic", "doomer"]
+    // multi_scenario() passes: ["optimistic", "realistic", "doomer"] — host order.
     let expected_sort = serde_json::json!(["optimistic", "realistic", "doomer"]);
     let multi = parse(&power_at_n_spec(&multi_scenario(), &PlotOptions::default()));
     let mbar = &multi["layer"][0]["encoding"];
@@ -324,13 +320,16 @@ fn power_at_n_is_horizontal_with_power_sort() {
         mbar["yOffset"]["sort"]
     );
     assert_eq!(mbar["yOffset"]["sort"], expected_sort);
+    // Colour keys on the effect (target), not the scenario, with NO pinned domain:
+    // hosts relabel the `target` data values, so a token domain would null out the
+    // marks. Vega derives the domain from the (relabelled) data.
+    assert_eq!(mbar["color"]["field"], "target");
     assert!(
-        mbar["color"]["sort"].is_array(),
-        "color.sort must be an explicit array, got: {}",
-        mbar["color"]["sort"]
+        mbar["color"]["scale"].is_null(),
+        "color must carry no explicit scale, got: {}",
+        mbar["color"]["scale"]
     );
-    assert_eq!(mbar["color"]["sort"], expected_sort);
-    // Errorbar layer (layer[1] when show_ci=true) must carry the same array.
+    // Errorbar layer (layer[1] when show_ci=true) must carry the same colour binding.
     let multi_ci = parse(&power_at_n_spec(
         &multi_scenario(),
         &PlotOptions {
@@ -340,7 +339,7 @@ fn power_at_n_is_horizontal_with_power_sort() {
     ));
     let ci_enc = &multi_ci["layer"][1]["encoding"];
     assert_eq!(ci_enc["yOffset"]["sort"], expected_sort);
-    assert_eq!(ci_enc["color"]["sort"], expected_sort);
+    assert_eq!(ci_enc["color"]["field"], "target");
     assert_eq!(mbar["yOffset"]["scale"]["paddingInner"], 0);
     assert_eq!(mbar["yOffset"]["scale"]["paddingOuter"], 0);
     // S=3 ⇒ y.scale.paddingInner == 2/11 (compare with tolerance: the JSON
@@ -409,15 +408,14 @@ fn curve_multi_facets_and_rekeys_to_target() {
         v.get("layer").is_none(),
         "layers move under spec when faceted"
     );
-    // Inside a panel, targets are keyed by strokeDash, never colour — colour is
-    // reserved for the joint-detection panel so the composite vconcat's shared
-    // colour scale stays clean. `series` drops the scenario label so each panel
-    // is multi-series.
+    // Inside a panel, targets are keyed by colour (shared domain, stable palette
+    // slot) and also by strokeDash (redundant for colourblind/print). The engine
+    // emits separate specs for the curve and joint panels, so there is no
+    // shared-scale conflict at the engine level (a host vconcat would need
+    // `resolve.scale.color = independent`). `series` drops the scenario label so
+    // each panel is multi-series.
     let line_enc = &v["spec"]["layer"][0]["encoding"];
-    assert!(
-        line_enc.get("color").is_none(),
-        "faceted curve must not colour by target (collides with the joint panel's colour scale)"
-    );
+    assert_eq!(line_enc["color"]["field"], "target");
     assert_eq!(line_enc["strokeDash"]["field"], "target");
     let rows = v["data"]["values"].as_array().unwrap();
     assert!(rows

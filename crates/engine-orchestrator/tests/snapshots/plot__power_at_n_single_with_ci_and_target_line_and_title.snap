@@ -26,6 +26,10 @@ expression: "parse(&power_at_n_spec(&single_scenario(), &opts))"
   "layer": [
     {
       "encoding": {
+        "color": {
+          "field": "target",
+          "type": "nominal"
+        },
         "x": {
           "field": "power",
           "scale": {
@@ -51,6 +55,10 @@ expression: "parse(&power_at_n_spec(&single_scenario(), &opts))"
     },
     {
       "encoding": {
+        "color": {
+          "field": "target",
+          "type": "nominal"
+        },
         "x": {
           "field": "ci_lo",
           "title": "Power",
