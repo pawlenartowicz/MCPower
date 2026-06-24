@@ -77,9 +77,12 @@ jobs:
         include:
           # Linux on the older glibc/webkit floor so the bundles run on the widest
           # range of distros (release leg legitimately differs from ci.yml's test
-          # leg, which uses ubuntu-latest). Bundles: .deb, .rpm, .AppImage.
+          # leg, which uses ubuntu-latest). Bundles: .deb + .rpm only. AppImage is
+          # deliberately dropped — a bare AppImage has no execute bit on download
+          # and double-clicking can route it into a disk-image flasher; the native
+          # packages open a graphical installer and can't be mistaken for one.
           - os: ubuntu-22.04
-            args: ''
+            args: '--bundles deb,rpm'
           # Bundles: .msi + .exe (NSIS).
           - os: windows-latest
             args: ''

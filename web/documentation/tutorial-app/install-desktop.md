@@ -26,10 +26,10 @@ The first launch may need **right-click → Open** (or **System Settings → Pri
 
 ## Linux
 
-Two formats are provided; pick the one that suits your distribution.
+Two native packages are provided; pick the one that suits your distribution.
 
-- **AppImage** — download the `.AppImage` `[needs release]`, mark it executable (`chmod +x` or via your file manager's Properties), and run it. No system install; it is self-contained.
-- **.deb** — on Debian/Ubuntu, download the `.deb` `[needs release]` and install it with your package manager (e.g. `sudo apt install ./<file>.deb`). MCPower then appears in your applications menu.
+- **.deb** — on Debian, Ubuntu, or Mint, download the `.deb` `[needs release]` and install it with your package manager (e.g. `sudo apt install ./<file>.deb`), or double-click it to open your graphical software installer. MCPower then appears in your applications menu.
+- **.rpm** — on Fedora, RHEL, or openSUSE, download the `.rpm` `[needs release]` and install it with `sudo dnf install ./<file>.rpm` (or `sudo zypper install`), or double-click it to open your graphical software installer. MCPower then appears in your applications menu.
 
 ## Updating
 
