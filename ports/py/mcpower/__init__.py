@@ -4,5 +4,5 @@ from .model import MCPower
 from .datasets import mtcars
 from . import progress
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __all__ = ["MCPower", "mtcars", "progress"]
