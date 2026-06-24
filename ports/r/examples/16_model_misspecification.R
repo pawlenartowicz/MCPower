@@ -9,7 +9,7 @@
 #
 # Run with:  Rscript 16_model_misspecification.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Data-generating truth. caffeine sits in the formula at effect 0 so it can shape
 # the data (and the correlation) while staying out of the genuinely correct

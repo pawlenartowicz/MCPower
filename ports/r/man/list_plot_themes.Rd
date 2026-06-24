@@ -7,8 +7,8 @@
 list_plot_themes()
 }
 \value{
-A character vector of theme names (e.g. \code{"light"}, \code{"dark"},
-\code{"print"}, \code{"wild"}).
+A character vector of theme names (e.g. \code{"light-print"},
+\code{"dark-print"}, \code{"light-app"}, \code{"dark-app"}).
 }
 \description{
 Returns the names of all built-in themes that can be passed to

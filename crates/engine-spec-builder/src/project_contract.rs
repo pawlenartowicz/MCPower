@@ -609,14 +609,10 @@ fn build_target_terms(
             term_positions.insert(pos);
         }
     }
-    if term_positions.is_empty()
-        && spec.contrast_pairs.is_empty()
-        && spec.posthoc_requests.is_empty()
-    {
-        return Err(SpecError::UnknownTarget {
-            name: "(empty)".into(),
-        });
-    }
+    // The "at least one target" check lives at the end of this function, after
+    // the omnibus Joint is appended — checking only `overall` (no marginals, no
+    // contrasts) is a legitimate analysis, so an empty `term_positions` here is
+    // not yet an error.
     // `term_positions` is a set, so these marginals are already mutually unique;
     // seed the dedup tracker with them so a reference-collapsing contrast below
     // can't re-emit a marginal a coefficient test already requested.
@@ -671,15 +667,11 @@ fn build_target_terms(
         }
     }
 
-    if out.is_empty() && spec.posthoc_requests.is_empty() {
-        return Err(SpecError::UnknownTarget {
-            name: "(empty)".into(),
-        });
-    }
-
     // Omnibus: emit one Joint covering every non-intercept position in
     // `design_test`. The contract adapter routes this to
-    // `SimulationSpec.report_overall = true`.
+    // `SimulationSpec.report_overall = true`. The omnibus is a first-class
+    // target — a run that checks only `overall` (no marginals/contrasts) is
+    // valid and lands here with an otherwise-empty `out`.
     if spec.report_overall {
         let joint_terms: Vec<u32> = design_test
             .terms
@@ -693,6 +685,15 @@ fn build_target_terms(
         if joint_terms.len() >= 2 {
             out.push(TestTarget::Joint { terms: joint_terms });
         }
+    }
+
+    // Single "at least one target" gate, after every kind of target (marginal,
+    // contrast, omnibus) has had its chance to populate `out`. Posthoc requests
+    // are carried separately on the spec, so they also satisfy it.
+    if out.is_empty() && spec.posthoc_requests.is_empty() {
+        return Err(SpecError::UnknownTarget {
+            name: "(empty)".into(),
+        });
     }
     Ok(out)
 }
@@ -1132,6 +1133,39 @@ mod tests {
             .expect("Joint emitted for report_overall");
         assert_eq!(joint, vec![1, 2]);
         c.validate().unwrap();
+    }
+
+    #[test]
+    fn report_overall_alone_is_valid_with_no_marginals() {
+        // Regression: checking only "overall" (empty per-effect target list, as the
+        // app sends when only the omnibus box is ticked) used to be rejected with
+        // `target '(empty)'` because the empty-target guard fired before the Joint
+        // was appended. The omnibus is a first-class target — the run is valid and
+        // emits a lone Joint.
+        let mut spec = simple_spec();
+        spec.targets = vec![]; // no per-effect/marginal/contrast tests
+        spec.report_overall = true;
+        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        assert_eq!(c.test.targets.len(), 1);
+        assert!(matches!(
+            c.test.targets.first(),
+            Some(TestTarget::Joint { .. })
+        ));
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn no_targets_and_no_overall_still_errors_empty() {
+        // The single end-of-function guard must still reject a run with nothing to
+        // test: no marginals, no contrasts, no posthoc, and no omnibus.
+        let mut spec = simple_spec();
+        spec.targets = vec![];
+        spec.report_overall = false;
+        let err = build_linear_contract(&spec).unwrap_err();
+        assert!(
+            matches!(&err, SpecError::UnknownTarget { name } if name == "(empty)"),
+            "expected UnknownTarget '(empty)', got {err:?}"
+        );
     }
 
     #[test]

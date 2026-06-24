@@ -7,7 +7,7 @@
 #
 # Run with:  Rscript 05_multiple_testing.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # 1. Five predictors — two are true nulls (effect = 0).
 model <- MCPower$new(

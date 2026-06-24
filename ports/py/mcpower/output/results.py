@@ -109,7 +109,7 @@ _EXPORT_ROADMAP = ("not implemented yet — LaTeX/PDF export is on the roadmap; 
 
 
 def _plot_impl(result, *, kind: str, path):
-    """Shared plot() body. No path -> write a distinctly-named print-themed
+    """Shared plot() body. No path -> write a distinctly-named light-print-themed
     stacked HTML in cwd and auto-open. Path -> delegate to save_plot."""
     if path is not None:
         result.save_plot(str(path))
@@ -160,9 +160,9 @@ class PowerResult(dict):
                 })
         return pd.DataFrame(rows)
 
-    def save_plot(self, path: str, *, theme: str = "print", scale: float = 2.0, ppi=None) -> None:
+    def save_plot(self, path: str, *, theme: str = "light-print", scale: float = 2.0, ppi=None) -> None:
         """Render this result's chart(s) to file(s) (png / svg / pdf / html,
-        by suffix). Default theme is ``"print"``; pass ``theme=None`` for
+        by suffix). Default theme is ``"light-print"``; pass ``theme=None`` for
         theme-naked output. For non-HTML formats one file is written per plot
         block with derived names. Needs the optional renderer for non-HTML:
         ``pip install mcpower[plot]``."""
@@ -175,7 +175,7 @@ class PowerResult(dict):
         )
 
     def plot(self, path: str = None) -> None:
-        """No path: write & open find_power.html (print-themed, stacked, CDN-backed).
+        """No path: write & open find_power.html (light-print-themed, stacked, CDN-backed).
         Path: delegate to save_plot (png/svg/pdf/html, optional renderer)."""
         _plot_impl(self, kind="find_power", path=path)
 
@@ -202,9 +202,9 @@ class SampleSizeResult(dict):
         from .report import Report
         return Report(self, self._meta, kind="find_sample_size")
 
-    def save_plot(self, path: str, *, theme: str = "print", scale: float = 2.0, ppi=None) -> None:
+    def save_plot(self, path: str, *, theme: str = "light-print", scale: float = 2.0, ppi=None) -> None:
         """Render this result's chart(s) to file(s) (png / svg / pdf / html,
-        by suffix). Default theme is ``"print"``; pass ``theme=None`` for
+        by suffix). Default theme is ``"light-print"``; pass ``theme=None`` for
         theme-naked output. For non-HTML formats one file is written per plot
         block with derived names. Needs the optional renderer for non-HTML:
         ``pip install mcpower[plot]``."""
@@ -217,7 +217,7 @@ class SampleSizeResult(dict):
         )
 
     def plot(self, path: str = None) -> None:
-        """No path: write & open find_sample_size.html (print-themed, stacked).
+        """No path: write & open find_sample_size.html (light-print-themed, stacked).
         Path: delegate to save_plot."""
         _plot_impl(self, kind="find_sample_size", path=path)
 

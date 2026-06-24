@@ -7,10 +7,13 @@ fn all_themes_validate() {
     let bytes = fs::read(&p).unwrap_or_else(|e| panic!("read {p:?}: {e}"));
     let map: serde_json::Map<String, serde_json::Value> =
         serde_json::from_slice(&bytes).expect("plot-themes.json must be a JSON object");
-    assert!(
-        map.keys()
-            .any(|k| ["light", "dark", "wild", "print"].contains(&k.as_str())),
-        "expected the four bundled theme keys",
+    let mut keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+    keys.sort_unstable();
+    let mut expected = ["light-print", "dark-print", "light-app", "dark-app"];
+    expected.sort_unstable();
+    assert_eq!(
+        keys, expected,
+        "expected exactly the four bundled theme keys"
     );
     for (name, theme) in &map {
         let theme_bytes = serde_json::to_vec(theme).unwrap();

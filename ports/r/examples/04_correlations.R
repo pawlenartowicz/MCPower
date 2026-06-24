@@ -8,7 +8,7 @@
 #
 # Run with:  Rscript 04_correlations.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # 1. Model with several predictors.
 model <- MCPower$new("life_satisfaction ~ income + education + social_support + health")

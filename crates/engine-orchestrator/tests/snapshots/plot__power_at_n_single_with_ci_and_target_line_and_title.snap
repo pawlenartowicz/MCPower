@@ -47,6 +47,7 @@ expression: "parse(&power_at_n_spec(&single_scenario(), &opts))"
             "paddingInner": 0.4,
             "paddingOuter": 0
           },
+          "sort": null,
           "title": "Effect",
           "type": "nominal"
         }
@@ -69,6 +70,7 @@ expression: "parse(&power_at_n_spec(&single_scenario(), &opts))"
         },
         "y": {
           "field": "target",
+          "sort": null,
           "title": "Effect",
           "type": "nominal"
         }

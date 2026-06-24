@@ -2,7 +2,7 @@
 % Please edit documentation in R/output-plotting.R
 \name{plot.mcpower_result}
 \alias{plot.mcpower_result}
-\title{Plot method for mcpower_result (power-at-N chart via Vega-Lite CDN HTML).}
+\title{Plot method for mcpower_result (power-at-N chart via Vega-Lite).}
 \usage{
 \method{plot}{mcpower_result}(x, file = NULL, ...)
 }
@@ -14,12 +14,16 @@
 \item{...}{Passed to \code{save_plot()} when \code{file} is supplied.}
 }
 \value{
-Invisibly, the path written.
+Invisibly: the rendered widget (vegawidget path) or the path written (CDN fallback).
 }
 \description{
-No \code{file} argument: writes a self-contained stacked HTML file to the
-working directory (\code{find_power.html}) and opens it. Successive calls use
-\code{_2}, \code{_3}, … suffixes to avoid clobbering.
+No \code{file} argument: displays the chart. When \pkg{vegawidget} is
+installed and the session is interactive, the chart renders as a bundled-JS
+htmlwidget — it shows inline in the RStudio Viewer (or opens in the browser
+under plain R) with no CDN, so it works in sandboxed panes that block the
+fallback. Otherwise a self-contained CDN HTML file is written to the working
+directory (\code{find_power.html}; successive calls use \code{_2}, \code{_3},
+… suffixes) and opened; its path is reported so it can be opened manually.
 With a \code{file} argument: delegates to \code{save_plot()} for
 image/widget export (requires optional renderers).
 }

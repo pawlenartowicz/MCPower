@@ -155,7 +155,9 @@ def test_sample_size_blocks_wire_through_to_rust_emitter():
 # ── available_themes / _apply_theme ─────────────────────────────────────────
 
 def test_list_plot_themes_returns_four_names():
-    assert set(plotting.available_themes()) == {"light", "dark", "print", "wild"}
+    assert set(plotting.available_themes()) == {
+        "light-print", "dark-print", "light-app", "dark-app"
+    }
 
 
 def test_plot_theme_unknown_raises():
@@ -171,10 +173,10 @@ def test_apply_theme_deep_merges_axis_subkeys():
     spec_json = json.dumps(
         {"$schema": V5, "config": {"axis": {"titleColor": "#abc"}}, "data": {"values": []}}
     )
-    merged = json.loads(plotting._apply_theme(spec_json, "light"))
+    merged = json.loads(plotting._apply_theme(spec_json, "light-app"))
     assert merged["config"]["background"] == "#ffffff"
-    assert merged["config"]["axis"]["labelColor"] == "#222"  # from theme
-    assert merged["config"]["axis"]["titleColor"] == "#222"  # theme overwrites scalar
+    assert merged["config"]["axis"]["labelColor"] == "#6a7280"  # from theme
+    assert merged["config"]["axis"]["titleColor"] == "#14161a"  # theme overwrites scalar
 
 
 # ── save_plot suffix / error handling ───────────────────────────────────────
@@ -200,24 +202,24 @@ def test_save_plot_missing_renderer_hints_extra(tmp_path, monkeypatch):
         res.save_plot(str(tmp_path / "chart.png"))
 
 
-# ── Default print theme ──────────────────────────────────────────────────────
+# ── Default light-print theme ─────────────────────────────────────────────────
 
 def test_saved_html_has_print_theme_by_default(tmp_path):
-    """HTML saved without explicit theme= uses the print theme."""
+    """HTML saved without explicit theme= uses the light-print theme."""
     res = _small_model().find_power(120)
     out = str(tmp_path / "chart.html")
     res.save_plot(out)
     html = (tmp_path / "chart.html").read_text()
-    # Print theme: background #ffffff and a legend config block
+    # light-print theme: background #ffffff and a legend config block
     assert '"#ffffff"' in html
     assert '"legend"' in html
 
 
 def test_saved_html_dark_theme_overrides(tmp_path):
-    """Explicit theme='dark' produces dark background."""
+    """Explicit theme='dark-print' produces dark background."""
     res = _small_model().find_power(120)
     out = str(tmp_path / "chart.html")
-    res.save_plot(out, theme="dark")
+    res.save_plot(out, theme="dark-print")
     html = (tmp_path / "chart.html").read_text()
     assert '"#1e1e1e"' in html
 
@@ -232,15 +234,15 @@ def test_saved_html_no_theme_is_naked(tmp_path):
     assert '"config"' not in html
 
 
-# ── Mimebundle: block choice + print theme ────────────────────────────────────
+# ── Mimebundle: block choice + light-print theme ──────────────────────────────
 
 def test_mimebundle_power_is_power_block_with_print_theme():
-    """find_power mimebundle: power block, print theme applied."""
+    """find_power mimebundle: power block, light-print theme applied."""
     res = _small_model().find_power(120)
     bundle = res.summary()._repr_mimebundle_()
     spec = bundle["application/vnd.vegalite.v5+json"]
     assert isinstance(spec, dict)
-    # Print theme applied
+    # light-print theme applied
     assert "config" in spec
     assert "legend" in spec["config"]
 
@@ -251,7 +253,7 @@ def test_mimebundle_sample_size_single_scenario_is_curve():
     bundle = res.summary()._repr_mimebundle_()
     spec = bundle["application/vnd.vegalite.v5+json"]
     assert isinstance(spec, dict)
-    assert "config" in spec  # print theme applied
+    assert "config" in spec  # light-print theme applied
 
 
 def test_mimebundle_sample_size_multi_scenario_is_overlay(monkeypatch):
@@ -440,10 +442,10 @@ def test_save_plot_html_writes_one_file(tmp_path):
     importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed"
 )
 def test_save_plot_theme_injects_config(tmp_path):
-    """Explicit theme='dark' produces a dark background."""
+    """Explicit theme='dark-print' produces a dark background."""
     res = _ss_result()
     out = str(tmp_path / "chart.html")
-    res.save_plot(out, theme="dark")
+    res.save_plot(out, theme="dark-print")
     html = (tmp_path / "chart.html").read_text()
     assert "#1e1e1e" in html
 

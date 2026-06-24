@@ -3,7 +3,7 @@ import { plotHtml, downloadPlot } from '../src/index';
 
 // A minimal theme-naked Vega-Lite spec (no config block).
 const NAKED_SPEC = '{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","mark":"point","data":{"values":[]}}';
-// A spec that already has a consumer config key not in the print theme.
+// A spec that already has a consumer config key not in the light-print theme.
 const SPEC_WITH_CONFIG = '{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","mark":"point","data":{"values":[]},"config":{"customKey":"survives"}}';
 
 describe('plotHtml', () => {
@@ -31,23 +31,23 @@ describe('plotHtml', () => {
     expect(html).toContain('forEach');
   });
 
-  it('applies the print theme: background #ffffff is present in the output', () => {
+  it('applies the light-print theme: background #ffffff is present in the output', () => {
     const html = plotHtml(NAKED_SPEC);
     expect(html).toContain('"background":"#ffffff"');
   });
 
-  it('applies the print theme: legend block is present in the output', () => {
+  it('applies the light-print theme: legend block is present in the output', () => {
     const html = plotHtml(NAKED_SPEC);
     expect(html).toContain('"legend"');
     expect(html).toContain('"labelColor":"#000000"');
   });
 
-  it('deep-merge: consumer config keys not in the print theme survive', () => {
+  it('deep-merge: consumer config keys not in the light-print theme survive', () => {
     const html = plotHtml(SPEC_WITH_CONFIG);
     expect(html).toContain('"customKey":"survives"');
   });
 
-  it('deep-merge: print theme keys land even when spec already has a config', () => {
+  it('deep-merge: light-print theme keys land even when spec already has a config', () => {
     const html = plotHtml(SPEC_WITH_CONFIG);
     expect(html).toContain('"background":"#ffffff"');
   });

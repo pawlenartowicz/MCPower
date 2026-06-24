@@ -345,7 +345,7 @@ test_that("sample-size header does not report the lowest grid N", {
 test_that("list_plot_themes returns the four embedded names", {
   themes <- list_plot_themes()
   expect_true(is.character(themes))
-  expect_setequal(themes, c("light", "dark", "print", "wild"))
+  expect_setequal(themes, c("light-print", "dark-print", "light-app", "dark-app"))
 })
 
 test_that(".plot_blocks find_power returns exactly one 'power' block with CI marks", {
@@ -437,16 +437,16 @@ test_that("save_plot HTML default theme: spec config has background=#ffffff and 
   f <- tempfile(fileext = ".html")
   save_plot(res, f)
   html <- paste(readLines(f), collapse = "\n")
-  # Print theme has background #ffffff
+  # light-print theme has background #ffffff
   expect_match(html, "#ffffff")
-  # Print theme has a legend block
+  # light-print theme has a legend block
   expect_match(html, '"legend"')
 })
 
-test_that("save_plot HTML theme='dark': spec has dark background", {
+test_that("save_plot HTML theme='dark-print': spec has dark background", {
   res <- .r_ols_model()$find_power(sample_size = 120, verbose = FALSE, progress_callback = FALSE)
   f <- tempfile(fileext = ".html")
-  save_plot(res, f, theme = "dark")
+  save_plot(res, f, theme = "dark-print")
   html <- paste(readLines(f), collapse = "\n")
   expect_match(html, "#1e1e1e")
 })
@@ -456,7 +456,7 @@ test_that("save_plot HTML theme=NULL: no config block added (theme-naked)", {
   f <- tempfile(fileext = ".html")
   save_plot(res, f, theme = NULL)
   html <- paste(readLines(f), collapse = "\n")
-  # Theme-naked: no background from print theme
+  # Theme-naked: no background from light-print theme
   expect_false(grepl("#ffffff", html))
 })
 

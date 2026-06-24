@@ -47,6 +47,7 @@ expression: "parse(&power_at_n_spec(&single_scenario(), &PlotOptions::default())
             "paddingInner": 0.4,
             "paddingOuter": 0
           },
+          "sort": null,
           "title": "Effect",
           "type": "nominal"
         }

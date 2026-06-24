@@ -8,7 +8,7 @@
 #
 # Run with:  Rscript 12_cluster_level_predictors.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Example: Multi-site clinical trial where a training intervention (treat) is
 # assigned at the SITE level (30 sites) while a continuous patient covariate

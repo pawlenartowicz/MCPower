@@ -62,7 +62,11 @@ NULL
     node$data$values <- vals
   }
   for (nm in seq_along(node)) {
-    node[[nm]] <- .relabel_walk(node[[nm]], label_map)
+    # Single-bracket `node[nm] <- list(...)` so a NULL result (a JSON `null` in
+    # the spec parses to a NULL element) is reassigned in place — `node[[nm]] <-
+    # NULL` would instead DELETE the element, shrinking the list mid-loop and
+    # making later seq_along indices out of bounds.
+    node[nm] <- list(.relabel_walk(node[[nm]], label_map))
   }
   node
 }
@@ -84,13 +88,14 @@ NULL
       }
     }
     # recurse into children but skip encoding (already handled)
+    # Single-bracket reassignment preserves NULL elements — see `.relabel_walk`.
     for (nm in names(node)) {
       if (nm == "encoding") next
-      node[[nm]] <- .rewrite_correction_axis_title_walk(node[[nm]], new_title)
+      node[nm] <- list(.rewrite_correction_axis_title_walk(node[[nm]], new_title))
     }
   } else {
     for (nm in seq_along(node)) {
-      node[[nm]] <- .rewrite_correction_axis_title_walk(node[[nm]], new_title)
+      node[nm] <- list(.rewrite_correction_axis_title_walk(node[[nm]], new_title))
     }
   }
   node
@@ -117,7 +122,8 @@ NULL
     }
     node$mark <- md
   }
-  for (nm in seq_along(node)) node[[nm]] <- .style_ci_walk(node[[nm]], color)
+  # Single-bracket reassignment preserves NULL elements — see `.relabel_walk`.
+  for (nm in seq_along(node)) node[nm] <- list(.style_ci_walk(node[[nm]], color))
   node
 }
 
@@ -158,6 +164,17 @@ NULL
       power          = power_rows,
       ci             = ci_rows
     )
+    if (kind == "find_power") {
+      # The overall/omnibus test is a first-class result: it draws one more bar
+      # (last) on the power-at-N chart, matching the table. NULL when the family
+      # suppressed the overall test (mixed/GLMM) → no bar.
+      if (!is.null(inner$overall_significant_rate)) {
+        out$overall_power <- inner$overall_significant_rate[[1]]
+        if (!is.null(inner$overall_significant_ci)) {
+          out$overall_ci <- I(as.numeric(inner$overall_significant_ci)[1:2])
+        }
+      }
+    }
     if (kind == "find_sample_size") {
       # histogram: always corrected (for at_least_k / exactly_k curves)
       if (!is.null(inner$success_count_histogram_corrected)) {
@@ -315,32 +332,53 @@ CI_DEFAULT_COLOR <- "#333333"
   invisible(path)
 }
 
-#' Plot method for mcpower_result (power-at-N chart via Vega-Lite CDN HTML).
+#' Plot method for mcpower_result (power-at-N chart via Vega-Lite).
 #'
-#' No \code{file} argument: writes a self-contained stacked HTML file to the
-#' working directory (\code{find_power.html}) and opens it. Successive calls use
-#' \code{_2}, \code{_3}, … suffixes to avoid clobbering.
+#' No \code{file} argument: displays the chart. When \pkg{vegawidget} is
+#' installed and the session is interactive, the chart renders as a bundled-JS
+#' htmlwidget — it shows inline in the RStudio Viewer (or opens in the browser
+#' under plain R) with no CDN, so it works in sandboxed panes that block the
+#' fallback. Otherwise a self-contained CDN HTML file is written to the working
+#' directory (\code{find_power.html}; successive calls use \code{_2}, \code{_3},
+#' … suffixes) and opened; its path is reported so it can be opened manually.
 #' With a \code{file} argument: delegates to \code{save_plot()} for
 #' image/widget export (requires optional renderers).
 #'
 #' @param x    An mcpower_result object returned by \code{find_power()}.
 #' @param file Optional output path; extension selects format (html/svg/png/pdf).
 #' @param ...  Passed to \code{save_plot()} when \code{file} is supplied.
-#' @return Invisibly, the path written.
+#' @return Invisibly: the rendered widget (vegawidget path) or the path written (CDN fallback).
 #' @export
 plot.mcpower_result <- function(x, file = NULL, ...) {
   kind <- attr(x, "mcpower_kind") %||% "find_power"
   if (!is.null(file)) return(save_plot(x, file, ...))
   blocks <- .plot_blocks(x, kind)
+
+  # Preferred: render through vegawidget so the JS is bundled locally (no CDN).
+  # The htmltools print method routes to getOption("viewer") in RStudio or a
+  # temp file + browser under plain R, so it shows where CDN HTML stays blank.
+  if (interactive() && requireNamespace("vegawidget", quietly = TRUE)) {
+    widgets <- lapply(blocks, function(spec) {
+      spec_json <- .apply_theme(
+        jsonlite::toJSON(spec, auto_unbox = TRUE, null = "null"), "light-print")
+      vegawidget::vegawidget(vegawidget::as_vegaspec(spec_json))
+    })
+    out <- htmltools::browsable(htmltools::tagList(widgets))
+    print(out)
+    return(invisible(out))
+  }
+
+  # Fallback: zero-dependency self-contained CDN HTML file, opened in a browser.
   base <- if (kind == "find_sample_size") "find_sample_size.html" else "find_power.html"
   path <- .mcpower_next_free(base)
-  .write_stacked_html(blocks, path, theme = "print")
+  .write_stacked_html(blocks, path, theme = "light-print")
   open_ok <- interactive() &&
              (.Platform$OS.type == "windows" || nzchar(Sys.getenv("DISPLAY")) ||
               nzchar(Sys.getenv("WAYLAND_DISPLAY")) || Sys.info()[["sysname"]] == "Darwin")
   if (open_ok) {
     viewer <- getOption("viewer")
     if (is.function(viewer)) viewer(path) else utils::browseURL(path)
+    message(sprintf("Wrote and opened %s", path))
   } else {
     message(sprintf("Wrote %s (no display — open it manually).", path))
   }
@@ -361,7 +399,7 @@ plot.mcpower_sample_size_result <- plot.mcpower_result
 #' Renders the text summary followed by a Vega-Lite chart widget when
 #' \pkg{vegawidget} is available, or falls back to plain text otherwise.
 #' Block selection: find_power -> "power" block; find_sample_size single-scenario
-#' -> "curve" block; multi-scenario -> "overlay" block. Print theme applied.
+#' -> "curve" block; multi-scenario -> "overlay" block. light-print theme applied.
 #'
 #' @param x   An mcpower_report object returned by \code{summary()}.
 #' @param ... Passed to \code{knitr::knit_print}.
@@ -390,10 +428,10 @@ knit_print.mcpower_report <- function(x, ...) {
     }
   }
 
-  # Apply print theme
+  # Apply light-print theme
   spec_json <- .apply_theme(
     jsonlite::toJSON(spec, auto_unbox = TRUE, null = "null"),
-    "print"
+    "light-print"
   )
   widget <- vegawidget::vegawidget(vegawidget::as_vegaspec(spec_json))
   out <- htmltools::tagList(
@@ -466,14 +504,14 @@ as_pdf.default <- function(x, file, ...)
 #' \pkg{rsvg} (system \code{librsvg}: \code{apt librsvg2-dev} /
 #' \code{dnf librsvg2-devel} on Linux).
 #'
-#' Default theme is \code{"print"}; pass \code{theme = NULL} for theme-naked output.
+#' Default theme is \code{"light-print"}; pass \code{theme = NULL} for theme-naked output.
 #'
 #' @param x An \code{mcpower_result}, \code{mcpower_sample_size_result}, or \code{mcpower_report}.
 #' @param file Output path; extension selects the format.
 #' @param theme Optional theme name (one of \code{list_plot_themes()}), or \code{NULL} for theme-naked.
 #' @param scale Raster scale for PNG (default 2). The PNG is rasterised at \code{scale × SVG pixel width}.
 #' @export
-save_plot <- function(x, file, theme = "print", scale = 2) {
+save_plot <- function(x, file, theme = "light-print", scale = 2) {
   if (inherits(x, "mcpower_report")) {
     result <- x$result
     kind <- x$kind %||% "find_power"
@@ -553,8 +591,8 @@ save_plot <- function(x, file, theme = "print", scale = 2) {
 #' argument of any plotting function.  Themes are embedded at build time from
 #' \code{configs/plot-themes.json}.
 #'
-#' @return A character vector of theme names (e.g. \code{"light"}, \code{"dark"},
-#'   \code{"print"}, \code{"wild"}).
+#' @return A character vector of theme names (e.g. \code{"light-print"},
+#'   \code{"dark-print"}, \code{"light-app"}, \code{"dark-app"}).
 #' @name list_plot_themes
 #' @export
 NULL

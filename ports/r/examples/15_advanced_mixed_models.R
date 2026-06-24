@@ -8,7 +8,7 @@
 #
 # Run with:  Rscript 15_advanced_mixed_models.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # ===========================================================================
 # 1. Random slopes — (1 + x | group)

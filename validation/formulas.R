@@ -518,7 +518,7 @@ upload_cont_binary <- list(
 # marginals + Pearson correlation), but strict bootstrap copies entire rows from
 # the uploaded frame so every generated row satisfies x2 = x1^2.
 #
-# The fixture lives in ports/r/examples/nonlinear_parabola.csv (x1 ∈ [0,3],
+# The fixture lives in validation/data/nonlinear_parabola.csv (x1 ∈ [0,3],
 # x2 = x1^2; 150 rows).  The empirical Pearson r(x1,x2) ≈ 0.968, which NORTA
 # would also match — the discriminating assertion is the parabolic joint, not
 # the linear correlation alone.
@@ -533,7 +533,7 @@ upload_strict_nonlinear <- list(
   formula     = "y ~ x1 + x2",
   family      = "ols",
   effects     = "x1=0.30, x2=0.20",
-  upload_csv  = "../ports/r/examples/nonlinear_parabola.csv",   # relative to mcpower/validation/
+  upload_csv  = "data/nonlinear_parabola.csv",   # relative to mcpower/validation/
   upload_cols = c("x1", "x2"),
   cont_cols   = c("x1", "x2"),
   binary_cols = character(0),

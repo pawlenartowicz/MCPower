@@ -9,7 +9,7 @@
 #
 # Run with:  Rscript 09_anova_posthoc.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Three-arm trial: does pain reduction differ across placebo / low / high dose?
 model <- MCPower$new("pain_reduction ~ dose_group")

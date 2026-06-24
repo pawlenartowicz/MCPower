@@ -7,7 +7,7 @@
 #
 # Run with:  Rscript 02_sample_size.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # 1. Define the model.
 model <- MCPower$new("test_score ~ intervention + prior_knowledge + motivation")

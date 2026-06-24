@@ -13,7 +13,7 @@
 #
 # Run with:  Rscript 03_interactions.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # 1. The `*` operator — factorial shorthand. It expands to advertising + age +
 #    advertising:age, so all three terms take an effect below.

@@ -8,7 +8,7 @@
 #
 # Run with:  Rscript 14_clustered_logistic.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Example: Multi-clinic trial with a binary outcome.
 # Patients are nested in clinics, and the outcome is whether each patient

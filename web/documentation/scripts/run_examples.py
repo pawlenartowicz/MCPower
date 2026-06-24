@@ -6,7 +6,7 @@ namespace, captures stdout into ``output``, and stamps ``captured_at``.
 
 If an entry sets ``"plot"``, the code must leave the result object to be plotted
 in a variable named ``result``; the runner renders it to
-``../assets/examples/<plot>`` via that result's public ``save_plot`` (PNG, print
+``../assets/examples/<plot>`` via that result's public ``save_plot`` (PNG, light-print
 theme — the default). This script also doubles as the shared renderer: on every run it sweeps
 ``../assets/examples`` for any ``*.vl.json`` specs left by ``run_examples.R``
 (the R port has no native PNG renderer) and converts them to PNG with

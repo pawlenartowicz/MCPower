@@ -4,7 +4,7 @@
 \alias{save_plot}
 \title{Save an MCPower result's chart to a file}
 \usage{
-save_plot(x, file, theme = "print", scale = 2)
+save_plot(x, file, theme = "light-print", scale = 2)
 }
 \arguments{
 \item{x}{An \code{mcpower_result}, \code{mcpower_sample_size_result}, or \code{mcpower_report}.}
@@ -27,5 +27,5 @@ dependency. SVG export requires \pkg{vegawidget} + \pkg{V8}. PNG/PDF require
 \pkg{rsvg} (system \code{librsvg}: \code{apt librsvg2-dev} /
 \code{dnf librsvg2-devel} on Linux).
 
-Default theme is \code{"print"}; pass \code{theme = NULL} for theme-naked output.
+Default theme is \code{"light-print"}; pass \code{theme = NULL} for theme-naked output.
 }

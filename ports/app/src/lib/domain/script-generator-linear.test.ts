@@ -138,7 +138,7 @@ describe('generateLinearScript', () => {
   it('generates an R script', () => {
     const out = generateLinearScript(linearSpec, 'find-power', { sample_size: 100 }, 'r');
     expect(out).toContain('library(mcpower)');
-    expect(out).toContain('install.packages("mcpower", repos = "https://pawlenartowicz.r-universe.dev")');
+    expect(out).toContain('install.packages("mcpower", repos = "https://r.mcpower.app")');
     expect(out).toContain('model <- MCPower$new("');
     expect(out).toContain('y ~ x1');                   // R formula separator
     expect(out).toContain('model$set_effects("');

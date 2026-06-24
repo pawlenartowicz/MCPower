@@ -101,12 +101,12 @@ function deepMerge(base: Record<string, unknown>, overlay: Record<string, unknow
 }
 
 /**
- * Apply the `print` theme from `configs/plot-themes.json` onto a parsed
+ * Apply the `light-print` theme from `configs/plot-themes.json` onto a parsed
  * theme-naked Vega-Lite spec object (mutates `spec`). Used by ExportTab to
- * embed the print theme into saved artifacts (white background, black axes,
+ * embed the light-print theme into saved artifacts (white background, black axes,
  * colour-blind–friendly palette — no live CSS involved).
  * Import `plotThemes` via `import plotThemes from '$configs/plot-themes.json'`
- * and pass `plotThemes.print` as `printTheme`.
+ * and pass `plotThemes['light-print']` as `printTheme`.
  */
 export function applyPrintTheme(
   spec: Record<string, unknown>,

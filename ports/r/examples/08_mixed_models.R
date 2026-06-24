@@ -7,7 +7,7 @@
 #
 # Run with:  Rscript 08_mixed_models.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Example: Education study where students are nested in classrooms.
 # Research question: Does a teaching method raise test scores, accounting for

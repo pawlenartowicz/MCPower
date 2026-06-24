@@ -1,5 +1,5 @@
-"""Visualise results: plot() opens a print-themed HTML (no extra deps), save_plot() renders
-to png/svg/pdf/html; tours the print default, theme override, per-block file sets, and
+"""Visualise results: plot() opens a light-print-themed HTML (no extra deps), save_plot() renders
+to png/svg/pdf/html; tours the light-print default, theme override, per-block file sets, and
 stacked HTML."""
 
 from mcpower import MCPower
@@ -17,18 +17,18 @@ model.set_variable_type("treatment=binary")
 #    plus the omnibus row — the same view summary() prints as a table.
 result = model.find_power(sample_size=120, target_test="all", verbose=False)
 
-# 3. plot() with no path writes a print-themed stacked HTML (find_power.html)
+# 3. plot() with no path writes a light-print-themed stacked HTML (find_power.html)
 #    and opens it. The HTML needs a CDN connection to load the Vega-Lite runtime
 #    but requires NO extra Python packages. Headless? It writes the file and
 #    tells you the path.
-print(">>> result.plot()  # power-at-N: print-themed HTML, opened in browser")
+print(">>> result.plot()  # power-at-N: light-print-themed HTML, opened in browser")
 result.plot()
 
 # 4. save_plot() saves to a file; format follows the suffix (.png/.svg/.pdf/.html).
-#    Default theme is 'print' — white background, black axes, light-grey grid,
+#    Default theme is 'light-print' — white background, black axes, light-grey grid,
 #    colourblind-safe palette. Needs the optional renderer for non-HTML:
 #    pip install mcpower[plot]
-print("\n>>> result.save_plot('power_default.png')  # print theme by default")
+print("\n>>> result.save_plot('power_default.png')  # light-print theme by default")
 try:
     result.save_plot("power_default.png")
     print("  saved power_default.png")
@@ -37,26 +37,35 @@ except ImportError as e:
 
 # 5. theme= overrides the default. available_themes() lists the choices.
 print(f"\n>>> available_themes()  ->  {available_themes()}")
-print(">>> result.save_plot('power_dark.svg', theme='dark')")
+print(">>> result.save_plot('power_dark.svg', theme='dark-print')")
 try:
-    result.save_plot("power_dark.svg", theme="dark")
+    result.save_plot("power_dark.svg", theme="dark-print")
     print("  saved power_dark.svg")
 except ImportError as e:
     print(f"  renderer not installed — {e}")
 
+# 5b. Tour every theme. HTML needs no extra packages, so render one file per
+#     theme — open them side by side to compare backgrounds and palettes.
+#     'light-print'/'dark-print' are colourblind-safe print palettes; 'light-app'/
+#     'dark-app' match the desktop/web app's light and dark charts.
+print(">>> result.save_plot('power_<theme>.html', theme=<theme>)  # one per theme")
+for th in available_themes():
+    result.save_plot(f"power_{th}.html", theme=th)
+    print(f"  saved power_{th}.html")
+
 # 6. HTML is the exception: one stacked file with every block, CDN-loaded runtime,
-#    no extra packages needed. It is print-themed by default (it is a saved artifact).
+#    no extra packages needed. It is light-print-themed by default (it is a saved artifact).
 print("\n>>> result.save_plot('power_report.html')  # stacked HTML, all blocks")
 result.save_plot("power_report.html")
 print("  saved power_report.html")
 
 # 7. Power curves. A find_sample_size result plots as power-vs-N — one line per
 #    effect, with the target-power reference line — the headline planning view.
-#    Same plot() / save_plot() API; same print default.
+#    Same plot() / save_plot() API; same light-print default.
 curve = model.find_sample_size(
     target_test="all", from_size=40, to_size=300, by=20, verbose=False
 )
-print("\n>>> curve.plot()  # power curves: print-themed HTML, opened in browser")
+print("\n>>> curve.plot()  # power curves: light-print-themed HTML, opened in browser")
 curve.plot()
 
 # 8. Multi-target sample-size: save_plot writes ONE FILE PER BLOCK with derived

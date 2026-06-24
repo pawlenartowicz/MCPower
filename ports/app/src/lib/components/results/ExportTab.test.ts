@@ -176,7 +176,7 @@ describe('ExportTab — block selector', () => {
   });
 });
 
-describe('ExportTab — print theme', () => {
+describe('ExportTab — light-print theme', () => {
   beforeEach(() => {
     embedPrintMock.mockClear();
     saveMock.mockClear();
@@ -189,7 +189,7 @@ describe('ExportTab — print theme', () => {
     await fireEvent.click(getByTestId('export-save-btn'));
     await new Promise((r) => setTimeout(r, 20));
     expect(embedPrintMock).toHaveBeenCalledOnce();
-    // The third argument to embedPrint is the print theme — must include background:#ffffff.
+    // The third argument to embedPrint is the light-print theme — must include background:#ffffff.
     const call = embedPrintMock.mock.calls[0] as unknown as [unknown, unknown, Record<string, unknown>];
     const printTheme = call[2];
     expect(printTheme['background']).toBe('#ffffff');

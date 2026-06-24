@@ -8,7 +8,7 @@
 #
 # Run with:  Rscript 13_crossed_random_effects.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Example: Psycholinguistics word-recognition experiment.
 # Each participant sees each item, so subjects and items are CROSSED (not nested).

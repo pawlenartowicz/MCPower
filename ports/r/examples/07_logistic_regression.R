@@ -7,7 +7,7 @@
 #
 # Run with:  Rscript 07_logistic_regression.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Example: Observational study of a binary clinical event.
 # Research question: Which factors predict whether a patient responds (yes/no)?

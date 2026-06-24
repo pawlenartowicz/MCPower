@@ -122,6 +122,10 @@ fn plot_point_from_power_dict(d: &Bound<'_, PyDict>) -> PyResult<PlotPoint> {
     let contrast_pairs = contrast_pairs_of(d)?;
     let power: Vec<f64> = first_row(get("power")?, "power")?;
     let ci = first_ci_row(get("ci")?, "ci")?;
+    // Optional overall/omnibus test: scalar rate + `[lo, hi]` CI. Absent (or
+    // `None`) whenever the family suppressed the overall test (mixed/GLMM) or an
+    // older caller didn't supply it; then no `overall` bar is drawn.
+    let (overall_power, overall_ci) = optional_overall(d)?;
     Ok(PlotPoint {
         n,
         target_indices,
@@ -129,11 +133,36 @@ fn plot_point_from_power_dict(d: &Bound<'_, PyDict>) -> PyResult<PlotPoint> {
         power,
         ci,
         histogram: vec![],
-        // The overall series rides the sample-size curve only; the Python
-        // envelope does not surface per-N overall rates, so it stays absent here.
-        overall_power: None,
-        overall_ci: None,
+        overall_power,
+        overall_ci,
     })
+}
+
+/// Optional `overall_power` (scalar) + `overall_ci` (`[lo, hi]`) keys. A missing
+/// key, an explicit `None`, or a missing CI all yield `(None, None)` — the bridge
+/// then draws no `overall` bar. A present rate with no CI degenerates to a
+/// zero-width interval at the rate (matches the orchestrator's curve fallback).
+fn optional_overall(d: &Bound<'_, PyDict>) -> PyResult<(Option<f64>, Option<Ci>)> {
+    let rate: Option<f64> = match d.get_item("overall_power")? {
+        Some(obj) if !obj.is_none() => Some(obj.extract()?),
+        _ => None,
+    };
+    let Some(rate) = rate else {
+        return Ok((None, None));
+    };
+    let ci = match d.get_item("overall_ci")? {
+        Some(obj) if !obj.is_none() => {
+            let seq = obj
+                .cast::<PySequence>()
+                .map_err(|_| PyValueError::new_err("overall_ci must be (lo, hi)"))?;
+            Ci {
+                lo: seq.get_item(0)?.extract()?,
+                hi: seq.get_item(1)?.extract()?,
+            }
+        }
+        _ => Ci { lo: rate, hi: rate },
+    };
+    Ok((Some(rate), Some(ci)))
 }
 
 /// Optional `contrast_pairs` key: list of `[positive, negative]` β-column

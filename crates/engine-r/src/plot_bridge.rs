@@ -99,6 +99,14 @@ struct ScenarioJson {
     /// sample-size grid point; older envelopes omit this field.
     #[serde(default)]
     histogram: Vec<Vec<u64>>,
+    /// find_power only: overall/omnibus test rate at the single N. Absent (or
+    /// `null`) when the family suppressed the overall test → no `overall` bar.
+    #[serde(default)]
+    overall_power: Option<f64>,
+    /// find_power only: `[lo, hi]` CI for `overall_power`. Absent → the bar falls
+    /// back to a zero-width interval at the rate.
+    #[serde(default)]
+    overall_ci: Option<Vec<f64>>,
 }
 
 fn parse_contrast_pairs(rows: &[Vec<u32>]) -> Vec<(u32, u32)> {
@@ -212,9 +220,15 @@ pub fn power_plot_set_json(
                 power,
                 ci,
                 histogram: vec![],
-                // The overall series rides the sample-size curve only.
-                overall_power: None,
-                overall_ci: None,
+                // The overall/omnibus test draws one more bar (last) on the
+                // power-at-N chart, matching the table. Absent when the family
+                // suppressed it. A present rate with no CI degenerates to a
+                // zero-width interval in the orchestrator.
+                overall_power: sc.overall_power,
+                overall_ci: sc
+                    .overall_ci
+                    .as_ref()
+                    .and_then(|v| (v.len() >= 2).then(|| Ci { lo: v[0], hi: v[1] })),
             }],
         });
     }

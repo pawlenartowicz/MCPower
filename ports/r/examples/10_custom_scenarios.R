@@ -7,7 +7,7 @@
 #
 # Run with:  Rscript 10_custom_scenarios.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # Example: Field experiment whose real-world conditions are messier than the
 # clean simulation defaults. Scenarios stress-test a power estimate against

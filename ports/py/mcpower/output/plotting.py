@@ -271,6 +271,12 @@ def _build_envelope(result: Dict[str, Any], meta: Dict[str, Any], kind: str) -> 
             "power": inner[pkey],
             "ci": inner[ckey],
         }
+        if kind == "find_power":
+            # The overall/omnibus test is a first-class result: it draws one more
+            # bar (last) on the power-at-N chart, matching the table. Absent when
+            # the family suppressed the overall test (mixed/GLMM) → no bar.
+            entry["overall_power"] = inner.get("overall_significant_rate")
+            entry["overall_ci"] = inner.get("overall_significant_ci")
         if kind == "find_sample_size":
             entry["histogram"] = inner.get("success_count_histogram_corrected", [])
         scenarios_out.append(entry)
@@ -424,7 +430,7 @@ def save_result_plot(
     kind: str,
     path: str,
     *,
-    theme: str = "print",
+    theme: str = "light-print",
     scale: float = 2.0,
     ppi: Optional[float] = None,
     label_map: Optional[Dict[str, str]] = None,
@@ -432,7 +438,7 @@ def save_result_plot(
     """Save the plot(s) for ``result`` to ``path``.
 
     HTML suffix → one stacked file; other suffixes → one file per block with
-    derived names (see ``_unique_block_paths``). Default theme is ``"print"``;
+    derived names (see ``_unique_block_paths``). Default theme is ``"light-print"``;
     pass ``theme=None`` for theme-naked output.
     """
     if label_map is None:
@@ -468,13 +474,13 @@ def view_result_plot(
     *,
     label_map: Optional[Dict[str, str]] = None,
 ) -> None:
-    """Write a stacked print-themed HTML in cwd (uniquely named) and open it."""
+    """Write a stacked light-print-themed HTML in cwd (uniquely named) and open it."""
     if label_map is None:
         label_map = {}
     blocks = _plot_blocks(result, meta, kind, label_map=label_map)
     basename = "find_power.html" if kind == "find_power" else "find_sample_size.html"
     out = _next_free_path(basename)
-    _write_stacked_html(blocks, out, theme="print")
+    _write_stacked_html(blocks, out, theme="light-print")
     msg = _open_or_report(out)
     print(msg)
 
@@ -486,7 +492,7 @@ def mimebundle_spec(
     *,
     label_map: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Return a single print-themed spec dict for Jupyter rich repr.
+    """Return a single light-print-themed spec dict for Jupyter rich repr.
 
     Block selection:
       - ``find_power``                    → ``power``
@@ -508,5 +514,5 @@ def mimebundle_spec(
         else:
             spec = block_dict.get("curve", next(iter(block_dict.values())))
 
-    spec = json.loads(_apply_theme(json.dumps(spec), "print"))
+    spec = json.loads(_apply_theme(json.dumps(spec), "light-print"))
     return spec

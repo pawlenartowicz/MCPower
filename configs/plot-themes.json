@@ -1,7 +1,5 @@
 {
-  "light": { "background": "#ffffff", "axis": { "labelColor": "#222", "titleColor": "#222" } },
-  "dark": { "background": "#1e1e1e", "axis": { "labelColor": "#ddd", "titleColor": "#ddd" } },
-  "print": {
+  "light-print": {
     "background": "#ffffff",
     "font": "sans-serif",
     "view": { "stroke": "transparent" },
@@ -26,5 +24,62 @@
       ]
     }
   },
-  "wild": { "background": "#3a0066", "axis": { "labelColor": "#ffd700", "titleColor": "#ffd700" } }
+
+  "dark-print": {
+    "background": "#1e1e1e",
+    "font": "sans-serif",
+    "view": { "stroke": "transparent" },
+    "axis": {
+      "labelColor": "#e0e0e0",
+      "titleColor": "#ffffff",
+      "tickColor": "#888888",
+      "domainColor": "#888888",
+      "gridColor": "#3a3a3a"
+    },
+    "legend": { "labelColor": "#e0e0e0", "titleColor": "#ffffff" },
+    "range": {
+      "category": [
+        "#56B4E9",
+        "#E69F00",
+        "#00C49A",
+        "#F0772E",
+        "#F0E442",
+        "#D0D0D0"
+      ]
+    }
+  },
+
+  "light-app": {
+    "background": "#ffffff",
+    "view": { "stroke": "transparent" },
+    "mark": { "color": "#c2356b" },
+    "range": { "category": ["#c2356b", "#3d7d6e", "#5a7a9a", "#b58936", "#8a909a"] },
+    "axis": {
+      "labelColor": "#6a7280",
+      "titleColor": "#14161a",
+      "gridColor": "#d4dae0",
+      "domainColor": "#d4dae0",
+      "tickColor": "#d4dae0"
+    },
+    "legend": { "labelColor": "#14161a", "titleColor": "#14161a" },
+    "header": { "labelColor": "#14161a", "titleColor": "#14161a" },
+    "title": { "color": "#14161a" }
+  },
+
+  "dark-app": {
+    "background": "#110b1c",
+    "view": { "stroke": "transparent" },
+    "mark": { "color": "#ff5e8a" },
+    "range": { "category": ["#ff5e8a", "#d9a55a", "#9b8ad9", "#6dbca5", "#9b8ea0"] },
+    "axis": {
+      "labelColor": "#8e8295",
+      "titleColor": "#ede5f0",
+      "gridColor": "#2a2138",
+      "domainColor": "#2a2138",
+      "tickColor": "#2a2138"
+    },
+    "legend": { "labelColor": "#ede5f0", "titleColor": "#ede5f0" },
+    "header": { "labelColor": "#ede5f0", "titleColor": "#ede5f0" },
+    "title": { "color": "#ede5f0" }
+  }
 }

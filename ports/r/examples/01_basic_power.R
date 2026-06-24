@@ -7,7 +7,7 @@
 #
 # Run with:  Rscript 01_basic_power.R
 
-suppressMessages(library(mcpower))
+library(mcpower)
 
 # 1. Define the model with an R formula.
 model <- MCPower$new("patient_outcome ~ treatment + baseline_score")

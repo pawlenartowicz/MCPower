@@ -43,7 +43,7 @@
     tab.plots?.blocks?.find((b) => b.key === selectedKey)?.spec ?? null
   );
 
-  const printTheme = (plotThemes as Record<string, Record<string, unknown>>)['print']!;
+  const printTheme = (plotThemes as Record<string, Record<string, unknown>>)['light-print']!;
 
   async function save() {
     const specStr = selectedSpec;

@@ -158,7 +158,7 @@ export async function embedPrint(
   printTheme: Record<string, unknown>,
 ): Promise<EmbedResult> {
   const parsed: Record<string, unknown> = JSON.parse(specString);
-  // CI styling: use black for error bars on the print theme (fg = #000000).
+  // CI styling: use black for error bars on the light-print theme (fg = #000000).
   styleErrorBars(parsed, { chart1: '#0072B2', chart2: '#E69F00', chart3: '#009E73',
     chart4: '#D55E00', chart5: '#56B4E9', fg: '#000000', mutedFg: '#333333', border: '#dddddd' });
   applyPrintTheme(parsed, printTheme);

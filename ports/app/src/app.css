@@ -105,6 +105,7 @@
   --border: #d4dae0;
   --input: #d4dae0;
   --ring: #c2356b;
+  /* Mirrored by light-app / dark-app in configs/plot-themes.json — change together. */
   --chart-1: #c2356b;
   --chart-2: #3d7d6e;
   --chart-3: #5a7a9a;
@@ -142,6 +143,7 @@
   --border: #2a2138;
   --input: #2a2138;
   --ring: #ff5e8a;
+  /* Mirrored by light-app / dark-app in configs/plot-themes.json — change together. */
   --chart-1: #ff5e8a;
   --chart-2: #d9a55a;
   --chart-3: #9b8ad9;

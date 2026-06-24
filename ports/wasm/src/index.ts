@@ -371,19 +371,19 @@ export async function findSampleSize(
 
 /**
  * Wrap a Vega-Lite spec JSON string in a self-contained HTML document using
- * the shared CDN template (`configs/plot-html-template.html`).  The `print`
+ * the shared CDN template (`configs/plot-html-template.html`).  The `light-print`
  * theme is deep-merged into `spec.config` before embedding — this is a saved
- * artifact, so it gets the print theme.  The returned string can be written to
+ * artifact, so it gets the light-print theme.  The returned string can be written to
  * a `.html` file or opened in a browser tab via a Blob URL.
  *
- * Mirrors Python's `_write_stacked_html` (theme=`"print"`) in
+ * Mirrors Python's `_write_stacked_html` (theme=`"light-print"`) in
  * `ports/py/mcpower/output/plotting.py`.
- * Mirror checklist: if the `<\/` escape strategy or the `"print"` theme-key
+ * Mirror checklist: if the `<\/` escape strategy or the `"light-print"` theme-key
  * changes in `_write_stacked_html`, update this function to match.
  */
 export function plotHtml(spec: string): string {
   const specObj = JSON.parse(spec) as Record<string, unknown>;
-  const printTheme = (plotThemes as Record<string, Record<string, unknown>>)['print']!;
+  const printTheme = (plotThemes as Record<string, Record<string, unknown>>)['light-print']!;
   const config = (specObj['config'] !== null && typeof specObj['config'] === 'object' && !Array.isArray(specObj['config']))
     ? specObj['config'] as Record<string, unknown>
     : {};

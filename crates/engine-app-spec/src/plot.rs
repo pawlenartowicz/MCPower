@@ -56,8 +56,11 @@ fn power_scenario(label: &str, pr: &PowerResult, corrected: bool) -> PlotScenari
         power,
         ci,
         histogram: Vec::new(), // power-at-N never reads the histogram
-        overall_power: None,   // the overall series rides the sample-size curve only
-        overall_ci: None,
+        // The overall/omnibus test is a first-class result: it draws one more
+        // bar (last) on the power-at-N chart, matching the table and the curve.
+        // `None` whenever the family suppressed the overall test (mixed/GLMM).
+        overall_power: pr.overall_significant_rate,
+        overall_ci: pr.overall_significant_ci,
     };
     PlotScenario {
         label: label.to_string(),

@@ -142,13 +142,34 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
                 "ci_hi":    ci.hi,
             }));
         }
+        // The overall/omnibus test as one more bar under the `"overall"` token
+        // (hosts relabel it F-test / LRT), appended after the marginals/contrasts
+        // so it lands last on the axis — matching the results table, where the
+        // overall row follows the per-effect rows. Mirrors the sample-size curve.
+        if let Some(op) = point.overall_power {
+            let ci = point.overall_ci.unwrap_or(Ci { lo: op, hi: op });
+            values.push(json!({
+                "scenario": label,
+                "target":   "overall",
+                "power":    op,
+                "ci_lo":    ci.lo,
+                "ci_hi":    ci.hi,
+            }));
+        }
     }
 
+    // The overall test (when present) draws one extra bar per scenario; count it
+    // in the row total so the data-rect height accounts for it.
+    let has_overall = scenarios
+        .first()
+        .and_then(|sc| sc.points.first())
+        .map(|p| p.overall_power.is_some())
+        .unwrap_or(false);
     // G = target rows the emitter draws (one bar per target), S = scenarios/row.
     let g = scenarios
         .first()
         .and_then(|sc| sc.points.first())
-        .map(|p| p.power.len())
+        .map(|p| p.power.len() + usize::from(has_overall))
         .unwrap_or(0) as f64;
     let s = if multi { scenarios.len() as f64 } else { 1.0 };
     // Flush within group, ⅔-bar gap between groups; 7-unit floor (the 2-row ×
@@ -177,6 +198,11 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
         },
         "y": {
             "field": "target", "type": "nominal", "title": "Effect",
+            // `sort: null` ⇒ axis follows data order (power-vector order, with the
+            // appended `overall` bar last) instead of Vega's default alphabetical.
+            // This matches the results table and keeps `overall` at the bottom. A
+            // token sort list would break under host relabel (see the colour note).
+            "sort": null,
             "scale": { "paddingInner": y_padding_inner, "paddingOuter": 0 },
         },
     });
@@ -213,7 +239,9 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
         let mut ci_enc = json!({
             "x":  { "field": "ci_lo", "type": "quantitative", "title": "Power" },
             "x2": { "field": "ci_hi" },
-            "y":  { "field": "target", "type": "nominal", "title": "Effect" },
+            // Match the bar layer's data-order sort so the errorbars align with
+            // their bars on the shared y scale (see the bar `sort: null` note).
+            "y":  { "field": "target", "type": "nominal", "title": "Effect", "sort": null },
         });
         // Mirror the bar layer's effect colour (no pinned domain — see the bar block).
         ci_enc["color"] = json!({ "field": "target", "type": "nominal" });

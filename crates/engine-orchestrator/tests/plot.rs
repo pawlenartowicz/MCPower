@@ -366,6 +366,44 @@ fn power_at_n_is_horizontal_with_power_sort() {
 }
 
 #[test]
+fn power_at_n_includes_overall_bar_last() {
+    // A single scenario with two marginals plus an overall/omnibus test: the
+    // overall test is a first-class result and must draw one more bar, appended
+    // AFTER the marginals so `sort: null` lands it last on the axis (matching the
+    // table). G grows to 3 for the height formula.
+    let mut pt = point(120, &[1, 2], &[0.83, 0.71], &[(0.80, 0.86), (0.67, 0.74)]);
+    pt.overall_power = Some(0.64);
+    pt.overall_ci = Some(Ci { lo: 0.60, hi: 0.68 });
+    let scenarios = vec![PlotScenario {
+        label: "optimistic".into(),
+        points: vec![pt],
+    }];
+
+    let v = parse(&power_at_n_spec(&scenarios, &PlotOptions::default()));
+    let values = v["data"]["values"].as_array().unwrap();
+    assert_eq!(values.len(), 3, "two marginals + one overall bar");
+    // Overall is the LAST data row (data order == axis order under sort: null).
+    let last = values.last().unwrap();
+    assert_eq!(last["target"], "overall");
+    assert_eq!(last["power"], 0.64);
+    assert_eq!(last["ci_lo"], 0.60);
+    assert_eq!(last["ci_hi"], 0.68);
+    // y axis follows data order, not Vega's default alphabetical.
+    assert_eq!(v["layer"][0]["encoding"]["y"]["sort"], Value::Null);
+    // G=3, S=1: 3 + 2*⅔ = 4.333 < 7 floor ⇒ round(7*16) == 112. Use a fixture
+    // above the floor to prove the overall bar is counted in G.
+    let mut many_pt = point(120, &[1, 2, 3, 4, 5, 6, 7, 8], &[0.8; 8], &[(0.7, 0.9); 8]);
+    many_pt.overall_power = Some(0.9);
+    let many = vec![PlotScenario {
+        label: "optimistic".into(),
+        points: vec![many_pt],
+    }];
+    // G=9 (8 marginals + overall), S=1: 9 + 8*⅔ = 14.333 ⇒ round(14.333*16) == 229.
+    let mv = parse(&power_at_n_spec(&many, &PlotOptions::default()));
+    assert_eq!(mv["height"], 229.0);
+}
+
+#[test]
 fn power_at_n_height_formula() {
     // G=2 targets, S=3 scenarios: G*S + (G-1)*⅔ = 6.667 → floored to 7 units
     // → round(7*16) == 112.

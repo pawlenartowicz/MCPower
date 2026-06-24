@@ -118,7 +118,7 @@ describe('generateLogitScript', () => {
   it('generates an R script', () => {
     const out = generateLogitScript(sampleLogitSpec(), 'find-power', { sample_size: 100 }, 'r');
     expect(out).toContain('library(mcpower)');
-    expect(out).toContain('install.packages("mcpower", repos = "https://pawlenartowicz.r-universe.dev")');
+    expect(out).toContain('install.packages("mcpower", repos = "https://r.mcpower.app")');
     expect(out).toContain('model <- MCPower$new("');
     expect(out).toContain('y ~ x1 + x2');              // R formula separator; both predictors present
     expect(out).toContain('family = "logit"');

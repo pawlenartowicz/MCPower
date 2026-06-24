@@ -36,7 +36,7 @@ assets <- file.path(dirname(here), "assets", "examples")
 # find_sample_size). run_examples.py converts every .vl.json to PNG via
 # vl_convert — so the R port ships no PNG renderer of its own.
 # Fails gracefully with a warning when vegawidget/V8 are absent (they are not
-# needed here — the spec is print-themed JSON written straight to disk).
+# needed here — the spec is light-print-themed JSON written straight to disk).
 write_plot_spec <- function(result, plot_name) {
   dir.create(assets, recursive = TRUE, showWarnings = FALSE)
   kind <- attr(result, "mcpower_kind")
@@ -55,11 +55,11 @@ write_plot_spec <- function(result, plot_name) {
   spec <- if (!is.null(blocks[[block_key]])) blocks[[block_key]] else blocks[[1L]]
   spec_json <- mcpower:::.apply_theme(
     toJSON(spec, auto_unbox = TRUE, null = "null"),
-    "print"
+    "light-print"
   )
   spec_path <- file.path(assets, sub("\\.png$", ".vl.json", plot_name))
   writeLines(spec_json, spec_path)
-  sprintf("(wrote print-themed spec %s; run_examples.py renders it to PNG)", basename(spec_path))
+  sprintf("(wrote light-print-themed spec %s; run_examples.py renders it to PNG)", basename(spec_path))
 }
 
 run_entry <- function(entry) {
