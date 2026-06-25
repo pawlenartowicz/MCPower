@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "mcpower-app"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "engine-app-spec",
  "engine-orchestrator",

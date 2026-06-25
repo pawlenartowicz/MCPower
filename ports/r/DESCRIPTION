@@ -1,6 +1,6 @@
 Package: mcpower
 Title: Statistical Power Analysis via MCPower Engine
-Version: 1.0.2
+Version: 1.0.3
 Authors@R:
     person("Paweł", "Lenartowicz", role = c("aut", "cre"), email = "pawellenartowicz@europe.com")
 Description: R bindings for the MCPower simulation engine. Provides OLS, GLM,
