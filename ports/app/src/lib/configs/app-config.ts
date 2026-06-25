@@ -10,7 +10,12 @@ export const SIMULATION = config.simulation as {
   sample_size_bounds: { from: number; to: number; by: number | 'auto' };
   cluster_auto_count: number;
 };
-export const BENCHMARKS = config.benchmarks as { continuous: number[]; binary_factor: number[] };
+export const BENCHMARKS = config.benchmarks as {
+  continuous: number[];
+  binary_factor: number[];
+  // Logit-outcome (beta) presets: β = log(OR) for OR = 1.5 / 2.5 / 4.0 (Chen et al. 2010).
+  odds: number[];
+};
 export const LIMITS = config.limits as unknown as {
   max_alpha: number; icc_stability: [number, number]; baseline_p_warn: [number, number];
   factor_levels: [number, number];

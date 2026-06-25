@@ -444,6 +444,35 @@
   paste(lines, collapse = "\n")
 }
 
+# Port of tables.py:_fmt_or — odds ratio (exp(β)) for a logit-scale effect, 2 dp.
+# β stays the wire truth; OR is a display-only readout (Chen et al. 2010).
+.fmt_or <- function(beta) sprintf("%.2f", exp(as.numeric(beta)))
+
+# Port of tables.py:_row_or_cell — OR cell for one .build_rows row, or "" when no
+# single configured β applies (omnibus/post-hoc rows; factor headers are spans).
+# β is recovered from meta$effect_sizes via the row's β-column index: the skeleton
+# carries the intercept at index 0 and the n effects at 1..n in the same order as
+# effect_sizes, so engine index `idx` maps to the 1-based `sizes[[idx]]`. A pairwise
+# contrast's OR is exp(β_p − β_n).
+.row_or_cell <- function(r, tix, cpairs, sizes) {
+  kind <- r$kind
+  if (identical(kind, "continuous") || identical(kind, "factor_level")) {
+    if (r$pos >= 1L && r$pos <= length(tix)) {
+      idx <- as.integer(tix[[r$pos]])
+      if (idx >= 1L && idx <= length(sizes)) return(.fmt_or(sizes[[idx]]))
+    }
+  } else if (identical(kind, "contrast")) {
+    j <- r$pos - length(tix)
+    if (j >= 1L && j <= length(cpairs)) {
+      pair <- cpairs[[j]]
+      p <- as.integer(pair[[1L]]); n <- as.integer(pair[[2L]])
+      if (p >= 1L && p <= length(sizes) && n >= 1L && n <= length(sizes))
+        return(.fmt_or(sizes[[p]] - sizes[[n]]))
+    }
+  }
+  ""
+}
+
 # Port of tables.py:main_power_tables — the main result as a character vector
 # of 1 or 2 table strings (two only when correction AND >1 scenario are both on).
 # caption is the base section title (NULL for the short form).
@@ -452,54 +481,73 @@
   corr <- !is.null(meta$correction) && meta$correction != "none"
   multi <- length(scen) > 1L
   inner0 <- scen[[1]]
-  rows <- .build_rows(inner0$target_indices, meta, inner0$contrast_pairs %||% list())
+  cpairs <- inner0$contrast_pairs %||% list()
+  rows <- .build_rows(inner0$target_indices, meta, cpairs)
   ph   <- if (!is.null(inner0$posthoc)) .posthoc_descriptors(meta) else list()
   tgt  <- .fmt_pct(target, tdec)
   posthoc_span <- function(r) list(kind = "span", text = sprintf("%s  (pairwise)", r$label))
   rowcells <- function(...) list(kind = "row", cells = c(...))
+  # Logit-outcome models (logistic regression / binary GLMM) get an OR = exp(β)
+  # column before the always-last Target column; other families render unchanged.
+  is_logit <- identical(meta$outcome_kind, "binary")
+  sizes <- meta$effect_sizes %||% list()
+  tix   <- inner0$target_indices %||% list()
+  or_col <- function(columns) {
+    if (!is_logit) return(columns)
+    k <- length(columns)
+    c(columns[seq_len(k - 1L)], list(list(header = cols$or, align = "r")), columns[k])
+  }
+  with_or <- function(row, or_str) {
+    if (!is_logit) return(row)
+    cells <- row$cells; k <- length(cells)
+    row$cells <- c(cells[seq_len(k - 1L)], or_str, cells[k])
+    row
+  }
 
   if (!multi) {
     if (!corr) {
-      columns <- list(list(header = cols$test,  align = "l"),
-                      list(header = cols$power,  align = "r"),
-                      list(header = cols$target, align = "r"))
+      columns <- or_col(list(list(header = cols$test,  align = "l"),
+                             list(header = cols$power,  align = "r"),
+                             list(header = cols$target, align = "r")))
       table <- list()
       if (!is.null(inner0$overall_significant_rate))
-        table <- c(table, list(rowcells(.overall_label(inner0),
-                     .fmt_pct(inner0$overall_significant_rate[[1]], dec), tgt)))
+        table <- c(table, list(with_or(rowcells(.overall_label(inner0),
+                     .fmt_pct(inner0$overall_significant_rate[[1]], dec), tgt), "")))
       pw <- inner0$power_uncorrected[[1]]
       for (r in rows) {
         if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
-        table <- c(table, list(rowcells(.indent_label(r), .fmt_pct(pw[[r$pos]], dec), tgt)))
+        table <- c(table, list(with_or(rowcells(.indent_label(r), .fmt_pct(pw[[r$pos]], dec), tgt),
+                                       .row_or_cell(r, tix, cpairs, sizes))))
       }
       for (r in ph) {
         if (identical(r$kind, "posthoc_header")) { table <- c(table, list(posthoc_span(r))); next }
         val <- inner0$posthoc[[r$block]]$power_uncorrected[[r$contrast]]
-        table <- c(table, list(rowcells(paste0("  ", r$label), .fmt_pct(val, dec), tgt)))
+        table <- c(table, list(with_or(rowcells(paste0("  ", r$label), .fmt_pct(val, dec), tgt), "")))
       }
       return(.minimal_table(caption, columns, table))
     }
     # correction only: Test | uncorrected | corrected | Target
-    columns <- list(list(header = cols$test,        align = "l"),
-                    list(header = cols$uncorrected, align = "r"),
-                    list(header = cols$corrected,   align = "r"),
-                    list(header = cols$target,      align = "r"))
+    columns <- or_col(list(list(header = cols$test,        align = "l"),
+                           list(header = cols$uncorrected, align = "r"),
+                           list(header = cols$corrected,   align = "r"),
+                           list(header = cols$target,      align = "r")))
     table <- list()
     pu <- inner0$power_uncorrected[[1]]; pc <- inner0$power_corrected[[1]]
     if (!is.null(inner0$overall_significant_rate))
-      table <- c(table, list(rowcells(.overall_label(inner0),
-                   .fmt_pct(inner0$overall_significant_rate[[1]], dec), "(same)", tgt)))
+      table <- c(table, list(with_or(rowcells(.overall_label(inner0),
+                   .fmt_pct(inner0$overall_significant_rate[[1]], dec), "(same)", tgt), "")))
     for (r in rows) {
       if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
-      table <- c(table, list(rowcells(.indent_label(r),
-                   .fmt_pct(pu[[r$pos]], dec), .fmt_pct(pc[[r$pos]], dec), tgt)))
+      table <- c(table, list(with_or(rowcells(.indent_label(r),
+                   .fmt_pct(pu[[r$pos]], dec), .fmt_pct(pc[[r$pos]], dec), tgt),
+                   .row_or_cell(r, tix, cpairs, sizes))))
     }
     for (r in ph) {
       if (identical(r$kind, "posthoc_header")) { table <- c(table, list(posthoc_span(r))); next }
       blk <- inner0$posthoc[[r$block]]
-      table <- c(table, list(rowcells(paste0("  ", r$label),
+      table <- c(table, list(with_or(rowcells(paste0("  ", r$label),
                    .fmt_pct(blk$power_uncorrected[[r$contrast]], dec),
-                   .fmt_pct(blk$power_corrected[[r$contrast]], dec), tgt)))
+                   .fmt_pct(blk$power_corrected[[r$contrast]], dec), tgt), "")))
     }
     return(.minimal_table(caption, columns, table))
   }
@@ -507,9 +555,9 @@
   # multi-scenario: one table per active correction state.
   names_v <- names(scen)
   build_scen_table <- function(pkey) {
-    columns <- c(list(list(header = cols$test, align = "l")),
-                 lapply(names_v, function(nm) list(header = nm, align = "r")),
-                 list(list(header = cols$target, align = "r")))
+    columns <- or_col(c(list(list(header = cols$test, align = "l")),
+                        lapply(names_v, function(nm) list(header = nm, align = "r")),
+                        list(list(header = cols$target, align = "r"))))
     table <- list()
     scen_row <- function(label, pos, overall) {
       raw <- lapply(scen, function(s)
@@ -520,12 +568,12 @@
     }
     if (!is.null(inner0$overall_significant_rate)) {
       r0 <- scen_row(.overall_label(inner0), NA_integer_, TRUE)
-      if (!is.null(r0)) table <- c(table, list(r0))
+      if (!is.null(r0)) table <- c(table, list(with_or(r0, "")))
     }
     for (r in rows) {
       if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
       rr <- scen_row(.indent_label(r), r$pos, FALSE)
-      if (!is.null(rr)) table <- c(table, list(rr))
+      if (!is.null(rr)) table <- c(table, list(with_or(rr, .row_or_cell(r, tix, cpairs, sizes))))
     }
     for (r in ph) {
       if (identical(r$kind, "posthoc_header")) { table <- c(table, list(posthoc_span(r))); next }
@@ -535,7 +583,7 @@
         if (r$block > length(blocks)) { ok <- FALSE; break }
         vals <- c(vals, blocks[[r$block]][[pkey]][[r$contrast]])
       }
-      if (ok) table <- c(table, list(rowcells(paste0("  ", r$label), .fmt_pct(vals, dec), tgt)))
+      if (ok) table <- c(table, list(with_or(rowcells(paste0("  ", r$label), .fmt_pct(vals, dec), tgt), "")))
     }
     list(columns = columns, table = table)
   }
@@ -683,8 +731,14 @@
                      .fmt_pct(target, tdec)))
   enames <- meta$effect_names; esizes <- meta$effect_sizes
   if (!is.null(enames) && !is.null(esizes) && length(enames) > 0L && length(esizes) > 0L) {
-    pairs <- paste(vapply(seq_along(enames), function(i)
-      sprintf("%s=%.2f", enames[[i]], as.numeric(esizes[[i]])), character(1L)), collapse = ", ")
+    # Logit-outcome models echo the OR = exp(β) beside each β; β is the wire truth.
+    fmt_one <- if (identical(meta$outcome_kind, "binary")) {
+      function(i) sprintf("%s=%.2f (OR %s)", enames[[i]], as.numeric(esizes[[i]]),
+                          .fmt_or(esizes[[i]]))
+    } else {
+      function(i) sprintf("%s=%.2f", enames[[i]], as.numeric(esizes[[i]]))
+    }
+    pairs <- paste(vapply(seq_along(enames), fmt_one, character(1L)), collapse = ", ")
     lines <- c(lines, sprintf("effects: %s", pairs))
   }
   if (!is.null(meta$correction) && meta$correction != "none")

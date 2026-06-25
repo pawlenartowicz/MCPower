@@ -91,7 +91,13 @@ class Report:
         names = m.get("effect_names", [])
         sizes = m.get("effect_sizes", [])
         if names and sizes:
-            lines.append("effects: " + ", ".join(f"{n}={s:.2f}" for n, s in zip(names, sizes)))
+            # Logit-outcome models echo the OR = exp(β) beside each β; β is the
+            # wire truth, OR a display-only readout (see tables._fmt_or).
+            if m.get("outcome_kind") == "binary":
+                pairs = (f"{n}={s:.2f} (OR {math.exp(s):.2f})" for n, s in zip(names, sizes))
+            else:
+                pairs = (f"{n}={s:.2f}" for n, s in zip(names, sizes))
+            lines.append("effects: " + ", ".join(pairs))
         if m.get("correction") and m["correction"] != "none":
             lines.append(f"correction: {m['correction']}")
         if m.get("residual") and m["residual"] != "normal":

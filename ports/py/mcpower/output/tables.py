@@ -114,6 +114,40 @@ def _power_row(label, power, target, dec, tdec):
     return ("row", [label, fmt_pct(power, dec), fmt_target(target, tdec)])
 
 
+def _fmt_or(beta: float) -> str:
+    """Odds ratio (`exp(β)`) display for a logit-scale effect, 2 dp — the printed
+    twin of the app's OR readout (beta presets, Chen et al. 2010). β stays the
+    single source of truth on the wire; OR is display-only. Per-1-SD for a
+    continuous predictor, per-category for binary/factor (the magnitude is the
+    same `exp(β)`; only the wording differs)."""
+    return f"{math.exp(beta):.2f}"
+
+
+def _row_or_cell(r, target_indices, contrast_pairs, sizes) -> str:
+    """OR cell (`exp(β)`) for one ``build_rows`` row, or '' when no single
+    configured β applies (omnibus/post-hoc rows; factor headers are spans).
+
+    β is recovered from ``meta['effect_sizes']`` via the row's β-column index:
+    the skeleton carries the intercept at 0 and the n effects at 1..n in the same
+    order as ``effect_sizes``, so skeleton index ``idx`` maps to ``sizes[idx-1]``.
+    A pairwise contrast's OR is ``exp(β_p − β_n)`` — the odds multiplier between
+    its two levels."""
+    kind = r.get("kind")
+    if kind in ("continuous", "factor_level"):
+        pos = r["pos"]
+        if 0 <= pos < len(target_indices):
+            k = target_indices[pos] - 1
+            if 0 <= k < len(sizes):
+                return _fmt_or(sizes[k])
+    elif kind == "contrast":
+        j = r["pos"] - len(target_indices)
+        if 0 <= j < len(contrast_pairs):
+            p, n = contrast_pairs[j][0], contrast_pairs[j][1]
+            if 0 <= p - 1 < len(sizes) and 0 <= n - 1 < len(sizes):
+                return _fmt_or(sizes[p - 1] - sizes[n - 1])
+    return ""
+
+
 def minimal_table(title, columns, rows, *, name_min: int = 18, name_max: int = 44) -> str:
     """Render a minimal-rules (booktabs-style) text table.
 
@@ -182,8 +216,26 @@ def main_power_tables(scenarios, meta, *, dec, tdec, target, caption):
     corr = _corr_on(meta)
     multi = len(scenarios) > 1
     inner0 = scenarios[0][1]
-    rows = build_rows(inner0["target_indices"], meta, inner0.get("contrast_pairs") or [])
+    tix = inner0.get("target_indices") or []
+    cpairs = inner0.get("contrast_pairs") or []
+    rows = build_rows(inner0["target_indices"], meta, cpairs)
     ph = posthoc_rows(meta) if inner0.get("posthoc") else []
+    # Logit-outcome models (logistic regression / binary GLMM) get an OR = exp(β)
+    # column beside the always-last Target column. β is the wire truth; OR is a
+    # display-only readout. Other families render exactly as before.
+    is_logit = meta.get("outcome_kind") == "binary"
+    sizes = meta.get("effect_sizes") or []
+
+    def or_col(columns):
+        """Insert the OR header before the (always-last) Target column."""
+        return columns[:-1] + [(cols["or"], "r")] + columns[-1:] if is_logit else columns
+
+    def with_or(row, or_str):
+        """Insert one OR cell before the (always-last) Target cell of a data row."""
+        if not is_logit:
+            return row
+        kind, cells = row
+        return (kind, cells[:-1] + [or_str] + cells[-1:])
 
     def factor_span(r):
         return ("span", f"{r['label']}  (baseline: {r['baseline']})")
@@ -196,25 +248,26 @@ def main_power_tables(scenarios, meta, *, dec, tdec, target, caption):
 
     if not multi:
         if not corr:
-            columns = [(cols["test"], "l"), (cols["power"], "r"), (cols["target"], "r")]
+            columns = or_col([(cols["test"], "l"), (cols["power"], "r"), (cols["target"], "r")])
             table = []
             if inner0.get("overall_significant_rate") is not None:
-                table.append(_power_row(_overall_label(inner0),
-                                        inner0["overall_significant_rate"], target, dec, tdec))
+                table.append(with_or(_power_row(_overall_label(inner0),
+                                                inner0["overall_significant_rate"], target, dec, tdec), ""))
             for r in rows:
                 if r["kind"] == "factor_header":
                     table.append(factor_span(r)); continue
-                table.append(_power_row(label_of(r), inner0["power_uncorrected"][0][r["pos"]],
-                                        target, dec, tdec))
+                table.append(with_or(_power_row(label_of(r), inner0["power_uncorrected"][0][r["pos"]],
+                                                target, dec, tdec),
+                                     _row_or_cell(r, tix, cpairs, sizes)))
             for r in ph:
                 if r["kind"] == "posthoc_header":
                     table.append(posthoc_span(r)); continue
                 val = inner0["posthoc"][r["block"]]["power_uncorrected"][r["contrast"]]
-                table.append(_power_row("  " + r["label"], val, target, dec, tdec))
+                table.append(with_or(_power_row("  " + r["label"], val, target, dec, tdec), ""))
             return [minimal_table(caption, columns, table)]
         # correction only: Test | uncorrected | corrected | Target
-        columns = [(cols["test"], "l"), (cols["uncorrected"], "r"),
-                   (cols["corrected"], "r"), (cols["target"], "r")]
+        columns = or_col([(cols["test"], "l"), (cols["uncorrected"], "r"),
+                          (cols["corrected"], "r"), (cols["target"], "r")])
         table = []
 
         def corr_row(label, pos_or_overall):
@@ -229,26 +282,27 @@ def main_power_tables(scenarios, meta, *, dec, tdec, target, caption):
             return ("row", [label, fmt_pct(u, dec), fmt_pct(c, dec), fmt_target(target, tdec)])
 
         if inner0.get("overall_significant_rate") is not None:
-            table.append(corr_row(_overall_label(inner0), "overall"))
+            table.append(with_or(corr_row(_overall_label(inner0), "overall"), ""))
         for r in rows:
             if r["kind"] == "factor_header":
                 table.append(factor_span(r)); continue
-            table.append(corr_row(label_of(r), r["pos"]))
+            table.append(with_or(corr_row(label_of(r), r["pos"]),
+                                 _row_or_cell(r, tix, cpairs, sizes)))
         for r in ph:
             if r["kind"] == "posthoc_header":
                 table.append(posthoc_span(r)); continue
             blk = inner0["posthoc"][r["block"]]
-            table.append(("row", ["  " + r["label"],
-                                  fmt_pct(blk["power_uncorrected"][r["contrast"]], dec),
-                                  fmt_pct(blk["power_corrected"][r["contrast"]], dec),
-                                  fmt_target(target, tdec)]))
+            table.append(with_or(("row", ["  " + r["label"],
+                                          fmt_pct(blk["power_uncorrected"][r["contrast"]], dec),
+                                          fmt_pct(blk["power_corrected"][r["contrast"]], dec),
+                                          fmt_target(target, tdec)]), ""))
         return [minimal_table(caption, columns, table)]
 
     # multi-scenario: one table per active correction state.
     names = [nm for nm, _ in scenarios]
 
     def build_scen_table(pkey):
-        columns = [(cols["test"], "l")] + [(nm, "r") for nm in names] + [(cols["target"], "r")]
+        columns = or_col([(cols["test"], "l")] + [(nm, "r") for nm in names] + [(cols["target"], "r")])
         table = []
 
         def scen_row(label, pos_or_overall):
@@ -265,13 +319,13 @@ def main_power_tables(scenarios, meta, *, dec, tdec, target, caption):
         if inner0.get("overall_significant_rate") is not None:
             r0 = scen_row(_overall_label(inner0), "overall")
             if r0:
-                table.append(r0)
+                table.append(with_or(r0, ""))
         for r in rows:
             if r["kind"] == "factor_header":
                 table.append(factor_span(r)); continue
             rr = scen_row(label_of(r), r["pos"])
             if rr:
-                table.append(rr)
+                table.append(with_or(rr, _row_or_cell(r, tix, cpairs, sizes)))
         for r in ph:
             if r["kind"] == "posthoc_header":
                 table.append(posthoc_span(r)); continue
@@ -282,9 +336,9 @@ def main_power_tables(scenarios, meta, *, dec, tdec, target, caption):
                     ok = False; break
                 vals.append(blocks[r["block"]][pkey][r["contrast"]])
             if ok:
-                table.append(("row", ["  " + r["label"]]
-                              + [fmt_pct(v, dec) for v in vals]
-                              + [fmt_target(target, tdec)]))
+                table.append(with_or(("row", ["  " + r["label"]]
+                                      + [fmt_pct(v, dec) for v in vals]
+                                      + [fmt_target(target, tdec)]), ""))
         return columns, table
 
     text = _text_cfg()

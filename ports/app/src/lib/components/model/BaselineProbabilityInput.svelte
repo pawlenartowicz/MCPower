@@ -12,14 +12,14 @@
 </script>
 
 {#if target?.baselineProbability !== undefined}
-  <div class="space-y-1">
+  <div class="flex items-center justify-between gap-3">
     <div class="flex items-center gap-2">
       <Label for="baseline-prob">Baseline probability</Label>
       <InfoIcon tipKey="baselineProbability" />
     </div>
     <NumberInput
       id="baseline-prob"
-      class="w-full"
+      class="w-32"
       step={0.05}
       min={0}
       max={1}

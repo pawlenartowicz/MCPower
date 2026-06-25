@@ -38,8 +38,8 @@
 |---|---|---|
 | **Online** | [open mcpower.app/online](https://mcpower.app/online) — no install | [App tutorial](https://docs.mcpower.app/tutorial-app/index) |
 | **Desktop app** | [download](https://mcpower.app/downloads) | [App tutorial](https://docs.mcpower.app/tutorial-app/index) |
-| **Python** | TBA | [Python tutorial](https://docs.mcpower.app/tutorial-python/index) |
-| **R** | TBA | [R tutorial](https://docs.mcpower.app/tutorial-r/index) |
+| **Python** | `pip install mcpower` | [Python tutorial](https://docs.mcpower.app/tutorial-python/index) |
+| **R** | `install.packages("mcpower", repos = "https://r.mcpower.app")` | [R tutorial](https://docs.mcpower.app/tutorial-r/index) |
 
 > **Fedora/RHEL:** the desktop download includes an `.rpm` — `sudo dnf install ./MCPower-*.rpm` (unsigned in v1; accept the GPG prompt or pass `--nogpgcheck`).
 

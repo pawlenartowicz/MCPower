@@ -1294,6 +1294,10 @@ MCPower <- R6::R6Class(
         effect_sizes = reg$get_effect_sizes(),
         factors = factors,
         estimator = self$estimator,
+        # "binary" for logit-link outcomes (logistic regression and binary GLMM,
+        # whose estimator is "mle" not "glm"); gates the OR = exp(β) readout.
+        # Mirrors Python _report_meta.
+        outcome_kind = self$outcome_kind,
         alpha = self$alpha,
         correction = correction %||% "none",
         target_power = self$power,

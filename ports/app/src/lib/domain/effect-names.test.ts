@@ -14,8 +14,16 @@ vi.mock('$lib/stores/parsed-formula.svelte', async (importOriginal) => {
 
 import canonical from '$configs/formula-fixtures/canonical-suite.json';
 import { toWireParsed } from '$lib/stores/parsed-formula.svelte';
-import { contrastNames, effectGroups, effectNames, effectRows } from './effect-names';
-import { defaultFamilyConfig } from './family';
+import {
+  contrastNames,
+  effectGroups,
+  effectNames,
+  effectRows,
+  presetsFor,
+  reconcileTestSelection,
+} from './effect-names';
+import { defaultFamilyConfig, type VariableRow } from './family';
+import { BENCHMARKS } from '$lib/configs/app-config';
 
 describe('effectNames', () => {
   it('generates numeric placeholder level names without L prefix', () => {
@@ -34,6 +42,25 @@ describe('effectNames', () => {
       variables: [{ kind: 'factor' as const, name: 'origin', levels: ['Japan', 'USA'] }],
     };
     expect(effectNames(cfg)).toEqual(['origin[Japan]', 'origin[USA]']);
+  });
+});
+
+describe('presetsFor', () => {
+  const cont = [{ kind: 'continuous' as const, name: 'x' }];
+  const fac = [{ kind: 'factor' as const, name: 'g', nLevels: 3 }];
+
+  it('returns the odds (beta) set for every predictor when the outcome is logit', () => {
+    const vals = (rows: VariableRow[], name: string) =>
+      presetsFor(name, rows, true).map((p) => p.value);
+    // Same odds triple regardless of predictor kind — it replaces both rows.
+    expect(vals(cont, 'x')).toEqual(BENCHMARKS.odds);
+    expect(vals(fac, 'g[2]')).toEqual(BENCHMARKS.odds);
+    expect(vals([], 'x1:x2')).toEqual(BENCHMARKS.odds);
+  });
+
+  it('keeps the continuous/Cohen split when the outcome is not logit', () => {
+    expect(presetsFor('x', cont, false).map((p) => p.value)).toEqual(BENCHMARKS.continuous);
+    expect(presetsFor('g[2]', fac, false).map((p) => p.value)).toEqual(BENCHMARKS.binary_factor);
   });
 });
 
@@ -255,8 +282,18 @@ describe('effectGroups', () => {
     };
     const g = effectGroups(cfg);
     expect(g.variables).toEqual([
-      { name: 'x1', kind: 'continuous', rows: [{ name: 'x1', isReference: false }] },
-      { name: 'x2', kind: 'binary', rows: [{ name: 'x2', isReference: false }] },
+      {
+        name: 'x1',
+        kind: 'continuous',
+        interactionOnly: false,
+        rows: [{ name: 'x1', isReference: false }],
+      },
+      {
+        name: 'x2',
+        kind: 'binary',
+        interactionOnly: false,
+        rows: [{ name: 'x2', isReference: false }],
+      },
     ]);
     expect(g.interactions).toEqual([]);
   });
@@ -272,6 +309,7 @@ describe('effectGroups', () => {
       {
         name: 'treatment',
         kind: 'factor',
+        interactionOnly: false,
         rows: [
           { name: 'treatment[1]', isReference: true },
           { name: 'treatment[2]', isReference: false },
@@ -345,6 +383,121 @@ describe('effectGroups', () => {
         ],
       },
     ]);
+  });
+});
+
+describe('empty / cleared formula', () => {
+  it('collapses effectNames and effectGroups to empty (Reset/clear)', () => {
+    const cfg = { ...defaultFamilyConfig('regression'), formula: '' };
+    expect(effectNames(cfg)).toEqual([]);
+    const g = effectGroups(cfg);
+    expect(g.variables).toEqual([]);
+    expect(g.interactions).toEqual([]);
+  });
+});
+
+describe('interaction-only variables', () => {
+  it('excludes a `:`-only var from effects/tests; engine target_indices align (labels.ts:44)', () => {
+    // y ~ a + b + x1:x2 — the parser auto-promotes x1/x2 to predictors but emits
+    // no `main` term for them, so they must NOT be effects. The engine builds
+    // target_indices dense over [a, b, x1:x2] (= [1,2,3]); the app list must
+    // match so labels.ts:44 (`effectNames[idx-1]`) resolves correctly.
+    const cfg = {
+      ...defaultFamilyConfig('regression'),
+      formula: 'y ~ a + b + x1:x2',
+      variables: [
+        { kind: 'continuous' as const, name: 'a' },
+        { kind: 'continuous' as const, name: 'b' },
+        { kind: 'continuous' as const, name: 'x1' },
+        { kind: 'continuous' as const, name: 'x2' },
+      ],
+    };
+    expect(effectNames(cfg)).toEqual(['a', 'b', 'x1:x2']);
+  });
+
+  it('still shows x1/x2 as cards but marks them interactionOnly with no rows', () => {
+    const cfg = {
+      ...defaultFamilyConfig('regression'),
+      formula: 'y ~ a + b + x1:x2',
+      variables: [
+        { kind: 'continuous' as const, name: 'a' },
+        { kind: 'continuous' as const, name: 'b' },
+        { kind: 'continuous' as const, name: 'x1' },
+        { kind: 'continuous' as const, name: 'x2' },
+      ],
+    };
+    const g = effectGroups(cfg);
+    expect(g.variables.map((v) => v.name)).toEqual(['a', 'b', 'x1', 'x2']);
+    const byName = new Map(g.variables.map((v) => [v.name, v]));
+    expect(byName.get('a')!.interactionOnly).toBe(false);
+    expect(byName.get('x1')).toMatchObject({ interactionOnly: true, rows: [] });
+    expect(byName.get('x2')).toMatchObject({ interactionOnly: true, rows: [] });
+  });
+
+  it('a var in both a main term and an interaction (a*b) is NOT interactionOnly', () => {
+    const cfg = {
+      ...defaultFamilyConfig('regression'),
+      formula: 'y ~ a*b',
+      variables: [
+        { kind: 'continuous' as const, name: 'a' },
+        { kind: 'continuous' as const, name: 'b' },
+      ],
+    };
+    expect(effectNames(cfg)).toEqual(['a', 'b', 'a:b']);
+    const g = effectGroups(cfg);
+    expect(g.variables.every((v) => v.interactionOnly === false)).toBe(true);
+    expect(g.variables.flatMap((v) => v.rows).length).toBeGreaterThan(0);
+  });
+
+  it('ANOVA guard: every factor keeps effect rows and interactionOnly stays false', () => {
+    const cfg = {
+      ...defaultFamilyConfig('anova'),
+      formula: '',
+      variables: [{ kind: 'factor' as const, name: 'group', nLevels: 3, role: 'factor' as const }],
+    };
+    const g = effectGroups(cfg);
+    expect(g.variables).toHaveLength(1);
+    expect(g.variables[0]!.interactionOnly).toBe(false);
+    expect(g.variables[0]!.rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('reconcileTestSelection', () => {
+  it('prunes a test name no longer in the candidate effect list', () => {
+    const cfg = {
+      ...defaultFamilyConfig('regression'),
+      tests: { kind: 'effects' as const, names: ['a', 'x1'] },
+    };
+    reconcileTestSelection(cfg, ['a', 'b', 'x1:x2']);
+    expect(cfg.tests).toEqual({ kind: 'effects', names: ['a'] });
+  });
+
+  it('leaves an unchanged selection alone (no needless rewrite)', () => {
+    const cfg = {
+      ...defaultFamilyConfig('regression'),
+      tests: { kind: 'effects' as const, names: ['a', 'b'] },
+    };
+    const before = cfg.tests;
+    reconcileTestSelection(cfg, ['a', 'b', 'x1:x2']);
+    expect(cfg.tests).toBe(before);
+  });
+
+  it('does not touch a kind:"all" selection', () => {
+    const cfg = { ...defaultFamilyConfig('regression'), tests: { kind: 'all' as const } };
+    reconcileTestSelection(cfg, ['a']);
+    expect(cfg.tests).toEqual({ kind: 'all' });
+  });
+
+  it('prunes a contrast whose endpoints left the candidate list', () => {
+    const cfg = {
+      ...defaultFamilyConfig('regression'),
+      contrasts: [
+        { positiveName: 'g[2]', negativeName: 'g[3]', enabled: true },
+        { positiveName: 'gone[2]', negativeName: 'gone[3]', enabled: true },
+      ],
+    };
+    reconcileTestSelection(cfg, ['g[1]', 'g[2]', 'g[3]']);
+    expect(cfg.contrasts).toEqual([{ positiveName: 'g[2]', negativeName: 'g[3]', enabled: true }]);
   });
 });
 

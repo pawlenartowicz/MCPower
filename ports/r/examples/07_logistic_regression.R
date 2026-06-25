@@ -26,6 +26,9 @@ model$set_baseline_probability(0.3)
 
 # 4. Effects are standardised log-odds shifts.
 #    dose=0.4 -> a strong predictor; age=0.25 / sex=0.5 -> moderate.
+#    Prefer to think in odds ratios? Use the odds benchmarks (Chen et al. 2010):
+#    small OR 1.5 -> beta=log(1.5)~0.41, medium OR 2.5 -> ~0.92, large OR 4.0 -> ~1.39.
+#    beta stays the value you set; the printed summary shows the OR = exp(beta) beside it.
 model$set_effects("dose=0.4, age=0.25, sex=0.5")
 
 # 5. Short form (printed automatically) — power per predictor at N=300.
@@ -35,7 +38,9 @@ cat(">>> model$find_power(sample_size = 300, target_test = 'all')\n")
 invisible(model$find_power(sample_size = 300, target_test = "all"))
 
 # 6. Long form via summary() for the joint-significance distribution and the
-#    GLM diagnostics (convergence, realised baseline probability).
+#    GLM diagnostics (convergence, realised baseline probability). For a logit
+#    model the per-test table also carries an OR column (OR = exp(beta)) — read it
+#    per 1 SD for dose/age (continuous) and per category for sex (binary).
 cat("\n>>> result <- model$find_power(sample_size = 300, target_test = 'all', verbose = FALSE)\n")
 cat(">>> print(summary(result))\n")
 result <- model$find_power(sample_size = 300, target_test = "all", verbose = FALSE)

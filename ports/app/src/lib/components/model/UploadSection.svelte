@@ -11,6 +11,18 @@
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
 
+  // Keep the levels panel compact: clip each level label and cap the list length.
+  // The leading count (col.labels.length) still reports the true total.
+  const MAX_LEVEL_LABEL = 24;
+  const MAX_LEVELS_SHOWN = 7;
+  function formatLevels(labels: string[]): string {
+    const shown = labels
+      .slice(0, MAX_LEVELS_SHOWN)
+      .map((l) => (l.length > MAX_LEVEL_LABEL ? l.slice(0, MAX_LEVEL_LABEL) + '…' : l));
+    if (labels.length > MAX_LEVELS_SHOWN) shown.push('…');
+    return shown.join(', ');
+  }
+
   let fileInput = $state<HTMLInputElement | undefined>(undefined);
   let parseError = $state<string | null>(null);
   let loading = $state(false);
@@ -83,7 +95,70 @@
   function addToFormula(name: string) {
     if (isInFormula(cfg.formula, name)) return;
     const f = cfg.formula.trim();
-    cfg.formula = f === '' ? `y = ${name}` : `${f} + ${name}`;
+    if (f === '') cfg.formula = `y = ${name}`;
+    // Trailing `=`/`~` = outcome set, no predictors yet (set via the y toggle):
+    // append as the first predictor, not after a stray `+`.
+    else if (/[=~]$/.test(f)) cfg.formula = `${f} ${name}`;
+    else cfg.formula = `${f} + ${name}`;
+  }
+
+  // Outcome (LHS) helpers. Source of truth is cfg.formula; selected state is
+  // derived by a synchronous LHS split — matching isInFormula's sync regex, not
+  // the async parsed-formula store (see the comment above). Both `=` and `~` are
+  // accepted LHS/RHS separators (the app writes `=`); split on whichever is first.
+  function splitFormula(formula: string): { lhs: string; rhs: string } {
+    const i = formula.search(/[=~]/);
+    if (i === -1) return { lhs: '', rhs: formula.trim() };
+    return { lhs: formula.slice(0, i).trim(), rhs: formula.slice(i + 1).trim() };
+  }
+
+  // Drop a bare main-effect token `name` from the RHS, preserving order. Splits
+  // on top-level `+` only so a `+` inside a random-effect term like `(1+x|g)`
+  // stays put. Interactions (`name:z`) that embed the name are intentionally left
+  // — only a standalone predictor is removed (mutual exclusivity with outcome).
+  function removeMainFromRhs(rhs: string, name: string): string {
+    const tokens: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of rhs) {
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      if (ch === '+' && depth === 0) {
+        tokens.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    tokens.push(current);
+    return tokens
+      .map((t) => t.trim())
+      .filter((t) => t !== '' && t !== name)
+      .join(' + ');
+  }
+
+  function isOutcome(formula: string, name: string): boolean {
+    return splitFormula(formula).lhs === name;
+  }
+
+  // Set `name` as the outcome: rewrite the LHS and strip `name` from the RHS if it
+  // was a predictor. The previous outcome (old LHS) is discarded entirely, not
+  // demoted to a predictor — silent promotion is surprising.
+  function setOutcomeColumn(name: string) {
+    const cleaned = removeMainFromRhs(splitFormula(cfg.formula).rhs, name);
+    cfg.formula = cleaned === '' ? `${name} =` : `${name} = ${cleaned}`;
+  }
+
+  // Clear the outcome: LHS falls back to the placeholder `y` (or fully empty when
+  // there are no predictors either).
+  function clearOutcomeColumn() {
+    const { rhs } = splitFormula(cfg.formula);
+    cfg.formula = rhs === '' ? '' : `y = ${rhs}`;
+  }
+
+  function toggleOutcome(name: string) {
+    if (isOutcome(cfg.formula, name)) clearOutcomeColumn();
+    else setOutcomeColumn(name);
   }
 </script>
 
@@ -133,7 +208,7 @@
           <span class="text-muted-foreground">{col.colType}</span>
           <span class="text-muted-foreground">
             {#if col.colType === 'factor'}
-              {col.labels.length} ({col.labels.join(', ')})
+              {col.labels.length} ({formatLevels(col.labels)})
             {:else if col.colType === 'binary'}
               2
             {:else}
@@ -141,15 +216,33 @@
             {/if}
           </span>
           {#if col.name}
-            <button
-              type="button"
-              title={isInFormula(cfg.formula, col.name) ? 'Already in formula' : 'Add to formula'}
-              disabled={isInFormula(cfg.formula, col.name)}
-              class="justify-self-end rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
-              onclick={() => addToFormula(col.name)}
-            >
-              <Plus class="h-3.5 w-3.5" />
-            </button>
+            <div class="justify-self-end flex items-center gap-1">
+              <!-- Outcome (y) toggle: exactly one column is the LHS at a time. -->
+              <button
+                type="button"
+                title={isOutcome(cfg.formula, col.name) ? 'Outcome (y) — click to clear' : 'Set as outcome (y)'}
+                aria-pressed={isOutcome(cfg.formula, col.name)}
+                class="rounded px-1.5 py-0.5 font-mono text-[11px] italic {isOutcome(cfg.formula, col.name)
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                onclick={() => toggleOutcome(col.name)}
+              >
+                y
+              </button>
+              <button
+                type="button"
+                title={isOutcome(cfg.formula, col.name)
+                  ? 'Is the outcome'
+                  : isInFormula(cfg.formula, col.name)
+                    ? 'Already in formula'
+                    : 'Add to formula'}
+                disabled={isInFormula(cfg.formula, col.name)}
+                class="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+                onclick={() => addToFormula(col.name)}
+              >
+                <Plus class="h-3.5 w-3.5" />
+              </button>
+            </div>
           {:else}
             <span></span>
           {/if}

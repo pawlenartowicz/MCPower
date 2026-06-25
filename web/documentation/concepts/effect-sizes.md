@@ -1,6 +1,6 @@
 ---
 title: "Effect sizes for power analysis"
-description: "Standardized effect sizes (betas) for power analysis: continuous, binary, and logistic regression benchmarks and Cohen conventions."
+description: "Standardized effect sizes (betas) for power analysis: continuous, binary, and logistic regression benchmarks, Cohen conventions, and odds-ratio anchors for logit models."
 ---
 # Effect sizes
 
@@ -59,6 +59,20 @@ Each factor level carries its own beta relative to the reference. If two non-ref
 
 The **odds** of an event are the chance it happens divided by the chance it doesn't (a 30% chance is odds of $0.3 / 0.7 \approx 0.43$); **log-odds** are the natural log of that. For a logistic (logit) model, betas are **standardized log-odds** coefficients — not raw odds ratios. A continuous predictor at $\beta = 0.5$ multiplies the odds of the outcome by $e^{0.5} \approx 1.65$ per 1-SD increase; a binary predictor at $\beta = 0.7$ multiplies them by $e^{0.7} \approx 2.0$ when switching from 0 to 1. The same log-odds beta interpretation applies when the binary outcome is **clustered** — a [[concepts/mixed-effects#Clustered logistic (GLMM)|clustered logistic GLMM]] — not just plain logistic regression.
 
+### Odds-ratio benchmarks (beta)
+
+When it is easier to think in **odds ratios** than in log-odds betas, MCPower offers an odds-scale benchmark set, following Chen, Cohen & Chen (2010):
+
+| Level | Odds ratio | Beta = log(OR) |
+|---|---|---|
+| Small | 1.5 | 0.41 |
+| Medium | 2.5 | 0.92 |
+| Large | 4.0 | 1.39 |
+
+This is a **beta** feature. The values are stored as the log-odds beta MCPower already works in, so nothing about data generation changes — only the benchmark you reach for. In the app, the small/medium/large preset buttons switch to this odds set for every predictor whenever the outcome is binary, and each effect input shows its live odds ratio ($\mathrm{OR} = e^{\beta}$) beside the value. In Python and R the printed summary echoes the OR beside each beta you set and adds an **OR** column to the per-test power table.
+
+Read the odds ratio on the **same scale as the beta**: **per 1 SD** for a continuous predictor, **per category** (reference → level) for a binary or factor predictor. The number $e^{\beta}$ is the same either way; only the wording of the unit differs.
+
 To convert an odds ratio reported per **raw unit** of $x$ in the literature:
 
 $$
@@ -96,3 +110,4 @@ For a logistic model you also set the **baseline probability** — the expected 
 ## References
 
 - Cohen, J. (1988). *Statistical power analysis for the behavioral sciences* (2nd ed.). Lawrence Erlbaum Associates.
+- Chen, H., Cohen, P., & Chen, S. (2010). How big is a big odds ratio? Interpreting the magnitudes of odds ratios in epidemiological studies. *Communications in Statistics — Simulation and Computation*, 39(4), 860–864.

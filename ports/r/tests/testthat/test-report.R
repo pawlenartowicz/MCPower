@@ -126,6 +126,55 @@ test_that("long form: Diagnostics section is gated — shows only on a threshold
   expect_match(out_bad, "! convergence")
 })
 
+# ── OR (odds-ratio) readout for logit-outcome models ────────────────
+# Mirrors Python test_report_helpers.py OR tests: a logit model echoes
+# "OR exp(β)" beside each β and the per-test table gains an OR column equal to
+# exp(β); OLS shows neither. β stays the wire truth (Chen et al. 2010 presets).
+
+.make_logit_inner <- function() {
+  list(
+    scenario = "default", target_indices = c(1L, 2L), contrast_pairs = list(),
+    sample_sizes = 300L, n = 300L, n_sims = 400L,
+    power_uncorrected = list(c(0.95, 0.40)), power_corrected = list(c(0.95, 0.40)),
+    ci_uncorrected = list(list(c(0.9, 0.99), c(0.34, 0.46))),
+    ci_corrected = list(list(c(0.9, 0.99), c(0.34, 0.46))),
+    convergence_rate = 1.0,
+    boundary_hit_rate_tau_zero = 0.0, boundary_hit_rate_high_tau = 0.0,
+    estimator_extras = list(estimator = "glm"),
+    overall_significant_rate = 0.99, overall_significant_ci = c(0.97, 1.0),
+    success_count_histogram_uncorrected = integer(0L))
+}
+
+.logit_meta <- function() list(
+  effect_names = c("x1", "x2"), effect_sizes = list(0.916, 0.405),
+  factors = list(), estimator = "glm", outcome_kind = "binary",
+  alpha = 0.05, correction = "none", target_power = 80, formula = "y ~ x1 + x2",
+  effect_skeleton = list(list(kind = "intercept"),
+                         list(kind = "continuous", predictor = "x1"),
+                         list(kind = "continuous", predictor = "x2")))
+
+test_that("long form: logit model echoes OR=exp(β) and adds an OR column", {
+  out <- paste(capture.output(print(summary(
+    mcpower:::.make_result(.make_logit_inner(), .logit_meta(), "find_power")))), collapse = "\n")
+  # Effects echo carries the OR beside each β.
+  expect_match(out, "x1=0.92 \\(OR 2.50\\)")
+  expect_match(out, "x2=0.41 \\(OR 1.50\\)")
+  # Per-test table has an OR column header and the exp(β) values.
+  expect_match(out, "\\bOR\\b")
+  expect_match(out, "2.50")
+  expect_match(out, "1.50")
+  # The omnibus (LR χ²) row carries no single β → blank OR cell.
+  lr_line <- grep("χ", strsplit(out, "\n")[[1]], value = TRUE)[1]
+  expect_false(grepl("2.50", lr_line))
+})
+
+test_that("long form: OLS model shows no OR column or echo", {
+  out <- paste(capture.output(print(summary(
+    .r_ols_model()$find_power(sample_size = 120, verbose = FALSE, progress_callback = FALSE)))),
+    collapse = "\n")
+  expect_false(grepl("\\bOR\\b", out))
+})
+
 # ──long-form boxed header, effects line, CI section, footer ─────────
 
 test_that("long form: boxed header, effects line, CI section, footer", {

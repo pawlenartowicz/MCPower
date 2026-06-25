@@ -1,0 +1,25 @@
+{
+  "title": "MCPower: power analysis by simulation",
+  "description": "MCPower is a Monte Carlo power-analysis tool: power and sample-size search by simulation for any design from t-tests to mixed models, across OLS, GLM, mixed-effects, and ANOVA. A single native Rust engine powers Python, R, desktop, and in-browser interfaces.",
+  "upload_type": "software",
+  "license": "GPL-3.0-or-later",
+  "creators": [
+    {
+      "name": "Lenartowicz, Paweł",
+      "affiliation": "Society for Open Science (Stowarzyszenie na Rzecz Otwartej Nauki), Poland; Centre for Brain Research, Jagiellonian University, Kraków, Poland",
+      "orcid": "0000-0002-6906-7217"
+    }
+  ],
+  "keywords": [
+    "power-analysis",
+    "sample-size",
+    "statistics",
+    "simulation",
+    "monte-carlo",
+    "regression",
+    "mixed-models",
+    "lmm",
+    "glmm",
+    "multilevel-models"
+  ]
+}

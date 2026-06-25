@@ -10,8 +10,13 @@
   import type { Entrypoint } from '$lib/domain/family';
   import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
+  import ModelBuilderDialog from './ModelBuilderDialog.svelte';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
+
+  // Visual builder is regression-only: mixed formulas carry random effects the
+  // pairwise builder would strip on "Use this model".
+  let modelBuilderOpen = $state(false);
 
   // Debounced commit: the input edits a local draft and writes cfg.formula
   // only after a typing pause (or Enter/blur). Committing per keystroke would
@@ -81,6 +86,17 @@
     >
       <RotateCcw class="mr-1 h-3.5 w-3.5" /> Reset
     </Button>
+    {#if familyStore.active === 'regression'}
+      <Button
+        type="button"
+        variant="default"
+        size="sm"
+        class="h-7 px-2 text-xs"
+        onclick={() => (modelBuilderOpen = true)}
+      >
+        Visual formula builder
+      </Button>
+    {/if}
   </div>
   <Input
     id="formula"
@@ -114,4 +130,7 @@
       </button>
     {/each}
   </p>
+  {#if familyStore.active === 'regression'}
+    <ModelBuilderDialog open={modelBuilderOpen} onOpenChange={(v) => (modelBuilderOpen = v)} />
+  {/if}
 </div>

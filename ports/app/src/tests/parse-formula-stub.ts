@@ -100,9 +100,13 @@ export function stubParseFormula(input: string): ParseState {
       if (vars.length > 2) terms.push({ kind: 'interaction', vars });
       continue;
     }
-    // Colon interaction: x1:x2 (or x1:x2:x3)
+    // Colon interaction: x1:x2 (or x1:x2:x3). The real Rust parser registers each
+    // component as a predictor (auto-promotes for column generation) WITHOUT
+    // emitting a `main` term for it — mirror that here, deduped, first-occurrence.
     if (tok.includes(':')) {
-      terms.push({ kind: 'interaction', vars: tok.split(':').map((s) => s.trim()) });
+      const vars = tok.split(':').map((s) => s.trim());
+      for (const v of vars) if (!predictors.includes(v)) predictors.push(v);
+      terms.push({ kind: 'interaction', vars });
       continue;
     }
     // Plain main effect

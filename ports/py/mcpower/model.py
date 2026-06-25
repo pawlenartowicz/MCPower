@@ -1845,6 +1845,10 @@ class MCPower:
             "effect_sizes": list(self._registry.get_effect_sizes()),
             "factors": factors,
             "estimator": self.estimator,
+            # "binary" for logit-link outcomes (logistic regression and binary
+            # GLMM, whose estimator is "mle" not "glm"); gates the OR = exp(β)
+            # readout in the report. "continuous" otherwise.
+            "outcome_kind": self.outcome_kind,
             "alpha": self.alpha,
             "correction": correction or "none",
             "target_power": self.power / 100.0,  # stored as 80.0, render as 0.8

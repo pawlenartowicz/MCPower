@@ -21,8 +21,8 @@ no closed-form formulas that only cover textbook designs.
 ## Use it
 
 - [[tutorial-app/index|The app]] — desktop (Tauri) and browser (WASM), one GUI.
-- [[tutorial-python/index|Python]] — the `mcpower` package.
-- [[tutorial-r/index|R]] — the R package.
+- [[tutorial-python/index|Python]] — the `mcpower` package: `pip install mcpower`.
+- [[tutorial-r/index|R]] — the R package: `install.packages("mcpower", repos = "https://r.mcpower.app")`.
 - [[internals/debug|Debug mode]] — pipeline introspection in R.
 
 ## More than a single power number

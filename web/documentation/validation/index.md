@@ -10,6 +10,17 @@ a textbook formula — the whole point of MCPower is to handle designs that have
 clean closed form. So MCPower proves correctness a different way: by splitting the
 pipeline in two and verifying each half against a trusted reference.
 
+There are two levels to this. The quick, intuitive check is to run the same design
+through other established simulation tools — the dedicated R packages `simglm` and
+`simr`, plus a plain hand-written loop — and confirm MCPower lands on the same power
+([Agreement with other tools](validation_tool_agreement.md)). It does. But that
+comparison is itself Monte Carlo: both sides carry their own sampling noise, so it can
+only show the answers are *close*, never *identical*. The disciplined checks below go
+further. By fixing the dataset they remove the noise entirely, then verify MCPower's
+numbers are *near-identical* to what SOTA solvers (`lme4`, R's `lm` and `glm`) compute
+on that exact data — and that the generated data reproduces the requested
+specification exactly.
+
 ## What "right" means
 
 A simulation power tool is correct if **both** halves of its pipeline are correct:

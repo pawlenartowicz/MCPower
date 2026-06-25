@@ -71,6 +71,16 @@ function createParsedFormulaStore() {
      * configs) on every formula edit. Error reporting stays on get().
      */
     getStable(formula: string): ParseState {
+      // An empty/cleared formula resolves to the empty state, NOT the last good
+      // parse. Without this, Reset and manual clear leave the stale parse alive
+      // and the derived cards/effects/tests revive on the next reconcile. The
+      // lastGood fallback below is kept only for NON-empty formulas (genuine
+      // mid-typing / transient syntax error), where collapsing to null would
+      // wipe user values.
+      if (formula.trim() === '') {
+        lastGood = null;
+        return EMPTY;
+      }
       const st = ensure(formula);
       if (st.result) {
         lastGood = st;

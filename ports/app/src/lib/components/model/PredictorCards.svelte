@@ -10,12 +10,11 @@
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import VariableCard from './VariableCard.svelte';
   import InteractionCard from './InteractionCard.svelte';
+  import EffectVisualizerDialog from './EffectVisualizerDialog.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import { uploadStore } from '$lib/stores/upload.svelte';
   import { parsedFormulaStore } from '$lib/stores/parsed-formula.svelte';
-  import { effectGroups, effectNames, reconcileEffects } from '$lib/domain/effect-names';
-  import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
-  import { getEffectsFromData, type EffectsFromData } from '$lib/api/engine';
+  import { effectGroups, effectNames, reconcileEffects, reconcileTestSelection } from '$lib/domain/effect-names';
   import { uploadedColumnByName } from '$lib/domain/upload-detect';
   import type { VariableRow } from '$lib/domain/family';
 
@@ -85,10 +84,16 @@
     });
   });
 
-  // (#3) Keep cfg.effects aligned with the derived effect names (shared reconcile).
+  // (#3) Keep cfg.effects — and the test/contrast selection — aligned with the
+  // derived effect names. Pruning stale test names here prevents a formula edit
+  // that drops a previously-selected effect (e.g. a no-longer-promoted
+  // interaction var) from reaching the adapter as an `unknown effect name`.
   $effect(() => {
     const names = effectNames(cfg);
-    untrack(() => reconcileEffects(cfg, names));
+    untrack(() => {
+      reconcileEffects(cfg, names);
+      reconcileTestSelection(cfg, names);
+    });
   });
 
   // Locked set: predictor names that match an uploaded column (drives the
@@ -97,82 +102,9 @@
     new Set(uploadedColumnByName(uploadStore.csvData).keys()),
   );
 
-  // ---------------------------------------------------------------------------
-  // Fit from data — recovers effects from an uploaded dataset for any formula
-  // family. The engine's get_effects_from_data dispatches the estimator off the
-  // spec family (OLS / GLM / MLE), so the only gate is "a formula family with
-  // data loaded" (ANOVA uses AnovaFactorEditor cards, not this editor).
-  // ---------------------------------------------------------------------------
-  let fitError = $state<string | null>(null);
-  let fitPending = $state(false);
-  // Fit produces a preview, not a write: the user reviews the values and clicks
-  // Apply to commit them. Null when no fit has run (or after Apply clears it).
-  let fittedPreview = $state<EffectsFromData | null>(null);
-  const canFitFromData = $derived(
-    (familyStore.active === 'regression' || familyStore.active === 'mixed') &&
-      uploadStore.csvData !== null,
-  );
-  // Estimator-aware caveat shown with the preview. regressionOutcome is
-  // ignored for the mixed family (it routes by entrypoint).
-  const fitNote = $derived(
-    familyStore.active === 'mixed'
-      ? 'mixed-model fixed-effect approximations'
-      : familyStore.regressionOutcome === 'binary'
-        ? 'logistic log-odds approximations'
-        : 'standardized OLS approximations',
-  );
-
-  async function fitFromData() {
-    fitError = null;
-    fitPending = true;
-    fittedPreview = null;
-    try {
-      const { spec, errors } = familyConfigToAppSpec(
-        familyStore.active,
-        cfg,
-        familyStore.regressionOutcome,
-      );
-      if (!spec || errors.length > 0) {
-        fitError = errors[0] ?? 'Spec is not ready — fix formula errors first.';
-        return;
-      }
-      // Store the recovered preview only; nothing is written into cfg until Apply.
-      fittedPreview = await getEffectsFromData(spec);
-    } catch (err) {
-      fitError = err instanceof Error ? err.message : String(err);
-      fittedPreview = null;
-    } finally {
-      fitPending = false;
-    }
-  }
-
-  // Commit the preview into cfg: fitted effects onto matching effect rows, the
-  // estimated ICC onto the cluster card (mixed), and the recovered baseline
-  // probability onto whichever knob the active outcome exposes — the cluster
-  // card for a mixed binary outcome, the top-level baseline for OLS-logit.
-  // Clears the preview so a second click cannot double-apply.
-  function applyPreview() {
-    const preview = fittedPreview;
-    if (!preview) return;
-    untrack(() => {
-      const byName = new Map(preview.effects.map((e) => [e.name, e.value]));
-      cfg.effects = cfg.effects.map((e) => ({
-        name: e.name,
-        value: byName.has(e.name) ? byName.get(e.name)! : e.value,
-      }));
-      if (preview.cluster_icc != null && cfg.cluster) {
-        cfg.cluster.icc = preview.cluster_icc;
-      }
-      if (preview.baseline_probability != null) {
-        if (familyStore.active === 'mixed' && cfg.cluster) {
-          cfg.cluster.baselineProbability = preview.baseline_probability;
-        } else {
-          cfg.baselineProbability = preview.baseline_probability;
-        }
-      }
-    });
-    fittedPreview = null;
-  }
+  // The "Get effects from data" fit flow lives in EffectVisualizerDialog (the
+  // dedicated effect-setting surface); this editor only opens that dialog.
+  let effectVisualizerOpen = $state(false);
 </script>
 
 <div class="space-y-2">
@@ -180,54 +112,16 @@
     <span class="text-sm font-semibold">Predictors</span>
     <InfoIcon tipKey="variableTypes" />
     <InfoIcon tipKey="effects" />
-    {#if canFitFromData}
-      <Button
-        variant="outline"
-        size="sm"
-        class="h-7 px-2 text-xs"
-        disabled={fitPending}
-        onclick={fitFromData}
-      >
-        {fitPending ? 'Fitting…' : 'Fit from data'}
-      </Button>
-    {/if}
+    <Button
+      variant="default"
+      size="sm"
+      class="ml-auto h-7 px-2 text-xs"
+      onclick={() => (effectVisualizerOpen = true)}
+    >
+      Visual effect builder
+    </Button>
   </div>
-  {#if fitError}
-    <p class="text-xs text-destructive">{fitError}</p>
-  {/if}
-  {#if fittedPreview && !fitError && !fitPending}
-    <div class="space-y-1 rounded-md border border-border bg-muted/30 p-2">
-      <p class="text-xs italic text-muted-foreground">
-        Note: fitted effects are {fitNote} from the uploaded data — useful as a
-        starting point, not exact power targets. Nothing changes until you Apply.
-      </p>
-      {#if fittedPreview.effects.length > 0}
-        <ul class="text-xs font-mono text-foreground">
-          {#each fittedPreview.effects as e (e.name)}
-            <li>{e.name} = {e.value.toFixed(4)}</li>
-          {/each}
-        </ul>
-      {/if}
-      {#if fittedPreview.cluster_icc != null}
-        <p class="text-xs text-foreground">
-          Estimated ICC: {fittedPreview.cluster_icc.toFixed(4)} — approximation.
-        </p>
-      {/if}
-      {#if fittedPreview.baseline_probability != null}
-        <p class="text-xs text-foreground">
-          Baseline probability: {fittedPreview.baseline_probability.toFixed(4)} — approximation.
-        </p>
-      {/if}
-      <Button
-        variant="default"
-        size="sm"
-        class="h-7 px-2 text-xs"
-        onclick={applyPreview}
-      >
-        Apply
-      </Button>
-    </div>
-  {/if}
+  <EffectVisualizerDialog open={effectVisualizerOpen} onOpenChange={(v) => (effectVisualizerOpen = v)} />
 
   {#if groups.variables.length === 0}
     <p class="text-xs text-muted-foreground">

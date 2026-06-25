@@ -76,6 +76,69 @@ def test_main_power_tables_both_splits_into_two():
     assert "Uncorrected" in tables[0] and "Corrected" in tables[1]
 
 
+def _synthetic_logit():
+    """Logit single-scenario result + meta: one continuous (β=0.916, OR≈2.50)
+    plus a 3-level factor (β=0.405/1.386, OR≈1.50/4.00)."""
+    inner = {
+        "target_indices": [1, 2, 3],
+        "sample_sizes": [300], "n_sims": 400,
+        "power_uncorrected": [[0.9, 0.2, 0.95]],
+        "power_corrected": [[0.9, 0.2, 0.95]],
+        "estimator_extras": {"estimator": "glm"},
+        "overall_significant_rate": 0.99,
+    }
+    meta = {
+        "effect_names": ["x1", "g[2]", "g[3]"],
+        "effect_sizes": [0.916, 0.405, 1.386],
+        "effect_skeleton": [{"kind": "intercept"},
+                            {"kind": "continuous", "predictor": "x1"},
+                            {"kind": "factor_level", "factor": "g", "level": 1},
+                            {"kind": "factor_level", "factor": "g", "level": 2}],
+        "factors": {"g": {"baseline": "1", "levels": ["1", "2", "3"]}},
+        "estimator": "glm", "outcome_kind": "binary",
+        "alpha": 0.05, "correction": "none", "target_power": 0.8, "formula": "y ~ x1 + g",
+    }
+    return inner, meta
+
+
+def test_fmt_or_is_exp_beta_two_dp():
+    from mcpower.output.tables import _fmt_or
+    assert _fmt_or(0.916) == "2.50"
+    assert _fmt_or(0.405) == "1.50"
+    assert _fmt_or(1.386) == "4.00"
+    assert _fmt_or(0.0) == "1.00"
+
+
+def test_main_power_tables_logit_adds_or_column():
+    from mcpower.output.tables import main_power_tables, _scenarios
+    result, meta = _synthetic_logit()
+    t = main_power_tables(_scenarios(result), meta, dec=1, tdec=0,
+                          target=0.8, caption="Per-test power")[0]
+    # OR column header present, and each effect's exp(β) shown beside its power.
+    assert "OR" in t
+    for or_val in ("2.50", "1.50", "4.00"):
+        assert or_val in t
+    # Omnibus row carries no single β → blank OR cell (the LR χ² line has no OR).
+    lr_line = next(ln for ln in t.splitlines() if "LR" in ln)
+    assert "2.50" not in lr_line and "1.50" not in lr_line
+
+
+def test_main_power_tables_ols_omits_or_column():
+    from mcpower.output.tables import main_power_tables, _scenarios
+    result, meta = _synthetic()   # OLS: no outcome_kind == "binary"
+    t = main_power_tables(_scenarios(result), meta, dec=1, tdec=0,
+                          target=0.8, caption="Per-test power")[0]
+    assert "OR" not in t
+
+
+def test_row_or_cell_contrast_is_exp_beta_difference():
+    from mcpower.output.tables import _row_or_cell, _fmt_or
+    # Contrast β_p − β_n with p=3 (β=1.386), n=2 (β=0.405): OR = exp(0.981).
+    r = {"kind": "contrast", "pos": 3}
+    sizes = [0.916, 0.405, 1.386]
+    assert _row_or_cell(r, [1, 2, 3], [[3, 2]], sizes) == _fmt_or(1.386 - 0.405)
+
+
 def test_build_rows_groups_factor_levels_under_header():
     # target_indices are β̂-column indices (intercept at 0); the skeleton is
     # β-aligned, so skeleton[idx] names the effect directly. Factor dummies

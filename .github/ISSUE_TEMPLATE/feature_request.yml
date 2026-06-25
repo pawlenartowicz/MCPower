@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a new capability or improvement for MCPower.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check existing issues first — your idea may already be tracked.
+
+        No GitHub account? Use the form → https://mcpower.app/report
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What design or workflow do you want that MCPower doesn't support yet?
+      placeholder: |
+        Power for a three-level nested design (students in classes in schools),
+        but MCPower only exposes a single cluster level.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Idea (optional)
+      description: What might the API, formula, or UI look like?
+      placeholder: |
+        model = MCPower("y ~ x1 + (1 | school/class)")
+    validations:
+      required: false
+  - type: checkboxes
+    id: ports
+    attributes:
+      label: Target port(s)
+      options:
+        - label: Python
+        - label: R
+        - label: Desktop app
+        - label: Web app

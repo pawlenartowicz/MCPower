@@ -121,7 +121,6 @@
     {/if}
     {#if locked}
       <span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{variable.kind}</span>
-      <span class="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">from data</span>
       <InfoIcon tipKey="uploadedType" />
     {:else if fixedKind}
       <span class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{variable.kind}</span>
@@ -193,31 +192,46 @@
     {/if}
   </div>
 
-  <div class="mt-2 text-[11.5px] text-muted-foreground">effects</div>
-  {#if singleRow}
-    {@const e = effectFor(group.rows[0]!.name)}
-    {#if e}
-      <div class="mt-2 flex items-center">
-        <EffectControls effect={e} {variables} />
-      </div>
-    {/if}
+  {#if group.interactionOnly}
+    <!-- A `:`-only interaction var generates a column (so the interaction has an
+         input) but has no main coefficient — show the `:`-vs-`*` note in place
+         of an effect input. -->
+    <div
+      class="mt-2 rounded-md bg-muted/50 px-2 py-1.5 text-[11.5px] leading-snug text-muted-foreground"
+      data-testid={`interaction-only-note-${variable.name}`}
+    >
+      <span class="font-mono">{variable.name}</span> only appears inside an interaction
+      (<span class="font-mono">:</span>), so it has no main effect of its own. Write
+      <span class="font-mono">{variable.name}*…</span> instead of
+      <span class="font-mono">{variable.name}:…</span> to also estimate its main effect.
+    </div>
   {:else}
-    {#each group.rows as row (row.name)}
-      {#if row.isReference}
-        <div class="mt-2 flex items-center gap-2">
-          <span class="min-w-16 font-mono text-xs text-muted-foreground">{rowLabel(row.name)}</span>
-          <span class="text-xs italic text-muted-foreground">reference</span>
+    <div class="mt-2 text-[11.5px] text-muted-foreground">effects</div>
+    {#if singleRow}
+      {@const e = effectFor(group.rows[0]!.name)}
+      {#if e}
+        <div class="mt-2 flex items-center">
+          <EffectControls effect={e} {variables} />
         </div>
-      {:else}
-        {@const e = effectFor(row.name)}
-        {#if e}
-          <div class="mt-2 flex items-center gap-2">
-            <span class="min-w-16 font-mono text-xs">{rowLabel(row.name)}</span>
-            <EffectControls effect={e} {variables} />
-          </div>
-        {/if}
       {/if}
-    {/each}
+    {:else}
+      {#each group.rows as row (row.name)}
+        {#if row.isReference}
+          <div class="mt-2 flex items-center gap-2">
+            <span class="min-w-16 font-mono text-xs text-muted-foreground">{rowLabel(row.name)}</span>
+            <span class="text-xs italic text-muted-foreground">reference</span>
+          </div>
+        {:else}
+          {@const e = effectFor(row.name)}
+          {#if e}
+            <div class="mt-2 flex items-center gap-2">
+              <span class="min-w-16 font-mono text-xs">{rowLabel(row.name)}</span>
+              <EffectControls effect={e} {variables} />
+            </div>
+          {/if}
+        {/if}
+      {/each}
+    {/if}
   {/if}
 </div>
 

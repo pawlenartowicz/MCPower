@@ -86,10 +86,27 @@ function predictorNames(cfg: FamilyConfig): string[] {
   return parsedFormulaStore.getStable(cfg.formula).result?.predictors ?? [];
 }
 
+// Names of `main` terms — the source of *effects* for the formula families.
+// Distinct from predictorNames: a `:`-only interaction (`x1:x2`) auto-promotes
+// its vars to predictors (so they generate columns) but emits NO `main` term,
+// so those vars must never become effects/tests. Reads through getStable like
+// predictorNames/interactionNames — reading the raw parse would make
+// interaction-only flagging flicker mid-typing. Mirrors Python parsers.py,
+// which builds effects from out["terms"].
+function mainTermNames(cfg: FamilyConfig): string[] {
+  const r = parsedFormulaStore.getStable(cfg.formula).result;
+  if (!r) return [];
+  return r.terms.filter((t) => t.kind === 'main').map((t) => (t as { name: string }).name);
+}
+
 export function effectNames(cfg: FamilyConfig): string[] {
   const byName = new Map(cfg.variables.map((v) => [v.name, v]));
   const out: string[] = [];
-  for (const name of predictorNames(cfg)) {
+  // ANOVA has no formula parse — its effects are its variables. Formula
+  // families draw mains from `main` terms (not raw predictors), so a `:`-only
+  // interaction var is excluded from effects.
+  const mains = cfg.family === 'anova' ? predictorNames(cfg) : mainTermNames(cfg);
+  for (const name of mains) {
     out.push(...expandMainEffect(byName.get(name), name, true));
   }
   if (cfg.family !== 'anova') {
@@ -132,6 +149,11 @@ export function effectRows(cfg: FamilyConfig): EffectRowMeta[] {
 export interface VariableGroup {
   name: string;
   kind: VariableKind;
+  /** True for a predictor that appears only inside a `:` interaction (no `main`
+   *  term): it gets a configurable card but no effect rows (`rows: []`) — the
+   *  card shows the `:`-vs-`*` note instead. Always false for ANOVA and for any
+   *  predictor that also has a `main` term (`x1*x2`, `x1 + x1:x2`). */
+  interactionOnly: boolean;
   rows: EffectRowMeta[];
 }
 export interface InteractionGroup {
@@ -146,9 +168,20 @@ export interface EffectGroups {
 
 export function effectGroups(cfg: FamilyConfig): EffectGroups {
   const byName = new Map(cfg.variables.map((v) => [v.name, v]));
+  // `mains === null` for ANOVA (no main-term parse): every ANOVA variable would
+  // otherwise flag interactionOnly → empty rows → blank factor cards. For the
+  // formula families, a predictor absent from every `main` term is a pure `:`
+  // interaction var (no main effect).
+  const mains = cfg.family === 'anova' ? null : new Set(mainTermNames(cfg));
   const variables: VariableGroup[] = predictorNames(cfg).map((name) => {
     const v = byName.get(name);
-    return { name, kind: v?.kind ?? 'continuous', rows: variableRows(name, v) };
+    const interactionOnly = mains !== null && !mains.has(name);
+    return {
+      name,
+      kind: v?.kind ?? 'continuous',
+      interactionOnly,
+      rows: interactionOnly ? [] : variableRows(name, v),
+    };
   });
 
   const interactions: InteractionGroup[] = [];
@@ -179,6 +212,24 @@ export function reconcileEffects(cfg: FamilyConfig, names: string[]): void {
   cfg.effects = names.map((name): EffectRow => byName.get(name) ?? { name, value: 0 });
 }
 
+// Prune a persisted test/contrast selection to names still present in the
+// candidate effect list after a formula edit. Mirrors reconcileEffects: a
+// previously-selected effect that leaves effectNames (e.g. a phantom
+// interaction-only var, selected while it was wrongly promoted) would otherwise
+// reach the adapter as `unknown effect name` and block the run. Call inside
+// untrack(). `names` is the current effectNames(cfg).
+export function reconcileTestSelection(cfg: FamilyConfig, names: string[]): void {
+  const candidates = new Set(names);
+  if (cfg.tests.kind === 'effects') {
+    const pruned = cfg.tests.names.filter((n) => candidates.has(n));
+    if (pruned.length !== cfg.tests.names.length) cfg.tests = { kind: 'effects', names: pruned };
+  }
+  const prunedContrasts = cfg.contrasts.filter(
+    (c) => candidates.has(c.positiveName) && candidates.has(c.negativeName),
+  );
+  if (prunedContrasts.length !== cfg.contrasts.length) cfg.contrasts = prunedContrasts;
+}
+
 // ---------------------------------------------------------------------------
 // Effect-size presets (Cohen benchmarks). A `name[level]` row is a factor dummy
 // and a factor-involved interaction also carries `[`; both use the binary/factor
@@ -204,8 +255,21 @@ const COHEN_PRESETS: readonly Preset[] = [
   { short: 'M', long: 'medium', value: BENCHMARKS.binary_factor[1]! },
   { short: 'L', long: 'large', value: BENCHMARKS.binary_factor[2]! },
 ];
+// Logit-outcome (beta) presets: β = log(OR) for OR = 1.5 / 2.5 / 4.0 (Chen et al.
+// 2010). Replaces both rows above for every predictor when the outcome is binary
+// (logistic regression / binary GLMM) — β stays the wire scale, the host shows OR.
+const ODDS_PRESETS: readonly Preset[] = [
+  { short: 'S', long: 'small', value: BENCHMARKS.odds[0]! },
+  { short: 'M', long: 'medium', value: BENCHMARKS.odds[1]! },
+  { short: 'L', long: 'large', value: BENCHMARKS.odds[2]! },
+];
 
-export function presetsFor(name: string, variables: VariableRow[]): readonly Preset[] {
+export function presetsFor(
+  name: string,
+  variables: VariableRow[],
+  isLogit = false,
+): readonly Preset[] {
+  if (isLogit) return ODDS_PRESETS;
   if (name.includes('[')) return COHEN_PRESETS;
   if (name.includes(':')) return CONTINUOUS_PRESETS;
   const v = variables.find((x) => x.name === name);

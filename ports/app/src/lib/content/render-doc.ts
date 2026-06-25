@@ -38,9 +38,24 @@ function resolveWikiLinks(md: string): string {
   });
 }
 
+// GitHub/Obsidian callout marker `> [!type] Title`. marked has no callout support,
+// so the raw `[!type]` would render literally. Drop the marker and keep the title
+// as a bold lead-in; the rest of the blockquote body is left untouched.
+const CALLOUT_MARKER = /^(>[ \t]*)\[!\w+\][ \t]*(.*)$/gm;
+
+function plainCallouts(md: string): string {
+  return md.replace(CALLOUT_MARKER, (_m, quote: string, title: string) =>
+    title.trim() ? `${quote}**${title.trim()}**` : quote.trimEnd(),
+  );
+}
+
 /** Render vault Markdown to sanitized HTML, with wiki links pointed at the live docs. */
 export function renderDoc(md: string): string {
-  const html = marked.parse(resolveWikiLinks(md), { async: false }) as string;
+  // Drop the YAML frontmatter first — marked has no frontmatter support and would
+  // otherwise render the raw `---`/`title:`/`description:` block into the page.
+  const html = marked.parse(resolveWikiLinks(plainCallouts(stripFrontmatter(md))), {
+    async: false,
+  }) as string;
   return DOMPurify.sanitize(html);
 }
 

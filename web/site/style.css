@@ -163,6 +163,14 @@ a {
   user-select: none;
 }
 
+/* Layout-neutral <h1> wrapper for the wordmark (the landing's only heading):
+   the svg keeps its own sizing/centring, so zeroing the heading's margins
+   leaves the render identical while giving crawlers/AT a real top-level
+   heading. */
+.banner-heading {
+  margin: 0;
+}
+
 /* ---- tagline ---- */
 
 .tagline {

@@ -14,6 +14,20 @@ describe('renderDoc', () => {
     expect(html).toContain('>tutorial-app/regression<'); // link text drops the .md too
   });
 
+  it('strips a leading YAML frontmatter block instead of rendering it', () => {
+    const html = renderDoc('---\ntitle: "T"\ndescription: "D"\n---\n# Heading\n\nBody.');
+    expect(html).toContain('<h1>Heading</h1>');
+    expect(html).not.toContain('title:');
+    expect(html).not.toContain('description:');
+  });
+
+  it('drops the [!type] callout marker and keeps the title as a bold lead-in', () => {
+    const html = renderDoc('> [!important] Repeated measures\n> Body of the note.');
+    expect(html).not.toContain('[!important]');
+    expect(html).toContain('<strong>Repeated measures</strong>');
+    expect(html).toContain('Body of the note.');
+  });
+
   it('renders ordinary markdown', () => {
     const html = renderDoc('# Title\n\n- a\n- b');
     expect(html).toContain('<h1>Title</h1>');

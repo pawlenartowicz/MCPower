@@ -10,7 +10,9 @@
   },
   "benchmarks": {
     "continuous": [0.1, 0.25, 0.4],
-    "binary_factor": [0.2, 0.5, 0.8]
+    "binary_factor": [0.2, 0.5, 0.8],
+    "_odds_note": "beta. log(OR) for OR = 1.5 / 2.5 / 4.0 (Chen, Cohen & Chen 2010). Logit-outcome presets only; values are on the β (log-odds) wire scale.",
+    "odds": [0.405, 0.916, 1.386]
   },
   "limits": {
     "max_alpha": 0.25,
@@ -60,6 +62,7 @@
         "test": "Test",
         "power": "Power",
         "target": "Target",
+        "or": "OR",
         "ci": "CI 95%",
         "required_n": "Required N",
         "uncorrected": "uncorrected",

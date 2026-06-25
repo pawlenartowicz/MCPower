@@ -62,6 +62,10 @@ pub enum ByStep {
 pub struct Benchmarks {
     pub continuous: [f64; 3],
     pub binary_factor: [f64; 3],
+    /// Logit-outcome (beta) presets: β = log(OR) for OR = 1.5 / 2.5 / 4.0
+    /// (Chen, Cohen & Chen 2010). Stored on the β (log-odds) wire scale so the
+    /// data-generation pipeline is unchanged; hosts display `exp(β)` as the OR.
+    pub odds: [f64; 3],
 }
 
 /// Validation limits shared by every host.
@@ -194,6 +198,7 @@ mod embed_tests {
         assert_eq!(cfg.limits.baseline_p_warn, [0.05, 0.95]);
         assert_eq!(cfg.limits.factor_levels, [2, 20]);
         assert_eq!(cfg.limits.factor_min_level_count, 5);
+        assert_eq!(cfg.benchmarks.odds, [0.405, 0.916, 1.386]);
         assert_eq!(cfg.upload.min_rows, 20);
         assert_eq!(cfg.report.thresholds.factor_exclusion_max, 0.0);
     }

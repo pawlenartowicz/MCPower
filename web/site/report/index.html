@@ -10,17 +10,22 @@
     />
     <link rel="canonical" href="https://mcpower.app/report/" />
 
-    <!-- Open Graph + Twitter card (mirrors the landing's head block). No
-         og:image — site/ ships only SVGs; use a text "summary" card until a
-         raster card exists. See index.html for the upgrade note. -->
+    <!-- Open Graph + Twitter card (mirrors the landing's head block). og-card.png
+         is one shared brand card for the whole apex domain; regenerate it with
+         scripts/gen-og-card.py. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="MCPower" />
     <meta property="og:url" content="https://mcpower.app/report/" />
     <meta property="og:title" content="Report a bug — MCPower" />
     <meta property="og:description" content="Report a bug or problem in MCPower — no GitHub account needed. Funnels straight into the public issue tracker." />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content="https://mcpower.app/og-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="MCPower — six statistical-power curves rising toward a 0.8 target as sample size grows." />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Report a bug — MCPower" />
     <meta name="twitter:description" content="Report a bug or problem in MCPower — no GitHub account needed. Funnels straight into the public issue tracker." />
+    <meta name="twitter:image" content="https://mcpower.app/og-card.png" />
 
     <script type="application/ld+json">
       {
@@ -28,6 +33,7 @@
         "@type": "SoftwareApplication",
         "name": "MCPower",
         "url": "https://mcpower.app",
+        "image": "https://mcpower.app/og-card.png",
         "description": "Statistical power and sample-size analysis by Monte Carlo simulation, for designs from t-test to mixed models — in the browser, on the desktop, and in Python and R.",
         "applicationCategory": "EducationalApplication",
         "operatingSystem": "Windows, macOS, Linux, Web browser",

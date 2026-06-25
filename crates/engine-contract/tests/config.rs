@@ -19,6 +19,7 @@ fn workspace_config_json_parses() {
     assert_eq!(cfg.simulation.cluster_auto_count, 12);
     assert_eq!(cfg.benchmarks.continuous, [0.1, 0.25, 0.4]);
     assert_eq!(cfg.benchmarks.binary_factor, [0.2, 0.5, 0.8]);
+    assert_eq!(cfg.benchmarks.odds, [0.405, 0.916, 1.386]);
     assert_eq!(cfg.limits.max_alpha, 0.25);
     assert_eq!(cfg.limits.icc_stability, [0.05, 0.95]);
     assert_eq!(cfg.limits.baseline_p_warn, [0.05, 0.95]);
