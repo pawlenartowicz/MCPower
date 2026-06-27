@@ -1,4 +1,4 @@
-//! Engine throughput bench — frozen fits/sec baseline over a 21-case grid.
+//! Engine throughput bench — frozen fits/sec baseline over a 26-case grid.
 //!
 //! Run from the workspace root (`mcpower/`):
 //!
@@ -50,7 +50,7 @@ use engine_core::rng::splitmix64_finalize;
 use engine_core::spec::{
     BatchResult, ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, Distribution,
     EstimatorSpec, HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations,
-    SimulationSpec,
+    SimulationSpec, WaldSe,
 };
 use serde::{Deserialize, Serialize};
 
@@ -135,10 +135,11 @@ fn scenario_seed() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen case grid — 21 cases. The OLS/GLM/LME rows mirror the cross-port
+// Frozen case grid — 26 cases. The OLS/GLM/LME rows mirror the cross-port
 // bench's ids; the M2 (crossed/nested), M3 (random-slope), and M4 (GLMM) rows
-// exercise the general-path kernels. Specs are the record (effect sizes follow
-// the cross-port sketches, frozen here).
+// exercise the general-path kernels. Each of the 5 M4 GLMM rows also carries a
+// `_hessian` copy (FD-Hessian Wald SE). Specs are the record (effect sizes
+// follow the cross-port sketches, frozen here).
 // ---------------------------------------------------------------------------
 
 struct Case {
@@ -196,6 +197,7 @@ fn base_spec(k: u32) -> SimulationSpec {
         residual_pinned: false,
         outcome_kind: OutcomeKind::Continuous,
         estimator: EstimatorSpec::Ols,
+        wald_se: WaldSe::default(),
         intercept: 0.0,
         posthoc: vec![],
         max_failed_fraction: 0.1,
@@ -252,34 +254,38 @@ fn glmm_spec(k: u32, baseline_p: f64, n_clusters: u32, tau_squared: f64) -> Simu
         slopes: vec![],
         extra_groupings: vec![],
     });
+    // Base GLMM rows are pinned to the Rx Schur SE (the fast legacy baseline) so the
+    // `<id>` vs `<id>_hessian` pair times the per-fit Hessian tax side-by-side. Without
+    // this the base would inherit `WaldSe::default()` = Hessian and the pair collapses.
+    s.wald_se = WaldSe::Rx;
     s
 }
 
 fn cases() -> Vec<Case> {
-    // OLS baseline, p=5 (the historical throughput case): x1=x2=0.25.
+    // OLS baseline, p=5 (the historical throughput case): x1=x2=0.18 (~75% power).
     let mut ols_multi = base_spec(5);
-    ols_multi.effect_sizes[1] = 0.25;
-    ols_multi.effect_sizes[2] = 0.25;
+    ols_multi.effect_sizes[1] = 0.18;
+    ols_multi.effect_sizes[2] = 0.18;
 
     // p=15 — design-matrix width scaling: x1=x2=0.2.
     let mut ols_wide = base_spec(15);
     ols_wide.effect_sizes[1] = 0.2;
     ols_wide.effect_sizes[2] = 0.2;
 
-    // n=5000 — per-row-dominated regime: x1=x2=0.07.
+    // n=5000 — per-row-dominated regime: x1=x2=0.037 (~75% power).
     let mut ols_large_n = base_spec(3);
-    ols_large_n.effect_sizes[1] = 0.07;
-    ols_large_n.effect_sizes[2] = 0.07;
+    ols_large_n.effect_sizes[1] = 0.037;
+    ols_large_n.effect_sizes[2] = 0.037;
 
     // Factor dummy draw + cont×factor product column:
-    // y = x1 + f + x1:f, f 2-level (0.5, 0.5); x1=0.40, f[2]=0.5, x1:f[2]=0.3.
+    // y = x1 + f + x1:f, f 2-level (0.5, 0.5); x1=0.27 (~75% power), f[2]=0.5, x1:f[2]=0.3.
     // Kernel columns: 0 intercept, 1 x1, 2 f-dummy, 3 interaction.
     let mut ols_factor_inter = base_spec(1);
     ols_factor_inter.n_factor_dummies = 1;
     ols_factor_inter.factor_n_levels = vec![2];
     ols_factor_inter.factor_proportions = vec![0.5, 0.5];
     ols_factor_inter.interactions = vec![vec![1, 2]];
-    ols_factor_inter.effect_sizes = vec![0.0, 0.40, 0.5, 0.3];
+    ols_factor_inter.effect_sizes = vec![0.0, 0.27, 0.5, 0.3];
     ols_factor_inter.target_indices = vec![1];
 
     // IRLS baseline: x1=x2=0.4 at baseline_p 0.3.
@@ -292,15 +298,15 @@ fn cases() -> Vec<Case> {
     glm_wide.effect_sizes[1] = 0.4;
     glm_wide.effect_sizes[2] = 0.4;
 
-    // IRLS large-n: x1=x2=0.15.
+    // IRLS large-n: x1=x2=0.09 (~75% power).
     let mut glm_large_n = glm_spec(3, 0.3);
-    glm_large_n.effect_sizes[1] = 0.15;
-    glm_large_n.effect_sizes[2] = 0.15;
+    glm_large_n.effect_sizes[1] = 0.09;
+    glm_large_n.effect_sizes[2] = 0.09;
 
-    // baseline_p=0.05 — IRLS iteration/convergence stress: x1=x2=1.0.
+    // baseline_p=0.05 — IRLS iteration/convergence stress: x1=x2=0.45 (~75% power, first-cut).
     let mut glm_rare = glm_spec(2, 0.05);
-    glm_rare.effect_sizes[1] = 1.0;
-    glm_rare.effect_sizes[2] = 1.0;
+    glm_rare.effect_sizes[1] = 0.45;
+    glm_rare.effect_sizes[2] = 0.45;
 
     // Brent + profiled deviance, 20 clusters: x1=x2=0.15.
     let mut lme_multi = lme_spec(5, 20);
@@ -406,13 +412,14 @@ fn cases() -> Vec<Case> {
         s
     };
 
-    // --- M4 GLMM rows (Glm + cluster). Latent τ² ≈ 0.822 (ICC 0.2), x1=0.5,
-    // baseline_p 0.3 — the losf-23/24 validation shapes. k=1 ⇒ target is [1].
+    // --- M4 GLMM rows (Glm + cluster). Latent τ² ≈ 0.822 (ICC 0.2), x1=0.28
+    // (intercept, ~75% power) / 0.5 (slope), baseline_p 0.3 — the losf-23/24
+    // validation shapes. k=1 ⇒ target is [1].
     // n_clusters is kept SMALL (8): the dense-RE Laplace fit is ~O(clusters²·n)
     // per PIRLS step (glmm.rs), so a realistic count makes these rows dominate
     // the whole bench. Throughput-probe sizing — not a power scenario.
     let mut glmm_intercept = glmm_spec(1, 0.3, 8, 0.822);
-    glmm_intercept.effect_sizes[1] = 0.5;
+    glmm_intercept.effect_sizes[1] = 0.28;
     glmm_intercept.target_indices = vec![1];
     let glmm_slope = {
         let mut s = glmm_spec(1, 0.3, 8, 0.822);
@@ -439,7 +446,7 @@ fn cases() -> Vec<Case> {
     // row: too slow for the grid at current dense-path cost.
     let glmm_crossed = {
         let mut s = glmm_spec(1, 0.3, 8, 0.822);
-        s.effect_sizes[1] = 0.5;
+        s.effect_sizes[1] = 0.30;
         s.target_indices = vec![1];
         s.cluster
             .as_mut()
@@ -454,7 +461,7 @@ fn cases() -> Vec<Case> {
     };
     let glmm_nested = {
         let mut s = glmm_spec(1, 0.3, 8, 0.822);
-        s.effect_sizes[1] = 0.5;
+        s.effect_sizes[1] = 0.30;
         s.target_indices = vec![1];
         s.cluster
             .as_mut()
@@ -469,7 +476,7 @@ fn cases() -> Vec<Case> {
     };
     let glmm_crossed_nested = {
         let mut s = glmm_spec(1, 0.3, 8, 0.822);
-        s.effect_sizes[1] = 0.5;
+        s.effect_sizes[1] = 0.30;
         s.target_indices = vec![1];
         let c = s.cluster.as_mut().unwrap();
         c.extra_groupings.push(GroupingSpec {
@@ -484,6 +491,22 @@ fn cases() -> Vec<Case> {
         });
         s
     };
+
+    // --- M4 GLMM hessian copies — every GLMM shape above, re-run with the
+    // FD-Hessian Wald SE (the engine default) instead of the base rows' pinned Rx
+    // Schur SE, so the grid times the per-fit Hessian tax side-by-side (`<id>` vs
+    // `<id>_hessian`). Same n/n_sims as their originals (true copies); fits/sec is
+    // per-fit so the ratio reads straight off the table.
+    let with_hessian = |s: &SimulationSpec| {
+        let mut s = s.clone();
+        s.wald_se = WaldSe::Hessian;
+        s
+    };
+    let glmm_intercept_hessian = with_hessian(&glmm_intercept);
+    let glmm_slope_hessian = with_hessian(&glmm_slope);
+    let glmm_crossed_hessian = with_hessian(&glmm_crossed);
+    let glmm_nested_hessian = with_hessian(&glmm_nested);
+    let glmm_crossed_nested_hessian = with_hessian(&glmm_crossed_nested);
 
     vec![
         Case {
@@ -589,11 +612,23 @@ fn cases() -> Vec<Case> {
             spec: glmm_intercept,
         }, // M4 GLMM (Glm+cluster), random intercept
         Case {
+            id: "glmm_intercept_hessian",
+            n: 480,
+            n_sims: 1_000,
+            spec: glmm_intercept_hessian,
+        }, // hessian copy of glmm_intercept
+        Case {
             id: "glmm_slope",
             n: 480,
             n_sims: 1_000,
             spec: glmm_slope,
         }, // M4 GLMM + slope, heaviest fit in grid
+        Case {
+            id: "glmm_slope_hessian",
+            n: 480,
+            n_sims: 1_000,
+            spec: glmm_slope_hessian,
+        }, // hessian copy of glmm_slope
         Case {
             id: "glmm_crossed",
             n: 480,
@@ -601,17 +636,35 @@ fn cases() -> Vec<Case> {
             spec: glmm_crossed,
         }, // M4 dense path, k=14 (~62 fits/s)
         Case {
+            id: "glmm_crossed_hessian",
+            n: 480,
+            n_sims: 500,
+            spec: glmm_crossed_hessian,
+        }, // hessian copy of glmm_crossed
+        Case {
             id: "glmm_nested",
             n: 480,
             n_sims: 500,
             spec: glmm_nested,
         }, // M4 dense path, k=24 (~27 fits/s)
         Case {
+            id: "glmm_nested_hessian",
+            n: 480,
+            n_sims: 500,
+            spec: glmm_nested_hessian,
+        }, // hessian copy of glmm_nested
+        Case {
             id: "glmm_crossed_nested",
             n: 480,
             n_sims: 500,
             spec: glmm_crossed_nested,
         }, // M4 dense path, k=30 (~13 fits/s)
+        Case {
+            id: "glmm_crossed_nested_hessian",
+            n: 480,
+            n_sims: 500,
+            spec: glmm_crossed_nested_hessian,
+        }, // hessian copy of glmm_crossed_nested
     ]
 }
 
@@ -1000,13 +1053,13 @@ fn run_smoke(selected: &[&Case], mode_filter: Option<&str>) {
                 Ok(results) => {
                     let conv = results.iter().map(convergence_rate).fold(1.0, f64::min);
                     println!(
-                        "{:<18} {:<4} n={:<5} n_sims=4 conv={conv:.2} ok",
+                        "{:<28} {:<4} n={:<5} n_sims=4 conv={conv:.2} ok",
                         case.id, mode, case.n
                     );
                 }
                 Err(e) => {
                     failed = true;
-                    println!("{:<18} {:<4} n={:<5} ERROR: {e}", case.id, mode, case.n);
+                    println!("{:<28} {:<4} n={:<5} ERROR: {e}", case.id, mode, case.n);
                 }
             }
         }
@@ -1031,7 +1084,7 @@ fn run_timed(selected: &[&Case], save: bool, mode_filter: Option<&str>) {
     };
 
     println!(
-        "{:<18} {:<9} {:>5} {:>7} {:>10} {:>12} {:>6} {:>7} {:>7} {:>7} {:>6}  vs_baseline",
+        "{:<28} {:<9} {:>5} {:>7} {:>10} {:>12} {:>6} {:>7} {:>7} {:>7} {:>6}  vs_baseline",
         "case",
         "scenarios",
         "n",
@@ -1128,7 +1181,7 @@ fn run_timed(selected: &[&Case], save: bool, mode_filter: Option<&str>) {
                 None => format!("{:>6}", "-"),
             };
             println!(
-                "{:<18} {:<9} {:>5} {:>7} {:>10.3} {:>12.0} {:>6.3} {:>7.3} {} {} {}  {}",
+                "{:<28} {:<9} {:>5} {:>7} {:>10.3} {:>12.0} {:>6.3} {:>7.3} {} {} {}  {}",
                 case.id,
                 mode,
                 case.n,

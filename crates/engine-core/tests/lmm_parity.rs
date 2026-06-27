@@ -127,6 +127,7 @@ fn spec_for(c: &CaseDef) -> SimulationSpec {
         residual_pinned: false,
         outcome_kind: OutcomeKind::Continuous,
         estimator: EstimatorSpec::Mle,
+        wald_se: Default::default(),
         intercept: 0.0,
         posthoc: vec![],
         max_failed_fraction: 0.25,

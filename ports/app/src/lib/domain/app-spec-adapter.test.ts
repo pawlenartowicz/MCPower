@@ -1239,6 +1239,25 @@ describe('familyConfigToAppSpec — non-finite numeric guards (stale persisted s
   });
 });
 
+describe('wald_se adapter', () => {
+  it('defaults to hessian and passes rx through for mixed', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    // defaultFamilyConfig('mixed') already seeds a cluster config; use it as-is.
+    const r1 = familyConfigToAppSpec('mixed', cfg);
+    expect(r1.errors).toEqual([]);
+    if (r1.spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect((r1.spec as any).wald_se).toBe('hessian');
+    // set to rx → must propagate
+    cfg.advanced.wald_se = 'rx';
+    const r2 = familyConfigToAppSpec('mixed', cfg);
+    expect(r2.errors).toEqual([]);
+    if (r2.spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect((r2.spec as any).wald_se).toBe('rx');
+  });
+});
+
 describe('familyConfigToAppSpec — validation harmonization (soft warns + ICC band)', () => {
   function oneEffectLinear() {
     return linearConfig({

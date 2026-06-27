@@ -40,6 +40,7 @@ fn sample_logit_spec(baseline_probability: f64) -> AppSpec {
         seed: 2137,
         tests: TestSelection::All,
         correction: CorrectionMethod::None,
+        wald_se: Default::default(),
         scenarios: vec![],
         csv: None,
         baseline_probability,

@@ -682,6 +682,18 @@ class MCPower:
         """
         _validate_correction_method(correction).raise_if_invalid()
 
+    def _validate_wald_se_arg(self, wald_se: str) -> None:
+        """Validate a per-call ``wald_se=`` kwarg.
+
+        Accepts ``"hessian"`` (default) and ``"rx"`` only.
+        """
+        key = (wald_se or "hessian").lower().replace("-", "_").replace(" ", "_")
+        if key not in {"hessian", "rx"}:
+            raise ValueError(
+                f"wald_se={wald_se!r} is not recognised. "
+                "Valid values: 'hessian' (default) or 'rx'."
+            )
+
     def _resolve_tests(self, target_test: str) -> Dict[str, Any]:
         """Parse a ``target_test`` DSL string into the wire dict.
 
@@ -1400,6 +1412,7 @@ class MCPower:
         test_formula: Optional[str] = None,
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
+        wald_se: str = "hessian",
     ) -> Dict[str, Any]:
         """Project current state into the Rust ``LinearSpec`` JSON contract.
 
@@ -1421,6 +1434,7 @@ class MCPower:
             residual_pinned=self._residual_pinned,
             alpha=self.alpha,
             correction=correction,
+            wald_se=wald_se,
             target_test=target_test,
             test_formula=test_formula,
             pending_data=getattr(self, "_pending_data", None),
@@ -1660,6 +1674,7 @@ class MCPower:
         *,
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
+        wald_se: str = "hessian",
         test_formula: Optional[str] = None,
         n_sims: Optional[int] = None,
         seed: Optional[int] = None,
@@ -1679,7 +1694,11 @@ class MCPower:
         ``target_test="overall"`` raises. ``correction``
         is the multiple-comparison correction (``"none"`` /
         ``"bonferroni"`` / ``"holm"`` / ``"bh"`` aka ``"fdr"``,
-        case-insensitive); ``None`` means no correction.
+        case-insensitive); ``None`` means no correction. ``wald_se`` selects
+        the standard-error flavour for the clustered-binary GLMM estimator:
+        ``"hessian"`` (default, per-fit FD-Hessian SE, lme4 ``use.hessian =
+        TRUE``) or ``"rx"`` (the opt-in Schur speed knob, faster but
+        anticonservative).
 
         Returns a result dict (single scenario) or a scenarios envelope
         (``{"scenarios": {...}, "comparison": {...}}``) when ``scenarios`` is
@@ -1692,6 +1711,7 @@ class MCPower:
         n_variables = len(self._registry.effect_names)
         _validate_sample_size_for_model(sample_size, n_variables).raise_if_invalid()
         self._validate_correction_arg(correction)
+        self._validate_wald_se_arg(wald_se)
 
         if test_formula is not None:
             available = self._registry.non_factor_names + self._registry.factor_names
@@ -1729,6 +1749,7 @@ class MCPower:
             test_formula=test_formula,
             target_test=target_test,
             correction=correction,
+            wald_se=wald_se,
         )
         outcome_kind_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
@@ -1871,6 +1892,7 @@ class MCPower:
         *,
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
+        wald_se: str = "hessian",
         test_formula: Optional[str] = None,
         target_power: Optional[float] = None,
         from_size: Optional[int] = None,
@@ -1887,7 +1909,8 @@ class MCPower:
 
         ``target_test`` / ``correction`` mirror :meth:`find_power` — they
         select the tested effect(s) and the multiple-comparison correction for
-        this call (see that method's docstring).
+        this call (see that method's docstring). ``wald_se`` mirrors
+        :meth:`find_power` — see that docstring for details.
 
         The search sweeps ``from_size .. to_size`` and reports the smallest N
         that reaches the target power for each tested effect. ``by`` controls
@@ -1924,6 +1947,7 @@ class MCPower:
             by = _ssb["by"]  # "auto"
 
         self._validate_correction_arg(correction)
+        self._validate_wald_se_arg(wald_se)
 
         _validate_sample_size_range(from_size, to_size, by).raise_if_invalid()
 
@@ -1958,6 +1982,7 @@ class MCPower:
             test_formula=test_formula,
             target_test=target_test,
             correction=correction,
+            wald_se=wald_se,
         )
         outcome_kind_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()

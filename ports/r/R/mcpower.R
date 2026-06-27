@@ -658,7 +658,8 @@ MCPower <- R6::R6Class(
         nrow           = as.integer(n_rows),
         ncol           = as.integer(ncol_design),
         outcome        = outcome,
-        cluster_ids    = cluster_ids
+        cluster_ids    = cluster_ids,
+        wald_se        = ""               # use the contract's configured SE mode
       )
 
       betas <- fit$betas
@@ -778,8 +779,8 @@ MCPower <- R6::R6Class(
     # ------------------------------------------------------------------
 
     find_power = function(sample_size, target_test = NULL, correction = NULL,
-                          test_formula = NULL, n_sims = NULL, seed = NULL,
-                          scenarios = FALSE, progress_callback = TRUE,
+                          wald_se = NULL, test_formula = NULL, n_sims = NULL,
+                          seed = NULL, scenarios = FALSE, progress_callback = TRUE,
                           verbose = TRUE) {
       if (!private$applied) private$apply()
 
@@ -818,7 +819,7 @@ MCPower <- R6::R6Class(
 
       contracts <- private$build_contract_bytes(
         names, target_test = target_test, correction = correction,
-        test_formula = test_formula)
+        wald_se = wald_se, test_formula = test_formula)
 
       progress <- private$resolve_progress(progress_callback)
       raw <- find_power(contracts, as.integer(sample_size), n, base_seed,
@@ -873,7 +874,8 @@ MCPower <- R6::R6Class(
     },
 
     find_sample_size = function(target_test = NULL, correction = NULL,
-                                test_formula = NULL, target_power = NULL,
+                                wald_se = NULL, test_formula = NULL,
+                                target_power = NULL,
                                 from_size = NULL, to_size = NULL, by = NULL,
                                 mode = "linear",
                                 n_sims = NULL, seed = NULL, scenarios = FALSE,
@@ -918,7 +920,7 @@ MCPower <- R6::R6Class(
 
       contracts <- private$build_contract_bytes(
         names, target_test = target_test, correction = correction,
-        test_formula = test_formula)
+        wald_se = wald_se, test_formula = test_formula)
 
       tp <- if (!is.null(target_power)) as.numeric(target_power) else as.numeric(self$power)
       progress <- private$resolve_progress(progress_callback)
@@ -1329,7 +1331,8 @@ MCPower <- R6::R6Class(
     # Captures $skeleton from the engine response into private$skeleton_json so
     # .build_report_meta can include the effect_skeleton without a separate call.
     build_contract_bytes = function(scenario_names, target_test = NULL,
-                                    correction = NULL, test_formula = NULL) {
+                                    correction = NULL, wald_se = NULL,
+                                    test_formula = NULL) {
       if (!private$applied) private$apply()
       reg <- private$registry
 
@@ -1342,6 +1345,7 @@ MCPower <- R6::R6Class(
         reg, scenario_names,
         alpha = self$alpha,
         correction = correction,
+        wald_se = wald_se,
         target_test = target_test,
         heteroskedasticity = private$heteroskedasticity,
         residual_name = private$residual_dist_name,

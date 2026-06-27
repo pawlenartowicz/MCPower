@@ -186,6 +186,7 @@ fn invariant_4_data_refit_reproduces_stat_under_hsk() {
         d.design.ncol,
         &d.outcome,
         None,
+        None,
     )
     .unwrap();
     for tg in &fit.targets {

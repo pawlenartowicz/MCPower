@@ -1,6 +1,7 @@
 // UI entrypoints, FamilyConfig shape, and default values for all three analysis families (regression, ANOVA, mixed).
 // NOTE: the `Entrypoint` string literals are persisted in saved state; renaming them needs a migration.
 import type { Component } from 'svelte';
+import type { WaldSe } from './wald-se-options';
 import AnovaIcon from '$lib/icons/AnovaIcon.svelte';
 import LinearIcon from '$lib/icons/LinearIcon.svelte';
 import MixedIcon from '$lib/icons/MixedIcon.svelte';
@@ -123,6 +124,8 @@ export interface AdvancedConfig {
   simulations: number;
   seed: number;
   correction: 'none' | 'bonferroni' | 'bh' | 'holm' | 'tukey';
+  /** Wald SE method for GLMM families (mixed/logit). Engine ignores it for OLS/LME. */
+  wald_se: WaldSe;
   maxFailedSimulations: number;
   testFormulaOverride: string;
 }
@@ -180,6 +183,7 @@ const baseAdvanced = (): AdvancedConfig => ({
   simulations: SIMULATION.n_sims.anova,
   seed: SIMULATION.seed,
   correction: 'none',
+  wald_se: 'hessian',
   maxFailedSimulations: SIMULATION.max_failed_fraction,
   testFormulaOverride: '',
 });

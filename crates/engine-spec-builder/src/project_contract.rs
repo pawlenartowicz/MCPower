@@ -124,6 +124,7 @@ pub fn build_linear_contract_with_skeleton(
             None
         },
         estimator: EstimatorSpec::Ols, // overwritten by build_contract
+        wald_se: spec.wald_se,
         test: TestSpec {
             targets: target_terms,
             correction: spec.correction,
@@ -1093,6 +1094,7 @@ mod tests {
             posthoc_requests: vec![],
             upload: None,
             cluster_level_vars: vec![],
+            wald_se: Default::default(),
         }
     }
 
@@ -1520,6 +1522,7 @@ mod tests {
             posthoc_requests: vec![],
             upload: None,
             cluster_level_vars: vec![],
+            wald_se: Default::default(),
         }
     }
 
@@ -1563,6 +1566,7 @@ mod tests {
             posthoc_requests: vec![],
             upload: None,
             cluster_level_vars: vec![],
+            wald_se: Default::default(),
         };
         let c = build_linear_contract(&spec).unwrap().pop().unwrap();
         // group[2] and group[3] must resolve to the non-reference dummy
@@ -2113,6 +2117,7 @@ mod tests {
             }],
             upload: None,
             cluster_level_vars: vec![],
+            wald_se: Default::default(),
         }
     }
 
@@ -2475,6 +2480,7 @@ mod tests {
             posthoc_requests: vec![],
             upload: None,
             cluster_level_vars: vec![],
+            wald_se: Default::default(),
         };
         let contracts = build_linear_contract(&spec).unwrap();
         let c = &contracts[0];

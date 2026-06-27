@@ -14,7 +14,8 @@ debug_load_data(
   nrow,
   ncol,
   outcome,
-  cluster_ids
+  cluster_ids,
+  wald_se
 )
 }
 \description{

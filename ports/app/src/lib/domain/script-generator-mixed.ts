@@ -190,7 +190,10 @@ export function generateMixedScript(
   // find_power / find_sample_size call
   const correction = toPortCorrection(s.correction);
   const testsArg = buildTestsArg(s);
-  for (const line of buildFindCallLines(lang, mode, params, testsArg, correction)) lines.push(line);
+  // wald_se is the GLMM SE knob; emitted only when non-default and only meaningful
+  // for the binary (clustered GLMM) outcome — harmless on the Gaussian LME path.
+  for (const line of buildFindCallLines(lang, mode, params, testsArg, correction, s.wald_se))
+    lines.push(line);
 
   return lines.join('\n') + '\n';
 }

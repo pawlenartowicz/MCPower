@@ -34,7 +34,7 @@ debug_report <- function(contracts, scenario_index, seed, n, n_sims, stage_input
 #' (character), `converged` (logical), `targets` (list of per-target lists with
 #' `target_index`, `target_label`, `beta`, `se`, `statistic`, `statistic_kind`,
 #' `critical_value`, `alpha`, `df`, `two_sided`).
-debug_load_data <- function(contracts, scenario_index, seed, design, nrow, ncol, outcome, cluster_ids) .Call(wrap__debug_load_data, contracts, scenario_index, seed, design, nrow, ncol, outcome, cluster_ids)
+debug_load_data <- function(contracts, scenario_index, seed, design, nrow, ncol, outcome, cluster_ids, wald_se) .Call(wrap__debug_load_data, contracts, scenario_index, seed, design, nrow, ncol, outcome, cluster_ids, wald_se)
 
 #' Build the whole `Vec<SimulationContract>` as a single msgpack blob,
 #' parametrising outcome_kind + estimator + intercept + clusters at the call

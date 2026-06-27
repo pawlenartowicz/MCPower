@@ -472,6 +472,7 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
         ncol,
         &outcome,
         cluster_ids.as_deref(),
+        None,
     )?;
 
     if result.betas.len() != semantic_names.len() {

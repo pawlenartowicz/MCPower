@@ -35,3 +35,51 @@ impl EstimatorSpec {
         }
     }
 }
+
+/// Fixed-effect Wald-SE denominator selection for the clustered-binary GLMM.
+/// Additive contract field (serde default `Hessian`); no-op for OLS/LMM.
+/// `Hessian` is the lme4 `use.hessian = TRUE` default; `Rx` is the opt-in
+/// speed knob (glmer `use.hessian = FALSE`). See the design spec §2.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WaldSe {
+    /// Per-fit FD-Hessian SE (glmer `use.hessian = TRUE`) — default, the lme4
+    /// "correct" denominator.
+    #[default]
+    Hessian,
+    /// RX/PLS Schur (glmer `use.hessian = FALSE`) — opt-in speed knob; faster
+    /// but anticonservative for GLMM (assumes β–θ orthogonality, false under
+    /// IRLS weight coupling).
+    Rx,
+}
+
+impl WaldSe {
+    /// `wald_se` only affects the clustered-binary GLMM estimator. OLS/LMM and
+    /// unclustered GLM SEs are already exact, so the orchestrator ignores the
+    /// switch there rather than computing a Hessian. (design §7.)
+    pub fn affects(self, est: EstimatorSpec, clustered: bool) -> bool {
+        matches!(est, EstimatorSpec::Glm) && clustered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wald_se_serde_snake_case_and_default() {
+        // wire tags are snake_case
+        assert_eq!(
+            serde_json::to_string(&WaldSe::Hessian).unwrap(),
+            "\"hessian\""
+        );
+        assert_eq!(serde_json::to_string(&WaldSe::Rx).unwrap(), "\"rx\"");
+        // default is hessian (lme4 use.hessian = TRUE)
+        assert_eq!(WaldSe::default(), WaldSe::Hessian);
+        // affects() is true only for clustered GLM
+        assert!(WaldSe::Hessian.affects(EstimatorSpec::Glm, true));
+        assert!(!WaldSe::Hessian.affects(EstimatorSpec::Glm, false)); // unclustered GLM
+        assert!(!WaldSe::Hessian.affects(EstimatorSpec::Ols, true));
+        assert!(!WaldSe::Hessian.affects(EstimatorSpec::Mle, true)); // LMM
+    }
+}

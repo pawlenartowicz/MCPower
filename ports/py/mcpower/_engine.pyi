@@ -55,6 +55,7 @@ def fit_uploaded_data(
     ncol: int,
     outcome: list[float],
     cluster_ids: list[int] | None,
+    wald_se: str = "",
     /,
 ) -> dict: ...
 

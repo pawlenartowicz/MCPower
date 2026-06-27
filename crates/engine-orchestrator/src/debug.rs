@@ -566,6 +566,7 @@ mod entry {
     /// path). Lowers the contract exactly as `debug_report` does so the spec /
     /// test definition is identical, then calls `fit_provided_data`. Wired for
     /// all three estimators (OLS t, GLM/MLE Wald z).
+    #[allow(clippy::too_many_arguments)] // raw data buffers for one validation call site
     pub fn debug_load_data(
         c: &SimulationContract,
         seed: u64,
@@ -574,12 +575,21 @@ mod entry {
         ncol: usize,
         outcome: &[f64],
         cluster_ids: Option<&[u32]>,
+        // Validation-only override of the contract's `wald_se` SE mode. `None`
+        // keeps the contract's configured mode; `Some(_)` forces the kernel SE
+        // (used by the R Oracle harness to read per-fit `rx` vs `hessian` SE on
+        // one dataset). Bypasses the port-level `rx` rejection by design — no
+        // production path passes a `Some`.
+        wald_se: Option<engine_contract::WaldSe>,
     ) -> Result<LoadDataResult, OrchestratorError> {
         let scenarios = lower_contracts(std::slice::from_ref(c), seed)?;
-        let scenario = scenarios
+        let mut scenario = scenarios
             .into_iter()
             .next()
             .ok_or_else(|| OrchestratorError::InvalidScenarios("empty".into()))?;
+        if let Some(w) = wald_se {
+            scenario.spec.wald_se = w;
+        }
         let spec = &scenario.spec;
 
         let r = engine_core::introspect::fit_provided_data(

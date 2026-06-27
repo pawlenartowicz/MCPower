@@ -184,7 +184,7 @@ const findRec = (b, id, mode) => b?.records?.find((r) => r.case_id === id && r.m
 const mod = await loadWasm(args.artifact ?? join(PORT_ROOT, 'vendor/engine-wasm'));
 
 console.log(
-  `${'case'.padEnd(18)} ${'scenarios'.padEnd(9)} ${'n'.padStart(5)} ${'n_sims'.padStart(7)} ${'elapsed_s'.padStart(10)} ${'fits_per_sec'.padStart(12)} ${'conv'.padStart(6)} ${'power'.padStart(7)} ${'wasm_tax'.padStart(8)}  vs_baseline  gate`,
+  `${'case'.padEnd(28)} ${'scenarios'.padEnd(9)} ${'n'.padStart(5)} ${'n_sims'.padStart(7)} ${'elapsed_s'.padStart(10)} ${'fits_per_sec'.padStart(12)} ${'conv'.padStart(6)} ${'power'.padStart(7)} ${'wasm_tax'.padStart(8)}  vs_baseline  gate`,
 );
 
 const records = [];
@@ -227,7 +227,7 @@ for (const [dump, mode] of rows) {
     : '-';
 
   console.log(
-    `${dump.id.padEnd(18)} ${mode.padEnd(9)} ${String(dump.n).padStart(5)} ${String(nSims).padStart(7)} ${best.toFixed(3).padStart(10)} ${fps.toFixed(0).padStart(12)} ${ctrl.convMin.toFixed(3).padStart(6)} ${power.toFixed(3).padStart(7)} ${(tax ? `${tax.toFixed(2)}x` : '-').padStart(8)}  ${vs.padEnd(11)}  ${gateVerdict(nat, row)}`,
+    `${dump.id.padEnd(28)} ${mode.padEnd(9)} ${String(dump.n).padStart(5)} ${String(nSims).padStart(7)} ${best.toFixed(3).padStart(10)} ${fps.toFixed(0).padStart(12)} ${ctrl.convMin.toFixed(3).padStart(6)} ${power.toFixed(3).padStart(7)} ${(tax ? `${tax.toFixed(2)}x` : '-').padStart(8)}  ${vs.padEnd(11)}  ${gateVerdict(nat, row)}`,
   );
 
   const { passes, ...rec } = row;

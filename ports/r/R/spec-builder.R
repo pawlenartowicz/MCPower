@@ -969,7 +969,7 @@ RVariableRegistry <- R6::R6Class(
 # list ready for jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null", digits = NA)
 # (the production serialization in MCPower's build_contract_bytes).
 .to_linear_spec_list <- function(reg, scenario_names, alpha, correction,
-                                  target_test, heteroskedasticity,
+                                  wald_se = NULL, target_test, heteroskedasticity,
                                   residual_name, residual_pinned = FALSE, max_failed,
                                   test_formula, scenario_configs = .scenario_defaults(),
                                   pending_data = NULL, cluster_level_vars = NULL,
@@ -1063,6 +1063,10 @@ RVariableRegistry <- R6::R6Class(
   # Correction (model.py _to_linear_spec_dict).
   correction_wire <- .correction_for_rust(correction)
 
+  # wald_se: normalise and validate; only affects the GLMM estimator, but the
+  # spec field is always emitted so the engine can apply it uniformly.
+  wald_se_wire <- .wald_se_for_rust(wald_se)
+
   # Scenarios (model.py _to_linear_spec_dict).
   scenarios <- lapply(scenario_names, function(nm) .scenario_dict(nm, scenario_configs))
   # RE knobs (random_effect_dist/df, icc_noise_sd) are LME-only: the engine
@@ -1127,6 +1131,7 @@ RVariableRegistry <- R6::R6Class(
     correlations = correlations,
     alpha = as.numeric(alpha),
     correction = correction_wire,
+    wald_se = wald_se_wire,
     targets = wire_targets,
     report_overall = wire_report_overall,
     contrast_pairs = wire_contrast_pairs,

@@ -236,7 +236,7 @@ test_that("to_linear_spec_json emits the documented field set", {
                test_formula = NULL)
   # heterogeneity removed from the top-level payload (scenario-only now).
   expect_setequal(names(payload), c("formula","predictors","effects","correlations",
-    "alpha","correction","targets","report_overall","contrast_pairs","posthoc_requests",
+    "alpha","correction","wald_se","targets","report_overall","contrast_pairs","posthoc_requests",
     "heteroskedasticity","residual","max_failed_fraction","scenarios"))
   expect_equal(payload$correction, "none")
   expect_equal(payload$targets, list("overall"))

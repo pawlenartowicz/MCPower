@@ -96,6 +96,7 @@ interface CommonProjection {
   seed: number;
   tests: WireTestSelection;
   correction: CorrectionMethod;
+  wald_se: 'hessian' | 'rx';
   scenarios: ScenarioWire[];
   csv: CsvData | null;
   report_overall: boolean;
@@ -306,6 +307,7 @@ function projectCommon(
     seed: config.advanced.seed,
     tests,
     correction,
+    wald_se: config.advanced.wald_se,
     scenarios,
     csv,
     // The omnibus (OLS F / GLM LRT) is not defined for a mixed-effects fit

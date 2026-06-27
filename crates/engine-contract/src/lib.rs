@@ -29,7 +29,7 @@ pub use contract::SimulationContract;
 pub use design::{DesignSpec, DesignTerm};
 pub use distribution::Distribution;
 pub use error::ContractError;
-pub use estimator::EstimatorSpec;
+pub use estimator::{EstimatorSpec, WaldSe};
 pub use generation::{
     ClusterSizing, ClusterSpec, ColumnSpec, Correlations, GenerationSpec, GroupingRelation,
     GroupingSpec, SlopeTerm, SyntheticKind, UploadedFrame, MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q,

@@ -52,6 +52,7 @@ pub fn example1_simple_ols() -> SimulationContract {
         },
         design_test: None, // None = correctly-specified (uses design_generation)
         estimator: EstimatorSpec::Ols,
+        wald_se: Default::default(),
         test: TestSpec {
             targets: vec![
                 TestTarget::Marginal { term: 1 },

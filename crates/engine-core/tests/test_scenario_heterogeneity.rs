@@ -62,6 +62,7 @@ fn base_spec(outcome_kind: OutcomeKind, effect_sizes: Vec<f64>) -> SimulationSpe
             OutcomeKind::Continuous => EstimatorSpec::Ols,
             OutcomeKind::Binary => EstimatorSpec::Glm,
         },
+        wald_se: Default::default(),
         intercept,
         posthoc: vec![],
         max_failed_fraction: 0.1,

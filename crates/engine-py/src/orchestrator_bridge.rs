@@ -196,8 +196,23 @@ fn ci_slice_to_pylist<'py>(py: Python<'py>, cis: &[Ci]) -> PyResult<Bound<'py, P
 ///
 /// `design` is column-major (col 0 first, then col 1, ...), length `nrow * ncol`.
 /// Pass `cluster_ids=None` for non-clustered designs.
+/// Parse the validation-only `wald_se` override string into an optional kernel
+/// SE mode. `""`/`"default"` ⇒ `None` (keep the contract's configured mode);
+/// `"rx"`/`"hessian"` force that mode. Reachable only via this raw bridge arg,
+/// for the Oracle harness; no production path passes a non-empty value.
+fn parse_wald_se_override(s: &str) -> PyResult<Option<engine_contract::WaldSe>> {
+    match s {
+        "" | "default" => Ok(None),
+        "rx" => Ok(Some(engine_contract::WaldSe::Rx)),
+        "hessian" => Ok(Some(engine_contract::WaldSe::Hessian)),
+        other => Err(PyValueError::new_err(format!(
+            "unknown wald_se override {other:?}; expected \"\", \"default\", \"rx\", or \"hessian\""
+        ))),
+    }
+}
+
 #[pyfunction]
-#[pyo3(signature = (contracts, scenario_index, seed, design, nrow, ncol, outcome, cluster_ids))]
+#[pyo3(signature = (contracts, scenario_index, seed, design, nrow, ncol, outcome, cluster_ids, wald_se=""))]
 #[allow(clippy::too_many_arguments)]
 pub fn fit_uploaded_data(
     py: Python<'_>,
@@ -209,7 +224,9 @@ pub fn fit_uploaded_data(
     ncol: i32,
     outcome: Vec<f64>,
     cluster_ids: Option<Vec<u32>>,
+    wald_se: &str,
 ) -> PyResult<Py<PyDict>> {
+    let wald_se_override = parse_wald_se_override(wald_se)?;
     let all = decode_contracts(contracts)?;
     let c = all.get(scenario_index as usize).ok_or_else(|| {
         PyValueError::new_err(format!("scenario_index {scenario_index} out of range"))
@@ -248,6 +265,7 @@ pub fn fit_uploaded_data(
         ncol,
         &outcome,
         cluster_ids.as_deref(),
+        wald_se_override,
     )
     .map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))?;
 

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::design::DesignSpec;
-use crate::estimator::EstimatorSpec;
+use crate::estimator::{EstimatorSpec, WaldSe};
 use crate::generation::GenerationSpec;
 use crate::outcome::OutcomeSpec;
 use crate::scenarios::ScenarioPerturbations;
@@ -26,6 +26,10 @@ pub struct SimulationContract {
     #[serde(default)]
     pub design_test: Option<DesignSpec>,
     pub estimator: EstimatorSpec,
+    /// Fixed-effect Wald-SE mode for the clustered-binary GLMM (no-op elsewhere).
+    /// Additive; serde default `Hessian` keeps older payloads valid. (design §7.)
+    #[serde(default)]
+    pub wald_se: WaldSe,
     pub test: TestSpec,
     #[serde(default)]
     pub posthoc: Vec<PosthocSpec>,
@@ -40,6 +44,7 @@ pub struct SimulationContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::estimator::WaldSe;
     use crate::fixtures::example1_simple_ols;
 
     #[test]
@@ -48,5 +53,21 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&c).unwrap();
         let back: SimulationContract = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(c, back);
+    }
+
+    #[test]
+    fn contract_wald_se_defaults_when_absent() {
+        // Serialize a named-map payload, strip the wald_se keys to mimic an older
+        // producer, then confirm the new struct deserializes it to the default.
+        let c = example1_simple_ols();
+        let v = rmp_serde::to_vec_named(&c).unwrap();
+        let mut val: rmpv::Value = rmp_serde::from_slice(&v).unwrap();
+        if let rmpv::Value::Map(entries) = &mut val {
+            entries.retain(|(k, _)| k.as_str() != Some("wald_se"));
+        }
+        let mut stripped = Vec::new();
+        rmpv::encode::write_value(&mut stripped, &val).unwrap();
+        let back: SimulationContract = rmp_serde::from_slice(&stripped).unwrap();
+        assert_eq!(back.wald_se, WaldSe::Hessian);
     }
 }

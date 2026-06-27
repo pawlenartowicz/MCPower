@@ -49,6 +49,7 @@ export const TIP_SOURCES: Record<string, TipSource> = {
   clusterDimKind:           { doc: 'concepts/mixed-effects', anchor: 'cluster-sizing-regimes', md: mixedEffects },
   randomSlopes:             { doc: 'concepts/mixed-effects', anchor: 'random-slopes', md: mixedEffects },
   clusterLevelVars:         { doc: 'concepts/mixed-effects', anchor: 'cluster-level-predictors', md: mixedEffects },
+  waldSe:                   { doc: 'concepts/mixed-effects', anchor: 'se-method-hessian-vs-schur', md: mixedEffects },
   contrasts:                { doc: 'concepts/multiple-testing', anchor: 'contrasts-and-post-hoc', md: multipleTesting },
   testFormulaOverride:      { doc: 'concepts/model-specification', anchor: 'test-formula-misspecification', md: modelSpec },
   sampledShares:            { doc: 'concepts/scenario-analysis', anchor: 'factor-allocation', md: scenarioAnalysis },

@@ -62,7 +62,15 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets
       - name: test
-        run: cargo test --workspace
+        # engine-r is excluded: it has no #[test]s, but `cargo test` would build
+        # its lib-test executable, which links -lR against the runner's R. That
+        # link is fragile — setup-r (r-version: release) tracks the newest R, and
+        # a stale Swatinem/rust-cache can pin extendr-ffi's build-script output to
+        # an old /opt/R/<ver> path that a patch bump (e.g. 4.6.0→4.6.1) deletes,
+        # giving "unable to find library -lR". engine-r is still compile-checked
+        # by the clippy step above (no link) and behaviourally tested in the `r`
+        # job (R CMD INSTALL never links -lR), so excluding it loses no coverage.
+        run: cargo test --workspace --exclude engine-r
 
   # ── Python port: native release engine via maturin, then pytest ───────────
   python:

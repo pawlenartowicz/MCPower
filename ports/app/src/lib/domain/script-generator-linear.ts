@@ -73,14 +73,16 @@ export function buildConfigLines(
 }
 
 /** The find_power / find_sample_size call block, shared by every family generator.
- *  Lines that restate a port default (bounds 30/200, by auto, correction none)
- *  are omitted. */
+ *  Lines that restate a port default (bounds 30/200, by auto, correction none,
+ *  wald_se hessian) are omitted. `waldSe` is the find_* kwarg both ports expose
+ *  for the clustered-binary GLMM; omitted/undefined for families that lack it. */
 export function buildFindCallLines(
   lang: Lang,
   mode: 'find-power' | 'find-sample-size',
   params: ScriptParams,
   testsArg: string | null,
   correction: string,
+  waldSe?: string,
 ): string[] {
   const lines: string[] = [];
   if (mode === 'find-power') {
@@ -99,6 +101,7 @@ export function buildFindCallLines(
   }
   if (testsArg !== null) lines.push(`    target_test="${testsArg}",`);
   if (correction !== 'none') lines.push(`    correction="${correction}",`);
+  if (waldSe && waldSe !== 'hessian') lines.push(`    wald_se="${waldSe}",`);
   lines.push(')');
   return lines;
 }

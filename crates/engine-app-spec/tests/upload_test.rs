@@ -316,6 +316,7 @@ fn f2_get_effects_glm_recovers_log_odds() {
             names: vec!["x".into()],
         },
         correction: CorrectionMethod::None,
+        wald_se: Default::default(),
         scenarios: vec![],
         csv: Some(CsvData {
             mode: UploadMode::Partial,
@@ -412,6 +413,7 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
             names: vec!["x".into()],
         },
         correction: CorrectionMethod::None,
+        wald_se: Default::default(),
         scenarios: vec![],
         csv: Some(CsvData {
             mode: UploadMode::Partial,

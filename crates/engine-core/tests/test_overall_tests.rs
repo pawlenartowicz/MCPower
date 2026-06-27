@@ -43,6 +43,7 @@ fn ols_spec(n_non_factor: u32, effect_sizes: Vec<f64>) -> SimulationSpec {
         residual_pinned: false,
         outcome_kind: OutcomeKind::Continuous,
         estimator: EstimatorSpec::Ols,
+        wald_se: Default::default(),
         intercept: 0.0,
         posthoc: vec![],
         max_failed_fraction: 1.0,

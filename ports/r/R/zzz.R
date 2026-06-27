@@ -51,6 +51,18 @@
   stop(sprintf("unknown correction %s", sQuote(correction)))
 }
 
+# Canonical WaldSe variant names (engine-contract estimator.rs). No config
+# aliases — "hessian" (default) and "rx" (opt-in speed knob) are accepted.
+# Mirrors .correction_for_rust.
+.wald_se_for_rust <- function(wald_se) {
+  if (is.null(wald_se)) return("hessian")
+  key <- gsub("[- ]", "_", tolower(wald_se))
+  if (key %in% c("hessian", "rx")) return(key)
+  stop(sprintf(
+    "unknown wald_se %s (use \"hessian\" or \"rx\")",
+    sQuote(wald_se)))
+}
+
 .mcpower_cache <- new.env(parent = emptyenv())
 
 .config <- function() {

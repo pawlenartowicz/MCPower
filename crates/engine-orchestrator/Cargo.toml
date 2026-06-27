@@ -20,6 +20,19 @@ serde_json  = "1"
 thiserror   = "2"
 indexmap    = "2"
 
+# `calibrate_asymp` builds faer Mats for the FD-Hessian covariance and inverts
+# the q×q mean target block. Match engine-core's pin (== faer's transitive 0.24)
+# AND its wasm carve-out: a plain `faer = "0.24"` here keeps default features on
+# all targets, and Cargo feature unification then re-enables `rand` (→ rand 0.9 →
+# getrandom 0.3, no wasm_js backend) across the whole graph, defeating the
+# engine-core carve-out when the engine-wasm cdylib is built. Drop `rand`/`rayon`
+# on wasm exactly as engine-core does; `std` + `linalg` cover the Mat math here.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+faer        = { version = "0.24", default-features = false, features = ["std", "linalg"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+faer        = "0.24"
+
 [dev-dependencies]
 rayon       = "1.10"
 engine-contract = { path = "../engine-contract", features = ["test-fixtures"] }

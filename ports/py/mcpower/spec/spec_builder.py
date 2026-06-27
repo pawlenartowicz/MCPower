@@ -99,6 +99,7 @@ def build_linear_spec(
     residual_pinned: bool = False,
     alpha: float,
     correction: Optional[str],
+    wald_se: str = "hessian",
     target_test: Optional[str],
     test_formula: Optional[str],
     pending_data: Optional[Dict[str, Any]],
@@ -225,6 +226,11 @@ def build_linear_spec(
     correction_key = (correction or "none").lower().replace("-", "_").replace(" ", "_")
     correction_wire = get_correction_aliases().get(correction_key, correction_key)
 
+    # wald_se: normalise to canonical snake_case; "hessian" (default) and "rx"
+    # (opt-in speed knob) are the valid wire values. Validation already ran in
+    # _validate_wald_se_arg; this mirrors the correction normalisation pattern.
+    wald_se_wire = (wald_se or "hessian").lower().replace("-", "_").replace(" ", "_")
+
     # Scenarios — pre-encode through `_scenario_dict` so the integer
     # code translation matches the existing Python projection exactly.
     scenarios = [build_scenario_dict(name, scenario_configs) for name in scenario_names]
@@ -314,6 +320,7 @@ def build_linear_spec(
         "correlations": correlations,
         "alpha": float(alpha),
         "correction": correction_wire,
+        "wald_se": wald_se_wire,
         "targets": wire_targets,
         "report_overall": wire_report_overall,
         "contrast_pairs": [list(pair) for pair in wire_contrast_pairs],

@@ -52,6 +52,7 @@ fn simple_spec() -> LinearSpec {
         posthoc_requests: vec![],
         upload: None,
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     }
 }
 

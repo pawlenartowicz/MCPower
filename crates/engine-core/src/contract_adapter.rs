@@ -202,6 +202,7 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         het_coeffs: HeteroskedasticityCoeffs::default(),
         report_overall,
         factor_min_level_count: 0,
+        wald_se: c.wald_se,
     })
 }
 
@@ -874,7 +875,7 @@ mod tests {
         ClusterSizing, ClusterSpec, ColumnId, CorrectionMethod, DesignSpec, EstimatorSpec,
         GenerationSpec, LmeScenarioPerturbations, OutcomeKind, OutcomeSpec, PosthocSpec,
         ResidualSpec, ScenarioPerturbations, SimulationContract, SlopeTerm, TestSpec, TestTarget,
-        UploadedFrame,
+        UploadedFrame, WaldSe,
     };
 
     #[test]
@@ -958,6 +959,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 3 }],
                 correction: CorrectionMethod::None,
@@ -1018,6 +1020,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Glm,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -1093,6 +1096,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -1175,6 +1179,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 // term 1 in design_test names x2.
                 targets: vec![TestTarget::Marginal { term: 1 }],
@@ -1283,6 +1288,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![
                     TestTarget::Marginal { term: 1 },
@@ -1374,6 +1380,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![
                     TestTarget::Marginal { term: 2 },
@@ -1586,6 +1593,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Joint { terms: vec![1, 2] }],
                 correction: CorrectionMethod::None,
@@ -1672,6 +1680,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -1758,6 +1767,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Contrast {
                     positive: 1,
@@ -1877,6 +1887,7 @@ mod tests {
             // the adapter falls back to design_generation (term index 3 below).
             design_test: None,
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 // Target the interaction term (term index 3 in design_generation)
                 targets: vec![TestTarget::Marginal { term: 3 }],
@@ -1946,6 +1957,7 @@ mod tests {
             },
             design_test: None,
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -2095,6 +2107,7 @@ mod tests {
             },
             design_test: None,
             estimator: EstimatorSpec::Mle,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 2 }],
                 correction: CorrectionMethod::None,
@@ -2173,6 +2186,7 @@ mod tests {
             },
             design_test: None,
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -2342,6 +2356,7 @@ mod tests {
                 ],
             }),
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![
                     TestTarget::Marginal { term: 1 },
@@ -2356,5 +2371,13 @@ mod tests {
         };
         let s = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(s.factor_sampled, vec![Some(false), Some(true)]);
+    }
+
+    #[test]
+    fn adapter_threads_wald_se() {
+        let mut c = example1_simple_ols();
+        c.wald_se = WaldSe::Hessian;
+        let spec = contract_to_simulation_spec(&c).unwrap();
+        assert_eq!(spec.wald_se, WaldSe::Hessian);
     }
 }

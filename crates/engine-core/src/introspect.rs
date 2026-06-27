@@ -305,6 +305,7 @@ pub fn fit_provided_data(
                 Some(&tbuf[..nt]),
                 &spec.effect_sizes,
                 nrow,
+                spec.wald_se,
             );
             // D̂ = Λ̂Λ̂' (no σ² — binomial dispersion fixed at 1). Diagonal
             // entries are RE variances; off-diagonals yield re_corr. Mirrors
@@ -786,6 +787,7 @@ mod tests {
             residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
             estimator: EstimatorSpec::Glm,
+            wald_se: Default::default(),
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -1188,6 +1190,7 @@ mod tests {
             },
             design_test: None,
             estimator: EstimatorSpec::Ols,
+            wald_se: Default::default(),
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 3 }],
                 correction: CorrectionMethod::None,
@@ -1398,6 +1401,7 @@ mod tests {
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
             estimator: EstimatorSpec::Mle,
+            wald_se: Default::default(),
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,

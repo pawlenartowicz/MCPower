@@ -227,6 +227,12 @@ On the binary path the ICC you specify maps to a random-intercept variance on th
 
 At small cluster sizes the Laplace approximation can be optimistic. MCPower warns when both hold: (1) the estimated between-cluster variance `τ̂²` (averaged across converged fits) exceeds the configured threshold (default 1.0), and (2) the minimum cluster size is below the recommended floor (default 10 observations per cluster). Cluster sizes below 5 are rejected outright, so the warning targets the "allowed but risky" 5–9-observations-per-cluster band. When it fires, interpret GLMM power with caution and consider larger clusters. With ≥10 observations per cluster the approximation is generally reliable at the ICCs common in social and health research (0.05–0.30).
 
+### SE method (Hessian vs Schur)
+
+For a clustered logistic model the Wald standard errors of the fixed effects can be computed two ways, exposed as the **SE method** control (`wald_se=` in the Python and R `find_power`/`find_sample_size` calls). **Per-fit Hessian** (the default, lme4's `use.hessian = TRUE`) inverts the full finite-difference Hessian of each fit — the "correct" denominator, slightly slower. **Schur (fast, approximate)** uses the Schur-complement shortcut (glmer's `use.hessian = FALSE`): faster, but anticonservative, because it assumes the fixed effects and the random-effect variance are orthogonal — an assumption the IRLS weight coupling of a GLMM breaks. Keep the default unless run time on a large GLMM grid is the bottleneck.
+
+This control only affects the **clustered-binary GLMM**. OLS, Gaussian mixed models, and unclustered logistic regression already have exact standard errors, so the setting is ignored there — which is why switching it changes nothing for those designs.
+
 ## Learn more
 
 - [[validation/index|Validation]] — how MCPower's mixed-model power is checked against `lme4`.

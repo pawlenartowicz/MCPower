@@ -1168,6 +1168,7 @@ version = "1.0.0"
 dependencies = [
  "engine-contract",
  "rmp-serde",
+ "rmpv",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1201,6 +1202,7 @@ dependencies = [
  "engine-contract",
  "engine-core",
  "engine-spec-builder",
+ "faer",
  "indexmap 2.14.0",
  "insta",
  "rayon",
@@ -4153,6 +4155,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmpv"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a4e1d4b9b938a26d2996af33229f0ca0956c652c1375067f0b45291c1df8417"
+dependencies = [
+ "rmp",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "rust_decimal"
 version = "1.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4348,6 +4361,16 @@ dependencies = [
  "serde",
  "serde_core",
  "typeid",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

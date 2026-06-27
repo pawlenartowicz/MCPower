@@ -96,7 +96,11 @@ MCPowerDebug <- R6::R6Class(
     #'   \item{targets}{list of per-target lists (beta, se, statistic,
     #'     critical_value, target_index, target_label, df, two_sided, ...)}
     #' }
-    load_data = function(d) {
+    #' @param wald_se Validation-only override of the Wald-SE kernel mode for this
+    #'   single fit. NULL (default) uses the contract's configured mode; accepts
+    #'   "rx" (Schur SE) or "hessian" (FD-Hessian SE). Used by the GLMM Oracle
+    #'   harness to read per-fit rx vs hessian SE on one dataset.
+    load_data = function(d, wald_se = NULL) {
       if (!private$applied) private$apply()
       blob <- private$build_contract_bytes(self$.debug_scenario)
       design <- d$design
@@ -111,7 +115,8 @@ MCPowerDebug <- R6::R6Class(
         nrow           = nrow(design),
         ncol           = ncol(design),
         outcome        = as.numeric(d$outcome),
-        cluster_ids    = if (is.null(cl)) integer(0) else as.integer(cl)
+        cluster_ids    = if (is.null(cl)) integer(0) else as.integer(cl),
+        wald_se        = if (is.null(wald_se)) "" else wald_se
       )
     },
 

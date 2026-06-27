@@ -300,6 +300,7 @@ fn nan_bearing_extras_survive_json_wire_and_merge() {
         seed: 2137,
         tests: TestSelection::All,
         correction: CorrectionMethod::None,
+        wald_se: Default::default(),
         scenarios: vec![],
         csv: None,
         baseline_probability: 0.3,

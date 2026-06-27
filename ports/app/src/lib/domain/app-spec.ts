@@ -134,6 +134,9 @@ export interface LinearSpec {
     seed: number;
     tests: TestSelection;
     correction: CorrectionMethod;
+    /** Wald SE method; only affects clustered-binary GLMM. Optional — mirrors the
+     *  Rust `#[serde(default)]` (omitted ⇒ engine default `hessian`). */
+    wald_se?: 'hessian' | 'rx';
     scenarios: ScenarioWire[];
     csv: CsvData | null;
     /** v1-parity omnibus: OLS F-test / Logit LRT vs intercept-only. Always false

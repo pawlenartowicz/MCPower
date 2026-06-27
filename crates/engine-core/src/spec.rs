@@ -5,7 +5,7 @@
 //! is host-agnostic.
 
 pub use engine_contract::{
-    CorrectionMethod, Distribution, EstimatorSpec, OutcomeKind, ResidualDist,
+    CorrectionMethod, Distribution, EstimatorSpec, OutcomeKind, ResidualDist, WaldSe,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -324,6 +324,10 @@ pub struct SimulationSpec {
     pub outcome_kind: OutcomeKind,
     /// Consumed by the solver dispatch.
     pub estimator: EstimatorSpec,
+    /// Fixed-effect Wald-SE mode for the clustered-binary GLMM (no-op elsewhere).
+    /// Threaded from the contract field of the same name. (design §7.)
+    #[serde(default)]
+    pub wald_se: WaldSe,
     /// Baseline intercept used by GLM data-gen and surfaced to result
     /// formatters. The kernel does NOT consume this in the linear-predictor
     /// computation — that comes from `effect_sizes[0]` instead. It exists as
@@ -597,6 +601,7 @@ mod tests {
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
             estimator: EstimatorSpec::Ols,
+            wald_se: WaldSe::default(),
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,

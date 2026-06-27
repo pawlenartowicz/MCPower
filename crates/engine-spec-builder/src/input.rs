@@ -76,6 +76,12 @@ pub struct LinearSpec {
     /// per row. Names must be real predictors (validated host-side).
     #[serde(default)]
     pub cluster_level_vars: Vec<String>,
+    /// Standard-error flavour for the clustered-binary GLMM estimator.
+    /// `Hessian` (default) uses the per-fit FD-Hessian SE (lme4 `use.hessian =
+    /// TRUE`, the "correct" denominator); `Rx` is the opt-in Schur speed knob
+    /// (faster, anticonservative). No-op for OLS/LMM and unclustered GLM.
+    #[serde(default)]
+    pub wald_se: engine_contract::WaldSe,
 }
 
 /// One all-pairwise post-hoc request for a single factor.
@@ -308,6 +314,7 @@ mod tests {
             posthoc_requests: vec![],
             upload: None,
             cluster_level_vars: vec![],
+            wald_se: Default::default(),
         }
     }
 

@@ -240,6 +240,7 @@ version = "1.0.0"
 dependencies = [
  "engine-contract",
  "engine-core",
+ "faer",
  "indexmap",
  "serde",
  "serde_json",

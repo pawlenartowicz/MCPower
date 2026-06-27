@@ -106,6 +106,7 @@ fn make_two_predictor_spec_with_upload(upload: UploadInput) -> LinearSpec {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     }
 }
 
@@ -217,6 +218,7 @@ fn binary_matched_column_becomes_resampled_binary_with_proportion() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
@@ -323,6 +325,7 @@ fn partial_mode_does_not_correlate_binary_column() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
@@ -406,6 +409,7 @@ fn partial_mode_measures_empirical_correlation() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
@@ -494,6 +498,7 @@ fn partial_mode_measures_spearman_converted() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
@@ -582,6 +587,7 @@ fn explicit_correlation_overrides_measured() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
@@ -658,6 +664,7 @@ fn matched_factor_column_becomes_factor_from_frame() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
@@ -829,6 +836,7 @@ fn partial_upload_nonpsd_combined_matrix_is_rejected() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let err = engine_spec_builder::build_contract(
         &spec,
@@ -992,6 +1000,7 @@ fn partial_mode_measures_nontrivial_and_excludes_binary() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
@@ -1139,6 +1148,7 @@ fn upload_mode_none_does_not_measure_correlations() {
         posthoc_requests: vec![],
         upload: Some(upload),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,

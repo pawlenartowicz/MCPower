@@ -7,9 +7,17 @@
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import CorrectionSelect from './CorrectionSelect.svelte';
+  import WaldSeSelect from './WaldSeSelect.svelte';
   import TestChooser from './TestChooser.svelte';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
+  // Show the Wald SE selector ONLY for the clustered-binary GLMM (mixed family +
+  // binary outcome) — the single estimator wald_se affects (see WaldSe::affects:
+  // Glm && clustered). OLS, Gaussian LME, and unclustered logit have exact SEs and
+  // ignore it, so surfacing the knob there reads as a control that does nothing.
+  const showWaldSe = $derived(
+    familyStore.active === 'mixed' && familyStore.activeOutcome === 'binary',
+  );
 </script>
 
 <div class="space-y-3">
@@ -39,9 +47,14 @@
         bind:value={cfg.alpha}
       />
     </div>
-    <div class="min-w-40 flex-1">
+    <div class="min-w-40">
       <CorrectionSelect />
     </div>
+    {#if showWaldSe}
+      <div class="min-w-40">
+        <WaldSeSelect />
+      </div>
+    {/if}
   </div>
   <TestChooser />
   <!-- Same format as the model Formula field: label above, full-width input. -->

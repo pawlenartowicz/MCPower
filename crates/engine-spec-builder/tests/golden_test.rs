@@ -147,6 +147,7 @@ fn linear_interaction_xi_xj_builds_with_interaction_term() {
         posthoc_requests: vec![],
         upload: None,
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
 
     let contracts = build_linear_contract(&spec).expect("interaction now supported");
@@ -234,6 +235,7 @@ fn linear_factor_interaction_builds_with_interaction_term() {
         posthoc_requests: vec![],
         upload: None,
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
 
     let contracts = build_linear_contract(&spec).expect("interaction now supported");
@@ -331,6 +333,7 @@ fn build_linear_contract_generation_column_kinds() {
         posthoc_requests: vec![],
         upload: None,
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     };
 
     let contracts = build_linear_contract(&spec).expect("build");

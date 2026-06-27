@@ -1,8 +1,15 @@
 //! `AppSpec` tagged-enum state model (`Linear`/`Logit`/`Mixed`) mirrored by the app's TS `AppSpec`.
 
-use engine_contract::CorrectionMethod;
+use engine_contract::{CorrectionMethod, WaldSe};
 use engine_spec_builder::input::{ScenarioInput, UploadColumn, UploadMode};
 use serde::{Deserialize, Serialize};
+
+/// `#[serde(skip_serializing_if)]` predicate for `wald_se`: omit the field when
+/// it equals the default so a minimal spec (no `wald_se`) round-trips unchanged,
+/// matching `#[serde(default)]` on decode.
+fn wald_se_is_default(w: &WaldSe) -> bool {
+    *w == WaldSe::default()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "family", rename_all = "lowercase")]
@@ -50,6 +57,12 @@ pub struct LogitSpec {
     pub seed: u64,
     pub tests: TestSelection,
     pub correction: CorrectionMethod,
+    /// Wald SE method. Only affects clustered-binary GLMM (Mixed+Binary);
+    /// OLS/LME and unclustered Glm (Logit) ignore it — default `Hessian`
+    /// (lme4 `use.hessian = TRUE`); `Rx` is the opt-in speed knob.
+    /// `#[serde(default)]` keeps older specs intact; skip-serialize when default.
+    #[serde(default, skip_serializing_if = "wald_se_is_default")]
+    pub wald_se: WaldSe,
     /// Scenarios to fan out, mirroring `engine_spec_builder::ScenarioInput`
     /// (host-projected from the Scenarios toggle). Empty → one baseline contract
     /// (toggle off), identical to the pre-fan-out behavior.
@@ -146,6 +159,12 @@ pub struct MixedSpec {
     pub seed: u64,
     pub tests: TestSelection,
     pub correction: CorrectionMethod,
+    /// Wald SE method. Only affects clustered-binary GLMM (this family with Binary
+    /// outcome); Gaussian LME ignores it. Default `Hessian` (per-fit FD-Hessian SE,
+    /// lme4 `use.hessian = TRUE`); `Rx` is the opt-in Schur speed knob.
+    /// `#[serde(default)]` keeps older specs intact; skip-serialize when default.
+    #[serde(default, skip_serializing_if = "wald_se_is_default")]
+    pub wald_se: WaldSe,
     /// Scenarios to fan out, mirroring `engine_spec_builder::ScenarioInput`
     /// (host-projected from the Scenarios toggle). Empty → one baseline contract
     /// (toggle off), identical to the pre-fan-out behavior.

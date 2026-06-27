@@ -103,6 +103,7 @@ fn assemble_mixed(
     builder_spec.test_formula = spec.test_formula.clone();
     builder_spec.scenarios = spec.scenarios.clone();
     builder_spec.cluster_level_vars = spec.cluster_level_vars.clone();
+    builder_spec.wald_se = spec.wald_se;
     apply_outcome_options(
         &mut builder_spec,
         spec.outcome_options.as_ref(),
@@ -290,6 +291,7 @@ fn assemble_logit(
     )?;
     builder_spec.test_formula = spec.test_formula.clone();
     builder_spec.scenarios = spec.scenarios.clone();
+    builder_spec.wald_se = spec.wald_se;
     apply_outcome_options(
         &mut builder_spec,
         spec.outcome_options.as_ref(),
@@ -566,6 +568,7 @@ fn project_to_builder_spec(
         posthoc_requests: vec![],
         upload: csv.map(csv_to_upload_input),
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     })
 }
 
@@ -1568,6 +1571,7 @@ mod tests {
             seed: 2137,
             tests: TestSelection::All,
             correction: CorrectionMethod::None,
+            wald_se: Default::default(),
             scenarios: vec![],
             csv: None,
             report_overall: false,

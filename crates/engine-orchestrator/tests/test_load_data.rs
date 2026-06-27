@@ -3,7 +3,9 @@
 // (betas are a deterministic byproduct of the same fit — see plan design note).
 mod common;
 
-use engine_contract::{ClusterSizing, ClusterSpec, GroupingRelation, GroupingSpec, OutcomeKind};
+use engine_contract::{
+    ClusterSizing, ClusterSpec, GroupingRelation, GroupingSpec, OutcomeKind, WaldSe,
+};
 use engine_orchestrator::debug::{debug_load_data, debug_report, StageMask};
 use engine_spec_builder::build_contract;
 
@@ -27,6 +29,7 @@ fn load_data_reproduces_sim0_statistic_and_crit_bit_for_bit() {
         d.design.ncol,
         &d.outcome,
         d.cluster_ids.as_deref(),
+        None,
     )
     .unwrap();
 
@@ -88,6 +91,7 @@ fn load_data_reproduces_glm_sim0_statistic_and_crit_bit_for_bit() {
         d.design.ncol,
         &d.outcome,
         d.cluster_ids.as_deref(),
+        None,
     )
     .unwrap();
 
@@ -141,6 +145,7 @@ fn load_data_reproduces_mle_sim0_statistic_and_crit_bit_for_bit() {
         d.design.ncol,
         &d.outcome,
         d.cluster_ids.as_deref(),
+        None,
     )
     .unwrap();
 
@@ -219,6 +224,7 @@ fn debug_surfaces_extra_grouping_ids_and_variance_components() {
         d.design.ncol,
         &d.outcome,
         d.cluster_ids.as_deref(),
+        None,
     )
     .unwrap();
     assert!(ld.converged, "general-path fit converged");
@@ -228,4 +234,68 @@ fn debug_surfaces_extra_grouping_ids_and_variance_components() {
         .iter()
         .all(|v| v.is_finite() && *v >= 0.0));
     assert!(ld.sigma_sq_hat.is_finite() && ld.sigma_sq_hat > 0.0);
+}
+
+// Validation-only `wald_se` override (Task 14b prerequisite for GLMM Oracle):
+// the same single GLMM (clustered logit) fit, read under `Rx` (Schur) and
+// `Hessian` (FD-Hessian) SE modes, returns identical β̂ (the point estimate does
+// not depend on the SE kernel) but `Hessian` SE ≥ `Rx` SE per target — the
+// design's core invariant (Schur understates GLMM SE; the FD-Hessian corrects it).
+#[test]
+fn load_data_wald_se_override_hessian_ge_rx_same_betas() {
+    let contracts = build_contract(
+        &common::logit_spec(),
+        OutcomeKind::Binary,
+        None,
+        -0.5,
+        vec![ClusterSpec {
+            sizing: ClusterSizing::FixedClusters { n_clusters: 25 },
+            tau_squared: 0.3,
+            slopes: vec![],
+            extra_groupings: vec![],
+        }],
+    )
+    .unwrap();
+    let c = &contracts[0];
+    let (n, n_sims, seed) = (500usize, 64usize, 555u64);
+
+    // Capture sim-0's exact bytes once; both modes fit the identical dataset.
+    let report = debug_report(c, seed, n, n_sims, StageMask::all()).unwrap();
+    let d = report.data.expect("data");
+
+    let fit = |mode: WaldSe| {
+        debug_load_data(
+            c,
+            seed,
+            &d.design.data,
+            d.design.nrow,
+            d.design.ncol,
+            &d.outcome,
+            d.cluster_ids.as_deref(),
+            Some(mode),
+        )
+        .unwrap()
+    };
+    let ld_rx = fit(WaldSe::Rx);
+    let ld_hess = fit(WaldSe::Hessian);
+
+    assert!(ld_rx.converged && ld_hess.converged, "both fits converged");
+    assert_eq!(ld_rx.betas.len(), ld_hess.betas.len());
+    for (b_rx, b_hess) in ld_rx.betas.iter().zip(&ld_hess.betas) {
+        assert!(
+            (b_rx - b_hess).abs() < 1e-12,
+            "β̂ must not depend on SE mode: rx={b_rx} hessian={b_hess}"
+        );
+    }
+    assert_eq!(ld_rx.targets.len(), ld_hess.targets.len());
+    for (t, (tr, th)) in ld_rx.targets.iter().zip(&ld_hess.targets).enumerate() {
+        assert!((tr.beta - th.beta).abs() < 1e-12, "target {t}: β̂ differs");
+        assert!(tr.se > 0.0 && th.se > 0.0, "target {t}: SE finite positive");
+        assert!(
+            th.se >= tr.se - 1e-9,
+            "target {t}: hessian SE {} must be >= rx SE {}",
+            th.se,
+            tr.se
+        );
+    }
 }

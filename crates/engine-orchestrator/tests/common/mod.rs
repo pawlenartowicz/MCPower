@@ -56,6 +56,7 @@ pub fn minimal_ols_contract() -> SimulationContract {
         },
         design_test: None,
         estimator: EstimatorSpec::Ols,
+        wald_se: Default::default(),
         test: TestSpec {
             targets: vec![TestTarget::Marginal { term: 1 }],
             correction: CorrectionMethod::None,
@@ -165,6 +166,7 @@ pub fn logit_spec() -> LinearSpec {
         posthoc_requests: vec![],
         upload: None,
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     }
 }
 
@@ -213,5 +215,6 @@ pub fn lme_spec() -> LinearSpec {
         posthoc_requests: vec![],
         upload: None,
         cluster_level_vars: vec![],
+        wald_se: Default::default(),
     }
 }

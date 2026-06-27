@@ -18,5 +18,5 @@ An object suitable for knitr output.
 Renders the text summary followed by a Vega-Lite chart widget when
 \pkg{vegawidget} is available, or falls back to plain text otherwise.
 Block selection: find_power -> "power" block; find_sample_size single-scenario
--> "curve" block; multi-scenario -> "overlay" block. Print theme applied.
+-> "curve" block; multi-scenario -> "overlay" block. light-print theme applied.
 }

@@ -10,7 +10,7 @@
 ╚═╝     ╚═╝  ╚═════╝ ╚═╝      ╚═════╝  ╚══╝╚══╝ ╚══════╝╚═╝  ╚═╝
 ```
 
-[![Tests](https://github.com/pawlenartowicz/mcpower/actions/workflows/tests.yml/badge.svg)](https://github.com/pawlenartowicz/mcpower/actions)
+[![CI](https://github.com/pawlenartowicz/mcpower/actions/workflows/ci.yml/badge.svg)](https://github.com/pawlenartowicz/mcpower/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.16502734-blue)](https://doi.org/10.5281/zenodo.16502734)
 

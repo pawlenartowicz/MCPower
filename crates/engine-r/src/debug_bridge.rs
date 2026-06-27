@@ -265,8 +265,22 @@ pub fn debug_load_data(
     ncol: i32,
     outcome: &[f64],
     cluster_ids: &[i32],
+    wald_se: &str,
 ) -> Result<List> {
     let all_contracts = decode_contracts(contracts)?;
+    // Validation-only SE-mode override (Oracle harness). `""`/`"default"` keeps
+    // the contract's configured mode; `"rx"` is the internal Schur SE rejected
+    // at the public R API, reachable only via this raw bridge arg.
+    let wald_se_override = match wald_se {
+        "" | "default" => None,
+        "rx" => Some(engine_contract::WaldSe::Rx),
+        "hessian" => Some(engine_contract::WaldSe::Hessian),
+        other => {
+            return Err(Error::Other(format!(
+                "unknown wald_se override {other:?}; expected \"\", \"default\", \"rx\", or \"hessian\""
+            )))
+        }
+    };
     let idx = scenario_index as usize;
     let contract = all_contracts
         .get(idx)
@@ -286,6 +300,7 @@ pub fn debug_load_data(
         ncol as usize,
         outcome,
         cluster_u32.as_deref(),
+        wald_se_override,
     )
     .map_err(|e| Error::Other(format!("{e}")))?;
 

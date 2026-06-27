@@ -265,6 +265,7 @@ The \code{MCPower} object invisibly (for chaining).
   sample_size,
   target_test = NULL,
   correction = NULL,
+  wald_se = NULL,
   test_formula = NULL,
   n_sims = NULL,
   seed = NULL,
@@ -283,6 +284,7 @@ The \code{MCPower} object invisibly (for chaining).
 \if{html}{\out{<div class="r">}}\preformatted{MCPower$find_sample_size(
   target_test = NULL,
   correction = NULL,
+  wald_se = NULL,
   test_formula = NULL,
   target_power = NULL,
   from_size = NULL,

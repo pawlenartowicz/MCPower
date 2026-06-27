@@ -628,6 +628,7 @@ mod tests {
             residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
             estimator: EstimatorSpec::Glm,
+            wald_se: Default::default(),
             intercept,
             posthoc: vec![],
             max_failed_fraction: 0.1,

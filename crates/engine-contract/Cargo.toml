@@ -20,3 +20,4 @@ thiserror  = "2"
 [dev-dependencies]
 engine-contract = { path = ".", features = ["test-fixtures"] }
 rmp-serde  = "1"
+rmpv       = { version = "1", features = ["with-serde"] }

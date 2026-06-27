@@ -567,6 +567,7 @@ fn example2_logit_with_uploaded_data_validates_cleanly() {
         },
         design_test: None,
         estimator: EstimatorSpec::Glm,
+        wald_se: Default::default(),
         test: TestSpec {
             targets: vec![
                 TestTarget::Marginal { term: 1 },
