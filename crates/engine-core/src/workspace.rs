@@ -31,6 +31,11 @@ pub struct SimWorkspace {
     pub x_full: Mat<f32>,
     /// Outcome vector at `max_n`.
     pub y_full: Vec<f32>,
+    /// f64 widen of `x_full` for the fit kernels (data_gen stays f32; this is
+    /// the single ingress widen). Same column-major shape as `x_full`.
+    pub x_full_f64: Mat<f64>,
+    /// f64 widen of `y_full` for the fit kernels.
+    pub y_full_f64: Vec<f64>,
     /// Residual buffer (Xβ noise contribution) at `max_n`.
     pub residuals: Vec<f32>,
     /// Planar standard-normal draws for the continuous block, column-major
@@ -205,11 +210,7 @@ pub struct SimWorkspace {
     pub irls_l: Mat<f64>,
     /// `max_n × P` capacity — per-fit f64 copy of X, column-major with
     /// stride = the fit's n (only the `[..n*p]` prefix is live per fit).
-    /// Filled once per `glm_irls_fit` call so the IRLS hot loops read
-    /// contiguous f64 instead of widening bounds-checked f32 MatRef loads
-    /// every iteration.
-    pub irls_x_f64: Vec<f64>,
-    /// Per-iteration W∘X scratch (column-major, mirrors `irls_x_f64`); needs `len ≥ n·p`.
+    /// Per-iteration W∘X scratch (column-major, stride n); needs `len ≥ n·p`.
     pub irls_wx: Vec<f64>,
 
     // ------------------------------------------------------------------
@@ -338,6 +339,8 @@ impl SimWorkspace {
         Self {
             x_full: Mat::<f32>::zeros(max_n, n_predictors),
             y_full: vec![0.0f32; max_n],
+            x_full_f64: Mat::<f64>::zeros(max_n, n_predictors),
+            y_full_f64: vec![0.0f64; max_n],
             residuals: vec![0.0f32; max_n],
             z_planar: vec![0.0f32; max_n * n_non_factor],
             mix_acc: vec![0.0f64; max_n],
@@ -392,7 +395,6 @@ impl SimWorkspace {
             irls_xtwx: Mat::<f64>::zeros(n_predictors, n_predictors),
             irls_xtwz: vec![0.0; n_predictors],
             irls_l: Mat::<f64>::zeros(n_predictors, n_predictors),
-            irls_x_f64: vec![0.0; max_n * n_predictors],
             irls_wx: vec![0.0; max_n * n_predictors],
 
             lme_xtx: Mat::<f64>::zeros(n_predictors, n_predictors),
@@ -581,7 +583,6 @@ mod tests {
         assert_eq!(ws.irls_xtwz.len(), 5);
         assert_eq!(ws.irls_l.nrows(), 5);
         assert_eq!(ws.irls_l.ncols(), 5);
-        assert_eq!(ws.irls_x_f64.len(), 100 * 5);
         assert_eq!(ws.irls_wx.len(), 100 * 5);
 
         // LME scratch.

@@ -198,17 +198,16 @@ fn corpus_parity(theta_start_for: fn(&CaseDef) -> Option<f64>) {
             .expect("shipped fit");
 
             // General path — the SAME bytes through the lmm machine.
-            // Design/outcome captured as f64; narrow to f32 for the data plane.
             let ids = d.cluster_ids.as_ref().expect("cluster ids");
-            let mut x = Mat::<f32>::zeros(d.nrow, d.ncol);
+            let mut x = Mat::<f64>::zeros(d.nrow, d.ncol);
             for j in 0..d.ncol {
                 for i in 0..d.nrow {
-                    x[(i, j)] = d.design[j * d.nrow + i] as f32;
+                    x[(i, j)] = d.design[j * d.nrow + i];
                 }
             }
-            let outcome_f32: Vec<f32> = d.outcome.iter().map(|&v| v as f32).collect();
+            let outcome_f64: Vec<f64> = d.outcome.to_vec();
             ws.suff.reset();
-            ws.suff.add_rows(x.as_ref(), &outcome_f32, ids);
+            ws.suff.add_rows(x.as_ref(), &outcome_f64, ids);
             let start_buf = theta_start_for(c).map(|t| [t]);
             let fit = fit_lmm(
                 &mut ws,

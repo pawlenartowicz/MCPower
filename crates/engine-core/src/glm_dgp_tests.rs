@@ -33,7 +33,6 @@ fn glm_scratch(ws: &mut SimWorkspace) -> GlmScratch<'_> {
         irls_xtwx: ws.irls_xtwx.as_mut(),
         irls_xtwz: &mut ws.irls_xtwz,
         irls_l: ws.irls_l.as_mut(),
-        irls_x_f64: &mut ws.irls_x_f64,
         irls_wx: &mut ws.irls_wx,
     }
 }
@@ -41,14 +40,14 @@ fn glm_scratch(ws: &mut SimWorkspace) -> GlmScratch<'_> {
 /// Helper: copy `ws.x_full[..n]` and `ws.y_full[..n]` out into owned
 /// `(Mat<f32>, Vec<f32>)` so the caller can re-borrow `ws` mutably for
 /// the glm scratch without violating aliasing.
-fn copy_xy(ws: &SimWorkspace, n: usize, p: usize) -> (Mat<f32>, Vec<f32>) {
-    let mut x = Mat::<f32>::zeros(n, p);
+fn copy_xy(ws: &SimWorkspace, n: usize, p: usize) -> (Mat<f64>, Vec<f64>) {
+    let mut x = Mat::<f64>::zeros(n, p);
     for i in 0..n {
         for j in 0..p {
-            x[(i, j)] = ws.x_full[(i, j)];
+            x[(i, j)] = ws.x_full[(i, j)] as f64;
         }
     }
-    let y: Vec<f32> = ws.y_full[..n].to_vec();
+    let y: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
     (x, y)
 }
 

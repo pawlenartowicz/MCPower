@@ -803,6 +803,31 @@ fn run_one_sim(
     }
     generate_sim_data(spec, sim_id as u64, base_seed, ws)?;
 
+    // Single f32→f64 ingress widen (data_gen stays f32). Exact value-preserving
+    // cast; the kernels (now f64) read x_full_f64/y_full_f64 instead of x_full.
+    // Per-column contiguous slices so the cast autovectorizes (vcvtps2pd) — the
+    // bounds-checked `(i, j)` form does not, and this widen is a per-sim pass
+    // over the whole design, so it shows up in the OLS/LME throughput.
+    {
+        let n_w = ws.x_full.nrows().min(ws.x_full_f64.nrows());
+        let p_w = ws.x_full.ncols().min(ws.x_full_f64.ncols());
+        for j in 0..p_w {
+            let src = ws.x_full.col(j).try_as_col_major().unwrap().as_slice();
+            let dst = ws
+                .x_full_f64
+                .col_mut(j)
+                .try_as_col_major_mut()
+                .unwrap()
+                .as_slice_mut();
+            for (d, &s) in dst[..n_w].iter_mut().zip(&src[..n_w]) {
+                *d = s as f64;
+            }
+        }
+        for (d, &s) in ws.y_full_f64[..n_w].iter_mut().zip(&ws.y_full[..n_w]) {
+            *d = s as f64;
+        }
+    }
+
     // Sparse-factor exclusion state — reset per sim, grown with the grid.
     // factor_prefix_counts is in factor_proportions layout (Σ factor_n_levels
     // entries); factor_excluded_flags is one flag per factor.
@@ -835,10 +860,10 @@ fn run_one_sim(
                 // Grow the accumulator from last_n_added..n_usize.
                 if n_usize > last_n_added {
                     let x_seg = ws
-                        .x_full
+                        .x_full_f64
                         .as_ref()
                         .subrows(last_n_added, n_usize - last_n_added);
-                    let y_seg = &ws.y_full[last_n_added..n_usize];
+                    let y_seg = &ws.y_full_f64[last_n_added..n_usize];
                     let mut suff = OlsSuffStats {
                         xtx: ws.suff_xtx.as_mut(),
                         xty: &mut ws.suff_xty,
@@ -1206,7 +1231,7 @@ fn run_one_sim(
                 let mut excl_target_slots: Vec<usize> = Vec::new();
                 // excl_x: reduced design matrix (n_usize × p_red); sized on first use.
                 // f32 to match the data plane (copied from x_full, fed to f32 fits).
-                let mut excl_x = faer::Mat::<f32>::zeros(0, 0);
+                let mut excl_x = faer::Mat::<f64>::zeros(0, 0);
                 // General-path cold-path workspace (exclusion rounds rebuild
                 // reduced-p suff stats; cold path only — mirrors red_lme_*).
                 // Stays `None` on the hot/Brent paths; the cold general branch
@@ -1271,10 +1296,10 @@ fn run_one_sim(
                         &mut excl_col_remap,
                     );
                     // Copy kept columns of x_full into excl_x (mirrors GLM arm).
-                    excl_x = faer::Mat::<f32>::zeros(n_usize, p_red);
+                    excl_x = faer::Mat::<f64>::zeros(n_usize, p_red);
                     for (rj, &cj) in excl_kept_cols.iter().enumerate() {
                         for i in 0..n_usize {
-                            excl_x[(i, rj)] = ws.x_full[(i, cj as usize)];
+                            excl_x[(i, rj)] = ws.x_full_f64[(i, cj as usize)];
                         }
                     }
                     // Remap targets; dropped targets will carry NaN in the gather below.
@@ -1328,7 +1353,7 @@ fn run_one_sim(
                         let (x_to_fit, suff_xtx, suff_xty, suff_yty, suff_sum_xc) =
                             if !needs_reduced_fit {
                                 (
-                                    ws.x_full.as_ref().subrows(0, n_usize),
+                                    ws.x_full_f64.as_ref().subrows(0, n_usize),
                                     ws.lme_xtx.as_mut(),
                                     ws.lme_xty.as_mut_slice(),
                                     &mut ws.lme_yty,
@@ -1357,7 +1382,7 @@ fn run_one_sim(
                             panel_x: &mut ws.panel_x,
                             panel_y: &mut ws.panel_y,
                         };
-                        let y_slice = &ws.y_full[..n_usize];
+                        let y_slice = &ws.y_full_f64[..n_usize];
                         let cid_slice = &ws.cluster_ids[..n_usize];
                         suff.add_rows(x_to_fit, y_slice, cid_slice);
                     }
@@ -1389,13 +1414,13 @@ fn run_one_sim(
                     // ---- general lmm path (non-degenerate ClusterSpec) ----
                     // Field-disjoint borrows: `lmm` lives behind ws.lmm; the
                     // id/data buffers are sibling fields.
-                    let y_slice = &ws.y_full[..n_usize];
+                    let y_slice = &ws.y_full_f64[..n_usize];
                     let cid_slice = &ws.cluster_ids[..n_usize];
                     if !needs_reduced_fit {
                         let lmm = ws.lmm.as_deref_mut().expect("checked is_some");
                         lmm.suff.reset();
                         lmm.suff.add_rows_multi(
-                            ws.x_full.as_ref().subrows(0, n_usize),
+                            ws.x_full_f64.as_ref().subrows(0, n_usize),
                             y_slice,
                             cid_slice,
                             &ws.extra_grouping_ids,
@@ -1529,8 +1554,8 @@ fn run_one_sim(
                         joint_rhs: &mut ws.lme_joint_rhs,
                         joint_k_inv: ws.lme_joint_k_inv.as_mut(),
                     };
-                    let x_slice = ws.x_full.as_ref().subrows(0, n_usize);
-                    let y_slice = &ws.y_full[..n_usize];
+                    let x_slice = ws.x_full_f64.as_ref().subrows(0, n_usize);
+                    let y_slice = &ws.y_full_f64[..n_usize];
                     let cid_slice = &ws.cluster_ids[..n_usize];
                     let f = glmm::mcpower::lme_fit(
                         x_slice,
@@ -1582,7 +1607,7 @@ fn run_one_sim(
                         joint_rhs: &mut red_lme_joint_rhs,
                         joint_k_inv: red_lme_joint_k_inv.as_mut(),
                     };
-                    let y_slice = &ws.y_full[..n_usize];
+                    let y_slice = &ws.y_full_f64[..n_usize];
                     let cid_slice = &ws.cluster_ids[..n_usize];
                     let f = glmm::mcpower::lme_fit(
                         excl_x.as_ref(),
@@ -1737,8 +1762,8 @@ fn run_one_sim(
             // Posthoc is rejected at batch entry above.
             for (n_idx, &n) in sample_sizes.iter().enumerate() {
                 let n_usize = n as usize;
-                let x_slice = ws.x_full.as_ref().subrows(0, n_usize);
-                let y_slice = &ws.y_full[..n_usize];
+                let x_slice = ws.x_full_f64.as_ref().subrows(0, n_usize);
+                let y_slice = &ws.y_full_f64[..n_usize];
 
                 // GLMM branch (Glm + cluster): a clustered binary design routes
                 // through the Laplace GLMM kernel instead of the plain IRLS path.
@@ -1747,12 +1772,6 @@ fn run_one_sim(
                 // multiplicity correction + joint Wald) and `continue`s past the
                 // plain-logistic attempt loop below.
                 if ws.glmm.is_some() {
-                    let slope_cols: Vec<usize> = spec
-                        .cluster_slope_design_cols
-                        .iter()
-                        .map(|&c| c as usize)
-                        .collect();
-
                     // `test_formula` reduced fit (Phase 2): fit only the FIXED
                     // columns in `spec.fit_columns`. The GLMM workspace was sized
                     // to p_red in `build_glmm_workspace`, so the reduced X / β-start
@@ -1763,15 +1782,15 @@ fn run_one_sim(
                     // `test_reduces` is false the buffers are empty and the full spec
                     // slices feed the fit, byte-for-byte the prior behaviour.
                     let (excl_x, reduced_beta, reduced_targets): (
-                        faer::Mat<f32>,
+                        faer::Mat<f64>,
                         Vec<f64>,
                         Vec<u32>,
                     ) = if test_reduces {
                         let p_red = spec.fit_columns.len();
-                        let mut xr = faer::Mat::<f32>::zeros(n_usize, p_red);
+                        let mut xr = faer::Mat::<f64>::zeros(n_usize, p_red);
                         for (rc, &fc) in spec.fit_columns.iter().enumerate() {
                             for i in 0..n_usize {
-                                xr[(i, rc)] = ws.x_full[(i, fc as usize)];
+                                xr[(i, rc)] = ws.x_full_f64[(i, fc as usize)];
                             }
                         }
                         let beta = spec
@@ -1792,12 +1811,12 @@ fn run_one_sim(
                             .collect();
                         (xr, beta, targets)
                     } else {
-                        (faer::Mat::<f32>::zeros(0, 0), Vec::new(), Vec::new())
+                        (faer::Mat::<f64>::zeros(0, 0), Vec::new(), Vec::new())
                     };
                     let fit_x = if test_reduces {
                         excl_x.as_ref().subrows(0, n_usize)
                     } else {
-                        ws.x_full.as_ref().subrows(0, n_usize)
+                        ws.x_full_f64.as_ref().subrows(0, n_usize)
                     };
                     let fit_targets: &[u32] = if test_reduces {
                         &reduced_targets
@@ -1821,10 +1840,9 @@ fn run_one_sim(
                         if !glmm.groupings.extra_offsets.is_empty() {
                             glmm::mcpower::build_z(
                                 glmm,
-                                ws.x_full.as_ref().subrows(0, n_usize),
+                                ws.x_full_f64.as_ref().subrows(0, n_usize),
                                 &ws.cluster_ids[..n_usize],
                                 &ws.extra_grouping_ids,
-                                &slope_cols,
                                 n_usize,
                             );
                         }
@@ -1842,7 +1860,7 @@ fn run_one_sim(
                         glmm::mcpower::fit_glmm(
                             glmm,
                             fit_x,
-                            &ws.y_full[..n_usize],
+                            &ws.y_full_f64[..n_usize],
                             &ws.cluster_ids[..n_usize],
                             fit_targets,
                             Some(&tbuf[..nt]),
@@ -1972,7 +1990,7 @@ fn run_one_sim(
                 let mut excl_col_remap: Vec<i32> = Vec::new();
                 let mut excl_targets: Vec<u32> = Vec::new();
                 let mut excl_target_slots: Vec<usize> = Vec::new();
-                let mut excl_x = faer::Mat::<f32>::zeros(0, 0); // sized on first use (f32 data plane)
+                let mut excl_x = faer::Mat::<f64>::zeros(0, 0); // sized on first use (f32 data plane)
                 let mut excl_beta_start: Vec<f64> = Vec::new();
 
                 // Attempt 0: sparse-reduced (or full) model.
@@ -2011,10 +2029,10 @@ fn run_one_sim(
                             &mut excl_kept_cols,
                             &mut excl_col_remap,
                         );
-                        excl_x = faer::Mat::<f32>::zeros(n_usize, p_red);
+                        excl_x = faer::Mat::<f64>::zeros(n_usize, p_red);
                         for (rj, &cj) in excl_kept_cols.iter().enumerate() {
                             for i in 0..n_usize {
-                                excl_x[(i, rj)] = ws.x_full[(i, cj as usize)];
+                                excl_x[(i, rj)] = ws.x_full_f64[(i, cj as usize)];
                             }
                         }
                         // Truth start for the reduced model: gather the kept
@@ -2041,7 +2059,7 @@ fn run_one_sim(
                         targets_fit = &excl_targets;
                     };
 
-                    let x_fit: faer::MatRef<f32> = if !needs_reduced_fit {
+                    let x_fit: faer::MatRef<f64> = if !needs_reduced_fit {
                         x_slice
                     } else {
                         excl_x.as_ref()
@@ -2077,7 +2095,6 @@ fn run_one_sim(
                         irls_xtwx: ws.irls_xtwx.as_mut().submatrix_mut(0, 0, p_red, p_red),
                         irls_xtwz: &mut ws.irls_xtwz[..p_red],
                         irls_l: ws.irls_l.as_mut().submatrix_mut(0, 0, p_red, p_red),
-                        irls_x_f64: &mut ws.irls_x_f64[..n_usize * p_red],
                         irls_wx: &mut ws.irls_wx[..n_usize * p_red],
                     };
                     let fit = glmm::mcpower::glm_irls_fit(

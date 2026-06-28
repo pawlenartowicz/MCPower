@@ -46,6 +46,8 @@ later costs nothing.
 - [[about/app-vs-python-vs-R|App, Python, or R?]] — which face fits your situation.
 - [[about/comparison|How it compares]] — MCPower vs G*Power, superpower, simr, pwr, and WebPower.
 - [[about/roadmap|Roadmap]] — what's coming next and what's deliberately out of scope.
+- [[about/acknowledgements|Acknowledgements]] — the prior work and open-source software the engine builds on.
+- [[about/AI-usage|AI usage]] — where AI contributed to MCPower, and where it did not.
 - [[tutorial-app/index|The app]] — the GUI, panel by panel.
 - [[tutorial-python/index|Python]] — install to first analysis in minutes.
 - [[tutorial-r/index|R]] — the same ladder in R.

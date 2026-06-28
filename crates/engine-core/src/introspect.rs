@@ -200,6 +200,25 @@ pub fn fit_provided_data(
     for i in 0..nrow {
         ws.y_full[i] = outcome[i] as f32;
     }
+    // f64 ingress widen — mirrors batch.rs (the fit kernels read x_full_f64/
+    // y_full_f64; data plane stays f32). introspect injects directly rather than
+    // via generate_sim_data, so widen here too. Per-column contiguous slices so
+    // the cast autovectorizes (see batch.rs).
+    for j in 0..ncol {
+        let src = ws.x_full.col(j).try_as_col_major().unwrap().as_slice();
+        let dst = ws
+            .x_full_f64
+            .col_mut(j)
+            .try_as_col_major_mut()
+            .unwrap()
+            .as_slice_mut();
+        for (d, &s) in dst[..nrow].iter_mut().zip(&src[..nrow]) {
+            *d = s as f64;
+        }
+    }
+    for (d, &s) in ws.y_full_f64[..nrow].iter_mut().zip(&ws.y_full[..nrow]) {
+        *d = s as f64;
+    }
     if let Some(ids) = cluster_ids {
         if n_clusters_ws > 0 {
             ws.cluster_ids[..nrow].copy_from_slice(&ids[..nrow]);
@@ -225,8 +244,8 @@ pub fn fit_provided_data(
             // TARGET-indexed.
             ws.reset_suff_stats();
             {
-                let x_seg = ws.x_full.as_ref().subrows(0, nrow);
-                let y_seg = &ws.y_full[..nrow];
+                let x_seg = ws.x_full_f64.as_ref().subrows(0, nrow);
+                let y_seg = &ws.y_full_f64[..nrow];
                 let mut suff = OlsSuffStats {
                     xtx: ws.suff_xtx.as_mut(),
                     xty: &mut ws.suff_xty,
@@ -291,10 +310,9 @@ pub fn fit_provided_data(
                 glmm::mcpower::GlmmWorkspace::for_cluster_spec(ncol, &model, nrow, &slope_cols);
             glmm::mcpower::build_z(
                 &mut glmm,
-                ws.x_full.as_ref().subrows(0, nrow),
+                ws.x_full_f64.as_ref().subrows(0, nrow),
                 &ws.cluster_ids[..nrow],
                 &ws.extra_grouping_ids,
-                &slope_cols,
                 nrow,
             );
             // Truth-start mirrors batch.rs Glm+cluster arm — change together.
@@ -303,8 +321,8 @@ pub fn fit_provided_data(
             tbuf[..nt].copy_from_slice(&glmm.theta_truth);
             let f = glmm::mcpower::fit_glmm(
                 &mut glmm,
-                ws.x_full.as_ref().subrows(0, nrow),
-                &ws.y_full[..nrow],
+                ws.x_full_f64.as_ref().subrows(0, nrow),
+                &ws.y_full_f64[..nrow],
                 &ws.cluster_ids[..nrow],
                 &spec.target_indices,
                 Some(&tbuf[..nt]),
@@ -371,8 +389,8 @@ pub fn fit_provided_data(
             // truth start (β₀ = effect_sizes) — required for the
             // load_data ≡ hot-loop bit-equivalence invariant. No
             // suff-stats. var_diag / t_sq are TARGET-indexed (like OLS).
-            let x_slice = ws.x_full.as_ref().subrows(0, nrow);
-            let y_slice = &ws.y_full[..nrow];
+            let x_slice = ws.x_full_f64.as_ref().subrows(0, nrow);
+            let y_slice = &ws.y_full_f64[..nrow];
             let scratch = GlmScratch {
                 irls_eta: &mut ws.irls_eta[..nrow],
                 irls_p: &mut ws.irls_p[..nrow],
@@ -386,7 +404,6 @@ pub fn fit_provided_data(
                 irls_xtwx: ws.irls_xtwx.as_mut(),
                 irls_xtwz: &mut ws.irls_xtwz,
                 irls_l: ws.irls_l.as_mut(),
-                irls_x_f64: &mut ws.irls_x_f64,
                 irls_wx: &mut ws.irls_wx,
             };
             let fit = glm_irls_fit(
@@ -442,8 +459,8 @@ pub fn fit_provided_data(
                 glmm::mcpower::LmmWorkspace::for_cluster_spec(ncol, &model, nrow, &slope_cols);
             let cid_slice = &ws.cluster_ids[..nrow];
             lmm.suff.add_rows_multi(
-                ws.x_full.as_ref().subrows(0, nrow),
-                &ws.y_full[..nrow],
+                ws.x_full_f64.as_ref().subrows(0, nrow),
+                &ws.y_full_f64[..nrow],
                 cid_slice,
                 &ws.extra_grouping_ids,
             );
@@ -537,8 +554,8 @@ pub fn fit_provided_data(
                     panel_x: &mut ws.panel_x,
                     panel_y: &mut ws.panel_y,
                 };
-                let x_slice = ws.x_full.as_ref().subrows(0, nrow);
-                let y_slice = &ws.y_full[..nrow];
+                let x_slice = ws.x_full_f64.as_ref().subrows(0, nrow);
+                let y_slice = &ws.y_full_f64[..nrow];
                 let cid_slice = &ws.cluster_ids[..nrow];
                 suff.add_rows(x_slice, y_slice, cid_slice);
             }
@@ -579,8 +596,8 @@ pub fn fit_provided_data(
                 joint_rhs: &mut ws.lme_joint_rhs,
                 joint_k_inv: ws.lme_joint_k_inv.as_mut(),
             };
-            let x_slice = ws.x_full.as_ref().subrows(0, nrow);
-            let y_slice = &ws.y_full[..nrow];
+            let x_slice = ws.x_full_f64.as_ref().subrows(0, nrow);
+            let y_slice = &ws.y_full_f64[..nrow];
             let cid_slice = &ws.cluster_ids[..nrow];
             // Truth start from the spec's BASE τ² (mirrors the hot loop,
             // which starts at the per-block √τ²_block). Provided bytes

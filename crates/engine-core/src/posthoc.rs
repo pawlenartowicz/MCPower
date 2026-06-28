@@ -169,22 +169,22 @@ mod tests {
         let n = 200;
         let p = 4; // intercept, x_cont, dummy_a, dummy_b
         let mut rng = SimRng::new(42, 1);
-        let mut x = Mat::<f32>::zeros(n, p);
+        let mut x = Mat::<f64>::zeros(n, p);
         for i in 0..n {
             x[(i, 0)] = 1.0;
-            x[(i, 1)] = rng.next_normal();
+            x[(i, 1)] = rng.next_normal() as f64;
             let lvl = i % 3;
             x[(i, 2)] = if lvl == 1 { 1.0 } else { 0.0 };
             x[(i, 3)] = if lvl == 2 { 1.0 } else { 0.0 };
         }
-        let true_beta = [0.0f32, 0.5, 0.4, -0.3];
-        let mut y = vec![0.0f32; n];
+        let true_beta = [0.0f64, 0.5, 0.4, -0.3];
+        let mut y = vec![0.0f64; n];
         for i in 0..n {
-            let mut s = 0.0f32;
+            let mut s = 0.0f64;
             for j in 0..p {
                 s += x[(i, j)] * true_beta[j];
             }
-            y[i] = s + rng.next_normal() * 0.5;
+            y[i] = s + rng.next_normal() as f64 * 0.5;
         }
 
         let mut ws = SimWorkspace::new(n, p, 1, 1, None);
@@ -318,14 +318,14 @@ mod tests {
 
         let n = 12;
         let p = 4; // intercept, x_cont, dummy_B, dummy_C
-        let mut x = Mat::<f32>::zeros(n, p);
+        let mut x = Mat::<f64>::zeros(n, p);
         for i in 0..n {
             x[(i, 0)] = 1.0;
-            x[(i, 1)] = x_cont[i] as f32;
+            x[(i, 1)] = x_cont[i];
             x[(i, 2)] = if (4..8).contains(&i) { 1.0 } else { 0.0 }; // level B
             x[(i, 3)] = if (8..12).contains(&i) { 1.0 } else { 0.0 }; // level C
         }
-        let y_f32: Vec<f32> = y.iter().map(|&v| v as f32).collect();
+        let y_f64: Vec<f64> = y.to_vec();
 
         let mut ws = SimWorkspace::new(n, p, 1, 1, None);
         ws.reset_suff_stats();
@@ -339,7 +339,7 @@ mod tests {
                 panel_x: &mut ws.panel_x,
                 panel_y: &mut ws.panel_y,
             };
-            s.add_rows(x.as_ref(), &y_f32);
+            s.add_rows(x.as_ref(), &y_f64);
         }
         let ols = fit_suff_stats_t_sq(
             ws.suff_xtx.as_ref(),
@@ -442,16 +442,14 @@ mod tests {
         // Drive a rank-deficient fit to produce a non-converged view from real
         // scratch, since the view borrows workspace storage and can't be hand-built.
         let n = 50;
-        let mut x = Mat::<f32>::zeros(n, p);
+        let mut x = Mat::<f64>::zeros(n, p);
         for i in 0..n {
             x[(i, 0)] = 1.0;
-            x[(i, 1)] = (i as f32) * 0.1;
-            // Zero column → exactly-zero Cholesky pivot, robustly rank-deficient
-            // in f32 (a duplicate column leaves a ~1e-7 roundoff pivot that f32
-            // generation tips above eps_rank — the f32 LLT grey zone).
+            x[(i, 1)] = (i as f64) * 0.1;
+            // Zero column → exactly-zero Cholesky pivot, robustly rank-deficient.
             x[(i, 2)] = 0.0;
         }
-        let y: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let y: Vec<f64> = (0..n).map(|i| i as f64).collect();
         let mut ws = SimWorkspace::new(n, p, 0, 0, None);
         ws.reset_suff_stats();
         {
@@ -536,22 +534,22 @@ mod tests {
         let n = 200;
         let p = 4; // intercept, x_cont, dummy_a, dummy_b
         let mut rng = SimRng::new(7, 1);
-        let mut x = Mat::<f32>::zeros(n, p);
+        let mut x = Mat::<f64>::zeros(n, p);
         for i in 0..n {
             x[(i, 0)] = 1.0;
-            x[(i, 1)] = rng.next_normal();
+            x[(i, 1)] = rng.next_normal() as f64;
             let lvl = i % 3;
             x[(i, 2)] = if lvl == 1 { 1.0 } else { 0.0 };
             x[(i, 3)] = if lvl == 2 { 1.0 } else { 0.0 };
         }
-        let true_beta = [0.0f32, 0.5, 0.4, -0.3];
-        let mut y = vec![0.0f32; n];
+        let true_beta = [0.0f64, 0.5, 0.4, -0.3];
+        let mut y = vec![0.0f64; n];
         for i in 0..n {
-            let mut s = 0.0f32;
+            let mut s = 0.0f64;
             for j in 0..p {
                 s += x[(i, j)] * true_beta[j];
             }
-            y[i] = s + rng.next_normal() * 0.5;
+            y[i] = s + rng.next_normal() as f64 * 0.5;
         }
 
         let mut ws = SimWorkspace::new(n, p, 1, 1, None);
