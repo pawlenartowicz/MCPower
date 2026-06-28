@@ -11,6 +11,15 @@ designs. It answers two questions:
    so this is both a speed check (do they cost the same?) and a correctness
    cross-check (same seed + single thread ⇒ identical power numbers).
 
+It also carries a **Julia** loop tier (`loop_naive` + `loop_best`, all four
+families incl. GLMM) as a third, competitor-only language. Julia removes the
+interpreted-language confound: a JIT-compiled tight loop runs at near-native
+speed, so "Rust engine vs Julia loop" is a language-neutral test of whether
+MCPower's `find_sample_size` grid-search advantage (one call, draws shared
+across the grid) survives against an opponent whose per-sim loop is as fast as
+ours. Julia has no MCPower engine port — so no `mcpower:jl`, no
+`find_sample_size:jl`, and no Julia `tool` tier.
+
 It is timing-oriented. Power values are reported only as a sanity signal — for
 statistical validation see `mcpower/validation/`.
 
@@ -48,13 +57,20 @@ Five recorded methods per case:
   named by the case, used as its docs show: `simr` (LME), `Superpower`
   (ANOVA), `simglm` (OLS/GLM). Adapters in `tools_r.R`.
 - **`loop_best`** — hand-rolled DIY loop with precomputed critical values and
-  a manual Wald decision, matching MCPower's decision rule (OLS *t*; GLM/LME
-  Wald *z* — not Satterthwaite), parallelized across cores. Python: numpy /
+  a manual Wald decision, matching MCPower's decision rule (OLS *t*; GLM/LME/
+  GLMM Wald *z* — not Satterthwaite), parallelized across cores. Python: numpy /
   IRLS / statsmodels `MixedLM`. R: manual `lm`-style fit / `glm.fit` /
-  `lme4::lmer`.
+  `lme4::lmer` / `lme4::glmer`. Julia: hand-rolled OLS/IRLS / `MixedModels.jl`
+  (LMM + Laplace GLMM), `Base.Threads`-parallel, BLAS pinned to 1 thread.
 - **`loop_naive`** — off-the-shelf API the way someone writes it first,
   serial. Python: `statsmodels` `OLS`/`GLM`/`MixedLM`. R: `lm` /
-  `glm(binomial)` / `lmerTest::lmer` (Satterthwaite p-values).
+  `glm(binomial)` / `lmerTest::lmer` (Satterthwaite p-values). Julia:
+  `GLM.jl` / `MixedModels.jl`.
+
+Julia records **only** the two loop tiers (no mcpower/tool/find_sample_size
+rows) and covers **all four families including GLMM** — the family the Python
+harness skips. R already supplies a `glmer` GLMM loop, so Julia GLMM is a second
+comparator, not a gap-filler.
 
 **Timing hygiene:** one discarded warm-up call per (method, case, n), then the
 median of 3 reps for the fast tiers (`mcpower_find_power`,
@@ -90,7 +106,20 @@ Rscript harness.R --case all --out results/r.json
 Rscript harness.R --case ols_multi --threads 1
 ```
 
-Combine both languages' results (optionally with the 1-thread runs and a
+Julia (needs the `benchmarks/` project instantiated once —
+`julia --project=. -e 'using Pkg; Pkg.instantiate()'` — and `GLM`,
+`MixedModels`, `StatsModels`, `Distributions`, `JSON3` from `Project.toml`):
+
+```bash
+julia --project=. -t auto harness.jl --case all --out results/jl.json   # all cases, all 4 families
+julia --project=. -t auto harness.jl --case glmm_simple --methods loop_best
+julia --project=. runtests.jl                                            # case-load + design-parse + loop smoke
+```
+
+Julia records only the loop tiers (no engine), so there is no `--threads 1`
+twin and no `jl_1t.json`.
+
+Combine all languages' results (optionally with the 1-thread runs and a
 chart):
 
 ```bash
@@ -118,8 +147,16 @@ python power_agreement.py        # reads results/r.json
 - `mc-py`, `mc-r` — MCPower `find_power` per-sim seconds, each language.
 - `py/r` — MCPower-R ÷ MCPower-Python (≈1.0 expected: same engine).
 - `tool`, `tool×r` — the covering tool and its per-sim time ÷ MCPower-R.
-- `naive×py` / `naive×r`, `best×py` / `best×r` — the loop tiers' per-sim time
-  ÷ MCPower, same language.
+- `naive×py` / `naive×r` / `naive×jl`, `best×py` / `best×r` / `best×jl` — the
+  loop tiers' per-sim time ÷ MCPower. The `:jl` columns are normalized to the
+  **py** engine (Julia has no engine; py/r per-sim ≈ equal, same engine).
+
+The loop tiers also surface as `loop_best:jl` / `loop_naive:jl` series in the
+per-family aggregates and grid-search projection. Caveat: the per-family
+aggregate and the two plots restrict to each family's **tool-covered** cases,
+and **GLMM has no tool** — so Julia's GLMM loops (the family py lacks) appear
+only in the per-`(case, n)` table above and the 10,000-sim `find_sample_size`
+footer projection, not in the per-family aggregate table or either plot.
 
 Below the table: per-family geometric-mean aggregates normalized to
 `mcpower:py = 1` (each tool averaged over its own covered cases), a per-family
@@ -181,6 +218,11 @@ table, on a different scale). Each is a per-family log-y bar chart.
 | `loops_r.R`            | R DIY-loop baselines (mirrors `loops_py.py`) |
 | `tools_r.R`            | dedicated-tool adapters: simr, Superpower, simglm |
 | `smoke_tools.R`        | on-request smoke for the tool adapters |
+| `cases.jl`             | loads the cases, merges family defaults (Julia; mirrors `cases.py`) |
+| `loops_jl.jl`          | Julia DIY-loop baselines, all 4 families incl. GLMM (mirrors `loops_py.py` + `loops_r.R` glmm) |
+| `harness.jl`           | Julia harness: loop-tier timing runner, CLI (mirrors `harness.py`, loops only) |
+| `runtests.jl`          | Julia unit tests (case-load, design-parse, loop smoke, harness) |
+| `Project.toml` / `Manifest.toml` | pinned Julia dependency environment for the `.jl` tier |
 | `combine.py`           | merges results into the tables, aggregates, summary + grid-search plots |
 | `power_agreement.py`   | power cross-check vs tools + DIY loops (printed after the tables); scatter / curve plots |
 | `run_all.sh`           | full pipeline with results-file caching |

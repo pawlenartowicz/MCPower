@@ -1,0 +1,24 @@
+# Mirrors the Citation block in README.md / CITATION.cff — change together.
+# bibtype "Manual" is the R-package convention; citation() cannot emit BibTeX
+# @software, so the README's @software entry maps to @Manual here. The DOI is
+# the load-bearing field and is identical across both.
+
+bibentry(
+  bibtype   = "Manual",
+  key       = "mcpower2025",
+  title     = "{MCPower}: Monte Carlo Power Analysis for Complex Statistical Models",
+  author    = person(
+                "Paweł", "Lenartowicz",
+                comment = c(ORCID = "0000-0002-6906-7217")
+              ),
+  year      = "2025",
+  publisher = "Zenodo",
+  doi       = "10.5281/zenodo.16502734",
+  url       = "https://doi.org/10.5281/zenodo.16502734",
+  note      = "Computer software",
+  textVersion = paste(
+    "Lenartowicz, P. (2025).",
+    "MCPower: Monte Carlo Power Analysis for Complex Statistical Models",
+    "[Computer software]. Zenodo. https://doi.org/10.5281/zenodo.16502734"
+  )
+)

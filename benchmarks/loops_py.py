@@ -75,6 +75,7 @@ def _chol(case: Case, cont: list[str]):
     return np.linalg.cholesky(C)
 
 
+# Mirrored by benchmarks/loops_jl.jl _design / _draw_X (Julia port) — change together.
 def _design(case: Case):
     """Parse a Case into the fixed column convention.
 

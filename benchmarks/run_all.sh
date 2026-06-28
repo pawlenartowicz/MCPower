@@ -51,6 +51,9 @@ run results/py.json    "$PY" harness.py --case all --scale "$SCALE" --out result
 run results/py_1t.json "$PY" harness.py --case all --methods mcpower_find_power --threads 1 --scale "$SCALE" --out results/py_1t.json
 run results/r.json     Rscript harness.R --case all --scale "$SCALE" --out results/r.json
 run results/r_1t.json  Rscript harness.R --case all --methods mcpower_find_power --threads 1 --scale "$SCALE" --out results/r_1t.json
+# Julia competitor tier (loops only — no engine, so no _1t twin). combine.py
+# auto-detects results/jl.json; the scale cache works via meta.n_sims_scale.
+run results/jl.json    julia --project=. -t auto harness.jl --case all --scale "$SCALE" --out results/jl.json
 
 "$PY" combine.py results/py.json results/r.json \
   --py-1t results/py_1t.json --r-1t results/r_1t.json \

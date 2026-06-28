@@ -226,6 +226,28 @@ def test_method_id_consistency():
     assert expanded == set(KNOWN_METHODS)
 
 
+def test_combine_reads_jl_series(tmp_path):
+    from combine import combine
+    py = _mk_results(tmp_path, "py.json", "py",
+                     [_row("ols_multi", "py", "mcpower_find_power", 100, 10000, 0.1),
+                      _row("ols_multi", "py", "loop_best", 100, 500, 0.5)])
+    jl = _mk_results(tmp_path, "jl.json", "jl",
+                     [_row("ols_multi", "jl", "loop_best", 100, 500, 0.25),
+                      _row("ols_multi", "jl", "loop_naive", 100, 100, 0.2)])
+    _, _, series, _, _ = combine(py, None, None, None, jl)
+    assert series[("ols_multi", 100)]["loop_best:jl"] == 0.25 / 500
+    assert series[("ols_multi", 100)]["loop_naive:jl"] == 0.2 / 100
+
+
+def test_combine_absent_jl_is_noop(tmp_path):
+    from combine import combine
+    py = _mk_results(tmp_path, "py.json", "py",
+                     [_row("ols_multi", "py", "mcpower_find_power", 100, 10000, 0.1)])
+    a = combine(py, None)              # 4-arg today
+    b = combine(py, None, None, None, None)  # explicit jl=None
+    assert a[2] == b[2]               # identical series
+
+
 def test_fss_summary_grid_vs_grid(tmp_path):
     import json as _json
     from cases import load_cases

@@ -1,0 +1,21 @@
+# Dependency environment for the Julia competitor tier (benchmarks/*.jl).
+# Intentionally NOT a package (no name/uuid/src): the benchmark is run via
+# `julia --project=. harness.jl` / `runtests.jl`, never `using` it. A name+uuid
+# would make Pkg try to precompile a nonexistent src module. Manifest.toml pins
+# exact versions; [compat] bounds the majors.
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+GLM = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+MixedModels = "ff71e718-51f3-5ec2-a782-8ffcbfa3c316"
+OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+StatsModels = "3eaba693-59b7-5ba5-a881-562e759f1c8d"
+
+[compat]
+julia = "1.10"
+Distributions = "0.25"
+GLM = "1"
+JSON3 = "1"
+MixedModels = "5"
+OrderedCollections = "1"
+StatsModels = "0.7"

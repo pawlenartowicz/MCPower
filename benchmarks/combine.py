@@ -19,6 +19,7 @@ PY_JSON = RESULTS_DIR / "py.json"
 R_JSON = RESULTS_DIR / "r.json"
 PY_1T_JSON = RESULTS_DIR / "py_1t.json"
 R_1T_JSON = RESULTS_DIR / "r_1t.json"
+JL_JSON = RESULTS_DIR / "jl.json"          # competitor-only loops (no engine/fss/tool, no _1t twin)
 PLOT_FP = RESULTS_DIR / "summary_fp.png"
 PLOT_FSS = RESULTS_DIR / "summary_fss.png"
 
@@ -53,10 +54,12 @@ FAMILY_LABEL = {"ols": "OLS", "logit": "GLM", "lme": "LME", "glmm": "GLMM"}
 # is reported per-case in print_fss_table, so it would only squash this chart.
 SUMMARY_ORDER = ["mcpower:py", "mcpower:r",
                  "simr:r", "superpower:r", "simglm:r",
-                 "loop_best:py", "loop_best:r", "loop_naive:py", "loop_naive:r"]
+                 "loop_best:py", "loop_best:r", "loop_best:jl",
+                 "loop_naive:py", "loop_naive:r", "loop_naive:jl"]
 FSS_ORDER = ["mcpower_fss:py", "mcpower_fss:r",
              "simr:r", "superpower:r", "simglm:r",
-             "loop_best:py", "loop_best:r", "loop_naive:py", "loop_naive:r"]
+             "loop_best:py", "loop_best:r", "loop_best:jl",
+             "loop_naive:py", "loop_naive:r", "loop_naive:jl"]
 
 
 def _short(method):
@@ -70,7 +73,7 @@ def load_results(path):
     return doc["meta"], doc["records"]
 
 
-def combine(py_path, r_path=None, py_1t_path=None, r_1t_path=None):
+def combine(py_path, r_path=None, py_1t_path=None, r_1t_path=None, jl_path=None):
     """Returns (py_meta, r_meta, series, tool_names, fss).
 
     series: (case_id, n) -> {"<short>:<lang>": per_sim_s}
@@ -82,16 +85,25 @@ def combine(py_path, r_path=None, py_1t_path=None, r_1t_path=None):
     are results from a `--threads 1` harness run; only their mcpower_find_power
     rows are used, as the `mcpower-1t:<lang>` series (single-core engine — the
     same-cores comparison against the serial tools).
+
+    jl_path None => no `:jl` series (absent jl.json renders identically to today).
+    Julia is competitor-only: it records only the loop tiers, so jl rides the main
+    series-build loop but NOT the `*_1t` loop (no engine, hence no jl_1t.json).
     """
     py_meta, py_rows = load_results(py_path)
     r_meta, r_rows = load_results(r_path) if r_path is not None else (None, [])
+    jl_meta, jl_rows = load_results(jl_path) if jl_path is not None else (None, [])
     scale = py_meta.get("n_sims_scale") or 1.0
     if r_meta is not None and (r_meta.get("n_sims_scale") or 1.0) != scale:
         print(f"WARNING: n_sims_scale differs between runs (py={scale:g}, "
               f"r={(r_meta.get('n_sims_scale') or 1.0):g}) — per-sim times are "
               f"not comparable across scales", file=sys.stderr)
+    if jl_meta is not None and (jl_meta.get("n_sims_scale") or 1.0) != scale:
+        print(f"WARNING: n_sims_scale differs between runs (py={scale:g}, "
+              f"jl={(jl_meta.get('n_sims_scale') or 1.0):g}) — per-sim times are "
+              f"not comparable across scales", file=sys.stderr)
     series, tool_names, fss = {}, {}, {}
-    for lang, rows in (("py", py_rows), ("r", r_rows)):
+    for lang, rows in (("py", py_rows), ("r", r_rows), ("jl", jl_rows)):
         for row in rows:
             if row["method"] == FSS_METHOD:
                 fss[(row["case_id"], lang)] = row
@@ -182,8 +194,8 @@ def print_meta(meta):
 
 def print_table(series, tool_names):
     hdr = (f"{'case':>18} {'n':>5} | {'mc-py':>10} {'mc-r':>10} {'py/r':>6} | "
-           f"{'tool':>11} {'tool×r':>7} | {'naive×py':>9} {'naive×r':>9} "
-           f"{'best×py':>8} {'best×r':>8}")
+           f"{'tool':>11} {'tool×r':>7} | {'naive×py':>9} {'naive×r':>9} {'naive×jl':>9} "
+           f"{'best×py':>8} {'best×r':>8} {'best×jl':>8}")
     print(hdr)
     print("-" * len(hdr))
     for (c, n) in sorted(series):
@@ -197,12 +209,15 @@ def print_table(series, tool_names):
         mc_py, mc_r = t.get("mcpower:py"), t.get("mcpower:r")
         tool = t.get(f"{tool_names.get(c)}:r")
         tool_lbl = tool_names.get(c, "none") if tool is not None else "none"
+        # jl loops are normalized to the py engine (no jl engine; py/r per-sim ≈ equal).
         print(f"{c:>18} {n:>5} | {e(mc_py)} {e(mc_r)} {f(ratio(mc_r, mc_py), 6)} | "
               f"{tool_lbl:>11} {f(ratio(tool, mc_r), 7)} | "
               f"{f(ratio(t.get('loop_naive:py'), mc_py), 9)} "
               f"{f(ratio(t.get('loop_naive:r'), mc_r), 9)} "
+              f"{f(ratio(t.get('loop_naive:jl'), mc_py), 9)} "
               f"{f(ratio(t.get('loop_best:py'), mc_py), 8)} "
-              f"{f(ratio(t.get('loop_best:r'), mc_r), 8)}")
+              f"{f(ratio(t.get('loop_best:r'), mc_r), 8)} "
+              f"{f(ratio(t.get('loop_best:jl'), mc_py), 8)}")
 
 
 def print_aggregates(agg, coverage):
@@ -244,9 +259,11 @@ def print_footer(series, tool_names, cases):
         tool_lbl = "/".join(tools) if tools else "none"
         print(f"  {FAMILY_LABEL[fam]}: MCPower {med_curve('mcpower:py') or 0:.1f} s (py) / "
               f"{med_curve('mcpower:r') or 0:.1f} s (r) — best loop ~{s(med_curve('loop_best:r'))}, "
-              f"naive loop ~{s(med_curve('loop_naive:r'))}, tool ({tool_lbl}) ~{s(med_curve('tool:r'))}")
+              f"naive loop ~{s(med_curve('loop_naive:r'))}, tool ({tool_lbl}) ~{s(med_curve('tool:r'))}, "
+              f"jl best ~{s(med_curve('loop_best:jl'))}, jl naive ~{s(med_curve('loop_naive:jl'))}")
         sp = ", ".join(f"{k} {med_speed(k):.0f}×" for k in
-                       ("loop_best:r", "loop_naive:r", "tool:r") if med_speed(k))
+                       ("loop_best:r", "loop_naive:r", "tool:r", "loop_best:jl", "loop_naive:jl")
+                       if med_speed(k))
         print(f"       median per-sim slowdown vs MCPower (py): {sp}")
 
 
@@ -331,7 +348,9 @@ def fss_gridsearch(fss, series, cases):
         S, G = case.n_sims["mcpower"], len(case.n_grid)
         row = {"case_id": cid, "family": case.family, "S": S, "G": G,
                "grid_s": {}, "total_sims": {}, "n_pts": {}}
-        for lang in ("py", "r"):
+        # jl included so loop_*:jl grid_s entries are built; the mcpower_fss:jl
+        # branch simply finds no jl fss record (Julia has no engine) and is skipped.
+        for lang in ("py", "r", "jl"):
             rec = fss.get((cid, lang))
             if rec is not None and rec["n_sims"]:
                 # find_sample_size budget is S sims TOTAL (shared draws), not S*G
@@ -402,7 +421,8 @@ def print_fss_gridsearch(rows, agg, cases):
     # competition only — find_sample_size vs the dedicated tools + DIY loops;
     # the within-MCPower find_power-grid win is reported in print_fss_table
     DISPLAY = ["mcpower_fss:py", "simglm:r", "superpower:r",
-               "simr:r", "loop_best:r", "loop_naive:r"]
+               "simr:r", "loop_best:r", "loop_naive:r",
+               "loop_best:jl", "loop_naive:jl"]
     LABEL = {"mcpower_fss": "find_sample_size"}
     for fam in ("ols", "logit", "lme", "glmm"):
         if fam not in agg:
@@ -463,7 +483,7 @@ def write_plot(panel, out_path):
             x, y = j + slot * width, agg[f][k]
             max_v = max(max_v, y)
             ax.bar(x, y, width=width, color=METHOD_COLORS[method],
-                   hatch="//" if lang == "r" else None, edgecolor="black", linewidth=0.4,
+                   hatch={"r": "//", "jl": ".."}.get(lang), edgecolor="black", linewidth=0.4,
                    label=k if k not in labeled else None)
             labeled.add(k)
             ax.annotate(_mult(y), (x, y), textcoords="offset points", xytext=(0, 2),
@@ -494,7 +514,8 @@ if __name__ == "__main__":
     r_json = R_JSON if R_JSON.exists() else None
     py_1t = PY_1T_JSON if PY_1T_JSON.exists() else None
     r_1t = R_1T_JSON if R_1T_JSON.exists() else None
-    py_meta, r_meta, series, tool_names, fss = combine(PY_JSON, r_json, py_1t, r_1t)
+    jl_json = JL_JSON if JL_JSON.exists() else None
+    py_meta, r_meta, series, tool_names, fss = combine(PY_JSON, r_json, py_1t, r_1t, jl_json)
     print_meta(py_meta)
     if r_meta is not None:
         print_meta(r_meta)
