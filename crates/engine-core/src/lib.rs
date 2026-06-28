@@ -21,17 +21,14 @@ pub mod correlation;
 pub mod critvals;
 pub mod data_gen;
 pub mod distributions;
-pub mod glm;
-pub mod glmm;
+#[cfg(test)]
+mod glm_dgp_tests;
 pub mod introspect;
-pub mod lme;
-pub mod lmm;
 pub mod marginals;
-pub mod ols;
+pub mod mixed_workspace;
 pub mod posthoc;
 pub mod rng;
 pub mod scenarios;
-mod simd_transcendental;
 pub mod spec;
 pub mod workspace;
 

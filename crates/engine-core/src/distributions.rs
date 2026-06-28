@@ -19,8 +19,8 @@
 //! on any such change.
 //!
 //! `phi`'s `erfc` composes the owned engine `exp` kernel
-//! (`simd_transcendental::exp_nonpos`, ≤1 ULP of libm) rather than libm `.exp()`;
-//! the A&S polynomial and constants are unchanged.
+//! (`glmm::simd_transcendental::exp_nonpos`, ≤1 ULP of libm) rather than libm
+//! `.exp()`; the A&S polynomial and constants are unchanged.
 
 use crate::rng::SimRng;
 
@@ -50,7 +50,7 @@ fn erfc(x: f64) -> f64 {
     let y = 1.0
         - (((((A5 * t + A4) * t) + A3) * t + A2) * t + A1)
             * t
-            * crate::simd_transcendental::exp_nonpos(-abs_x * abs_x);
+            * glmm::simd_transcendental::exp_nonpos(-abs_x * abs_x);
     let erf_x = sign * y;
     1.0 - erf_x
 }
@@ -222,7 +222,7 @@ mod tests {
             let z = -9.0 + 18.0 * k as f64 / n as f64;
             let x = -z * std::f64::consts::FRAC_1_SQRT_2;
             let arg = -x.abs() * x.abs();
-            let e_owned = crate::simd_transcendental::exp_nonpos(arg);
+            let e_owned = glmm::simd_transcendental::exp_nonpos(arg);
             let e_libm = arg.exp();
             let e_ulp = ((e_owned.to_bits() as i64) - (e_libm.to_bits() as i64)).abs();
             assert!(e_ulp <= 2, "owned exp({arg}) drifted {e_ulp} ULP from libm");

@@ -29,13 +29,13 @@ use rayon::prelude::*;
 use crate::correction::apply_correction;
 use crate::critvals::CritValueTable;
 use crate::data_gen::generate_sim_data;
-use crate::ols::{fit_suff_stats_t_sq, ols_contrast_t_sq, OlsScratch, OlsSuffStats};
 use crate::posthoc::evaluate_posthoc;
 use crate::spec::{
     BatchResult, CorrectionMethod, EngineError, EstimatorSpec, PosthocBlockShape, ProgressSink,
     ResultShape, SimulationSpec,
 };
 use crate::workspace::{ReducedCritEntry, SimWorkspace};
+use glmm::mcpower::{fit_suff_stats_t_sq, ols_contrast_t_sq, OlsScratch, OlsSuffStats};
 
 /// Rank-deficiency epsilon for the Cholesky pivot ratio (min|L_diag|/max|L_diag|).
 pub(crate) const EPS_RANK: f64 = 1e-12;
@@ -529,10 +529,10 @@ fn run_batch_impl(
         // change together.
         ws.lme_joint_rhs
             .resize(n_predictors_total.max(n_targets), 0.0);
-        ws.lmm = crate::lmm::build_lmm_workspace(spec, max_n, n_predictors_total);
+        ws.lmm = crate::mixed_workspace::build_lmm_workspace(spec, max_n, n_predictors_total);
         // Mutually exclusive with lmm: build_lmm_workspace requires Mle,
         // build_glmm_workspace requires Glm+cluster (returns None otherwise).
-        ws.glmm = crate::glmm::build_glmm_workspace(spec, max_n, n_predictors_total);
+        ws.glmm = crate::mixed_workspace::build_glmm_workspace(spec, max_n, n_predictors_total);
         let zipped = unc_per_sim
             .into_iter()
             .zip(cor_per_sim)
@@ -643,10 +643,17 @@ fn run_batch_impl(
                         // sequential site above, change together.
                         ws.lme_joint_rhs
                             .resize(n_predictors_total.max(n_targets), 0.0);
-                        ws.lmm = crate::lmm::build_lmm_workspace(spec, max_n, n_predictors_total);
+                        ws.lmm = crate::mixed_workspace::build_lmm_workspace(
+                            spec,
+                            max_n,
+                            n_predictors_total,
+                        );
                         // Mutually exclusive with lmm (see sequential site).
-                        ws.glmm =
-                            crate::glmm::build_glmm_workspace(spec, max_n, n_predictors_total);
+                        ws.glmm = crate::mixed_workspace::build_glmm_workspace(
+                            spec,
+                            max_n,
+                            n_predictors_total,
+                        );
                         ws
                     },
                     |ws,
@@ -1205,7 +1212,7 @@ fn run_one_sim(
                 // Stays `None` on the hot/Brent paths; the cold general branch
                 // overwrites it before the LmeFitView borrows it.
                 #[allow(unused_assignments)]
-                let mut excl_lmm: Option<Box<crate::lmm::LmmWorkspace>> = None;
+                let mut excl_lmm: Option<Box<glmm::mcpower::LmmWorkspace>> = None;
 
                 // p_red: reduced predictor count — n_predictors_total on the hot path.
                 let p_red: usize;
@@ -1336,7 +1343,7 @@ fn run_one_sim(
                                     red_lme_sum_xc.as_mut(),
                                 )
                             };
-                        let mut suff = crate::lme::LmeSuffStats {
+                        let mut suff = glmm::mcpower::LmeSuffStats {
                             xtx: suff_xtx,
                             xty: suff_xty,
                             yty: suff_yty,
@@ -1400,17 +1407,18 @@ fn run_one_sim(
                         // &lmm.theta_truth vs &mut lmm borrow conflict (zero-alloc).
                         // Sized MAX_THETA (mirrors MAX_THETA — change together);
                         // validate() (invariants 20/21) ensure nt ≤ MAX_THETA.
-                        let mut tbuf = [0.0_f64; crate::lmm::MAX_THETA];
+                        let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
                         let nt = lmm.theta_truth.len();
                         debug_assert!(nt <= tbuf.len(), "nt={nt} exceeds MAX_THETA");
                         tbuf[..nt].copy_from_slice(&lmm.theta_truth);
-                        let f = crate::lmm::fit_lmm(lmm, &spec.target_indices, Some(&tbuf[..nt]));
+                        let f =
+                            glmm::mcpower::fit_lmm(lmm, &spec.target_indices, Some(&tbuf[..nt]));
                         optim_diag::record_fit(f.n_eval, f.converged, f.boundary_hit == 1);
                         lmm_pc = f.pinned_components; // general lmm arm: full bitmask
                         let lmm = ws.lmm.as_deref().expect("checked is_some");
                         (
                             &spec.target_indices[..],
-                            crate::lme::LmeFitView {
+                            glmm::mcpower::LmeFitView {
                                 betas: &lmm.fit.betas,
                                 var_diag: &lmm.fit.var_diag,
                                 t_sq: &lmm.fit.t_sq,
@@ -1434,9 +1442,14 @@ fn run_one_sim(
                         // Intercept-only layout: the reduced model excludes target columns;
                         // slope col indices from the full design don't map to p_red (Task 5+).
                         let cluster = spec.cluster.as_ref().expect("lmm ⇒ cluster");
-                        excl_lmm = Some(Box::new(crate::lmm::LmmWorkspace::for_cluster_spec(
-                            p_red,
+                        let model = crate::mixed_workspace::cluster_to_model_spec(
                             cluster,
+                            spec.estimator,
+                            spec.wald_se,
+                        );
+                        excl_lmm = Some(Box::new(glmm::mcpower::LmmWorkspace::for_cluster_spec(
+                            p_red,
+                            &model,
                             n_usize,
                             &[],
                         )));
@@ -1452,17 +1465,17 @@ fn run_one_sim(
                         // branch + introspect; change together.
                         // Sized MAX_THETA (mirrors MAX_THETA — change together);
                         // validate() (invariants 20/21) ensure nt ≤ MAX_THETA.
-                        let mut tbuf = [0.0_f64; crate::lmm::MAX_THETA];
+                        let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
                         let nt = lmm.theta_truth.len();
                         debug_assert!(nt <= tbuf.len(), "nt={nt} exceeds MAX_THETA");
                         tbuf[..nt].copy_from_slice(&lmm.theta_truth);
-                        let f = crate::lmm::fit_lmm(lmm, &excl_targets, Some(&tbuf[..nt]));
+                        let f = glmm::mcpower::fit_lmm(lmm, &excl_targets, Some(&tbuf[..nt]));
                         optim_diag::record_fit(f.n_eval, f.converged, f.boundary_hit == 1);
                         lmm_pc = f.pinned_components; // general lmm arm: full bitmask
                         let lmm = excl_lmm.as_deref().expect("just set");
                         (
                             &excl_targets[..],
-                            crate::lme::LmeFitView {
+                            glmm::mcpower::LmeFitView {
                                 betas: &lmm.fit.betas,
                                 var_diag: &lmm.fit.var_diag,
                                 t_sq: &lmm.fit.t_sq,
@@ -1480,7 +1493,7 @@ fn run_one_sim(
                         )
                     }
                 } else if !needs_reduced_fit {
-                    let scratch = crate::lme::LmeScratch {
+                    let scratch = glmm::mcpower::LmeScratch {
                         xtx: ws.lme_xtx.as_ref(),
                         xty: &ws.lme_xty,
                         yty: ws.lme_yty,
@@ -1519,7 +1532,7 @@ fn run_one_sim(
                     let x_slice = ws.x_full.as_ref().subrows(0, n_usize);
                     let y_slice = &ws.y_full[..n_usize];
                     let cid_slice = &ws.cluster_ids[..n_usize];
-                    let f = crate::lme::lme_fit(
+                    let f = glmm::mcpower::lme_fit(
                         x_slice,
                         y_slice,
                         cid_slice,
@@ -1533,7 +1546,7 @@ fn run_one_sim(
                     // by the struct but unused by lme_fit today (τ̂≈0 path uses
                     // profiled_deviance, not fit_suff_stats_t_sq). Views are sized
                     // p_red to satisfy the struct; no other invariant is load-bearing.
-                    let scratch = crate::lme::LmeScratch {
+                    let scratch = glmm::mcpower::LmeScratch {
                         xtx: red_lme_xtx.as_ref(),
                         xty: &red_lme_xty,
                         yty: red_lme_yty,
@@ -1571,7 +1584,7 @@ fn run_one_sim(
                     };
                     let y_slice = &ws.y_full[..n_usize];
                     let cid_slice = &ws.cluster_ids[..n_usize];
-                    let f = crate::lme::lme_fit(
+                    let f = glmm::mcpower::lme_fit(
                         excl_x.as_ref(),
                         y_slice,
                         cid_slice,
@@ -1806,7 +1819,7 @@ fn run_one_sim(
                     {
                         let glmm = ws.glmm.as_deref_mut().expect("is_some");
                         if !glmm.groupings.extra_offsets.is_empty() {
-                            crate::glmm::build_z(
+                            glmm::mcpower::build_z(
                                 glmm,
                                 ws.x_full.as_ref().subrows(0, n_usize),
                                 &ws.cluster_ids[..n_usize],
@@ -1820,13 +1833,13 @@ fn run_one_sim(
                     // the LME arm's stack-buffer trick to sidestep the &theta_truth
                     // vs &mut glmm borrow conflict). Sized MAX_THETA — change with
                     // the LME arm.
-                    let mut tbuf = [0.0_f64; crate::lmm::MAX_THETA];
+                    let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
                     let f = {
                         let glmm = ws.glmm.as_deref_mut().expect("is_some");
                         let nt = glmm.theta_truth.len();
                         debug_assert!(nt <= tbuf.len(), "nt={nt} exceeds MAX_THETA");
                         tbuf[..nt].copy_from_slice(&glmm.theta_truth);
-                        crate::glmm::fit_glmm(
+                        glmm::mcpower::fit_glmm(
                             glmm,
                             fit_x,
                             &ws.y_full[..n_usize],
@@ -1835,7 +1848,7 @@ fn run_one_sim(
                             Some(&tbuf[..nt]),
                             fit_beta,
                             n_usize,
-                            spec.wald_se,
+                            crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
                         )
                     };
 
@@ -2051,7 +2064,7 @@ fn run_one_sim(
                     };
                     let t_red = targets_fit.len();
 
-                    let scratch = crate::glm::GlmScratch {
+                    let scratch = glmm::mcpower::GlmScratch {
                         irls_eta: &mut ws.irls_eta[..n_usize],
                         irls_p: &mut ws.irls_p[..n_usize],
                         irls_w: &mut ws.irls_w[..n_usize],
@@ -2067,8 +2080,13 @@ fn run_one_sim(
                         irls_x_f64: &mut ws.irls_x_f64[..n_usize * p_red],
                         irls_wx: &mut ws.irls_wx[..n_usize * p_red],
                     };
-                    let fit =
-                        crate::glm::glm_irls_fit(x_fit, y_slice, targets_fit, beta_start, scratch);
+                    let fit = glmm::mcpower::glm_irls_fit(
+                        x_fit,
+                        y_slice,
+                        targets_fit,
+                        beta_start,
+                        scratch,
+                    );
 
                     if fit.converged || attempt == 1 {
                         // Final attempt: record results and break.

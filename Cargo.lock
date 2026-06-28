@@ -1167,6 +1167,7 @@ name = "engine-contract"
 version = "1.0.0"
 dependencies = [
  "engine-contract",
+ "glmm",
  "rmp-serde",
  "rmpv",
  "serde",
@@ -1183,6 +1184,7 @@ dependencies = [
  "dhat",
  "engine-contract",
  "faer",
+ "glmm",
  "libm",
  "pulp",
  "rand_philox",
@@ -2052,6 +2054,15 @@ checksum = "063ce2eb6a8d0ea93d2bf8ba1957e78dbab6be1c2220dd3daca57d5a9d869898"
 dependencies = [
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "glmm"
+version = "0.0.1"
+dependencies = [
+ "bobyqa",
+ "faer",
+ "pulp",
 ]
 
 [[package]]

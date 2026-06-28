@@ -12,12 +12,12 @@
 //! started at the spec's known θ).
 
 use engine_core::introspect::{fit_provided_data, run_introspect, IntrospectMask};
-use engine_core::lmm::{fit_lmm, LmmWorkspace};
 use engine_core::spec::{
     ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, Distribution, EstimatorSpec,
     HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
 };
 use faer::Mat;
+use glmm::mcpower::{fit_lmm, LmmWorkspace};
 
 const BASE_SEED: u64 = 2137;
 /// Datasets per case — 6 cases × 25 seeds = 150 same-bytes comparisons.

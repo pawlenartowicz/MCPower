@@ -45,7 +45,7 @@
   <NumberInput
     class="h-8 w-24 shrink-0"
     dense
-    step={0.1}
+    step={0.05}
     bind:value={effect.value}
     data-testid={`effect-${effect.name}`}
   />

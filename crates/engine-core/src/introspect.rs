@@ -9,13 +9,13 @@ use crate::batch::run_batch_st_capture;
 use crate::batch::EPS_RANK;
 use crate::critvals::CritValueTable;
 use crate::data_gen::generate_sim_data;
-use crate::glm::{glm_irls_fit, GlmScratch};
-use crate::lme::{lme_fit, LmeScratch, LmeSuffStats};
-use crate::ols::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
 use crate::rng::pcg_mix64;
 use crate::spec::{BatchResult, EstimatorSpec, SimulationSpec};
 use crate::workspace::SimWorkspace;
 use crate::EngineError;
+use glmm::mcpower::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
+use glmm::mcpower::{glm_irls_fit, GlmScratch};
+use glmm::mcpower::{lme_fit, LmeScratch, LmeSuffStats};
 
 /// Which observations to capture. Engine-core-local (orchestrator maps its
 /// `StageMask` onto this — engine-core never depends on orchestrator types).
@@ -282,9 +282,14 @@ pub fn fit_provided_data(
                 .iter()
                 .map(|&c| c as usize)
                 .collect();
+            let model = crate::mixed_workspace::cluster_to_model_spec(
+                cluster,
+                spec.estimator,
+                spec.wald_se,
+            );
             let mut glmm =
-                crate::glmm::GlmmWorkspace::for_cluster_spec(ncol, cluster, nrow, &slope_cols);
-            crate::glmm::build_z(
+                glmm::mcpower::GlmmWorkspace::for_cluster_spec(ncol, &model, nrow, &slope_cols);
+            glmm::mcpower::build_z(
                 &mut glmm,
                 ws.x_full.as_ref().subrows(0, nrow),
                 &ws.cluster_ids[..nrow],
@@ -294,9 +299,9 @@ pub fn fit_provided_data(
             );
             // Truth-start mirrors batch.rs Glm+cluster arm — change together.
             let nt = glmm.theta_truth.len();
-            let mut tbuf = [0.0_f64; crate::lmm::MAX_THETA];
+            let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
             tbuf[..nt].copy_from_slice(&glmm.theta_truth);
-            let f = crate::glmm::fit_glmm(
+            let f = glmm::mcpower::fit_glmm(
                 &mut glmm,
                 ws.x_full.as_ref().subrows(0, nrow),
                 &ws.y_full[..nrow],
@@ -305,14 +310,14 @@ pub fn fit_provided_data(
                 Some(&tbuf[..nt]),
                 &spec.effect_sizes,
                 nrow,
-                spec.wald_se,
+                crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
             );
             // D̂ = Λ̂Λ̂' (no σ² — binomial dispersion fixed at 1). Diagonal
             // entries are RE variances; off-diagonals yield re_corr. Mirrors
             // the Mle general branch's q_p > 1 block, with σ=1. primary_lambda
             // refreshes glmm.lam; for q_p == 1 re_corr is empty (inner loop vacuous).
             let q = glmm.groupings.primary_q;
-            crate::lmm::primary_lambda(&glmm.params[..glmm.n_theta], q, &mut glmm.lam);
+            glmm::mcpower::primary_lambda(&glmm.params[..glmm.n_theta], q, &mut glmm.lam);
             let mut d = vec![0.0_f64; q * q];
             for i in 0..q {
                 for j in 0..q {
@@ -428,8 +433,13 @@ pub fn fit_provided_data(
                 .iter()
                 .map(|&c| c as usize)
                 .collect();
+            let model = crate::mixed_workspace::cluster_to_model_spec(
+                cluster,
+                spec.estimator,
+                spec.wald_se,
+            );
             let mut lmm =
-                crate::lmm::LmmWorkspace::for_cluster_spec(ncol, cluster, nrow, &slope_cols);
+                glmm::mcpower::LmmWorkspace::for_cluster_spec(ncol, &model, nrow, &slope_cols);
             let cid_slice = &ws.cluster_ids[..nrow];
             lmm.suff.add_rows_multi(
                 ws.x_full.as_ref().subrows(0, nrow),
@@ -439,10 +449,10 @@ pub fn fit_provided_data(
             );
             // Truth-start (P1) — MIRRORS batch.rs's general branch; hot loop
             // and debug path must derive the same hint; change together.
-            let mut tbuf = [0.0_f64; 1 + crate::lmm::MAX_EXTRA_GROUPINGS];
+            let mut tbuf = [0.0_f64; 1 + glmm::consts::MAX_EXTRA_GROUPINGS];
             let nt = lmm.theta_truth.len();
             tbuf[..nt].copy_from_slice(&lmm.theta_truth);
-            let f = crate::lmm::fit_lmm(&mut lmm, &spec.target_indices, Some(&tbuf[..nt]));
+            let f = glmm::mcpower::fit_lmm(&mut lmm, &spec.target_indices, Some(&tbuf[..nt]));
             let sig = f.sigma_sq;
             let q = lmm.suff.groupings.primary_q;
             let (variance_components, re_corr) = if q > 1 {
@@ -451,7 +461,7 @@ pub fn fit_provided_data(
                 // are the RE variances [τ̂₀², τ̂₁², …]; off-diagonals yield
                 // the correlation vector (vech column-major).
                 let mut lam = vec![0.0_f64; q * q];
-                crate::lmm::primary_lambda(&lmm.theta, q, &mut lam);
+                glmm::mcpower::primary_lambda(&lmm.theta, q, &mut lam);
                 let mut d = vec![0.0_f64; q * q];
                 for i in 0..q {
                     for j in 0..q {

@@ -81,21 +81,21 @@
       </figure>
     {/if}
     {#each ssrScenarios as scenario (scenario.label)}
-      <table class="w-full text-sm">
-        <caption class="mb-1 text-left font-medium">
+      <table class="w-auto text-sm [&_td]:pr-8 [&_th]:pr-8 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
+        <caption class="mb-1 text-left text-sm font-medium text-foreground">
           {#if hasMultipleScenarios}{scenario.label} — {/if}Joint detection → required N (target {targetPct})
         </caption>
         <thead>
-          <tr>
-            <th class="pr-4 text-left font-medium text-muted-foreground">Joint target</th>
-            <th class="text-right font-medium text-muted-foreground">Required N</th>
+          <tr class="border-b border-border text-left">
+            <th class="py-1">Joint target</th>
+            <th class="py-1 text-right">Required N</th>
           </tr>
         </thead>
         <tbody>
           {#each scenario.rows as row}
-            <tr>
-              <td class="pr-4">{row.rowLabel}</td>
-              <td class="text-right tabular-nums">{row.n}</td>
+            <tr class="border-b border-border/50">
+              <td class="py-1">{row.rowLabel}</td>
+              <td class="py-1 text-right font-mono tabular-nums">{row.n}</td>
             </tr>
           {/each}
         </tbody>
@@ -111,20 +111,20 @@
           Joint significance distribution is unavailable for this result.
         </p>
       {:else}
-        <table class="w-full text-sm">
+        <table class="w-auto text-sm [&_td]:pr-8 [&_th]:pr-8 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
           <thead>
-            <tr>
-              <th class="pr-4 text-left font-medium text-muted-foreground">k</th>
-              <th class="pr-4 text-left font-medium text-muted-foreground">Exactly</th>
-              <th class="text-left font-medium text-muted-foreground">At least</th>
+            <tr class="border-b border-border text-left">
+              <th class="py-1">k</th>
+              <th class="py-1">Exactly</th>
+              <th class="py-1">At least</th>
             </tr>
           </thead>
           <tbody>
             {#each scenario.jd.exactly as p, k}
-              <tr>
-                <td class="pr-4">{k}</td>
-                <td class="pr-4">{pct(p)}</td>
-                <td>{pct(scenario.jd.atLeast[k] ?? 0)}</td>
+              <tr class="border-b border-border/50">
+                <td class="py-1">{k}</td>
+                <td class="py-1 font-mono">{pct(p)}</td>
+                <td class="py-1 font-mono">{pct(scenario.jd.atLeast[k] ?? 0)}</td>
               </tr>
             {/each}
           </tbody>

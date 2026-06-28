@@ -8,9 +8,9 @@
 //! method as the original OLS contrast path, modulo the t² rewrite.
 
 use crate::correction::apply_correction;
-use crate::ols::OlsFitView;
 use crate::spec::CorrectionMethod;
 use faer::MatRef;
+use glmm::mcpower::OlsFitView;
 
 use crate::FLOAT_NEAR_ZERO;
 
@@ -154,10 +154,10 @@ fn forward_solve_l_norm_sq(l: MatRef<'_, f64>, b: &[f64], u: &mut [f64]) -> f64 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ols::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
     use crate::rng::SimRng;
     use crate::workspace::SimWorkspace;
     use faer::Mat;
+    use glmm::mcpower::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
 
     /// EST-29: posthoc pass/fail is monotone in the uncorrected threshold —
     /// lowering the threshold can only turn failures into passes, never the

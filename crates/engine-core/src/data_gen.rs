@@ -152,7 +152,7 @@ pub fn generate_sim_data(
                     dmat[i * q + j] = tau_vec[i] * r[i * q + j] * tau_vec[j];
                 }
             }
-            let l = chol_lower(&dmat, q);
+            let l = glmm::linalg::chol_lower(&dmat, q);
             let tau0 = tau_vec[0];
             let n_clusters_sl = cluster_spec.sizing.n_clusters_at(max_n);
             let mut z = vec![0.0f64; q];
@@ -730,7 +730,7 @@ pub fn generate_sim_data(
         // mult_i = exp(γ·z_i)·hsk_inv_norm via the owned SIMD exp (≤1 ULP of the
         // old libm .exp() — result-moving, rides the golden campaign), then the
         // same per-element scale-and-narrow as the old in-loop form.
-        crate::simd_transcendental::exp_fill(&mut ws.mix_acc[..max_n]);
+        glmm::simd_transcendental::exp_fill(&mut ws.mix_acc[..max_n]);
         for i in 0..max_n {
             let mult = ws.mix_acc[i] * hsk_inv_norm;
             ws.residuals[i] = (ws.residuals[i] as f64 * mult.sqrt()) as f32;
@@ -744,7 +744,7 @@ pub fn generate_sim_data(
         // p_i = σ(η_i) via the owned SIMD kernel (≤2 ULP of the old libm
         // sigmoid_stable — a y flip needs the uniform inside that gap, ~2⁻⁵²/row;
         // formally result-moving, rides the golden campaign).
-        crate::simd_transcendental::sigmoid_fill(&mut ws.eta_acc[..max_n]);
+        glmm::simd_transcendental::sigmoid_fill(&mut ws.eta_acc[..max_n]);
         for i in 0..max_n {
             ws.y_full[i] = if (ws.residuals[i] as f64) < ws.eta_acc[i] {
                 1.0f32
@@ -972,12 +972,12 @@ fn apply_marginal(
             // u → −ln ≥ 7.6 → min returns the cap, so DIST-08 holds with no extra clamp —
             // don't restructure it away. phi's A&S tail error only matters where
             // Φ(−z) ≥ e^{−EXP_CAP} ≈ 9.5e-4 (|z| ≤ 3.1); beyond that the cap censors anyway.
-            let e = (-crate::simd_transcendental::ln_owned(phi(-z))).min(EXP_CAP);
+            let e = (-glmm::simd_transcendental::ln_owned(phi(-z))).min(EXP_CAP);
             (e - EXP_CENSORED_MEAN) / EXP_CENSORED_STD
         }
         Distribution::LeftSkewed => {
             // Mirror: -RightSkewed(-z). Heavy tail on the left, monotone-increasing in z.
-            let e = (-crate::simd_transcendental::ln_owned(phi(z))).min(EXP_CAP);
+            let e = (-glmm::simd_transcendental::ln_owned(phi(z))).min(EXP_CAP);
             (EXP_CENSORED_MEAN - e) / EXP_CENSORED_STD
         }
         Distribution::HighKurtosis => {
@@ -1027,7 +1027,7 @@ fn apply_marginal_column(
     var_idx: usize,
     spec: &SimulationSpec,
 ) {
-    use crate::simd_transcendental::phi_fill;
+    use glmm::simd_transcendental::phi_fill;
     match dist_type {
         // Caller fast-paths Normal; identity here keeps the dispatch total.
         Distribution::Normal | Distribution::UploadedFactor => {}
@@ -1050,7 +1050,7 @@ fn apply_marginal_column(
                 *z = -*z;
             }
             phi_fill(col);
-            crate::simd_transcendental::ln_fill(col);
+            glmm::simd_transcendental::ln_fill(col);
             for u in col.iter_mut() {
                 let e = (-*u).min(EXP_CAP);
                 *u = (e - EXP_CENSORED_MEAN) / EXP_CENSORED_STD;
@@ -1058,7 +1058,7 @@ fn apply_marginal_column(
         }
         Distribution::LeftSkewed => {
             phi_fill(col);
-            crate::simd_transcendental::ln_fill(col);
+            glmm::simd_transcendental::ln_fill(col);
             for u in col.iter_mut() {
                 let e = (-*u).min(EXP_CAP);
                 *u = (EXP_CENSORED_MEAN - e) / EXP_CENSORED_STD;
@@ -1150,31 +1150,6 @@ fn draw_residual(rng: &mut SimRng, residual_dist: ResidualDist, residual_df: f64
         // generate_sim_data; change together.
         ResidualDist::Uniform => (2.0 * rng.next_uniform() as f64 - 1.0) * SQRT3,
     }
-}
-
-/// Lower Cholesky factor of a symmetric PSD `q×q` matrix (row-major in/out).
-/// validate() guarantees PSD, so a zero pivot is treated as exact 0 (its
-/// below-diagonal column entries become 0).
-pub(crate) fn chol_lower(a: &[f64], q: usize) -> Vec<f64> {
-    let mut l = vec![0.0f64; q * q];
-    for j in 0..q {
-        let mut diag = a[j * q + j];
-        for k in 0..j {
-            diag -= l[j * q + k] * l[j * q + k];
-        }
-        let ljj = diag.max(0.0).sqrt();
-        l[j * q + j] = ljj;
-        for i in (j + 1)..q {
-            if ljj > 0.0 {
-                let mut s = a[i * q + j];
-                for k in 0..j {
-                    s -= l[i * q + k] * l[j * q + k];
-                }
-                l[i * q + j] = s / ljj;
-            }
-        }
-    }
-    l
 }
 
 // ---------------------------------------------------------------------------
@@ -3130,7 +3105,7 @@ mod tests {
             // n_sl == 1, so cluster_slope_u_draws[g * 1 + 0] == cluster_slope_u_draws[g]
             let u_re = ws.cluster_u_draws[g] as f64
                 + ws.cluster_slope_u_draws[g] as f64 * ws.x_full[(i, 1)] as f64;
-            let p = crate::glm::sigmoid_stable(lp + u_re);
+            let p = glmm::mcpower::sigmoid_stable(lp + u_re);
             let expect = if (ws.residuals[i] as f64) < p {
                 1.0f32
             } else {

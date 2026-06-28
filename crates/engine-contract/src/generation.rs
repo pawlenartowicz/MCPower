@@ -218,23 +218,12 @@ pub enum GroupingRelation {
     NestedWithin { n_per_parent: u32 },
 }
 
-/// Maximum number of extra groupings a spec may declare. The solver lays each
-/// fit's per-row level ids into a fixed-size stack buffer of width
-/// `1 + MAX_EXTRA_GROUPINGS` (primary + extras) — `gid` in
-/// `lmm::add_rows_multi` and the truth-start `tbuf` — so this is a HARD ceiling.
-/// `validate()` (invariant 20) rejects any spec above it before a fit is built;
-/// the constant lives here, not in `engine-core`, so the contract boundary can
-/// enforce it. Mirrors those two buffer sizes — change together. Real designs
-/// sit far below (≤ 1 nested + a handful of crossed factors).
-pub const MAX_EXTRA_GROUPINGS: usize = 7;
-
-/// Maximum primary RE width `q_p = 1 + #slopes`, i.e. at most 7 random slopes.
-/// Bounds the stack-allocated θ truth-start buffer in the solver (the buffer is
-/// sized `MAX_PRIMARY_Q*(MAX_PRIMARY_Q+1)/2 + MAX_EXTRA_GROUPINGS`).
-/// `validate()` (invariant 21) rejects `1 + cluster.slopes.len() > MAX_PRIMARY_Q`
-/// before a fit is built. Realistic random-slope models have 1–3 slopes;
-/// 8 is a generous hard cap.
-pub const MAX_PRIMARY_Q: usize = 8;
+// Capacity ceilings are owned by `glmm` (carve spec §6) and re-exported here so
+// `validate()` (invariants 20/21) enforces the same bounds the solver allocates to.
+// The solver's stack buffers (`gid` width `1 + MAX_EXTRA_GROUPINGS`, θ truth-start
+// `tbuf` sized `MAX_PRIMARY_Q*(MAX_PRIMARY_Q+1)/2 + MAX_EXTRA_GROUPINGS`) are
+// HARD ceilings — mirrors those two buffer sizes — change together.
+pub use glmm::consts::{MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q};
 
 impl GroupingRelation {
     /// Levels this grouping contributes to one atom block: the fixed crossed

@@ -12,6 +12,7 @@
   import SummaryTab from './SummaryTab.svelte';
   import JointDistTab from './JointDistTab.svelte';
   import ExportTab from './ExportTab.svelte';
+  import ResultsCitation from './ResultsCitation.svelte';
 
   const active = $derived(runStore.runTabs.find((t) => t.id === runStore.activeTabId) ?? null);
 </script>
@@ -39,6 +40,7 @@
       {:else}
         <ExportTab tab={active} />
       {/if}
+      <ResultsCitation />
     </div>
   {:else if !runStore.lastError}
     <!-- New-run tab: family-aware empty state as a tutorial preview. The trailing

@@ -93,7 +93,7 @@
                   {:else if dispJ < dispI}
                     <NumberInput
                       class="w-28"
-                      step={0.1}
+                      step={0.05}
                       min={-1}
                       max={1}
                       value={displayValue(re.idx, entries[dispJ]!.idx)}
