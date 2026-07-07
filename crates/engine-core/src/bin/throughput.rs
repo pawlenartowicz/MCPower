@@ -1,4 +1,4 @@
-//! Engine throughput bench — frozen fits/sec baseline over a 26-case grid.
+//! Engine throughput bench — frozen fits/sec baseline over a 21-case grid.
 //!
 //! Run from the workspace root (`mcpower/`):
 //!
@@ -135,11 +135,11 @@ fn scenario_seed() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen case grid — 26 cases. The OLS/GLM/LME rows mirror the cross-port
+// Frozen case grid — 21 cases. The OLS/GLM/LME rows mirror the cross-port
 // bench's ids; the M2 (crossed/nested), M3 (random-slope), and M4 (GLMM) rows
-// exercise the general-path kernels. Each of the 5 M4 GLMM rows also carries a
-// `_hessian` copy (FD-Hessian Wald SE). Specs are the record (effect sizes
-// follow the cross-port sketches, frozen here).
+// exercise the general-path kernels. The 5 M4 GLMM rows run the host-default
+// FD-Hessian Wald SE. Specs are the record (effect sizes follow the cross-port
+// sketches, frozen here).
 // ---------------------------------------------------------------------------
 
 struct Case {
@@ -208,6 +208,7 @@ fn base_spec(k: u32) -> SimulationSpec {
         report_overall: false,
         factor_min_level_count: 0,
         cluster_slope_design_cols: vec![],
+        extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
     }
 }
@@ -254,10 +255,8 @@ fn glmm_spec(k: u32, baseline_p: f64, n_clusters: u32, tau_squared: f64) -> Simu
         slopes: vec![],
         extra_groupings: vec![],
     });
-    // Base GLMM rows are pinned to the Rx Schur SE (the fast legacy baseline) so the
-    // `<id>` vs `<id>_hessian` pair times the per-fit Hessian tax side-by-side. Without
-    // this the base would inherit `WaldSe::default()` = Hessian and the pair collapses.
-    s.wald_se = WaldSe::Rx;
+    // GLMM rows inherit `WaldSe::default()` = Hessian (the host default, FD-Hessian
+    // Wald SE); the bench times only that path.
     s
 }
 
@@ -492,22 +491,6 @@ fn cases() -> Vec<Case> {
         s
     };
 
-    // --- M4 GLMM hessian copies — every GLMM shape above, re-run with the
-    // FD-Hessian Wald SE (the engine default) instead of the base rows' pinned Rx
-    // Schur SE, so the grid times the per-fit Hessian tax side-by-side (`<id>` vs
-    // `<id>_hessian`). Same n/n_sims as their originals (true copies); fits/sec is
-    // per-fit so the ratio reads straight off the table.
-    let with_hessian = |s: &SimulationSpec| {
-        let mut s = s.clone();
-        s.wald_se = WaldSe::Hessian;
-        s
-    };
-    let glmm_intercept_hessian = with_hessian(&glmm_intercept);
-    let glmm_slope_hessian = with_hessian(&glmm_slope);
-    let glmm_crossed_hessian = with_hessian(&glmm_crossed);
-    let glmm_nested_hessian = with_hessian(&glmm_nested);
-    let glmm_crossed_nested_hessian = with_hessian(&glmm_crossed_nested);
-
     vec![
         Case {
             id: "ols_multi",
@@ -612,23 +595,11 @@ fn cases() -> Vec<Case> {
             spec: glmm_intercept,
         }, // M4 GLMM (Glm+cluster), random intercept
         Case {
-            id: "glmm_intercept_hessian",
-            n: 480,
-            n_sims: 1_000,
-            spec: glmm_intercept_hessian,
-        }, // hessian copy of glmm_intercept
-        Case {
             id: "glmm_slope",
             n: 480,
             n_sims: 1_000,
             spec: glmm_slope,
         }, // M4 GLMM + slope, heaviest fit in grid
-        Case {
-            id: "glmm_slope_hessian",
-            n: 480,
-            n_sims: 1_000,
-            spec: glmm_slope_hessian,
-        }, // hessian copy of glmm_slope
         Case {
             id: "glmm_crossed",
             n: 480,
@@ -636,35 +607,17 @@ fn cases() -> Vec<Case> {
             spec: glmm_crossed,
         }, // M4 dense path, k=14 (~62 fits/s)
         Case {
-            id: "glmm_crossed_hessian",
-            n: 480,
-            n_sims: 500,
-            spec: glmm_crossed_hessian,
-        }, // hessian copy of glmm_crossed
-        Case {
             id: "glmm_nested",
             n: 480,
             n_sims: 500,
             spec: glmm_nested,
         }, // M4 dense path, k=24 (~27 fits/s)
         Case {
-            id: "glmm_nested_hessian",
-            n: 480,
-            n_sims: 500,
-            spec: glmm_nested_hessian,
-        }, // hessian copy of glmm_nested
-        Case {
             id: "glmm_crossed_nested",
             n: 480,
             n_sims: 500,
             spec: glmm_crossed_nested,
         }, // M4 dense path, k=30 (~13 fits/s)
-        Case {
-            id: "glmm_crossed_nested_hessian",
-            n: 480,
-            n_sims: 500,
-            spec: glmm_crossed_nested_hessian,
-        }, // hessian copy of glmm_crossed_nested
     ]
 }
 

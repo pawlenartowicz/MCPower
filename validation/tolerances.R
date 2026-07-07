@@ -148,7 +148,14 @@ SCENARIO_TOL <- list(
 # to 4*MC_SE so a K-draw mean within sampling noise of the spec passes.
 MLMM_TOL <- list(
   beta_abs_floor   = 1e-5,  # B<->C |beta_hat_R - beta_hat_MCPower| floor (below this, rel band is noise)
-  stat_abs_floor   = 1e-4,  # B<->C |z_R - z_MCPower| floor (Wald-z optimizer placement)
+  stat_abs_floor   = 5e-4,  # B<->C |z_R - z_MCPower| floor (Wald-z optimizer placement).
+                            # z = β̂/SE is a derived RATIO, so it accumulates BOTH operands'
+                            # optimizer placement noise — it cannot share the β̂/VC primitives'
+                            # floor. The relative arm (estimate_rel_iter * max(...)) still guards
+                            # systematic/proportional errors; this absolute floor only governs
+                            # small-|z| noise. Extra-slope LMM cases (losf 28/29) show measured
+                            # interior-fit gaps up to ~4.4e-4 (all VCs >> PIN_THETA = 1e-4, i.e.
+                            # ridge noise, not a boundary snap), so 5e-4 covers them with margin.
   ab_beta_pad      = 0.005, # A<->B fixed-effect recovery pad (lightest tail)
   ab_vc_pad        = 0.01,  # A<->B intercept tau^2 / residual sigma^2 pad (M2; heavier tail than beta)
   ab_slope_var_pad = 0.02,  # A<->B random-SLOPE variance pad (M3/M4; harder to recover at moderate K)

@@ -1523,6 +1523,39 @@ class MCPower:
             clusters_json,
         )
 
+    def _slope_terms_for(self, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Build the SlopeTerm list for one grouping from its _pending_clusters config.
+
+        Shape mirrors R debug seam (spec-builder.R .encode_outcome_and_clusters) and
+        the engine's SlopeTerm serde:
+          {column: <0-based gen col>, variance: f64, corr_with_intercept: f64,
+           corr_with: Vec<f64>}  (corr_with = correlations with EARLIER slopes;
+           empty list for the first slope, zero for subsequent ones because the
+           scalar set_cluster API cannot express non-zero slope↔slope correlations).
+
+        Returns [] when the config has no random_slopes — caller omits "slopes" key.
+        """
+        _random_slopes = cfg.get("random_slopes") or []
+        if not _random_slopes:
+            return []
+        _nf_names = list(self._registry.non_factor_names)  # generation column order
+        _sv = float(cfg.get("slope_variance", 0.0))
+        _sc = float(cfg.get("slope_intercept_corr", 0.0))
+        _terms: List[Dict[str, Any]] = []
+        for _sname in _random_slopes:
+            if _sname not in _nf_names:
+                raise ValueError(
+                    f"random_slopes: {_sname!r} is not a non-factor predictor; "
+                    f"valid: {_nf_names}"
+                )
+            _terms.append({
+                "column": _nf_names.index(_sname),
+                "variance": _sv,
+                "corr_with_intercept": _sc,
+                "corr_with": [0.0] * len(_terms),
+            })
+        return _terms
+
     def _build_cluster_spec_dict(self) -> Dict[str, Any]:
         """Project all pending LME cluster specs into a single engine ClusterSpec.
 
@@ -1593,38 +1626,17 @@ class MCPower:
                     _relation = {
                         "Crossed": {"n_clusters": int(_n_cls) if _n_cls is not None else 0}
                     }
-                extra.append({"relation": _relation, "tau_squared": float(_tau)})
+                _extra_spec: Dict[str, Any] = {"relation": _relation, "tau_squared": float(_tau)}
+                _extra_slopes = self._slope_terms_for(_cfg)
+                if _extra_slopes:
+                    _extra_spec["slopes"] = _extra_slopes
+                extra.append(_extra_spec)
             spec["extra_groupings"] = extra
 
-        # Random slopes: build SlopeTerm list for the primary grouping.
-        # Shape mirrors R debug seam (spec-builder.R .encode_outcome_and_clusters) and the engine's
-        # SlopeTerm serde shape:
-        #   {column: <0-based gen col>, variance: f64, corr_with_intercept: f64,
-        #    corr_with: Vec<f64>}  (corr_with = correlations with EARLIER slopes;
-        #    empty list for the first slope).
-        _random_slopes = primary_cfg.get("random_slopes") or []
-        if _random_slopes:
-            _nf_names = list(self._registry.non_factor_names)  # generation column order
-            _sv = float(primary_cfg.get("slope_variance", 0.0))
-            _sc = float(primary_cfg.get("slope_intercept_corr", 0.0))
-            _slope_terms: List[Dict[str, Any]] = []
-            for _sname in _random_slopes:
-                if _sname not in _nf_names:
-                    raise ValueError(
-                        f"random_slopes: {_sname!r} is not a non-factor predictor; "
-                        f"valid: {_nf_names}"
-                    )
-                # corr_with = correlations with each EARLIER slope (empty for the
-                # first slope). The scalar API can't express non-zero slope↔slope
-                # correlations, so they are zero; len == number of slopes already
-                # appended, which the engine requires (slope k needs k entries).
-                _slope_terms.append({
-                    "column": _nf_names.index(_sname),
-                    "variance": _sv,
-                    "corr_with_intercept": _sc,
-                    "corr_with": [0.0] * len(_slope_terms),
-                })
-            spec["slopes"] = _slope_terms
+        # Random slopes for the primary grouping — reuses the same helper.
+        _primary_slopes = self._slope_terms_for(primary_cfg)
+        if _primary_slopes:
+            spec["slopes"] = _primary_slopes
 
         return spec
 

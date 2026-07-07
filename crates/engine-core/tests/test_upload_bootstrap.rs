@@ -75,6 +75,7 @@ fn strict_2cont_spec(frame: &[[f64; 2]]) -> SimulationSpec {
         report_overall: false,
         factor_min_level_count: 0,
         cluster_slope_design_cols: vec![],
+        extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
     }
 }
@@ -213,6 +214,7 @@ fn strict_cont_plus_factor_spec(frame: &[[f64; 2]]) -> SimulationSpec {
         report_overall: false,
         factor_min_level_count: 0,
         cluster_slope_design_cols: vec![],
+        extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
     }
 }
@@ -343,6 +345,7 @@ fn strict_cont_plus_binary_spec(upload_data: Vec<f64>, u: usize, p: f64) -> Simu
         report_overall: false,
         factor_min_level_count: 0,
         cluster_slope_design_cols: vec![],
+        extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
     }
 }

@@ -92,10 +92,10 @@ pub enum ClusterDim {
 }
 
 /// One extra grouping factor in UI-layer terms, mirroring
-/// `engine_contract::GroupingSpec` (sans slopes — the UI does not expose slopes
-/// on secondary groupings; the engine rejects them). `tau_squared` is the RE
-/// variance entered directly (the host already converts ICC → τ² for the primary
-/// grouping; secondaries take τ² straight from the UI).
+/// `engine_contract::GroupingSpec` (slopes now supported on secondary groupings,
+/// mirroring the primary — gated kernel path). `tau_squared` is the RE variance
+/// entered directly (the host already converts ICC → τ² for the primary grouping;
+/// secondaries take τ² straight from the UI).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppGroupingSpec {
     pub tau_squared: f64,
@@ -105,6 +105,11 @@ pub struct AppGroupingSpec {
     /// `GroupingSpec` is index-based and ignores it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cluster_name: Option<String>,
+    /// Random slopes on this grouping factor, mirroring the primary's `slopes`.
+    /// Resolved to contract `SlopeTerm`s the same way (predictor name → non-factor
+    /// column). Empty → intercept-only RE on this grouping.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slopes: Vec<AppSlopeTerm>,
 }
 
 /// Mirrors `engine_contract::GroupingRelation` (externally tagged there; this

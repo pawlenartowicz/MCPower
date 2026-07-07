@@ -262,9 +262,11 @@ optimizers on the same bytes need not share the optimum at a boundary).
 > from `glmer`’s *default* summary on two known, deferred axes (full
 > rationale in the workspace doc
 > `docs/ideas-features/mixed-model-significance-reference.md`): **(z)**
-> MCPower’s Wald SE is the RX/PLS Schur
+> on this GLMM path MCPower’s Wald SE is the RX/PLS Schur
 > (`= glmer vcov(use.hessian = FALSE)`), ~3% anticonservative vs glmer’s
-> default `use.hessian = TRUE` — a deliberate, documented, deferred
+> default `use.hessian = TRUE` (GLMM-only; the linear LMM path above
+> uses the standard GLS `(XᵀV̂⁻¹X)⁻¹`, lme4-equivalent, with no
+> Schur/Hessian fork) — a deliberate, documented, deferred
 > choice (that doc’s §“Second axis”), *not* a regression; **(β̂/τ̂²/ρ̂)**
 > MCPower-BOBYQA vs glmer-Laplace agree on the same bytes only to ~2–3×
 > the LMM-inherited `GLMM_TOL` bands, plus glmer’s few-cluster

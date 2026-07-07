@@ -526,3 +526,49 @@ def test_find_power_cluster_level_var_smoke():
     assert row[1] > 0.05, f"x2 power {row[1]} too low — cluster-level-var path may be broken"
     # x1 (observation-level) should have higher power than x2 (cluster-level, same effect).
     assert row[0] > row[1], f"Expected power(x1)>power(x2) but got {row[0]:.3f} vs {row[1]:.3f}"
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — extra grouping emits slopes
+# ---------------------------------------------------------------------------
+
+
+def test_extra_grouping_emits_slopes():
+    """Extra grouping with random_slopes emits a slopes list in the spec dict.
+    Primary grouping slopes are also exercised — refactored _slope_terms_for
+    call site must work for both primary and extra.
+
+    column=0 because x1 is the sole non-factor predictor → generation index 0.
+    corr_with=[] because it is the first (and only) slope term.
+    """
+    m = MCPower("y ~ x1 + (1 + x1|grp) + (1 + x1|item)", family="lme")
+    m.set_effects("x1=0.3")
+    m.set_cluster("grp", ICC=0.2, n_clusters=24,                      # primary
+                  random_slopes=["x1"], slope_variance=0.08,
+                  slope_intercept_corr=0.15)
+    m.set_cluster("item", ICC=0.1, n_clusters=6,                      # extra
+                  random_slopes=["x1"], slope_variance=0.10,
+                  slope_intercept_corr=0.2)
+    spec = m._build_cluster_spec_dict()
+    # Primary grouping slopes
+    assert "slopes" in spec
+    assert spec["slopes"] == [
+        {"column": 0, "variance": 0.08, "corr_with_intercept": 0.15, "corr_with": []}
+    ]
+    # Extra grouping slopes
+    extra = spec["extra_groupings"][0]
+    assert extra["slopes"] == [
+        {"column": 0, "variance": 0.10, "corr_with_intercept": 0.2, "corr_with": []}
+    ]
+
+
+def test_extra_grouping_no_slopes_key_absent():
+    """When an extra grouping has no random_slopes, 'slopes' key is absent.
+    Negative assertion locking in the conditional emission pattern."""
+    m = MCPower("y ~ x1 + (1|grp) + (1|item)", family="lme")
+    m.set_effects("x1=0.3")
+    m.set_cluster("grp", ICC=0.2, n_clusters=24)
+    m.set_cluster("item", ICC=0.1, n_clusters=6)
+    spec = m._build_cluster_spec_dict()
+    extra = spec["extra_groupings"][0]
+    assert "slopes" not in extra

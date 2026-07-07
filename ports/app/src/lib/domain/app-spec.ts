@@ -171,6 +171,9 @@ export interface AppGroupingSpec {
     relation: AppGroupingRelation;
     /** Grouping-factor name from its formula term (host-side: script gen, labels). */
     cluster_name?: string;
+    /** Random slopes on this grouping factor (mirrors the primary's `slopes`).
+     *  Omitted/empty → intercept-only RE on this grouping. */
+    slopes?: AppSlopeTerm[];
 }
 
 /** Mirrors `engine_app_spec::AppSlopeTerm` — one random slope (predictor named,

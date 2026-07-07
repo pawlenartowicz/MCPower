@@ -5,7 +5,8 @@ use crate::design::DesignTerm;
 use crate::error::ContractError;
 use crate::estimator::EstimatorSpec;
 use crate::generation::{
-    ClusterSizing, ColumnSpec, Correlations, GroupingRelation, MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q,
+    ClusterSizing, ColumnSpec, Correlations, GroupingRelation, SlopeTerm, MAX_EXTRA_GROUPINGS,
+    MAX_EXTRA_Q, MAX_PRIMARY_Q,
 };
 use crate::outcome::OutcomeKind;
 use crate::scenarios::ScenarioPerturbations;
@@ -38,7 +39,7 @@ impl SimulationContract {
         self.invariant_16_correlation_psd()?;
         self.invariant_17_posthoc_consistency()?;
         self.invariant_18_interaction_well_formed()?;
-        self.invariant_19_extra_slopes_unsupported()?;
+        self.invariant_19_extra_grouping_slope_structure()?;
         self.invariant_20_extra_grouping_structure()?;
         self.invariant_21_primary_slope_structure()?;
         self.invariant_22_scenario_perturbations_well_formed()?;
@@ -73,7 +74,7 @@ impl SimulationContract {
         self.invariant_16_correlation_psd()?;
         self.invariant_17_posthoc_consistency()?;
         self.invariant_18_interaction_well_formed()?;
-        self.invariant_19_extra_slopes_unsupported()?;
+        self.invariant_19_extra_grouping_slope_structure()?;
         self.invariant_20_extra_grouping_structure()?;
         self.invariant_21_primary_slope_structure()?;
         self.invariant_22_scenario_perturbations_well_formed()?;
@@ -558,57 +559,39 @@ impl SimulationContract {
         Ok(())
     }
 
-    // Primary slopes are live capability (validated structurally by invariant_21).
-    // Slopes on EXTRA groupings stay rejected — supporting multi-grouping
-    // random slopes requires non-trivial composition changes and is not yet
-    // implemented.
-    fn invariant_19_extra_slopes_unsupported(&self) -> Result<(), ContractError> {
-        if let Some(cluster) = &self.generation.cluster {
-            for g in &cluster.extra_groupings {
-                if !g.slopes.is_empty() {
-                    return Err(ContractError::ExtraSlopesUnsupported);
-                }
+    // invariant_19: random slopes on EXTRA groupings are SUPPORTED (gated kernel
+    // path). Each extra factor's RE width q_g = 1 + #slopes must fit the solver's
+    // per-factor vech(Λ_g) block (MAX_EXTRA_Q — else the θ packing / tail scratch
+    // overflow), and every slope column gets the same structural validation as a
+    // primary slope (continuous Direct fixed effect, sane variance/correlation,
+    // corr_with lower triangle). The slope↔intercept and slope↔slope correlations
+    // form each factor's own D_g; PSD of D_g is the data-gen layer's concern.
+    fn invariant_19_extra_grouping_slope_structure(&self) -> Result<(), ContractError> {
+        let Some(cluster) = &self.generation.cluster else {
+            return Ok(());
+        };
+        for g in &cluster.extra_groupings {
+            let q_g = 1 + g.slopes.len();
+            if q_g > MAX_EXTRA_Q {
+                return Err(ContractError::ExtraGroupingQTooLarge {
+                    got: q_g as u32,
+                    max: MAX_EXTRA_Q as u32,
+                });
             }
+            self.check_slope_terms(&g.slopes)?;
         }
         Ok(())
     }
 
-    /// Structural rules for the primary random slopes: one or more,
-    /// composable with intercept-only crossed/nested extra groupings (slopes ON an
-    /// extra grouping stay rejected by invariant_19); each on a continuous column
-    /// that is a Direct fixed effect; sane variance/correlation; a non-zero
-    /// intercept variance to correlate against; a corr_with lower triangle of the
-    /// right length; and a PSD covariance D.
-    fn invariant_21_primary_slope_structure(&self) -> Result<(), ContractError> {
-        let Some(cluster) = &self.generation.cluster else {
-            return Ok(());
-        };
-        if cluster.slopes.is_empty() {
-            // Intercept-only: tau_squared may be 0.0 (ICC = 0 is a valid
-            // control-arm value) but must be finite and non-negative. The
-            // slopes path tightens this to tau_squared > 0.0 (a slope needs a
-            // non-zero intercept variance to correlate against).
-            if !(cluster.tau_squared.is_finite() && cluster.tau_squared >= 0.0) {
-                return Err(ContractError::InterceptOnlyTauSquaredInvalid {
-                    got: cluster.tau_squared,
-                });
-            }
-            return Ok(());
-        }
-        // q_p = 1 + #slopes; must fit the solver's stack-allocated θ truth-start
-        // buffer (MAX_THETA in lmm.rs = MAX_PRIMARY_Q*(MAX_PRIMARY_Q+1)/2 + MAX_EXTRA_GROUPINGS).
-        if 1 + cluster.slopes.len() > MAX_PRIMARY_Q {
-            return Err(ContractError::TooManySlopes {
-                got: (1 + cluster.slopes.len()) as u32,
-                max: MAX_PRIMARY_Q as u32,
-            });
-        }
-        if !(cluster.tau_squared.is_finite() && cluster.tau_squared > 0.0) {
-            return Err(ContractError::SlopeInterceptVarianceMissing {
-                got: cluster.tau_squared,
-            });
-        }
-        for (k, slope) in cluster.slopes.iter().enumerate() {
+    /// Per-slope structural checks shared by the primary factor (invariant_21)
+    /// and the extra groupings (invariant_19): each slope sits on an in-range,
+    /// continuous column that appears as a Direct fixed effect (so x_full carries
+    /// its values, the s-Gram recovery works, and the model matches the lmer
+    /// oracle); finite variance ≥ 0; finite correlations in [-1, 1]; and a
+    /// corr_with lower triangle of length exactly `k` (the slope's own index).
+    /// The error vocabulary is identical for both factors.
+    fn check_slope_terms(&self, slopes: &[SlopeTerm]) -> Result<(), ContractError> {
+        for (k, slope) in slopes.iter().enumerate() {
             let id = slope.column.0;
             // Range (mirrors invariant_04's continuous range guard).
             if (id as usize) >= self.generation.columns.len() {
@@ -658,6 +641,45 @@ impl SimulationContract {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Structural rules for the primary random slopes: one or more,
+    /// composable with crossed/nested extra groupings (their own slopes are
+    /// validated by invariant_19); each on a continuous column
+    /// that is a Direct fixed effect; sane variance/correlation; a non-zero
+    /// intercept variance to correlate against; a corr_with lower triangle of the
+    /// right length; and a PSD covariance D.
+    fn invariant_21_primary_slope_structure(&self) -> Result<(), ContractError> {
+        let Some(cluster) = &self.generation.cluster else {
+            return Ok(());
+        };
+        if cluster.slopes.is_empty() {
+            // Intercept-only: tau_squared may be 0.0 (ICC = 0 is a valid
+            // control-arm value) but must be finite and non-negative. The
+            // slopes path tightens this to tau_squared > 0.0 (a slope needs a
+            // non-zero intercept variance to correlate against).
+            if !(cluster.tau_squared.is_finite() && cluster.tau_squared >= 0.0) {
+                return Err(ContractError::InterceptOnlyTauSquaredInvalid {
+                    got: cluster.tau_squared,
+                });
+            }
+            return Ok(());
+        }
+        // q_p = 1 + #slopes; must fit the solver's stack-allocated θ truth-start
+        // buffer (MAX_THETA in lmm.rs = MAX_PRIMARY_Q*(MAX_PRIMARY_Q+1)/2 + MAX_EXTRA_GROUPINGS).
+        if 1 + cluster.slopes.len() > MAX_PRIMARY_Q {
+            return Err(ContractError::TooManySlopes {
+                got: (1 + cluster.slopes.len()) as u32,
+                max: MAX_PRIMARY_Q as u32,
+            });
+        }
+        if !(cluster.tau_squared.is_finite() && cluster.tau_squared > 0.0) {
+            return Err(ContractError::SlopeInterceptVarianceMissing {
+                got: cluster.tau_squared,
+            });
+        }
+        self.check_slope_terms(&cluster.slopes)?;
         // The full RE covariance must admit a Cholesky (data-gen needs it).
         if !cluster.re_covariance_is_psd() {
             return Err(ContractError::SlopeCovarianceNotPSD);

@@ -12,6 +12,7 @@
   import Settings2 from '@lucide/svelte/icons/settings-2';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import ClusterAdvancedDialog from './ClusterAdvancedDialog.svelte';
+  import ExtraGroupingAdvancedDialog from './ExtraGroupingAdvancedDialog.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import { parsedFormulaStore, toClusterTerms } from '$lib/stores/parsed-formula.svelte';
   import { LIMITS } from '$lib/configs/app-config';
@@ -25,6 +26,10 @@
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
 
   let advancedOpen = $state(false);
+  // One dialog instance keyed by the open extra grouping's index (mirrors the
+  // primary's `advancedOpen`); the card buttons set the index then open it.
+  let extraAdvancedOpen = $state(false);
+  let extraAdvancedIndex = $state(0);
 
   // Cluster terms mirror the formula's random effects (read-only structure).
   // getStable: cards must not flash away (and the reconcile below must not act
@@ -51,6 +56,17 @@
       const next = t.slice(1).map((term) => {
         const prev = prevByName.get(term.cluster);
         const relation = term.parent !== null ? ('nested' as const) : ('crossed' as const);
+        // Slopes mirror this term's `(1+x|g)` vars exactly — same rule as the
+        // primary below (params preserved by name, stale vars dropped).
+        const prevSlopes = new Map((prev?.slopes ?? []).map((s) => [s.predictorName, s]));
+        const slopes = term.slopeVars.map(
+          (v) =>
+            prevSlopes.get(v) ?? {
+              predictorName: v,
+              slopeVariance: SLOPE_DEFAULTS.variance,
+              slopeInterceptCorr: SLOPE_DEFAULTS.corr,
+            },
+        );
         return {
           clusterName: term.cluster,
           relation,
@@ -58,6 +74,7 @@
           n:
             prev?.n ??
             (relation === 'nested' ? EXTRA_GROUPING_DEFAULTS.nestedN : EXTRA_GROUPING_DEFAULTS.crossedN),
+          slopes,
         };
       });
       const current = cl.extraGroupings ?? [];
@@ -66,7 +83,14 @@
         next.every((g, i) => {
           const p = current[i]!;
           return (
-            p.clusterName === g.clusterName && p.relation === g.relation && p.icc === g.icc && p.n === g.n
+            p.clusterName === g.clusterName &&
+            p.relation === g.relation &&
+            p.icc === g.icc &&
+            p.n === g.n &&
+            // Slope SET identity (by predictor name); params edited in-place via
+            // the advanced popup, so a param change must NOT force a rewrite.
+            (p.slopes?.length ?? 0) === g.slopes.length &&
+            g.slopes.every((s, j) => p.slopes?.[j]?.predictorName === s.predictorName)
           );
         });
       if (!same) cl.extraGroupings = next;
@@ -240,6 +264,15 @@
                 if (g) g.n = v;
               }}
             />
+            <Button
+              variant="outline"
+              size="sm"
+              class="ml-auto h-7 shrink-0 px-2 text-xs"
+              data-testid={`cluster-extra-advanced-${extra.clusterName}`}
+              onclick={() => { extraAdvancedIndex = i; extraAdvancedOpen = true; }}
+            >
+              <Settings2 class="mr-1 h-3.5 w-3.5" /> Advanced
+            </Button>
           </div>
         </div>
       {/each}
@@ -252,4 +285,5 @@
   </div>
 
   <ClusterAdvancedDialog bind:open={advancedOpen} />
+  <ExtraGroupingAdvancedDialog bind:open={extraAdvancedOpen} groupingIndex={extraAdvancedIndex} />
 {/if}

@@ -372,7 +372,15 @@ lme4_re_summary <- function(rf, case) {
   if (!is.null(case$extra))
     for (e in case$extra) {
       vce <- lme4::VarCorr(rf)[[paste0("g_", e$var)]]
-      vars <- c(vars, as.numeric(attr(vce, "stddev"))^2)
+      if (!is.null(e$slopes)) {
+        # Extra has slopes: full q_e×q_e block (diagonal variances + off-diagonal correlations).
+        q_e <- 1L + length(e$slopes)
+        sdpe <- attr(vce, "stddev"); corpe <- attr(vce, "correlation")
+        vars <- c(vars, as.numeric(sdpe)^2)
+        corr <- c(corr, vapply(m3_offdiag_pairs(q_e), function(p) corpe[p[1], p[2]], numeric(1)))
+      } else {
+        vars <- c(vars, as.numeric(attr(vce, "stddev"))^2)
+      }
     }
   list(vars = vars, corr = corr)
 }
@@ -389,7 +397,22 @@ spec_re_summary <- function(case) {
     if (length(cw)) for (i in seq_along(cw)) R[i + 1, k + 1] <- R[k + 1, i + 1] <- cw[i]
   }
   corr <- vapply(m3_offdiag_pairs(q), function(p) R[p[1], p[2]], numeric(1))
-  if (!is.null(case$extra)) vars <- c(vars, vapply(case$extra, function(e) e$tau_squared, numeric(1)))
+  if (!is.null(case$extra))
+    for (e in case$extra) {
+      vars <- c(vars, e$tau_squared)
+      if (!is.null(e$slopes)) {
+        # Extra grouping has slopes: append slope variances + off-diagonal correlations.
+        vars <- c(vars, vapply(e$slopes, function(s) s$variance, numeric(1)))
+        q_e <- 1L + length(e$slopes)
+        Re <- diag(q_e)
+        for (k in seq_along(e$slopes)) {
+          Re[1, k + 1] <- Re[k + 1, 1] <- e$slopes[[k]]$corr_with_intercept
+          cw <- e$slopes[[k]]$corr_with
+          if (length(cw)) for (i in seq_along(cw)) Re[i + 1, k + 1] <- Re[k + 1, i + 1] <- cw[i]
+        }
+        corr <- c(corr, vapply(m3_offdiag_pairs(q_e), function(p) Re[p[1], p[2]], numeric(1)))
+      }
+    }
   list(vars = vars, corr = corr)
 }
 
@@ -532,8 +555,9 @@ at a boundary).
 > **B↔C is a documented XFAIL, not a hard gate.** MCPower-GLMM diverges from `glmer`'s
 > *default* summary on two known, deferred axes (full rationale in the workspace doc
 > `docs/ideas-features/mixed-model-significance-reference.md`):
-> **(z)** MCPower's Wald SE is the RX/PLS Schur (`= glmer vcov(use.hessian = FALSE)`),
-> ~3% anticonservative vs glmer's default `use.hessian = TRUE` — a deliberate, documented,
+> **(z)** on this GLMM path MCPower's Wald SE is the RX/PLS Schur (`= glmer vcov(use.hessian = FALSE)`),
+> ~3% anticonservative vs glmer's default `use.hessian = TRUE` (GLMM-only; the linear LMM path above
+> uses the standard GLS `(XᵀV̂⁻¹X)⁻¹`, lme4-equivalent, with no Schur/Hessian fork) — a deliberate, documented,
 > deferred choice (that doc's §"Second axis"), *not* a regression; **(β̂/τ̂²/ρ̂)** MCPower-BOBYQA
 > vs glmer-Laplace agree on the same bytes only to ~2–3× the LMM-inherited `GLMM_TOL` bands,
 > plus glmer's few-cluster convergence noise. The cell logs the measured gaps and renders
@@ -596,7 +620,15 @@ m4_re_summary <- function(rf, case) {
   if (!is.null(case$extra))
     for (e in case$extra) {
       vce <- lme4::VarCorr(rf)[[paste0("g_", e$var)]]
-      vars <- c(vars, as.numeric(attr(vce, "stddev"))^2)
+      if (!is.null(e$slopes)) {
+        # Extra has slopes: full q_e×q_e block — mirrors lme4_re_summary.
+        q_e <- 1L + length(e$slopes)
+        sdpe <- attr(vce, "stddev"); corpe <- attr(vce, "correlation")
+        vars <- c(vars, as.numeric(sdpe)^2)
+        corr <- c(corr, vapply(m3_offdiag_pairs(q_e), function(p) corpe[p[1], p[2]], numeric(1)))
+      } else {
+        vars <- c(vars, as.numeric(attr(vce, "stddev"))^2)
+      }
     }
   list(vars = vars, corr = corr)
 }
@@ -617,7 +649,22 @@ spec_re_summary_m4 <- function(case) {
     if (length(cw)) for (i in seq_along(cw)) R[i + 1, k + 1] <- R[k + 1, i + 1] <- cw[i]
   }
   corr <- vapply(m3_offdiag_pairs(q), function(p) R[p[1], p[2]], numeric(1))
-  if (!is.null(case$extra)) vars <- c(vars, vapply(case$extra, function(e) e$tau_squared, numeric(1)))
+  if (!is.null(case$extra))
+    for (e in case$extra) {
+      vars <- c(vars, e$tau_squared)
+      if (!is.null(e$slopes)) {
+        # Extra grouping has slopes: append slope variances + off-diagonal correlations — mirrors spec_re_summary.
+        vars <- c(vars, vapply(e$slopes, function(s) s$variance, numeric(1)))
+        q_e <- 1L + length(e$slopes)
+        Re <- diag(q_e)
+        for (k in seq_along(e$slopes)) {
+          Re[1, k + 1] <- Re[k + 1, 1] <- e$slopes[[k]]$corr_with_intercept
+          cw <- e$slopes[[k]]$corr_with
+          if (length(cw)) for (i in seq_along(cw)) Re[i + 1, k + 1] <- Re[k + 1, i + 1] <- cw[i]
+        }
+        corr <- c(corr, vapply(m3_offdiag_pairs(q_e), function(p) Re[p[1], p[2]], numeric(1)))
+      }
+    }
   list(vars = vars, corr = corr)
 }
 

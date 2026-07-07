@@ -653,7 +653,7 @@ fn invariant_19_primary_slopes_now_live_capability() {
 }
 
 #[test]
-fn invariant_19_extra_grouping_slopes_unsupported() {
+fn invariant_19_extra_grouping_slopes_accepted() {
     let mut c = example1_simple_ols();
     c.estimator = EstimatorSpec::Mle;
     c.generation.cluster = Some(some_valid_cluster_spec());
@@ -662,28 +662,92 @@ fn invariant_19_extra_grouping_slopes_unsupported() {
         "base Mle+cluster must validate cleanly"
     );
 
-    // M2: intercept-only extra groupings are legal…
+    // Intercept-only extra groupings are legal…
     c.generation.cluster.as_mut().unwrap().extra_groupings = vec![GroupingSpec {
         relation: GroupingRelation::Crossed { n_clusters: 12 },
         tau_squared: 0.1,
         slopes: vec![],
     }];
-    assert!(
-        c.validate().is_ok(),
-        "intercept-only extras must validate at M2"
-    );
+    assert!(c.validate().is_ok(), "intercept-only extras must validate");
 
-    // …but slopes on an extra grouping stay rejected until M3.
+    // …and a random slope on an extra grouping is now SUPPORTED (gated kernel path):
+    // q_g = 2 ≤ MAX_EXTRA_Q, slope on continuous col 1 which is a Direct fixed effect.
     c.generation.cluster.as_mut().unwrap().extra_groupings[0].slopes = vec![SlopeTerm {
         column: ColumnId(1),
         variance: 0.4,
         corr_with_intercept: 0.0,
         corr_with: vec![],
     }];
+    assert!(
+        c.validate().is_ok(),
+        "an extra-grouping random slope on a valid column must validate"
+    );
+}
+
+#[test]
+fn extra_grouping_accepts_one_slope() {
+    let mut spec = two_continuous_lme_spec();
+    let cl = spec.generation.cluster.as_mut().unwrap();
+    cl.tau_squared = 0.25;
+    cl.extra_groupings = vec![GroupingSpec {
+        relation: GroupingRelation::Crossed { n_clusters: 6 },
+        tau_squared: 0.1,
+        slopes: vec![slope(1, 0.10, 0.0)], // q_g = 2, on continuous Direct col 1
+    }];
+    assert!(spec.validate().is_ok());
+}
+
+#[test]
+fn extra_grouping_rejects_too_many_slopes() {
+    // q_g = 5 (intercept + 4 slopes) exceeds MAX_EXTRA_Q = 4. The q_g bound fires
+    // before any per-slope check, so the empty corr_with on later slopes is irrelevant.
+    let mut spec = two_continuous_lme_spec();
+    let cl = spec.generation.cluster.as_mut().unwrap();
+    cl.tau_squared = 0.25;
+    cl.extra_groupings = vec![GroupingSpec {
+        relation: GroupingRelation::Crossed { n_clusters: 6 },
+        tau_squared: 0.1,
+        slopes: vec![
+            slope(0, 0.10, 0.0),
+            slope(1, 0.10, 0.0),
+            slope(0, 0.10, 0.0),
+            slope(1, 0.10, 0.0),
+        ],
+    }];
     assert!(matches!(
-        c.validate(),
-        Err(ContractError::ExtraSlopesUnsupported)
+        spec.validate(),
+        Err(ContractError::ExtraGroupingQTooLarge { got: 5, max: 4 })
     ));
+}
+
+#[test]
+fn extra_grouping_accepts_three_slopes_at_cap() {
+    // q_g = 4 (intercept + 3 slopes) is exactly MAX_EXTRA_Q after the M1 bump.
+    // corr_with lower triangle: slope[k] needs exactly k entries (mirrors the primary
+    // slope validator — see check_slope_terms). All zeros → diagonal D_g (PSD trivially).
+    let mut spec = two_continuous_lme_spec();
+    let cl = spec.generation.cluster.as_mut().unwrap();
+    cl.tau_squared = 0.25;
+    cl.extra_groupings = vec![GroupingSpec {
+        relation: GroupingRelation::Crossed { n_clusters: 6 },
+        tau_squared: 0.1,
+        slopes: vec![
+            slope(0, 0.10, 0.0), // k=0: corr_with=[]
+            SlopeTerm {
+                column: ColumnId(1),
+                variance: 0.10,
+                corr_with_intercept: 0.0,
+                corr_with: vec![0.0],
+            }, // k=1
+            SlopeTerm {
+                column: ColumnId(0),
+                variance: 0.10,
+                corr_with_intercept: 0.0,
+                corr_with: vec![0.0, 0.0],
+            }, // k=2
+        ],
+    }];
+    assert!(spec.validate().is_ok());
 }
 
 fn mle_with_cluster(sizing: ClusterSizing) -> SimulationContract {
@@ -1205,9 +1269,10 @@ fn slope_with_intercept_only_extra_accepts() {
     assert!(spec.validate().is_ok());
 }
 
-/// Slopes ON an extra grouping stay rejected (a future lift) — invariant_19.
+/// A primary slope composed with a slope ON an extra grouping — now SUPPORTED
+/// (invariant_19, gated kernel path). `y ~ x1 + (1 + x1 | g) + (1 + x2 | item)`.
 #[test]
-fn slopes_on_extra_grouping_still_rejected() {
+fn slopes_on_extra_grouping_accepted() {
     let mut spec = two_continuous_lme_spec();
     let cl = spec.generation.cluster.as_mut().unwrap();
     cl.tau_squared = 0.25;
@@ -1217,10 +1282,7 @@ fn slopes_on_extra_grouping_still_rejected() {
         tau_squared: 0.1,
         slopes: vec![slope(1, 0.05, 0.0)],
     }];
-    assert!(matches!(
-        spec.validate(),
-        Err(ContractError::ExtraSlopesUnsupported)
-    ));
+    assert!(spec.validate().is_ok());
 }
 
 #[test]

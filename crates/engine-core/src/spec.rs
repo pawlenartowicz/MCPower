@@ -314,6 +314,15 @@ pub struct SimulationSpec {
     /// terms) and the lmm solver (the slope `s`-row indices).
     #[serde(default)]
     pub cluster_slope_design_cols: Vec<u32>,
+    /// Per-extra-grouping `x_full` column indices of that grouping's random-slope
+    /// covariates (declaration order; intercept implicit at 0), resolved by the
+    /// contract adapter — the crossed/nested analogue of
+    /// `cluster_slope_design_cols`. Outer index = extra grouping (declaration
+    /// order); inner = its slopes. Empty inner vecs (or empty outer) for
+    /// intercept-only extras / non-cluster specs. Read by data-gen (the
+    /// covariate-weighted extra-RE contribution) and the lmm suff-stats.
+    #[serde(default)]
+    pub extra_slope_cols: Vec<Vec<u32>>,
     pub residual_dist: ResidualDist,
     /// `true` = the user explicitly chose `residual_dist` (incl. explicit
     /// normal), so scenario residual swaps leave it alone. The df for a
@@ -612,6 +621,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }

@@ -186,9 +186,64 @@ pub fn generate_sim_data(
         // populate_design — change together.
         for g in 0..ws.extra_u_draws.len() {
             let tau_g = ws.extra_tau_sq_design[g].max(0.0).sqrt();
-            let k_g = ws.extra_u_draws[g].len();
-            for c in 0..k_g {
-                ws.extra_u_draws[g][c] = (draw_residual(&mut rng, re_dist, re_df) * tau_g) as f32;
+            let q_g = 1 + cluster_spec.extra_groupings[g].slopes.len();
+            let n_levels = ws.extra_u_draws[g].len() / q_g;
+            // Intercept slot (u_0 = τ_g·z_0) at the block head `c·q_g`. q_g==1 ⇒
+            // index `c` and one draw per level — the pre-slope RNG stream, byte-
+            // identical.
+            for c in 0..n_levels {
+                ws.extra_u_draws[g][c * q_g] =
+                    (draw_residual(&mut rng, re_dist, re_df) * tau_g) as f32;
+            }
+        }
+
+        // 2b′. Extra random-slope draws (q_g > 1) — mirrors the primary slope pass
+        // 2a′: recover z_0 = u_0/τ_0 from the intercept draw above, draw
+        // z_1..z_{q_g-1}, set u_d = Σ_{j≤d} L_g[d][j]·z_j (d ≥ 1) via the q_g×q_g
+        // Cholesky L_g of D_g = diag(τ_g)·R_g·diag(τ_g). Intercept-only groupings
+        // (q_g == 1) draw nothing here, so an all-intercept spec's stream is
+        // unchanged. Drawn after ALL intercepts (not interleaved) — there is no
+        // pre-existing golden for extra slopes, so only the q_g==1 stream is pinned.
+        for g in 0..ws.extra_u_draws.len() {
+            let grouping = &cluster_spec.extra_groupings[g];
+            if grouping.slopes.is_empty() {
+                continue;
+            }
+            let q_g = 1 + grouping.slopes.len();
+            let (qd, r) = grouping.re_correlation_matrix();
+            debug_assert_eq!(qd, q_g);
+            let tau0 = ws.extra_tau_sq_design[g].max(0.0).sqrt();
+            let mut tau_vec = Vec::with_capacity(q_g);
+            tau_vec.push(tau0);
+            for s in &grouping.slopes {
+                tau_vec.push(s.variance.max(0.0).sqrt());
+            }
+            let mut dmat = vec![0.0f64; q_g * q_g];
+            for i in 0..q_g {
+                for j in 0..q_g {
+                    dmat[i * q_g + j] = tau_vec[i] * r[i * q_g + j] * tau_vec[j];
+                }
+            }
+            let l = glmm::linalg::chol_lower(&dmat, q_g);
+            let n_levels = ws.extra_u_draws[g].len() / q_g;
+            let mut z = vec![0.0f64; q_g];
+            for c in 0..n_levels {
+                z[0] = if tau0 > 0.0 {
+                    ws.extra_u_draws[g][c * q_g] as f64 / tau0
+                } else {
+                    0.0
+                };
+                #[allow(clippy::needless_range_loop)]
+                for j in 1..q_g {
+                    z[j] = draw_residual(&mut rng, re_dist, re_df);
+                }
+                for d in 1..q_g {
+                    let mut ud = 0.0;
+                    for j in 0..=d {
+                        ud += l[d * q_g + j] * z[j];
+                    }
+                    ws.extra_u_draws[g][c * q_g + d] = ud as f32;
+                }
             }
         }
     }
@@ -693,7 +748,22 @@ pub fn generate_sim_data(
             0.0
         };
         for g in 0..ws.extra_grouping_ids.len() {
-            u_re += ws.extra_u_draws[g][ws.extra_grouping_ids[g][i] as usize] as f64;
+            // Covariate-weighted RE: u_{g,0}·1 + Σ_d u_{g,d+1}·x_{slope_d}. The
+            // q_g-wide block for this level is [level·q_g .. +q_g]. q_g is recovered
+            // from extra_slope_cols (mirrors the primary using cluster_slope_design_cols);
+            // intercept-only ⇒ q_g==1, base==level, the pre-slope scalar add.
+            let scols = spec
+                .extra_slope_cols
+                .get(g)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let q_g = 1 + scols.len();
+            let base = ws.extra_grouping_ids[g][i] as usize * q_g;
+            u_re += ws.extra_u_draws[g][base] as f64;
+            for (d, &sc) in scols.iter().enumerate() {
+                u_re +=
+                    ws.extra_u_draws[g][base + 1 + d] as f64 * ws.x_full[(i, sc as usize)] as f64;
+            }
         }
         let gprim = ws.cluster_ids[i] as usize;
         let n_sl = spec.cluster_slope_design_cols.len();
@@ -1215,6 +1285,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -1799,6 +1870,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -2833,6 +2905,86 @@ mod tests {
         assert!(v0 > 0.0, "crossed draws must be non-degenerate");
     }
 
+    /// Phase 2: a crossed grouping carrying a random SLOPE. y must decompose into
+    /// lp + residual + primary u + the covariate-weighted extra RE
+    /// `u_{g,0} + u_{g,1}·x_full[i, slope_col]`, reading the q_g-wide draw block
+    /// `[level·q_g .. +q_g]` back from the workspace.
+    #[test]
+    fn crossed_slope_assembly_adds_covariate_weighted_u() {
+        use crate::spec::{ClusterSizing, ClusterSpec, EstimatorSpec};
+        use engine_contract::{ColumnId, GroupingRelation, GroupingSpec, SlopeTerm};
+        let mut spec = ols_spec_simple();
+        spec.estimator = EstimatorSpec::Mle;
+        let mut cluster =
+            ClusterSpec::intercept_only(ClusterSizing::FixedClusters { n_clusters: 4 }, 0.20);
+        // Crossed item factor with a slope; its draw uses variance/corr, its
+        // contribution weights by x_full col 1 (set via extra_slope_cols below).
+        cluster.extra_groupings = vec![GroupingSpec {
+            relation: GroupingRelation::Crossed { n_clusters: 3 },
+            tau_squared: 0.15,
+            slopes: vec![SlopeTerm {
+                column: ColumnId(0),
+                variance: 0.10,
+                corr_with_intercept: 0.3,
+                corr_with: vec![],
+            }],
+        }];
+        spec.cluster = Some(cluster.clone());
+        spec.extra_slope_cols = vec![vec![1]]; // grouping 0 slope → x_full col 1
+        let max_n = 48;
+        let mut ws = SimWorkspace::new(max_n, 3, 2, 0, Some(&cluster));
+        generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
+        // Draw block is q_g = 2 wide per level.
+        assert_eq!(ws.extra_u_draws[0].len(), 3 * 2);
+        for i in 0..max_n {
+            let mut lp = 0.0_f64;
+            for j in 0..3 {
+                lp += ws.x_full[(i, j)] as f64 * spec.effect_sizes[j];
+            }
+            let level = ws.extra_grouping_ids[0][i] as usize;
+            let u_intercept = ws.extra_u_draws[0][level * 2] as f64;
+            let u_slope = ws.extra_u_draws[0][level * 2 + 1] as f64;
+            let expect = lp
+                + ws.residuals[i] as f64
+                + ws.cluster_u_draws[ws.cluster_ids[i] as usize] as f64
+                + u_intercept
+                + u_slope * ws.x_full[(i, 1)] as f64;
+            assert!(
+                (ws.y_full[i] as f64 - expect).abs() <= 1e-6,
+                "row {i}: y={} expected {expect}",
+                ws.y_full[i]
+            );
+        }
+        // The slope draws must be non-degenerate (not all zero).
+        assert!(
+            (0..3).any(|c| ws.extra_u_draws[0][c * 2 + 1] != 0.0),
+            "extra-slope draws must be populated"
+        );
+    }
+
+    /// Phase 2 reduction-to-scalar: an intercept-only extra (q_g == 1) is NOT
+    /// widened — the draw buffer stays one-per-level and the assembly reads the
+    /// `[level]` slot, byte-identical to the pre-slope path.
+    #[test]
+    fn extra_intercept_only_draw_buffer_not_widened() {
+        use crate::spec::{ClusterSizing, ClusterSpec, EstimatorSpec};
+        use engine_contract::{GroupingRelation, GroupingSpec};
+        let mut spec = ols_spec_simple();
+        spec.estimator = EstimatorSpec::Mle;
+        let mut cluster =
+            ClusterSpec::intercept_only(ClusterSizing::FixedClusters { n_clusters: 4 }, 0.20);
+        cluster.extra_groupings = vec![GroupingSpec {
+            relation: GroupingRelation::Crossed { n_clusters: 3 },
+            tau_squared: 0.15,
+            slopes: vec![],
+        }];
+        spec.cluster = Some(cluster.clone());
+        // extra_slope_cols intentionally left empty (intercept-only).
+        let mut ws = SimWorkspace::new(24, 3, 2, 0, Some(&cluster));
+        generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
+        assert_eq!(ws.extra_u_draws[0].len(), 3, "q_g==1 ⇒ one draw per level");
+    }
+
     /// Per-grouping τ² slots: optimistic path copies the spec values; the
     /// extra draws scale by their own τ_g (zero τ ⇒ exactly zero draws).
     #[test]
@@ -2965,6 +3117,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }

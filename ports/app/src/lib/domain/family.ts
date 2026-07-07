@@ -81,6 +81,9 @@ export interface ExtraGroupingConfig {
   relation: 'crossed' | 'nested';
   /** For 'crossed': number of levels. For 'nested': children per primary cluster. */
   n: number;
+  /** Random slopes on this grouping factor (mirrors the primary's `slopes`).
+   *  Formula-driven from this term's `(1+x|name)` vars; default []. */
+  slopes?: SlopeConfig[];
 }
 
 /** One random slope on the primary grouping factor. `predictorName` names a

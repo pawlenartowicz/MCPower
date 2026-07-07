@@ -33,6 +33,8 @@ import {
   SLOPE_DEFAULTS,
   type Entrypoint,
   type FamilyConfig,
+  type SlopeConfig,
+  type VariableKind,
 } from './family';
 
 export interface AdaptResult {
@@ -41,6 +43,41 @@ export interface AdaptResult {
   /** Non-blocking soft warnings (e.g. alpha above the usual maximum, extreme
    *  baseline probability). Unlike `errors`, these do not gate the run. */
   warnings: string[];
+}
+
+/** Build the wire `AppSlopeTerm[]` for ONE grouping factor (primary or extra).
+ *  Slopes are formula-driven: `slopeVars` (from the `(1+x|g)` term) ARE the set;
+ *  `slopeCfg` (kept mirrored by ClusterEditor) only supplies variance/corr.
+ *  Carried as predictor NAMES — the Rust assembler resolves name → non-factor
+ *  column, so each var must also be a continuous fixed predictor or the engine
+ *  errors. Shared by the primary and every extra grouping (DRY). */
+function buildSlopeTerms(
+  slopeVars: string[],
+  slopeCfg: SlopeConfig[] | undefined,
+  clusterName: string,
+  predictorSet: Set<string>,
+  varKindByName: Map<string, VariableKind>,
+  errors: string[],
+): AppSlopeTerm[] {
+  const cfgByName = new Map((slopeCfg ?? []).map((s) => [s.predictorName, s]));
+  const names = [...new Set(slopeVars)];
+  for (const n of names) {
+    if (!predictorSet.has(n)) {
+      errors.push(
+        `random slope on '${n}': add it as a fixed predictor too (e.g. y = ${n} + … + (1+${n}|${clusterName}))`,
+      );
+    } else if (varKindByName.get(n) === 'factor') {
+      errors.push(`random slope on '${n}': slopes need a continuous (non-factor) predictor`);
+    }
+  }
+  return names.map((n) => {
+    const s = cfgByName.get(n);
+    return {
+      predictor_name: n,
+      slope_variance: s?.slopeVariance ?? SLOPE_DEFAULTS.variance,
+      slope_intercept_corr: s?.slopeInterceptCorr ?? SLOPE_DEFAULTS.corr,
+    };
+  });
 }
 
 /** Per-family scenario support: 'lme' passes RE-perturbation fields through;
@@ -542,11 +579,9 @@ export function familyConfigToAppSpec(
     if (extraTerms.length > 0 && cl.dimKind === 'cluster_size') {
       errors.push("extra grouping factors require 'by n clusters' sizing on the primary cluster");
     }
-    for (const t of extraTerms) {
-      if (t.slopeVars.length > 0) {
-        errors.push(`random slopes are only supported on the primary (first) cluster, not '${t.cluster}'`);
-      }
-    }
+    // Shared by the primary and every extra grouping's slope resolution.
+    const varKindByName = new Map(config.variables.map((v) => [v.name, v.kind]));
+    const predictorSet = new Set(parsed.predictors);
     const extra_groupings: AppGroupingSpec[] = extraTerms.map((t) => {
       const g = extrasByName.get(t.cluster);
       const icc = g?.icc ?? EXTRA_GROUPING_DEFAULTS.icc;
@@ -555,12 +590,16 @@ export function familyConfigToAppSpec(
       } else if (icc !== 0 && (icc < iccLo || icc > iccHi)) {
         errors.push(`grouping '${t.cluster}': icc ${icc} outside the stable band [${iccLo}, ${iccHi}] (use 0 for no clustering)`);
       }
+      // Slopes on this grouping are formula-driven (its `(1+x|g)` vars), with
+      // variance/corr from the card — same machinery as the primary below.
+      const slopes = buildSlopeTerms(t.slopeVars, g?.slopes, t.cluster, predictorSet, varKindByName, errors);
       if (t.parent !== null) {
         const n = g?.n ?? EXTRA_GROUPING_DEFAULTS.nestedN;
         return {
           tau_squared: iccToTau(icc),
           relation: { kind: 'nested_within' as const, n_per_parent: n },
           cluster_name: t.cluster,
+          slopes,
         };
       }
       const n = g?.n ?? EXTRA_GROUPING_DEFAULTS.crossedN;
@@ -569,35 +608,21 @@ export function familyConfigToAppSpec(
         tau_squared: iccToTau(icc),
         relation: { kind: 'crossed' as const, n_clusters: n },
         cluster_name: t.cluster,
+        slopes,
       };
     });
 
-    // Slopes are formula-driven: the primary term's `(1+x|g)` vars ARE the
-    // slope set; cl.slopes (kept mirrored by ClusterEditor) only contributes
-    // the variance/corr parameters. Carried as predictor NAMES; the Rust
-    // assembler resolves name → non-factor column — so each var must be a
-    // fixed predictor too, or the engine errors with an unfriendly message.
-    const slopeCfgByName = new Map((cl.slopes ?? []).map((s) => [s.predictorName, s]));
-    const slopeNames = [...new Set(primary.slopeVars)];
-    const varKindByName = new Map(config.variables.map((v) => [v.name, v.kind]));
-    const predictorSet = new Set(parsed.predictors);
-    for (const n of slopeNames) {
-      if (!predictorSet.has(n)) {
-        errors.push(
-          `random slope on '${n}': add it as a fixed predictor too (e.g. y = ${n} + … + (1+${n}|${cluster_name}))`,
-        );
-      } else if (varKindByName.get(n) === 'factor') {
-        errors.push(`random slope on '${n}': slopes need a continuous (non-factor) predictor`);
-      }
-    }
-    const slopes: AppSlopeTerm[] = slopeNames.map((n) => {
-      const s = slopeCfgByName.get(n);
-      return {
-        predictor_name: n,
-        slope_variance: s?.slopeVariance ?? SLOPE_DEFAULTS.variance,
-        slope_intercept_corr: s?.slopeInterceptCorr ?? SLOPE_DEFAULTS.corr,
-      };
-    });
+    // Primary-grouping slopes: the `(1+x|g)` vars ARE the set; cl.slopes (kept
+    // mirrored by ClusterEditor) only supplies variance/corr. Same helper as the
+    // extra groupings above.
+    const slopes: AppSlopeTerm[] = buildSlopeTerms(
+      primary.slopeVars,
+      cl.slopes,
+      cluster_name,
+      predictorSet,
+      varKindByName,
+      errors,
+    );
 
     // Absent → Rust #[serde(default)] = Gaussian; UI toggle is user-owned.
     let outcome: MixedSpec['outcome'];

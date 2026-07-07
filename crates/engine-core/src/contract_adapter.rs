@@ -140,6 +140,26 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
                 .collect()
         })
         .unwrap_or_default();
+    // Crossed/nested analogue: each extra grouping's slope covariates → x_full
+    // columns, declaration order. Same `column_position_for_continuous` resolution
+    // as the primary; validate() (invariant_19) guarantees each is continuous and
+    // Direct. Empty inner vecs for intercept-only extras.
+    let extra_slope_cols: Vec<Vec<u32>> = c
+        .generation
+        .cluster
+        .as_ref()
+        .map(|cl| {
+            cl.extra_groupings
+                .iter()
+                .map(|g| {
+                    g.slopes
+                        .iter()
+                        .map(|s| column_position_for_continuous(c, s.column.0))
+                        .collect()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     // Fitted (test) design's kept kernel columns, for `test_formula` reduced
     // fits. Fires only when an explicit design_test drops at least one column:
     // map each test-design term to its generation kernel column (ascending,
@@ -189,6 +209,7 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         },
         heteroskedasticity_driver,
         cluster_slope_design_cols,
+        extra_slope_cols,
         residual_dist,
         residual_pinned: c.outcome.residual.pinned,
         outcome_kind,

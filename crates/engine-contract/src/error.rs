@@ -67,8 +67,8 @@ pub enum ContractError {
     #[error("scenario.lme requires estimator == Mle")]
     LmeScenarioRequiresMle,
 
-    #[error("slopes on extra groupings are not supported by this engine version")]
-    ExtraSlopesUnsupported,
+    #[error("extra grouping RE width q_g = 1 + #slopes must be ≤ {max}; got q_g = {got}")]
+    ExtraGroupingQTooLarge { got: u32, max: u32 },
 
     #[error("SlopeTerm.column {id} is a factor or non-continuous column; random slopes require a continuous predictor")]
     SlopeColumnNotContinuous { id: u32 },

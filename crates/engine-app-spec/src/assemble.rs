@@ -120,8 +120,11 @@ fn assemble_mixed(
     };
 
     let slopes = resolve_slopes(&spec.var_types, &spec.slopes)?;
-    let extra_groupings: Vec<engine_contract::GroupingSpec> =
-        spec.extra_groupings.iter().map(to_grouping_spec).collect();
+    let extra_groupings: Vec<engine_contract::GroupingSpec> = spec
+        .extra_groupings
+        .iter()
+        .map(|g| to_grouping_spec(g, &spec.var_types))
+        .collect::<Result<_, _>>()?;
 
     // Validate the primary ICC here (the Python/R hosts validate it before
     // building their contracts; this is the Tauri/WASM path's equivalent).
@@ -183,10 +186,14 @@ fn assemble_mixed(
 }
 
 /// Convert a UI-layer [`AppGroupingSpec`] to the contract's `GroupingSpec`.
-/// Slopes on secondary groupings are not exposed (the engine rejects them — see
-/// the `engine-contract` grouping invariant), so they are always empty.
-fn to_grouping_spec(g: &AppGroupingSpec) -> engine_contract::GroupingSpec {
-    engine_contract::GroupingSpec {
+/// Slopes are resolved through the same `resolve_slopes` path as the primary
+/// (predictor name → non-factor column); the engine accepts slopes on secondary
+/// groupings (see the `engine-contract` `invariant_19_extra_grouping_slopes_accepted`).
+fn to_grouping_spec(
+    g: &AppGroupingSpec,
+    var_types: &[VarType],
+) -> Result<engine_contract::GroupingSpec, AdapterError> {
+    Ok(engine_contract::GroupingSpec {
         tau_squared: g.tau_squared,
         relation: match g.relation {
             AppGroupingRelation::Crossed { n_clusters } => {
@@ -196,8 +203,8 @@ fn to_grouping_spec(g: &AppGroupingSpec) -> engine_contract::GroupingSpec {
                 engine_contract::GroupingRelation::NestedWithin { n_per_parent }
             }
         },
-        slopes: vec![],
-    }
+        slopes: resolve_slopes(var_types, &g.slopes)?,
+    })
 }
 
 /// Resolve UI-layer slope predictor names to contract `SlopeTerm`s.
@@ -1606,8 +1613,7 @@ mod tests {
     }
 
     // A crossed extra grouping (no slopes) passes the engine's grouping
-    // invariants and builds. (Slopes on extra groupings are rejected by the
-    // engine, not extra groupings themselves.)
+    // invariants and builds.
     #[test]
     fn assemble_mixed_forwards_extra_groupings() {
         let mut spec = mixed_fixture();
@@ -1615,6 +1621,7 @@ mod tests {
             tau_squared: 0.1,
             cluster_name: None,
             relation: AppGroupingRelation::Crossed { n_clusters: 8 },
+            slopes: vec![],
         }];
         let (contracts, _) =
             assemble_mixed(&spec).expect("assemble_mixed with extra_groupings must succeed");
@@ -1628,6 +1635,47 @@ mod tests {
             cluster.extra_groupings.len(),
             1,
             "crossed grouping must forward"
+        );
+    }
+
+    // A slope on an extra grouping resolves through the same name → non-factor
+    // column path as the primary and lands on that grouping's `GroupingSpec`.
+    // (Mirrors `assemble_mixed_forwards_slopes`, but on a secondary grouping —
+    // the engine accepts these per invariant_19_extra_grouping_slopes_accepted.)
+    #[test]
+    fn assemble_mixed_forwards_extra_grouping_slopes() {
+        let mut spec = mixed_fixture();
+        spec.extra_groupings = vec![AppGroupingSpec {
+            tau_squared: 0.1,
+            cluster_name: None,
+            relation: AppGroupingRelation::Crossed { n_clusters: 8 },
+            slopes: vec![AppSlopeTerm {
+                predictor_name: "x1".into(),
+                slope_variance: 0.07,
+                slope_intercept_corr: -0.3,
+            }],
+        }];
+        let (contracts, _) = assemble_mixed(&spec)
+            .expect("assemble_mixed with an extra-grouping slope must not error");
+        let cluster = contracts[0]
+            .generation
+            .cluster
+            .as_ref()
+            .expect("mixed contract carries a cluster");
+        assert_eq!(
+            cluster.extra_groupings.len(),
+            1,
+            "extra grouping must forward"
+        );
+        assert_eq!(
+            cluster.extra_groupings[0].slopes.len(),
+            1,
+            "slope on the extra grouping must forward"
+        );
+        assert!(
+            (cluster.extra_groupings[0].slopes[0].variance - 0.07).abs() < 1e-12,
+            "extra-grouping slope variance forwarded: {}",
+            cluster.extra_groupings[0].slopes[0].variance
         );
     }
 

@@ -1255,10 +1255,20 @@ RVariableRegistry <- R6::R6Class(
             "set_cluster(%s): n_clusters required for extra groupings", gv), call. = FALSE)
           relation <- list(Crossed = list(n_clusters = as.integer(gn)))
         }
-        extra_from_public[[length(extra_from_public) + 1L]] <- list(
+        extra_entry <- list(
           relation    = relation,
           tau_squared = as.numeric(gtau)
         )
+        # Forward random slopes on this extra grouping, mirroring the primary
+        # (lines 1286-1291). corr_with must be I()-wrapped so length-1 vectors
+        # serialize as JSON arrays (serde expects Vec<f64>), not bare scalars.
+        if (!is.null(gcfg$slopes)) {
+          extra_entry$slopes <- lapply(gcfg$slopes, function(s) {
+            s$corr_with <- I(as.numeric(s$corr_with))
+            s
+          })
+        }
+        extra_from_public[[length(extra_from_public) + 1L]] <- extra_entry
       }
     }
 

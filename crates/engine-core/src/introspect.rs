@@ -13,6 +13,7 @@ use crate::rng::pcg_mix64;
 use crate::spec::{BatchResult, EstimatorSpec, SimulationSpec};
 use crate::workspace::SimWorkspace;
 use crate::EngineError;
+use glmm::consts::MAX_EXTRA_Q;
 use glmm::mcpower::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
 use glmm::mcpower::{glm_irls_fit, GlmScratch};
 use glmm::mcpower::{lme_fit, LmeScratch, LmeSuffStats};
@@ -71,9 +72,10 @@ pub struct IntrospectResults {
     /// `N - n_predictors_total`. Only meaningful for OLS (Student-t df_resid);
     /// the z-based GLM/MLE estimators are df-independent and ignore it.
     pub df_resid: f64,
-    /// Estimated variance components τ̂²_g = θ̂_g²·σ̂², order [primary,
-    /// extras in declaration order]. Filled by the general (multi-grouping)
-    /// Mle path only at this milestone; empty elsewhere.
+    /// Estimated variance components: the diagonals of each grouping's RE
+    /// covariance D = σ̂²·ΛΛ′. Order [primary (q_p entries), extras in
+    /// declaration order (q_g entries each)]. Filled by the general (multi-
+    /// grouping) Mle path and the Glm+cluster path; empty elsewhere.
     pub variance_components: Vec<f64>,
     /// σ̂² from the same fit; NaN when not surfaced.
     pub sigma_sq_hat: f64,
@@ -346,13 +348,26 @@ pub fn fit_provided_data(
                     d[i * q + j] = acc;
                 }
             }
-            // Primary diagonal variances, then extra-grouping scalars (θ_e²).
-            // Order mirrors lmm.rs diagonal_theta()/variance_components — change together.
+            // Primary diagonal variances, then each extra factor's full q_g
+            // diagonal of D_g = Λ_gΛ_g′ (σ²=1, binomial) via a θ cursor walk in
+            // declaration order — NOT one scalar per extra. The old
+            // `params[base+e]` indexing silently assumed q_g==1. Order [primary
+            // diag, extras in declaration order] mirrors generation.rs
+            // n_variance_components and lmm.rs diagonal_theta — change together.
             let mut variance_components: Vec<f64> = (0..q).map(|dd| d[dd * q + dd]).collect();
-            let base = q * (q + 1) / 2;
-            for e in 0..glmm.groupings.extra_offsets.len() {
-                let te = glmm.params[base + e];
-                variance_components.push(te * te);
+            let mut cursor = q * (q + 1) / 2;
+            for &qg in glmm.groupings.extra_q.iter() {
+                let mut lam_g = [0.0f64; MAX_EXTRA_Q * MAX_EXTRA_Q];
+                glmm::mcpower::primary_lambda(&glmm.params[cursor..], qg, &mut lam_g);
+                for dd in 0..qg {
+                    let mut acc = 0.0;
+                    // lam_g row-major q_g×q_g ⇒ D_g[dd,dd] = Σ_k Λ_g[dd,k]².
+                    for kk in 0..qg {
+                        acc += lam_g[dd * qg + kk] * lam_g[dd * qg + kk];
+                    }
+                    variance_components.push(acc); // D_g[dd,dd] (σ²=1)
+                }
+                cursor += qg * (qg + 1) / 2;
             }
             // re_corr: primary off-diagonals vech column-major (empty when q_p == 1).
             let mut re_corr = Vec::with_capacity(q * (q - 1) / 2);
@@ -450,13 +465,23 @@ pub fn fit_provided_data(
                 .iter()
                 .map(|&c| c as usize)
                 .collect();
+            let extra_slope_cols: Vec<Vec<usize>> = spec
+                .extra_slope_cols
+                .iter()
+                .map(|v| v.iter().map(|&c| c as usize).collect())
+                .collect();
             let model = crate::mixed_workspace::cluster_to_model_spec(
                 cluster,
                 spec.estimator,
                 spec.wald_se,
             );
-            let mut lmm =
-                glmm::mcpower::LmmWorkspace::for_cluster_spec(ncol, &model, nrow, &slope_cols);
+            let mut lmm = glmm::mcpower::LmmWorkspace::for_cluster_spec_ext(
+                ncol,
+                &model,
+                nrow,
+                &slope_cols,
+                &extra_slope_cols,
+            );
             let cid_slice = &ws.cluster_ids[..nrow];
             lmm.suff.add_rows_multi(
                 ws.x_full_f64.as_ref().subrows(0, nrow),
@@ -466,55 +491,63 @@ pub fn fit_provided_data(
             );
             // Truth-start (P1) — MIRRORS batch.rs's general branch; hot loop
             // and debug path must derive the same hint; change together.
-            let mut tbuf = [0.0_f64; 1 + glmm::consts::MAX_EXTRA_GROUPINGS];
+            // Sized MAX_THETA (mirrors batch.rs) — crossed/nested-slope θ exceeds
+            // the old `1 + MAX_EXTRA_GROUPINGS` scalar-per-extra width.
+            let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
             let nt = lmm.theta_truth.len();
             tbuf[..nt].copy_from_slice(&lmm.theta_truth);
             let f = glmm::mcpower::fit_lmm(&mut lmm, &spec.target_indices, Some(&tbuf[..nt]));
             let sig = f.sigma_sq;
             let q = lmm.suff.groupings.primary_q;
-            let (variance_components, re_corr) = if q > 1 {
-                // Slope spec: D̂ = σ̂²·Λ̂Λ̂′ where Λ̂ is the row-major
-                // lower-triangular primary Cholesky factor. Diagonals of D̂
-                // are the RE variances [τ̂₀², τ̂₁², …]; off-diagonals yield
-                // the correlation vector (vech column-major).
-                let mut lam = vec![0.0_f64; q * q];
-                glmm::mcpower::primary_lambda(&lmm.theta, q, &mut lam);
-                let mut d = vec![0.0_f64; q * q];
-                for i in 0..q {
-                    for j in 0..q {
-                        let mut acc = 0.0;
-                        for k in 0..q {
-                            acc += lam[i * q + k] * lam[j * q + k];
-                        }
-                        d[i * q + j] = sig * acc;
+            // Primary RE covariance D̂ = σ̂²·Λ̂Λ̂′ where Λ̂ is the row-major
+            // lower-triangular primary Cholesky factor (q_p=1 ⇒ Λ̂=[θ̂₀], the
+            // scalar τ̂²=θ̂₀²·σ̂²). Diagonals of D̂ are the RE variances
+            // [τ̂₀², τ̂₁², …]; off-diagonals yield the correlation vector (vech
+            // column-major, empty for q_p=1).
+            let mut lam = vec![0.0_f64; q * q];
+            glmm::mcpower::primary_lambda(&lmm.theta, q, &mut lam);
+            let mut d = vec![0.0_f64; q * q];
+            for i in 0..q {
+                for j in 0..q {
+                    let mut acc = 0.0;
+                    for k in 0..q {
+                        acc += lam[i * q + k] * lam[j * q + k];
                     }
+                    d[i * q + j] = sig * acc;
                 }
-                // variance_components order [intercept, slope_0, …, extras] mirrors
-                // diagonal_theta()/boundary_rate_per_component (lmm.rs / result.rs) —
-                // change together. Primary diagonals first, then extra scalars at
-                // lmm.theta[base + e] (base = q(q+1)/2 = primary vech length).
-                let mut vc: Vec<f64> = (0..q).map(|dd| d[dd * q + dd]).collect();
-                let base = q * (q + 1) / 2;
-                for e in 0..lmm.suff.groupings.extra_offsets.len() {
-                    let te = lmm.theta[base + e];
-                    vc.push(sig * te * te);
-                }
-                // re_corr = primary off-diagonals vech column-major:
-                // corr(r, c) for c < r.
-                let mut rc = Vec::with_capacity(q * (q - 1) / 2);
-                for c in 0..q {
-                    for r in (c + 1)..q {
-                        let den = (d[r * q + r] * d[c * q + c]).sqrt();
-                        rc.push(if den > 0.0 { d[r * q + c] / den } else { 0.0 });
+            }
+            // Each extra factor contributes its full q_g diagonal of
+            // D_g = σ̂²·Λ_gΛ_g′, not a single scalar — mirrors the primary
+            // above. Walk a θ cursor in declaration order (start past the
+            // primary vech block, advance q_g(q_g+1)/2 per factor); the old
+            // `theta[base+e]` indexing (and the q_p==1 `theta.iter()` map)
+            // silently assumed q_g==1. Order [primary diag, extras in
+            // declaration order] mirrors generation.rs n_variance_components
+            // and lmm.rs diagonal_theta — change together.
+            let mut variance_components: Vec<f64> = (0..q).map(|dd| d[dd * q + dd]).collect();
+            let mut cursor = q * (q + 1) / 2;
+            for &qg in lmm.suff.groupings.extra_q.iter() {
+                let mut lam_g = [0.0f64; MAX_EXTRA_Q * MAX_EXTRA_Q];
+                glmm::mcpower::primary_lambda(&lmm.theta[cursor..], qg, &mut lam_g);
+                for dd in 0..qg {
+                    let mut acc = 0.0;
+                    // lam_g row-major q_g×q_g ⇒ D_g[dd,dd] = Σ_k Λ_g[dd,k]².
+                    for kk in 0..qg {
+                        acc += lam_g[dd * qg + kk] * lam_g[dd * qg + kk];
                     }
+                    variance_components.push(sig * acc); // D_g[dd,dd] = σ̂² · Σ_k Λ_g[dd,k]²
                 }
-                (vc, rc)
-            } else {
-                // q_p == 1 ⇒ every θ entry is a diagonal variance (1×1 primary vech
-                // + extra scalars), so θ²·σ̂² is the per-component variance; no off-diagonals.
-                let vc: Vec<f64> = lmm.theta.iter().map(|t| t * t * sig).collect();
-                (vc, vec![])
-            };
+                cursor += qg * (qg + 1) / 2;
+            }
+            // re_corr = primary off-diagonals vech column-major: corr(r, c) for
+            // c < r (empty when q_p == 1 — inner loop vacuous).
+            let mut re_corr = Vec::with_capacity(q * (q - 1) / 2);
+            for c in 0..q {
+                for r in (c + 1)..q {
+                    let den = (d[r * q + r] * d[c * q + c]).sqrt();
+                    re_corr.push(if den > 0.0 { d[r * q + c] / den } else { 0.0 });
+                }
+            }
             let betas = lmm.fit.betas[..ncol].to_vec();
             let se = spec
                 .target_indices
@@ -830,6 +863,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         };
 
@@ -1344,6 +1378,77 @@ mod tests {
         assert!(r.sigma_sq_hat.is_finite() && r.sigma_sq_hat > 0.0);
     }
 
+    /// Extra-grouping random SLOPE: the crossed factor carries intercept + 1
+    /// slope (q_g = 2), so its RE covariance D_g is 2×2 and contributes TWO
+    /// diagonal variance components, not one. Primary intercept-only (q_p = 1) ⇒
+    /// total length 1 (primary) + 2 (extra) = 3. Before the cursor-walk fix the
+    /// extra pushed a single scalar (length 2) and read the wrong θ slot
+    /// (`theta[base+e]`, which assumed q_g==1). Clone of
+    /// `fit_provided_data_general_path_surfaces_variance_components` with one
+    /// slope added to the crossed extra.
+    #[test]
+    fn introspect_surfaces_extra_grouping_slope_variance() {
+        use engine_contract::{
+            ClusterSizing, ClusterSpec, ColumnId, EstimatorSpec, GroupingRelation, GroupingSpec,
+            SlopeTerm,
+        };
+        let mut c = minimal_ols_contract();
+        c.estimator = EstimatorSpec::Mle;
+        let mut cluster =
+            ClusterSpec::intercept_only(ClusterSizing::FixedClusters { n_clusters: 6 }, 0.20);
+        cluster.extra_groupings = vec![GroupingSpec {
+            relation: GroupingRelation::Crossed { n_clusters: 4 },
+            tau_squared: 0.15,
+            slopes: vec![SlopeTerm {
+                column: ColumnId(0),
+                variance: 0.12,
+                corr_with_intercept: 0.0,
+                corr_with: vec![],
+            }],
+        }];
+        c.generation.cluster = Some(cluster);
+        let spec = contract_to_simulation_spec(&c).unwrap();
+        let p = (1 + spec.n_non_factor + spec.n_factor_dummies) as usize;
+        let n = 96usize; // atom 6·4 = 24 → multiple
+        let mut ws = SimWorkspace::new(
+            n,
+            p,
+            spec.n_non_factor as usize,
+            spec.factor_n_levels.len(),
+            spec.cluster.as_ref(),
+        );
+        crate::data_gen::generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
+        let mut design = vec![0.0; n * p];
+        for j in 0..p {
+            for i in 0..n {
+                design[j * n + i] = ws.x_full[(i, j)] as f64;
+            }
+        }
+        let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
+        let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
+        let r = fit_provided_data(&spec, &design, n, p, &outcome, Some(&cids)).unwrap();
+        assert!(r.converged);
+        // q_p=1 (primary) + q_g=2 (extra intercept+slope) = 3 components.
+        assert_eq!(
+            r.variance_components.len(),
+            3,
+            "primary intercept + extra (intercept + slope) = 3 components"
+        );
+        assert!(
+            r.variance_components
+                .iter()
+                .all(|v| v.is_finite() && *v >= 0.0),
+            "all RE variances finite and non-negative: {:?}",
+            r.variance_components,
+        );
+        // The extra's slope variance — previously dropped (length-2 bug).
+        assert!(
+            r.variance_components[2] > 0.0,
+            "extra slope variance must be positive, got {}",
+            r.variance_components[2],
+        );
+    }
+
     /// Random-intercept-only Mle (no slopes, no extra groupings) routes through
     /// the scalar `EstimatorSpec::Mle` branch — which historically returned an
     /// empty `variance_components`. It must now surface [τ̂²] (= θ̂²·σ̂²) and a
@@ -1450,6 +1555,7 @@ mod tests {
             factor_min_level_count: 0,
             // x_full col 1 = x1 (col 0 = intercept, col 1 = first continuous).
             cluster_slope_design_cols: vec![1],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         };
 

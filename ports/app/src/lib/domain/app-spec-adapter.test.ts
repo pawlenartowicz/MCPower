@@ -677,6 +677,68 @@ describe('familyConfigToAppSpec — Mixed', () => {
     });
   });
 
+  // The RE extraction order is (nested, then slopes, then plain intercepts), so
+  // among two slope terms the FIRST (`grp`) is primary and the second (`item`)
+  // is the extra grouping — `item`'s slope exercises the extra-grouping path.
+  // (A formula like `(1|grp) + (1+x|item)` would instead make `item` primary.)
+  it('emits slopes on an extra grouping instead of rejecting', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x1 + x2 + (1 + x1|grp) + (1 + x2|item)';
+    cfg.effects = [
+      { name: 'x1', value: 0.5 },
+      { name: 'x2', value: 0.3 },
+    ];
+    cfg.cluster = {
+      clusterName: 'grp',
+      icc: 0.2,
+      dimKind: 'n_clusters',
+      nClusters: 20,
+      clusterSize: 30,
+      slopes: [{ predictorName: 'x1', slopeVariance: 0.05, slopeInterceptCorr: 0 }],
+      extraGroupings: [
+        {
+          clusterName: 'item',
+          icc: 0.1,
+          relation: 'crossed',
+          n: 8,
+          slopes: [{ predictorName: 'x2', slopeVariance: 0.07, slopeInterceptCorr: -0.3 }],
+        },
+      ],
+    };
+    const { spec, errors } = familyConfigToAppSpec('mixed', cfg);
+    expect(errors).toEqual([]);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect(spec.extra_groupings?.[0]!.slopes).toHaveLength(1);
+    expect(spec.extra_groupings?.[0]!.slopes![0]).toEqual({
+      predictor_name: 'x2',
+      slope_variance: 0.07,
+      slope_intercept_corr: -0.3,
+    });
+  });
+
+  it('an extra-grouping formula slope is included even without card slope config', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x1 + x2 + (1 + x1|grp) + (1 + x2|item)';
+    cfg.effects = [
+      { name: 'x1', value: 0.5 },
+      { name: 'x2', value: 0.3 },
+    ];
+    cfg.cluster = {
+      clusterName: 'grp',
+      icc: 0.2,
+      dimKind: 'n_clusters',
+      nClusters: 20,
+      clusterSize: 30,
+      extraGroupings: [{ clusterName: 'item', icc: 0.1, relation: 'crossed', n: 8 }],
+    };
+    const { spec, errors } = familyConfigToAppSpec('mixed', cfg);
+    expect(errors).toEqual([]);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect(spec.extra_groupings?.[0]!.slopes).toEqual([
+      { predictor_name: 'x2', slope_variance: 0.1, slope_intercept_corr: 0 },
+    ]);
+  });
+
   it('binary mixed outcome: adapter maps binary cluster config to outcome.kind === binary', () => {
     const cfg = defaultFamilyConfig('mixed');
     cfg.formula = 'y ~ x + (1|school)';

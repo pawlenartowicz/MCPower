@@ -86,7 +86,7 @@ for CASE in "${CASES[@]}"; do
   # Clean timed row from the STANDARD artifact (the runner rebuilds it), no
   # profiler attached — the fits/s of record. Header-only output means the
   # case has no such mode (mixed rows are off-only): skip it.
-  TIMING="$(cd "$REPO_ROOT/ports/wasm" && taskset -c "$PIN_CORE" node "$RUNNER" --case "$CASE" --mode "$MODE")"
+  TIMING="$(cd "$REPO_ROOT/ports/wasm" && taskset -c "$PIN_CORE" node "$RUNNER" --case "$CASE" --scenarios "$MODE")"
   echo "$TIMING"
   if [[ "$(wc -l <<<"$TIMING")" -lt 2 ]]; then
     echo "  (no $MODE mode for $CASE — skipped)"
@@ -99,7 +99,7 @@ for CASE in "${CASES[@]}"; do
   # /tmp/perf-<pid>.map; perf report resolves wasm frames through it.
   perf record -F "$PERF_FREQ" -o "$RUN_SCRATCH/$CASE-$MODE.data" -- \
     taskset -c "$PIN_CORE" node --perf-basic-prof "$RUNNER" \
-    --case "$CASE" --mode "$MODE" --artifact "$RUN_SCRATCH/pkg" > /dev/null
+    --case "$CASE" --scenarios "$MODE" --artifact "$RUN_SCRATCH/pkg" > /dev/null
   perf report --stdio --no-children -s sym --percent-limit 0.3 \
     -i "$RUN_SCRATCH/$CASE-$MODE.data" > "$OUT/symbols.txt" 2>/dev/null
 

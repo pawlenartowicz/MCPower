@@ -100,7 +100,7 @@ The choice matters most for cluster-level predictors (see [Cluster-level predict
 
 - ICC must be 0 or in 0.05–0.95.
 - With crossed or nested extra groupings, total N must be an exact multiple of the **atom** — the product of primary cluster count and each extra-grouping's level count. `set_cluster` reports the atom size when it does not divide evenly.
-- Random slopes (`random_slopes`) apply to the primary grouping only; slopes on extra groupings are not supported.
+- Random slopes (`random_slopes`) can be placed on any grouping factor — the primary or any crossed/nested extra grouping.
 - `cluster_level_vars` names predictors that are constant within each cluster — typically a cluster-assigned treatment. Their standard error scales with `1/sqrt(n_clusters)`, not `1/sqrt(N)`; the design-effect difference is large when clusters are few.
 
 ## Cluster-level predictors
@@ -190,8 +190,8 @@ model$set_cluster("school", ICC = 0.20, n_clusters = 30,
 `random_slopes` names the predictor(s) whose effect varies across groups — each must appear in the formula's random-slope term, e.g. `(1 + x|school)`. `slope_variance` is the between-group variance of the slope; `slope_intercept_corr` is the correlation between each group's random intercept and its random slope.
 
 > [!note] Slopes on extra groupings
-> Random slopes compose freely with intercept-only extra groupings. Slopes on the
-> extra groupings themselves are not yet supported.
+> Random slopes compose freely across groupings — each crossed or nested extra
+> grouping can carry its own random slopes, just like the primary.
 
 ## Convergence failures
 

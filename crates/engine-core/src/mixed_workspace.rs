@@ -100,12 +100,18 @@ pub fn build_lmm_workspace(
         .iter()
         .map(|&c| c as usize)
         .collect();
+    let extra_slope_cols: Vec<Vec<usize>> = spec
+        .extra_slope_cols
+        .iter()
+        .map(|v| v.iter().map(|&c| c as usize).collect())
+        .collect();
     let model = cluster_to_model_spec(cluster, spec.estimator, spec.wald_se);
-    Some(Box::new(glmm::mcpower::LmmWorkspace::for_cluster_spec(
+    Some(Box::new(glmm::mcpower::LmmWorkspace::for_cluster_spec_ext(
         n_predictors,
         &model,
         max_n,
         &slope_cols,
+        &extra_slope_cols,
     )))
 }
 

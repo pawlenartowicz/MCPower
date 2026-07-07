@@ -435,7 +435,36 @@ lmm_slope_crossed <- list(
   n = 480L, seed = 2303
 )
 
-M3_LMM_CASES <- list(lmm_slope_a, lmm_slope_b, lmm_multislope, lmm_slope_crossed)
+# losf 28 — EXTRA SLOPES (crossed): (1+x1|grp) + (1+x1|item); slopes on both groupings
+lmm_slope_crossed_extra_slopes <- list(
+  label = "lmm_slope_crossed_extra_slopes", losf = 28L,
+  # grp ICC .2 (τ₀²=.25) τ₁²=.10 ρ=+0.3 ; item τ²=.16 τ₁²=.06 ρ=−0.2 ; 24 grp × 20, 6 items, n=480
+  formula = "y ~ x1 + (1|grp)", family = "lme",
+  effects = "x1=0.30",
+  cluster = list(var = "grp", ICC = 0.2, n_clusters = 24L, cluster_size = 20L),
+  slopes = list(list(column = 0L, variance = 0.10, corr_with_intercept = 0.3, corr_with = numeric(0))),
+  extra = list(list(var = "item", kind = "crossed", n_clusters = 6L, tau_squared = 0.16,
+                    slopes = list(list(column = 0L, variance = 0.06, corr_with_intercept = -0.2, corr_with = numeric(0))))),
+  lmer_re = "(1 + x1 | g_primary) + (1 + x1 | g_item)",
+  n = 480L, seed = 2304
+)
+
+# losf 29 — EXTRA SLOPES (nested): (1+x1|grp) + (1+x1|class); slopes on both groupings
+lmm_slope_nested_extra_slopes <- list(
+  label = "lmm_slope_nested_extra_slopes", losf = 29L,
+  # grp ICC .2 (τ₀²=.25) τ₁²=.10 ρ=+0.3 ; class τ²=.10 τ₁²=.05 ρ=−0.2 ; 12 grp × 60, 3 nested, n=720
+  formula = "y ~ x1 + (1|grp)", family = "lme",
+  effects = "x1=0.30",
+  cluster = list(var = "grp", ICC = 0.2, n_clusters = 12L, cluster_size = 60L),
+  slopes = list(list(column = 0L, variance = 0.10, corr_with_intercept = 0.3, corr_with = numeric(0))),
+  extra = list(list(var = "class", kind = "nested", n_clusters = 3L, tau_squared = 0.10,
+                    slopes = list(list(column = 0L, variance = 0.05, corr_with_intercept = -0.2, corr_with = numeric(0))))),
+  lmer_re = "(1 + x1 | g_primary) + (1 + x1 | g_class)",
+  n = 720L, seed = 2305
+)
+
+M3_LMM_CASES <- list(lmm_slope_a, lmm_slope_b, lmm_multislope, lmm_slope_crossed,
+                     lmm_slope_crossed_extra_slopes, lmm_slope_nested_extra_slopes)
 names(M3_LMM_CASES) <- vapply(M3_LMM_CASES, function(c) c$label, character(1))
 
 # Ordered case suite (losf complexity order). Extend as MCPower grows new forms.
@@ -988,7 +1017,36 @@ glmm_laplace_bias <- list(
   n = 600L, seed = 2404
 )
 
-M4_GLMM_CASES <- list(glmm_intercept, glmm_slope, glmm_multislope, glmm_slope_crossed, glmm_laplace_bias)
+# losf 30 — EXTRA SLOPES (crossed, logit): (1+x1|grp) + (1+x1|item); slopes on both groupings
+glmm_slope_crossed_extra_slopes <- list(
+  label = "glmm_slope_crossed_extra_slopes", losf = 30L,
+  # logit(P) = logit(0.3) + 0.5*x1 + (1+x1|grp) + (1+x1|item) ; ICC 0.2 ; 24 grp × 20, 6 items, n=480
+  formula = "y ~ x1 + (1|grp)", family = "logit",
+  effects = "x1=0.50", baseline_probability = 0.3,
+  cluster = list(var = "grp", ICC = 0.2, n_clusters = 24L, cluster_size = 20L),
+  slopes = list(list(column = 0L, variance = 0.10, corr_with_intercept = 0.3, corr_with = numeric(0))),
+  extra = list(list(var = "item", kind = "crossed", n_clusters = 6L, tau_squared = 0.16,
+                    slopes = list(list(column = 0L, variance = 0.06, corr_with_intercept = -0.2, corr_with = numeric(0))))),
+  glmer_re = "(1 + x1 | g_primary) + (1 + x1 | g_item)",
+  n = 480L, seed = 2405
+)
+
+# losf 31 — EXTRA SLOPES (nested, logit): (1+x1|grp) + (1+x1|class); slopes on both groupings
+glmm_slope_nested_extra_slopes <- list(
+  label = "glmm_slope_nested_extra_slopes", losf = 31L,
+  # logit(P) = logit(0.3) + 0.5*x1 + (1+x1|grp) + (1+x1|class) ; ICC 0.2 ; 12 grp × 60, 3 nested, n=720
+  formula = "y ~ x1 + (1|grp)", family = "logit",
+  effects = "x1=0.50", baseline_probability = 0.3,
+  cluster = list(var = "grp", ICC = 0.2, n_clusters = 12L, cluster_size = 60L),
+  slopes = list(list(column = 0L, variance = 0.10, corr_with_intercept = 0.3, corr_with = numeric(0))),
+  extra = list(list(var = "class", kind = "nested", n_clusters = 3L, tau_squared = 0.10,
+                    slopes = list(list(column = 0L, variance = 0.05, corr_with_intercept = -0.2, corr_with = numeric(0))))),
+  glmer_re = "(1 + x1 | g_primary) + (1 + x1 | g_class)",
+  n = 720L, seed = 2406
+)
+
+M4_GLMM_CASES <- list(glmm_intercept, glmm_slope, glmm_multislope, glmm_slope_crossed, glmm_laplace_bias,
+                      glmm_slope_crossed_extra_slopes, glmm_slope_nested_extra_slopes)
 names(M4_GLMM_CASES) <- vapply(M4_GLMM_CASES, function(c) c$label, character(1))
 
 # C4: M2/M3/M4 now flow through data_generation.r's save loop, so they gain the

@@ -41,26 +41,10 @@ of clusters, the z approximation runs slightly optimistic. Treat power
 estimates at those edges with extra caution, and prefer more clusters over
 more rows per cluster when you can.
 
-## Random slopes only on the primary grouping
-
-In a mixed model with more than one grouping factor — crossed factors like
-`(1|subject) + (1|item)`, or a nested pair like `(1|school/class)` — **random
-slopes can be placed only on the first (primary) grouping.** Any additional
-grouping factor enters as a random *intercept* only: a single variance
-component, set through its ICC. So `(1 + treatment | subject) + (1 | item)` is
-expressible, but a varying `treatment` slope across *items* as well is not.
-
-For the common case this is enough — you usually want a varying slope for your
-focal grouping and intercepts for the secondary one. If your analysis genuinely
-needs slopes on a second grouping (something tools like `lme4` allow), MCPower
-can't express it today; this is a planned addition, available **on request**
-(see the [[about/roadmap|roadmap]]).
-
 ## Mixed-effects structure has depth limits
 
-Beyond the random-slopes restriction above, the mixed-model structure is bounded
-in two ways. They cover the designs people actually run, but stop short of full
-`lme4` generality:
+The mixed-model structure is bounded in two ways. They cover the designs people
+actually run, but stop short of full `lme4` generality:
 
 - **One level of nesting.** A single nested grouping such as `(1|school/class)`
   is supported; a deeper chain like `(1|school/class/student)` is not.

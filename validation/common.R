@@ -72,7 +72,7 @@ build_m3_model <- function(case, seed_off = 0L) {
                 n_clusters = case$cluster$n_clusters)
   m$set_slopes_debug(case$slopes)
   # composition: translate the M3 human-readable extra format (var/kind/n_clusters)
-  # to the contract shape (relation/tau_squared) that set_extra_groupings_debug expects.
+  # to the contract shape (relation/tau_squared[/slopes]) that set_extra_groupings_debug expects.
   if (!is.null(case$extra)) {
     contract_extras <- lapply(case$extra, function(e) {
       rel <- if (e$kind == "crossed") {
@@ -80,7 +80,9 @@ build_m3_model <- function(case, seed_off = 0L) {
       } else {
         list(NestedWithin = list(n_per_parent = e$n_clusters))
       }
-      list(relation = rel, tau_squared = e$tau_squared)
+      out <- list(relation = rel, tau_squared = e$tau_squared)
+      if (!is.null(e$slopes)) out$slopes <- e$slopes   # forward extra-grouping slopes
+      out
     })
     m$set_extra_groupings_debug(contract_extras)
   }
@@ -97,12 +99,14 @@ build_m4_model <- function(case, seed_off = 0L) {
                 n_clusters = case$cluster$n_clusters)
   if (!is.null(case$slopes)) m$set_slopes_debug(case$slopes)
   # Composition: translate the M4 human-readable extra format (var/kind/n_clusters)
-  # to the contract shape that set_extra_groupings_debug expects — mirrors M3.
+  # to the contract shape (relation/tau_squared[/slopes]) that set_extra_groupings_debug expects — mirrors M3.
   if (!is.null(case$extra)) {
     contract_extras <- lapply(case$extra, function(e) {
       rel <- if (e$kind == "crossed") list(Crossed = list(n_clusters = e$n_clusters))
              else list(NestedWithin = list(n_per_parent = e$n_clusters))
-      list(relation = rel, tau_squared = e$tau_squared)
+      out <- list(relation = rel, tau_squared = e$tau_squared)
+      if (!is.null(e$slopes)) out$slopes <- e$slopes   # forward extra-grouping slopes
+      out
     })
     m$set_extra_groupings_debug(contract_extras)
   }

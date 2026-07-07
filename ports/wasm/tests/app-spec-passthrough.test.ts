@@ -58,4 +58,24 @@ describe('WASM AppSpec passthrough — Mixed with growth fields', () => {
     expect(scenarios[0]?.random_effect_dist).toBe(1);
     expect(scenarios[0]?.icc_noise_sd).toBeCloseTo(0.05);
   });
+
+  it('preserves slopes nested on an extra grouping', () => {
+    const spec: AppSpec = {
+      target_power: 0.8,
+      extra_groupings: [
+        {
+          tau_squared: 0.16,
+          relation: { kind: 'crossed', n_clusters: 6 },
+          slopes: [{ predictor_name: 'x1', slope_variance: 0.10, slope_intercept_corr: 0.2 }],
+        },
+      ],
+    };
+
+    const parsed = JSON.parse(JSON.stringify(spec)) as Record<string, unknown>;
+    expect(parsed.extra_groupings).toHaveLength(1);
+    const extraGrouping = (parsed.extra_groupings as Array<Record<string, unknown>>)[0];
+    expect(extraGrouping?.slopes).toEqual(
+      spec.extra_groupings[0].slopes
+    );
+  });
 });

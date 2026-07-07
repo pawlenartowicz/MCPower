@@ -54,6 +54,7 @@ fn ols_spec(n_non_factor: u32, effect_sizes: Vec<f64>) -> SimulationSpec {
         report_overall: true,
         factor_min_level_count: 0,
         cluster_slope_design_cols: vec![],
+        extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
     }
 }

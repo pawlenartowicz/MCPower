@@ -1467,11 +1467,18 @@ fn run_one_sim(
                         // Intercept-only layout: the reduced model excludes target columns;
                         // slope col indices from the full design don't map to p_red (Task 5+).
                         let cluster = spec.cluster.as_ref().expect("lmm ⇒ cluster");
-                        let model = crate::mixed_workspace::cluster_to_model_spec(
+                        let mut model = crate::mixed_workspace::cluster_to_model_spec(
                             cluster,
                             spec.estimator,
                             spec.wald_se,
                         );
+                        // The reduced-p exclusion fit drops random slopes (primary via
+                        // the `&[]` slope_cols below; extras here) — the full-design
+                        // slope columns don't map to p_red. Stripping the extra slopes
+                        // keeps q_g = 1 so the scalar tail (not the blocked path) runs.
+                        for grp in &mut model.extra_groupings {
+                            grp.slopes.clear();
+                        }
                         excl_lmm = Some(Box::new(glmm::mcpower::LmmWorkspace::for_cluster_spec(
                             p_red,
                             &model,
@@ -2776,6 +2783,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -3104,6 +3112,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -3236,6 +3245,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -3562,6 +3572,7 @@ mod tests {
             report_overall: true, // omnibus F still runs
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -3714,6 +3725,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 0,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -4264,6 +4276,7 @@ mod tests {
             report_overall: true,
             factor_min_level_count,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -4489,6 +4502,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count: 5,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         };
 
@@ -4598,6 +4612,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -4769,6 +4784,7 @@ mod tests {
             report_overall: true,
             factor_min_level_count,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -4826,6 +4842,7 @@ mod tests {
             report_overall: true,
             factor_min_level_count,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }
@@ -4952,6 +4969,7 @@ mod tests {
             report_overall: false,
             factor_min_level_count,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
     }

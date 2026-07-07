@@ -207,6 +207,39 @@ pub struct GroupingSpec {
     pub slopes: Vec<SlopeTerm>,
 }
 
+impl GroupingSpec {
+    /// The `q_g×q_g` RE *correlation* matrix `R_g` over `[intercept, slope_0, …]`
+    /// (`q_g = 1 + slopes.len()`). Identical recipe to the primary's
+    /// [`ClusterSpec::re_correlation_matrix`]; data-gen reads it to draw this
+    /// grouping's correlated `q_g`-vector of random effects per level.
+    pub fn re_correlation_matrix(&self) -> (usize, Vec<f64>) {
+        re_correlation_from_slopes(&self.slopes)
+    }
+}
+
+/// Build the `q×q` RE correlation matrix over `[intercept, slope_0, …]` from a
+/// slope list (`q = 1 + slopes.len()`), row-major: diagonal 1;
+/// `R[0][k+1]=R[k+1][0]=slopes[k].corr_with_intercept`;
+/// `R[i+1][k+1]=R[k+1][i+1]=slopes[k].corr_with[i]` for `i < k`. Shared by the
+/// primary factor ([`ClusterSpec::re_correlation_matrix`]) and each extra
+/// ([`GroupingSpec::re_correlation_matrix`]) — one source, no drift.
+fn re_correlation_from_slopes(slopes: &[SlopeTerm]) -> (usize, Vec<f64>) {
+    let q = 1 + slopes.len();
+    let mut r = vec![0.0; q * q];
+    for d in 0..q {
+        r[d * q + d] = 1.0;
+    }
+    for (k, s) in slopes.iter().enumerate() {
+        r[k + 1] = s.corr_with_intercept; // R[0][k+1]
+        r[(k + 1) * q] = s.corr_with_intercept; // R[k+1][0]
+        for (i, &cik) in s.corr_with.iter().enumerate() {
+            r[(i + 1) * q + (k + 1)] = cik;
+            r[(k + 1) * q + (i + 1)] = cik;
+        }
+    }
+    (q, r)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum GroupingRelation {
     /// Fully crossed with the primary factor (e.g. (1|subject)+(1|item)).
@@ -223,7 +256,7 @@ pub enum GroupingRelation {
 // The solver's stack buffers (`gid` width `1 + MAX_EXTRA_GROUPINGS`, θ truth-start
 // `tbuf` sized `MAX_PRIMARY_Q*(MAX_PRIMARY_Q+1)/2 + MAX_EXTRA_GROUPINGS`) are
 // HARD ceilings — mirrors those two buffer sizes — change together.
-pub use glmm::consts::{MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q};
+pub use glmm::consts::{MAX_EXTRA_GROUPINGS, MAX_EXTRA_Q, MAX_PRIMARY_Q};
 
 impl GroupingRelation {
     /// Levels this grouping contributes to one atom block: the fixed crossed
@@ -293,7 +326,17 @@ impl ClusterSpec {
     /// `boundary_rate_per_component` / `variance_components`. Slopes and extra
     /// groupings DO coexist (composition, Task 6).
     pub fn n_variance_components(&self) -> usize {
-        1 + self.slopes.len() + self.extra_groupings.len()
+        // Per grouping: 1 intercept + #slopes (its q_g diagonal). Order
+        // [primary, extras in declaration order] mirrors introspect.rs
+        // variance_components and the lmm.rs diagonal_theta walk — change
+        // together. (Pre-slope-on-extras this was `+ extra_groupings.len()`,
+        // i.e. one scalar per extra — wrong once an extra carries a slope.)
+        1 + self.slopes.len()
+            + self
+                .extra_groupings
+                .iter()
+                .map(|g| 1 + g.slopes.len())
+                .sum::<usize>()
     }
 
     /// The `q_p×q_p` RE *correlation* matrix `R` over `[intercept, slope_0, …]`,
@@ -301,20 +344,7 @@ impl ClusterSpec {
     /// slopes[k].corr_with_intercept`; `R[i+1][k+1]=R[k+1][i+1]=slopes[k].corr_with[i]`
     /// for `i < k`. Multiply by `diag(τ)` on both sides for `D`.
     pub fn re_correlation_matrix(&self) -> (usize, Vec<f64>) {
-        let q = 1 + self.slopes.len();
-        let mut r = vec![0.0; q * q];
-        for d in 0..q {
-            r[d * q + d] = 1.0;
-        }
-        for (k, s) in self.slopes.iter().enumerate() {
-            r[k + 1] = s.corr_with_intercept; // R[0][k+1]
-            r[(k + 1) * q] = s.corr_with_intercept; // R[k+1][0]
-            for (i, &cik) in s.corr_with.iter().enumerate() {
-                r[(i + 1) * q + (k + 1)] = cik;
-                r[(k + 1) * q + (i + 1)] = cik;
-            }
-        }
-        (q, r)
+        re_correlation_from_slopes(&self.slopes)
     }
 
     /// True iff `D = diag(τ)·R·diag(τ)` is PSD (a tolerant Cholesky exists) —

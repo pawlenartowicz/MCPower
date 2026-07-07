@@ -432,6 +432,7 @@ mod tests {
             },
             heteroskedasticity_driver: None,
             cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,

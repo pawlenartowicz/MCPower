@@ -156,3 +156,86 @@ test_that("find_power with two crossed groupings completes without error", {
   # (not capture-pinned — the R package is not installable in this WIP tree).
   expect_true(res$power_uncorrected[[1]][[1]] > 0.05)
 })
+
+# ---------------------------------------------------------------------------
+# Slopes in extra groupings — Task 5
+# ---------------------------------------------------------------------------
+
+# (11) Extra grouping slopes survive into clusters_json (public-path encoder).
+# Pre-inject resolved slopes on the second pending entry (mirrors test (6) in
+# test-lme-m3.R which pre-injects primary slopes). Fails before the fix in
+# extra_from_public because the loop drops gcfg$slopes.
+test_that("extra grouping slopes survive into clusters_json (public path)", {
+  pending <- list(
+    school = list(icc = 0.1, n_clusters = 20L, cluster_size = 15L),
+    class  = list(icc = 0.05, n_clusters = 6L,
+                  slopes = list(
+                    list(column = 0L, variance = 0.10,
+                         corr_with_intercept = 0.2, corr_with = I(numeric(0)))
+                  ))
+  )
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
+  eg  <- cj[[1]]$extra_groupings
+  expect_length(eg[[1]]$slopes, 1L)
+  expect_equal(eg[[1]]$slopes[[1]]$variance, 0.10)
+  expect_equal(eg[[1]]$slopes[[1]]$corr_with_intercept, 0.2)
+  expect_equal(length(eg[[1]]$slopes[[1]]$corr_with), 0L)
+})
+
+# (12) Debug-seam extra_groupings with slopes survive unchanged (Task 8 invariant).
+# set_extra_groupings_debug passes a raw contract list into cfg$extra_groupings;
+# the merge block uses it verbatim, so slopes embedded there bypass extra_from_public
+# and must survive to the contract. This test verifies the seam is airtight.
+test_that("debug seam extra_groupings with slopes survive into clusters_json", {
+  # NOTE: debug seam passes the raw contract verbatim (no I() wrapping) — callers
+  # supplying a length-1 corr_with (e.g. the Task 8 validation harness) must I()-wrap it themselves.
+  pending <- list(
+    school = list(
+      icc = 0.1, n_clusters = 20L, cluster_size = 15L,
+      extra_groupings = list(list(
+        relation    = list(Crossed = list(n_clusters = 6L)),
+        tau_squared = 0.16,
+        slopes      = list(list(
+          column              = 0L,
+          variance            = 0.10,
+          corr_with_intercept = 0.2,
+          corr_with           = numeric(0)
+        ))
+      ))
+    )
+  )
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
+  eg  <- cj[[1]]$extra_groupings
+  expect_length(eg[[1]]$slopes, 1L)
+  expect_equal(eg[[1]]$slopes[[1]]$variance, 0.10)
+  expect_equal(eg[[1]]$slopes[[1]]$corr_with_intercept, 0.2)
+})
+
+# (13) length-1 corr_with in extra-grouping slope serialises as JSON array, not
+# a bare scalar. Exercises the I() wrap inside extra_from_public (spec-builder.R
+# ~line 1267); removing that I() would produce a JSON scalar 0.5 which serde
+# cannot deserialise into Vec<f64>, causing a silent run-time failure.
+test_that("length-1 corr_with in extra-grouping slope serialises as array not scalar", {
+  # Lower-tri rule: slope at index k carries exactly k entries in corr_with.
+  # slope[0] → corr_with length 0; slope[1] → corr_with length 1.
+  pending <- list(
+    school = list(icc = 0.1, n_clusters = 20L, cluster_size = 15L),
+    class  = list(icc = 0.05, n_clusters = 6L,
+                  slopes = list(
+                    list(column = 0L, variance = 0.10,
+                         corr_with_intercept = 0.0, corr_with = numeric(0)),
+                    list(column = 1L, variance = 0.08,
+                         corr_with_intercept = 0.1, corr_with = c(0.5))
+                  ))
+  )
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
+  eg  <- cj[[1]]$extra_groupings
+  corr_with_1 <- eg[[1]]$slopes[[2]]$corr_with
+  # fromJSON(simplifyVector=FALSE): JSON [0.5] → list of length 1 (is.list);
+  # JSON 0.5 → bare numeric (is.numeric). The is.list check is the regression guard.
+  expect_length(corr_with_1, 1L)
+  expect_true(is.list(corr_with_1))
+})

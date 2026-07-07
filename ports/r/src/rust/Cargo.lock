@@ -213,6 +213,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 name = "engine-contract"
 version = "1.0.0"
 dependencies = [
+ "glmm",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -225,6 +226,7 @@ dependencies = [
  "bobyqa",
  "engine-contract",
  "faer",
+ "glmm",
  "pulp",
  "rand_philox",
  "rayon",
@@ -586,6 +588,15 @@ dependencies = [
  "libc",
  "r-efi",
  "wasip2",
+]
+
+[[package]]
+name = "glmm"
+version = "0.0.1"
+dependencies = [
+ "bobyqa",
+ "faer",
+ "pulp",
 ]
 
 [[package]]

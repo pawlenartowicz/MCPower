@@ -76,6 +76,7 @@ fn ols_spec(beta_x1: f64, het: f64) -> SimulationSpec {
         report_overall: false,
         factor_min_level_count: 0,
         cluster_slope_design_cols: vec![],
+        extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
     }
 }

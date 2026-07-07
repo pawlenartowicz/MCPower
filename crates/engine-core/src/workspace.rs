@@ -449,8 +449,15 @@ impl SimWorkspace {
                         .collect()
                 })
                 .collect(),
+            // q_g RE draws per level (intercept + slopes), block-contiguous
+            // [level·q_g .. level·q_g + q_g]. q_g == 1 ⇒ one per level (the
+            // pre-slope sizing).
             extra_u_draws: (0..n_extras)
-                .map(|g| vec![0.0f32; cluster.unwrap().extra_n_levels_at(g, max_n)])
+                .map(|g| {
+                    let c = cluster.unwrap();
+                    let q_g = 1 + c.extra_groupings[g].slopes.len();
+                    vec![0.0f32; q_g * c.extra_n_levels_at(g, max_n)]
+                })
                 .collect(),
             extra_tau_sq_design: vec![0.0; n_extras],
             lmm: None,

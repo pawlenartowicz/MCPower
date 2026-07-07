@@ -66,12 +66,6 @@ Real candidates, but with an open question that has to clear before they ship:
   correction) for designs with few clusters, where the standard test is mildly
   anticonservative. The shipped test is the honest power of the test most people
   actually run, so this would be built **on request** rather than by default.
-- **Random slopes on crossed and nested groupings** — today a mixed model can
-  carry random slopes only on its primary grouping; additional crossed or nested
-  factors enter as random intercepts only (see
-  [[concepts/limitations|limitations]]). Lifting this to match what `lme4`
-  expresses (varying slopes on a second grouping) needs a different solver path,
-  so it would be added **on request** rather than by default.
 
 ## Deliberately out of scope
 
