@@ -130,13 +130,6 @@ Two entry points, a fluent `set_*` chain:
 
 All `set_*` methods chain and return `self`; add `scenarios=True` to either `find_*` for optimistic/realistic/doomer robustness.
 
-## What's new in 1.1.0
-
-Clustered binary/count models (logit, probit, Poisson GLMMs) now default to a
-faster Wald standard-error method (`wald_se="rx"`, fastmode) instead of the
-old per-fit Hessian. Results shift slightly from 1.0.x runs of the same
-design; pass `wald_se="hessian"` to restore the previous behaviour exactly.
-
 ## Docs
 
 Full documentation: [https://docs.mcpower.app](https://docs.mcpower.app).
