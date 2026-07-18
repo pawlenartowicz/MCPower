@@ -9,6 +9,7 @@ site.  Mirrors \code{engine-py/src/spec_builder_bridge.rs} \code{build_contract_
 build_contract_from_spec(
   json,
   outcome_kind,
+  link,
   estimator,
   intercept,
   clusters_json
@@ -25,6 +26,8 @@ label store instead of re-deriving the factor layout.
 }
 }
 \details{
-\code{outcome_kind} is one of \code{"continuous"} | \code{"binary"}.
+\code{outcome_kind} is one of \code{"continuous"} | \code{"binary"} | \code{"count"}.
+\code{link} is \code{"canonical"} (or \code{""}) for the canonical link, or \code{"probit"} to
+override a binary outcome to the probit link.
 \code{estimator}    is one of \code{"ols"} | \code{"glm"} | \code{"mle"}.
 }

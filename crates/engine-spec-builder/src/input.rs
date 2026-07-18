@@ -76,12 +76,23 @@ pub struct LinearSpec {
     /// per row. Names must be real predictors (validated host-side).
     #[serde(default)]
     pub cluster_level_vars: Vec<String>,
-    /// Standard-error flavour for the clustered-binary GLMM estimator.
-    /// `Hessian` (default) uses the per-fit FD-Hessian SE (lme4 `use.hessian =
-    /// TRUE`, the "correct" denominator); `Rx` is the opt-in Schur speed knob
-    /// (faster, anticonservative). No-op for OLS/LMM and unclustered GLM.
+    /// Standard-error flavour for the clustered-binary/count GLMM estimator.
+    /// `Rx` (1.1.0 default, fastmode) is the Schur speed knob; `Hessian` uses
+    /// the per-fit FD-Hessian SE (lme4 `use.hessian = TRUE`, the accurate/AGQ
+    /// opt-in). No-op for OLS/LMM and unclustered GLM.
     #[serde(default)]
     pub wald_se: engine_contract::WaldSe,
+    /// AGQ node count for the GLMM likelihood (1 = Laplace, the default).
+    /// Host-side eligibility (Binary/Count GLMM, single grouping, ≤ 3 REs, odd
+    /// k ≤ 25) is checked before this reaches the engine; the contract backstop
+    /// (invariant 25) re-enforces it.
+    #[serde(default = "default_nagq_input")]
+    pub nagq: u8,
+}
+
+/// Serde default for `LinearSpec.nagq` — Laplace.
+fn default_nagq_input() -> u8 {
+    1
 }
 
 /// One all-pairwise post-hoc request for a single factor.
@@ -253,6 +264,10 @@ pub struct ScenarioInput {
     /// Factor-proportion sampling (scenario knob); `false` (exact) when absent.
     #[serde(default)]
     pub sampled_factor_proportions: bool,
+    /// Scenario assumption: truth-seeded fitter start vs. cold (blind) start;
+    /// `false` (cold start) when absent.
+    #[serde(default)]
+    pub truth_start: bool,
     /// Random-effect distribution code (RE_DIST_CODES space): 0=normal,
     /// 1=heavy_tailed (t kernel). The RE knob keeps its own
     /// normal/heavy_tailed vocabulary — it is NOT the residual-pool space.
@@ -315,6 +330,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            nagq: 1,
         }
     }
 

@@ -104,4 +104,39 @@ the crossing point.
 > The compact table prints automatically when you omit `verbose=False`. Use
 > `.summary()` when you want the confidence intervals and the joint distribution.
 
+## Other outcome families
+
+Logit is one of four outcome families — see [[concepts/supported-families|supported
+families]] for the full picture. Two more binary/count options need only a
+different `family=` and baseline setter.
+
+### Probit
+
+`family="probit"` fits the same binary outcome through the normal-inverse-CDF
+(probit) link instead of the log-odds link. It still needs a baseline via
+`set_baseline_probability`, and the API is otherwise identical:
+
+```python
+model = MCPower("recovered = treatment + age", family="probit")
+model.set_variable_type("treatment=binary")
+model.set_baseline_probability(0.3)
+model.set_effects("treatment=0.5, age=0.3")
+result = model.find_power(sample_size=300, target_test="all", verbose=False)
+```
+
+### Poisson (counts)
+
+For a count outcome (number of visits, incidents, purchases), `family="poisson"`
+fits a log-link GLM. The required baseline is a **rate**, not a probability —
+`set_baseline_rate(lambda)` sets the expected count at the reference level, and
+effects are log-rate shifts:
+
+```python
+model = MCPower("visits = treatment + age", family="poisson")
+model.set_variable_type("treatment=binary")
+model.set_baseline_rate(2.0)
+model.set_effects("treatment=0.3, age=0.15")
+result = model.find_power(sample_size=300, target_test="all", verbose=False)
+```
+
 next → [[05_mixed-models|Mixed models]]

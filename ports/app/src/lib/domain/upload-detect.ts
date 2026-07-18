@@ -1,5 +1,9 @@
-// CSV parser + column-type detector mirroring Python upload_data_utils.py and R upload-data.R.
-// Produces typed CsvData (continuous/binary/factor) from raw CSV text.
+// Column-type detector + typed-CsvData builder for uploaded data. The type-detection
+// rules (continuous/binary/factor) mirror Python upload_data_utils.py and R upload-data.R.
+// Raw parsing is handled by upload-parsers.ts (PapaParse for CSV/TSV, plus XLSX and
+// SPSS .sav), which normalizes every format into the ParsedCsv shape defined here — so
+// this file no longer parses CSV text itself and the app now ingests TSV/XLSX/.sav too,
+// unlike Python/R which stay CSV/dataframe-only.
 import type { CsvData, UploadColumn, UploadMode } from './app-spec';
 export type { UploadColumn };
 import { UPLOAD } from '$lib/configs/app-config';
@@ -21,80 +25,15 @@ export function valueToLabel(v: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// Minimal CSV parser — header + data rows, handles quoted fields with embedded commas
+// ParsedCsv — the normalized parse result. Raw parsing (CSV/TSV/XLSX/.sav)
+// lives in upload-parsers.ts, which produces this shape.
 // ---------------------------------------------------------------------------
-
-function parseRow(line: string, delimiter: string): string[] {
-    const fields: string[] = [];
-    let i = 0;
-    while (i <= line.length) {
-        if (line[i] === '"') {
-            // quoted field
-            i++; // skip opening quote
-            let field = '';
-            while (i < line.length) {
-                if (line[i] === '"') {
-                    if (line[i + 1] === '"') {
-                        // escaped quote
-                        field += '"';
-                        i += 2;
-                    } else {
-                        i++; // skip closing quote
-                        break;
-                    }
-                } else {
-                    field += line[i];
-                    i++;
-                }
-            }
-            fields.push(field);
-            // Skip the delimiter; if none follows, this quoted field was the last
-            // on the line — break (otherwise the next iteration emits a phantom "").
-            if (line[i] === delimiter) i++;
-            else break;
-        } else {
-            const end = line.indexOf(delimiter, i);
-            if (end === -1) {
-                fields.push(line.slice(i));
-                break;
-            }
-            fields.push(line.slice(i, end));
-            i = end + 1;
-            // handle trailing delimiter — push empty field
-            if (i === line.length) fields.push('');
-        }
-    }
-    return fields;
-}
 
 export interface ParsedCsv {
     header: string[];
     /** Each element is an array of string values for that column (row-major → col-major transposed). */
     columns: string[][];
     nRows: number;
-}
-
-/** Parse CSV text (comma-delimited; no TSV needed in the app upload path).
- * Returns header names and per-column string arrays.
- */
-export function parseCsvText(text: string): ParsedCsv {
-    // Normalise line endings; split; drop empty trailing lines.
-    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-    const nonEmpty = lines.filter((l) => l.trim() !== '');
-    if (nonEmpty.length === 0) {
-        return { header: [], columns: [], nRows: 0 };
-    }
-    const delimiter = ',';
-    const header = parseRow(nonEmpty[0]!, delimiter);
-    const nCols = header.length;
-    const columns: string[][] = header.map(() => []);
-    for (let r = 1; r < nonEmpty.length; r++) {
-        const row = parseRow(nonEmpty[r]!, delimiter);
-        for (let c = 0; c < nCols; c++) {
-            columns[c]!.push(row[c] ?? '');
-        }
-    }
-    return { header, columns, nRows: nonEmpty.length - 1 };
 }
 
 /** Host-side upload row-count gate, shared by the Tauri and WASM shells

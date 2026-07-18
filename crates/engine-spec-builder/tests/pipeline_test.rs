@@ -53,6 +53,7 @@ fn simple_spec() -> LinearSpec {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     }
 }
 
@@ -332,6 +333,7 @@ fn scenario_input(name: &str) -> ScenarioInput {
         residual_dists: vec![],
         residual_df: 0.0,
         sampled_factor_proportions: false,
+        truth_start: false,
         random_effect_dist: 0,
         random_effect_df: 0.0,
         icc_noise_sd: 0.0,
@@ -422,6 +424,7 @@ fn builtin_preset_scenario_payloads_still_build() {
             residual_dists: vec![4, 2], // high_kurtosis, right_skewed
             residual_df: 10.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
@@ -437,6 +440,7 @@ fn builtin_preset_scenario_payloads_still_build() {
             residual_dists: vec![4, 2],
             residual_df: 8.0,
             sampled_factor_proportions: true,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
@@ -452,6 +456,7 @@ fn builtin_preset_scenario_payloads_still_build() {
             residual_dists: vec![4, 2],
             residual_df: 5.0,
             sampled_factor_proportions: true,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
@@ -478,6 +483,7 @@ fn explicit_scenarios_produce_one_spec_each() {
             residual_dists: vec![],
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
@@ -493,6 +499,7 @@ fn explicit_scenarios_produce_one_spec_each() {
             residual_dists: vec![4],
             residual_df: 8.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,

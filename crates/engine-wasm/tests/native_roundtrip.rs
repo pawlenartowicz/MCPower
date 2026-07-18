@@ -301,6 +301,8 @@ fn nan_bearing_extras_survive_json_wire_and_merge() {
         tests: TestSelection::All,
         correction: CorrectionMethod::None,
         wald_se: Default::default(),
+        link: Default::default(),
+        agq: 1,
         scenarios: vec![],
         csv: None,
         baseline_probability: 0.3,

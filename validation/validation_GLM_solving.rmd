@@ -12,12 +12,18 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 source("common.R")     # build_model, fit_sota, fit_mcpower, solving_rows, hash_check, ...
 source("tolerances.R") # SOLVING_TOL — the central B<->C gate
 source("formulas.R")   # CASES
-GLM_CASES <- Filter(function(c) c$family == "logit", CASES)
+GLM_CASES <- Filter(function(c) c$family %in% c("logit", "probit", "poisson"), CASES)
 DATA_DIR  <- "data"
 
 png_type <- if (capabilities("cairo")) "cairo" else "Xlib"
 
-family_long <- function(case) "logistic regression (binary outcome)"
+family_long <- function(case) switch(
+  case$family,
+  logit   = "logistic regression (binary outcome)",
+  probit  = "probit regression (binary outcome)",
+  poisson = "Poisson regression (count outcome)",
+  "generalized linear model"
+)
 
 model_equation <- function(case) {
   e <- parse_effects(case$effects)

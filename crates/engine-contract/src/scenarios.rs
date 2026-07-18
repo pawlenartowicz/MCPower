@@ -32,6 +32,12 @@ pub struct ScenarioPerturbations {
     /// older payloads, defaulting to `false` (exact), preserving v1 behaviour.
     #[serde(default)]
     pub sampled_factor_proportions: bool,
+    /// Scenario assumption about the fitter's starting values, not a speed knob:
+    /// `true` asserts estimation is well-behaved (truth-seeded start); `false`
+    /// starts blind, as a real analyst would. Additive — absent in older
+    /// payloads, defaulting to `false` (cold start).
+    #[serde(default)]
+    pub truth_start: bool,
     pub lme: Option<LmeScenarioPerturbations>,
 }
 
@@ -52,6 +58,7 @@ impl Default for ScenarioPerturbations {
             residual_dists: Vec::new(),
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             lme: None,
         }
     }
@@ -82,6 +89,7 @@ mod tests {
             residual_dists: vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
             residual_df: 8.0,
             sampled_factor_proportions: true,
+            truth_start: true,
             lme: Some(LmeScenarioPerturbations {
                 random_effect_dist: ResidualDist::Normal,
                 random_effect_df: 5.0,
@@ -96,5 +104,35 @@ mod tests {
     #[test]
     fn sampled_factor_proportions_defaults_false() {
         assert!(!ScenarioPerturbations::default().sampled_factor_proportions);
+    }
+
+    #[test]
+    fn truth_start_defaults_false_on_old_payload() {
+        // A payload predating this field has no `truth_start` key at all.
+        let json = r#"{
+            "name": "realistic",
+            "heterogeneity": 0.1,
+            "heteroskedasticity_ratio": 2.0,
+            "correlation_noise_sd": 0.0,
+            "distribution_change_prob": 0.0,
+            "new_distributions": [],
+            "residual_change_prob": 0.0,
+            "residual_dists": [],
+            "residual_df": 0.0,
+            "lme": null
+        }"#;
+        let spec: ScenarioPerturbations = serde_json::from_str(json).unwrap();
+        assert!(!spec.truth_start);
+    }
+
+    #[test]
+    fn truth_start_roundtrips_true() {
+        let spec = ScenarioPerturbations {
+            truth_start: true,
+            ..ScenarioPerturbations::default()
+        };
+        let bytes = rmp_serde::to_vec_named(&spec).unwrap();
+        let back: ScenarioPerturbations = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(back.truth_start);
     }
 }

@@ -16,7 +16,7 @@
   import { familyStore } from '$lib/stores/family.svelte';
   import { parsedFormulaStore, toClusterTerms } from '$lib/stores/parsed-formula.svelte';
   import { LIMITS } from '$lib/configs/app-config';
-  import { EXTRA_GROUPING_DEFAULTS, SLOPE_DEFAULTS } from '$lib/domain/family';
+  import { EXTRA_GROUPING_DEFAULTS, SLOPE_DEFAULTS, mixedOutcomeKind } from '$lib/domain/family';
 
   // input floor = engine hard floor; 'reliable'/'recommended' are advisory.
   const MIN_OBS_PER_CLUSTER = LIMITS.min_rows_per_cluster;           // 2 (was hardcoded 5, mislabeled "hard minimum")
@@ -41,6 +41,10 @@
   const primary = $derived(terms[0] ?? null);
   const extraTerms = $derived(terms.slice(1));
   const nestedCount = $derived(extraTerms.filter((t) => t.parent !== null).length);
+  // Poisson has no residual variance to scale an ICC against (family.ts docs
+  // this on ClusterConfig.tauSquared) — both the primary and every extra
+  // grouping take a raw τ² instead, so the ICC input is meaningless here.
+  const isPoisson = $derived(mixedOutcomeKind(cfg.cluster) === 'poisson');
 
   // Reconcile formula-derived structure into cfg.cluster, preserving user
   // values by cluster name (mirrors the predictor reconcile in PredictorCards).
@@ -71,6 +75,7 @@
           clusterName: term.cluster,
           relation,
           icc: prev?.icc ?? EXTRA_GROUPING_DEFAULTS.icc,
+          tauSquared: prev?.tauSquared ?? EXTRA_GROUPING_DEFAULTS.tauSquared,
           n:
             prev?.n ??
             (relation === 'nested' ? EXTRA_GROUPING_DEFAULTS.nestedN : EXTRA_GROUPING_DEFAULTS.crossedN),
@@ -86,6 +91,7 @@
             p.clusterName === g.clusterName &&
             p.relation === g.relation &&
             p.icc === g.icc &&
+            p.tauSquared === g.tauSquared &&
             p.n === g.n &&
             // Slope SET identity (by predictor name); params edited in-place via
             // the advanced popup, so a param change must NOT force a rewrite.
@@ -158,17 +164,29 @@
         <div class="flex flex-wrap items-center gap-2">
           <span class="font-mono text-[13px] font-semibold" data-testid="cluster-name">{primary.cluster}</span>
           <span class="rounded-full border border-primary/50 px-2 py-0.5 text-[11px] text-primary">primary</span>
-          <span class="text-xs text-muted-foreground">ICC</span>
-          <InfoIcon tipKey="icc" />
-          <NumberInput
-            id="cluster-icc"
-            class="h-7 w-28 shrink-0"
-            step={0.05}
-            min={0}
-            max={0.99}
-            value={cfg.cluster.icc}
-            oninput={(v) => { if (cfg.cluster) cfg.cluster.icc = v; }}
-          />
+          {#if isPoisson}
+            <span class="text-xs text-muted-foreground">τ²</span>
+            <NumberInput
+              id="cluster-tau-squared"
+              class="h-7 w-28 shrink-0"
+              step={0.05}
+              min={0}
+              value={cfg.cluster.tauSquared ?? 0}
+              oninput={(v) => { if (cfg.cluster) cfg.cluster.tauSquared = v; }}
+            />
+          {:else}
+            <span class="text-xs text-muted-foreground">ICC</span>
+            <InfoIcon tipKey="icc" />
+            <NumberInput
+              id="cluster-icc"
+              class="h-7 w-28 shrink-0"
+              step={0.05}
+              min={0}
+              max={0.99}
+              value={cfg.cluster.icc}
+              oninput={(v) => { if (cfg.cluster) cfg.cluster.icc = v; }}
+            />
+          {/if}
           <Button
             variant="outline"
             size="sm"
@@ -241,18 +259,32 @@
             <span class="rounded-full border px-2 py-0.5 text-[11px] {extra.relation === 'nested'
               ? 'border-violet-500/50 text-violet-600 dark:text-violet-400'
               : 'border-sky-500/50 text-sky-600 dark:text-sky-400'}">{extra.relation}</span>
-            <span class="text-xs text-muted-foreground">ICC</span>
-            <NumberInput
-              class="h-7 w-24 shrink-0"
-              step={0.05}
-              min={0}
-              max={0.99}
-              value={extra.icc}
-              oninput={(v) => {
-                const g = cfg.cluster?.extraGroupings?.[i];
-                if (g) g.icc = v;
-              }}
-            />
+            {#if isPoisson}
+              <span class="text-xs text-muted-foreground">τ²</span>
+              <NumberInput
+                class="h-7 w-24 shrink-0"
+                step={0.05}
+                min={0}
+                value={extra.tauSquared ?? 0}
+                oninput={(v) => {
+                  const g = cfg.cluster?.extraGroupings?.[i];
+                  if (g) g.tauSquared = v;
+                }}
+              />
+            {:else}
+              <span class="text-xs text-muted-foreground">ICC</span>
+              <NumberInput
+                class="h-7 w-24 shrink-0"
+                step={0.05}
+                min={0}
+                max={0.99}
+                value={extra.icc}
+                oninput={(v) => {
+                  const g = cfg.cluster?.extraGroupings?.[i];
+                  if (g) g.icc = v;
+                }}
+              />
+            {/if}
             <span class="text-xs text-muted-foreground">{extra.relation === 'nested' ? 'n per parent' : 'n clusters'}</span>
             <NumberInput
               class="h-7 w-24 shrink-0"

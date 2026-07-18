@@ -225,6 +225,78 @@ glm_interaction_b <- list(
   n = 1000L, seed = 2138
 )
 
+# ---- GLM — probit (binary outcome, probit link) ------------------------------
+# Same feature axes as the logit cases (losf 9-12) but on the probit scale:
+# the intercept is Phi^-1(baseline_probability), betas are probit-scale.
+# B-side oracle: glm(family = binomial(link = "probit")).
+
+# probit — one continuous predictor
+probit_simple_a <- list(
+  label = "probit_simple_a", losf = 9L,
+  # probit(P) = qnorm(0.3) + 0.5*x1
+  formula = "y ~ x1", family = "probit",
+  effects = "x1=0.5", baseline_probability = 0.3, n = 600L, seed = 2137
+)
+probit_simple_b <- list(
+  label = "probit_simple_b", losf = 9L,
+  # probit(P) = qnorm(0.5) + 0.8*x1
+  formula = "y ~ x1", family = "probit",
+  effects = "x1=0.8", baseline_probability = 0.5, n = 600L, seed = 2138
+)
+
+# probit — multiple predictors, correlated
+probit_two_a <- list(
+  label = "probit_two_a", losf = 10L,
+  formula = "y ~ x1 + x2", family = "probit",
+  effects = "x1=0.5, x2=0.3", baseline_probability = 0.3,
+  correlations = "corr(x1,x2)=0.2", n = 800L, seed = 2137
+)
+
+# probit — a factor on the probit scale
+probit_factor_a <- list(
+  label = "probit_factor_a", losf = 11L,
+  formula = "y ~ x1 + g", family = "probit",
+  variable_types = "g=(factor, 0.5, 0.3, 0.2)",
+  effects = "x1=0.5, g[2]=0.4, g[3]=0.8", baseline_probability = 0.3,
+  n = 1000L, seed = 2137
+)
+
+# ---- GLM — Poisson (count outcome, log link) ---------------------------------
+# Log-link count model. The intercept is log(baseline_rate); betas are
+# log-rate-ratios. B-side oracle: glm(family = poisson()). No baseline
+# probability — Poisson is sized by baseline_rate.
+
+# poisson — one continuous predictor
+poisson_simple_a <- list(
+  label = "poisson_simple_a", losf = 9L,
+  # log(lambda) = log(2.0) + 0.5*x1
+  formula = "y ~ x1", family = "poisson",
+  effects = "x1=0.5", baseline_rate = 2.0, n = 600L, seed = 2137
+)
+poisson_simple_b <- list(
+  label = "poisson_simple_b", losf = 9L,
+  # log(lambda) = log(5.0) + 0.3*x1 ; higher rate, weaker effect
+  formula = "y ~ x1", family = "poisson",
+  effects = "x1=0.3", baseline_rate = 5.0, n = 600L, seed = 2138
+)
+
+# poisson — multiple predictors, correlated
+poisson_two_a <- list(
+  label = "poisson_two_a", losf = 10L,
+  formula = "y ~ x1 + x2", family = "poisson",
+  effects = "x1=0.4, x2=0.2", baseline_rate = 2.0,
+  correlations = "corr(x1,x2)=0.2", n = 800L, seed = 2137
+)
+
+# poisson — a factor on the log-rate scale
+poisson_factor_a <- list(
+  label = "poisson_factor_a", losf = 11L,
+  formula = "y ~ x1 + g", family = "poisson",
+  variable_types = "g=(factor, 0.5, 0.3, 0.2)",
+  effects = "x1=0.4, g[2]=0.3, g[3]=0.5", baseline_rate = 2.0,
+  n = 1000L, seed = 2137
+)
+
 # ---- Mixed / LME (clustered outcome) -----------------------------------------
 
 # losf 13 — random intercept (set ICC)
@@ -474,6 +546,8 @@ CASES <- list(
   ols_factor_a, ols_factor_b, ols_cf_a, ols_cf_b, ols_ff_a, ols_ff_b,
   glm_simple_a, glm_simple_b, glm_two_a, glm_two_b,
   glm_factor_a, glm_factor_b, glm_interaction_a, glm_interaction_b,
+  probit_simple_a, probit_simple_b, probit_two_a, probit_factor_a,
+  poisson_simple_a, poisson_simple_b, poisson_two_a, poisson_factor_a,
   lme_simple_a, lme_simple_b, lme_two_a, lme_two_b,
   lme_interaction_a, lme_interaction_b,
   lme_factor_a, lme_factor_b
@@ -775,6 +849,31 @@ scen_fa_mle <- list(
   n = 1000L, K = 200L, seed = 41000
 )
 
+# He under the new GLM families (probit latent / Poisson log-rate). The He
+# per-study β-jitter is family-general (drawn once per study, slopes clipped at
+# s_j = h|β_j|, intercept jitter symmetric), so each study fits a clean GLM at its
+# own β_eff and the mean β̂ → E[β_eff] = glm_perstudy_beta(β, h). Gate the SLOPES
+# against that per-study pseudo-true within glm_beta_abs (measured worst: probit
+# 0.0075 / Poisson 0.0085 at h = 0.4). The intercept carries an ADDITIONAL
+# link-nonlinearity (Jensen) shift ~0.025 the per-study oracle does not model —
+# reported, not gated (mirrors scen_fg_glm_flip's Jensen note).
+scen_he_probit <- list(
+  label = "scen_he_probit", knob = "heterogeneity",
+  formula = "y ~ x1 + x2", family = "probit",
+  effects = "x1=0.5, x2=0.3", baseline_probability = 0.4,
+  scenario_configs = list(t_he = list(heterogeneity = 0.4)),
+  scenario = "t_he",
+  n = 2000L, K = 300L, seed = 60000
+)
+scen_he_poisson <- list(
+  label = "scen_he_poisson", knob = "heterogeneity",
+  formula = "y ~ x1 + x2", family = "poisson",
+  effects = "x1=0.5, x2=0.3", baseline_rate = 2.0,
+  scenario_configs = list(t_he = list(heterogeneity = 0.4)),
+  scenario = "t_he",
+  n = 2000L, K = 300L, seed = 61000
+)
+
 # -- Tier B: joint --------------------------------------------------------------
 
 # B0: optimistic ≡ baseline at the find_power level — the scenarios=FALSE
@@ -906,6 +1005,37 @@ scen_fg_glm_ident <- list(
   n = 2000L, K = 20L, seed = 49000
 )
 
+# Probit / Poisson λ + residual-swap inertness — same family-gating premise as
+# scen_fg_glm_ident but for the new links. apply_hsk requires a continuous
+# Gaussian outcome and consumes no RNG, so a λ toggle is an exact no-op under
+# probit (binary) and Poisson (count); the residual swap consumes only
+# scenario-stream draws AFTER every other consumer, so outcomes stay
+# bit-identical too. Both pairs verified bit-identical in-harness (run_fg_ident).
+scen_fg_probit_ident <- list(
+  label = "scen_fg_probit_ident", knob = "family_gating",
+  formula = "y ~ x1 + x2", family = "probit",
+  effects = "x1=0.5, x2=0.3", baseline_probability = 0.4,
+  scenario_configs = list(
+    g_l4   = list(heteroskedasticity_ratio = 4.0),
+    g_l4re = list(heteroskedasticity_ratio = 4.0, residual_change_prob = 1.0,
+                  residual_dists = list("high_kurtosis"), residual_df = 10)
+  ),
+  pairs = list(c("optimistic", "g_l4"), c("g_l4", "g_l4re")),
+  n = 2000L, K = 20L, seed = 62000
+)
+scen_fg_poisson_ident <- list(
+  label = "scen_fg_poisson_ident", knob = "family_gating",
+  formula = "y ~ x1 + x2", family = "poisson",
+  effects = "x1=0.5, x2=0.3", baseline_rate = 2.0,
+  scenario_configs = list(
+    g_l4   = list(heteroskedasticity_ratio = 4.0),
+    g_l4re = list(heteroskedasticity_ratio = 4.0, residual_change_prob = 1.0,
+                  residual_dists = list("high_kurtosis"), residual_df = 10)
+  ),
+  pairs = list(c("optimistic", "g_l4"), c("g_l4", "g_l4re")),
+  n = 2000L, K = 20L, seed = 63000
+)
+
 # GLM He: the per-row log-odds jitter is latent (one Bernoulli draw), so the
 # get is the paired h-toggle flip rate vs its Monte-Carlo prediction
 # (glm_fliprate_pred). The Jensen mean-rate shift is reported, not gated.
@@ -939,8 +1069,10 @@ SCENARIO_CASES <- list(
   scen_he, scen_hs, scen_co_low, scen_co_high, scen_co_psd,
   scen_px, scen_px_t3, scen_re, scen_re_replace,
   scen_fa_ols, scen_fa_mle,
+  scen_he_probit, scen_he_poisson,
   scen_b0, scen_b1_ols, scen_b1_glm, scen_b2, scen_b3, scen_b4, scen_b5,
   scen_fg_glm_ident, scen_fg_glm_flip,
+  scen_fg_probit_ident, scen_fg_poisson_ident,
   scen_re_multi
 )
 names(SCENARIO_CASES) <- vapply(SCENARIO_CASES, function(c) c$label, character(1))

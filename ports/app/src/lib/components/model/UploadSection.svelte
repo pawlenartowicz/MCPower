@@ -1,13 +1,14 @@
 <script lang="ts">
-  // Upload section: file picker → CSV parse → type detection → store CsvData.
-  // Renders a type-summary panel (name / type / levels + add-to-formula button)
-  // and a none/partial/strict mode selector.
+  // Upload section: file picker → staging dialog (parse/preview/dialect) → store CsvData.
+  // Picking a file opens UploadDialog, which parses (CSV/TSV/XLSX/.sav) and commits on
+  // confirm. This section renders the post-commit type-summary panel (name / type /
+  // levels + add-to-formula button) and the none/partial/strict mode selector.
   import { uploadStore } from '$lib/stores/upload.svelte';
-  import { parseCsvText, csvDataFromParsed, validateUploadRowCount } from '$lib/domain/upload-detect';
   import { familyStore } from '$lib/stores/family.svelte';
   import type { UploadMode } from '$lib/domain/app-spec';
   import Plus from '@lucide/svelte/icons/plus';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
+  import UploadDialog from './UploadDialog.svelte';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
 
@@ -24,8 +25,8 @@
   }
 
   let fileInput = $state<HTMLInputElement | undefined>(undefined);
-  let parseError = $state<string | null>(null);
-  let loading = $state(false);
+  let pendingFile = $state<File | null>(null);
+  let dialogOpen = $state(false);
 
   const MODE_OPTIONS: { value: UploadMode; label: string; title: string }[] = [
     {
@@ -45,32 +46,21 @@
     },
   ];
 
-  async function onFileChange(e: Event) {
+  function onFileChange(e: Event) {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
+    pendingFile = file;
+    dialogOpen = true;
+  }
 
-    loading = true;
-    parseError = null;
-
-    try {
-      const text = await file.text();
-      const parsed = parseCsvText(text);
-      if (parsed.header.length === 0 || parsed.nRows === 0) {
-        parseError = 'File appears empty or has no data rows.';
-        return;
-      }
-      const rowError = validateUploadRowCount(parsed.nRows);
-      if (rowError) {
-        parseError = rowError;
-        return;
-      }
-      const csvData = csvDataFromParsed(parsed, uploadStore.mode);
-      uploadStore.load(csvData, file.name);
-    } catch (err) {
-      parseError = err instanceof Error ? err.message : 'Failed to parse CSV.';
-    } finally {
-      loading = false;
+  // Close = discard the staged parse; reset the input so re-picking the same file
+  // still fires onchange (mirrors onClear).
+  function onDialogOpenChange(v: boolean) {
+    dialogOpen = v;
+    if (!v) {
+      pendingFile = null;
+      if (fileInput) fileInput.value = '';
     }
   }
 
@@ -80,7 +70,6 @@
 
   function onClear() {
     uploadStore.clear();
-    parseError = null;
     if (fileInput) fileInput.value = '';
   }
 
@@ -183,17 +172,10 @@
       <input
         bind:this={fileInput}
         type="file"
-        accept=".csv"
+        accept=".csv,.tsv,.txt,.xlsx,.sav"
         class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-primary-foreground file:text-sm file:cursor-pointer cursor-pointer text-muted-foreground"
         onchange={onFileChange}
-        disabled={loading}
       />
-      {#if loading}
-        <p class="mt-1 text-xs text-muted-foreground">Parsing…</p>
-      {/if}
-      {#if parseError}
-        <p class="mt-1 text-xs text-destructive">{parseError}</p>
-      {/if}
     </div>
   {:else}
     <!-- Type-summary panel: one grid so name/type/levels/add align across rows -->
@@ -274,3 +256,5 @@
     </div>
   {/if}
 </div>
+
+<UploadDialog file={pendingFile} open={dialogOpen} onOpenChange={onDialogOpenChange} />

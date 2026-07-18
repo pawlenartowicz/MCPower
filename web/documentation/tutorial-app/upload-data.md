@@ -1,6 +1,6 @@
 ---
 title: "Upload pilot data - MCPower app"
-description: "Drive MCPower simulations from pilot data - upload a CSV to set predictor distributions, choose resampling mode, and borrow effect sizes from real data."
+description: "Drive MCPower simulations from pilot data - upload a CSV, TSV, Excel, or SPSS file to set predictor distributions, choose resampling mode, and borrow effect sizes from real data."
 ---
 # Upload data (app)
 
@@ -8,7 +8,13 @@ When you have **pilot data** — a small study, a prior experiment, a public dat
 
 ## Load a file
 
-Expand the collapsible **Upload data** section above Model and pick a `.csv` file. The app parses it in place — nothing leaves your machine. A type-summary panel then lists every column with its detected **Type** and **Levels**: a factor shows its count and labels (`cyl` → `3 (4, 6, 8)`, `origin` → `3 (Europe, Japan, USA)`), a binary column shows `2`, a continuous column shows `—`, with the row and column totals beneath. Use the **+** next to any column to add it to your formula (it greys out once the column is already there). See [[concepts/variable-types|variable types]].
+Expand the collapsible **Upload data** section above Model and pick a file — **CSV**, **TSV**, **Excel** (`.xlsx`), or **SPSS** (`.sav`). The app parses it in place — nothing leaves your machine — and opens a preview dialog so you can check the data before it reaches the model. Nothing is committed until you confirm.
+
+- **CSV / TSV:** the separator and quote character are auto-detected and shown ("detected: comma"). If the guess is wrong, override either from its dropdown — Comma / Semicolon / Tab / Pipe, or a custom character — and the preview re-renders instantly.
+- **Excel:** if the workbook has more than one sheet, a **Sheet** picker lets you choose which one to load.
+- **SPSS:** loads directly; when the file carries variable labels they appear as tooltips on the preview column headers.
+
+The preview shows the first ten rows and a "showing 10 of N rows · M columns" line. Click **Use this data** to commit (or **Cancel** to discard). A type-summary panel then lists every column with its detected **Type** and **Levels**: a factor shows its count and labels (`cyl` → `3 (4, 6, 8)`, `origin` → `3 (Europe, Japan, USA)`), a binary column shows `2`, a continuous column shows `—`, with the row and column totals beneath. Use the **+** next to any column to add it to your formula (it greys out once the column is already there). See [[concepts/variable-types|variable types]].
 
 ## Matched predictors lock to the data
 

@@ -60,6 +60,7 @@ fn anova_3level_posthoc_contract() -> Vec<engine_contract::SimulationContract> {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     build_linear_contract(&spec).expect("build anova posthoc contract")
 }

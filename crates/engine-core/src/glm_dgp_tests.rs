@@ -1,12 +1,12 @@
 //! GLM fit tests that depend on engine-core's data-generation layer.
 //!
-//! These four tests drive `glmm::mcpower::glm_irls_fit` on data produced by
+//! These four tests drive `glmm::loop_advanced::glm_irls_fit` on data produced by
 //! `data_gen::generate_sim_data` (via a logit `SimulationSpec`). The fit kernel
 //! moved to the `glmm` crate in the carve, but `SimulationSpec` /
 //! `generate_sim_data` stay here — so these DGP-coupled tests live in
 //! engine-core (the other, inline-data GLM tests stay in `glmm`). Bodies are
 //! verbatim from the former `glmm/src/glm.rs` test block; only the physical home
-//! and the `glm_irls_fit`/`GlmScratch` import path (now `glmm::mcpower`) changed.
+//! and the `glm_irls_fit`/`GlmScratch` import path (now `glmm::loop_advanced`) changed.
 
 use crate::data_gen::generate_sim_data;
 use crate::spec::{
@@ -15,7 +15,13 @@ use crate::spec::{
 };
 use crate::workspace::SimWorkspace;
 use faer::Mat;
-use glmm::mcpower::{glm_irls_fit, GlmScratch, MAX_IRLS_ITERS};
+use glmm::loop_advanced::{glm_irls_fit, GlmScratch, MAX_IRLS_ITERS};
+use glmm::{BinomialLink, Family};
+
+/// Every fixture in this file is built via `logit_spec` (binomial/logit) —
+/// `nb_theta` is NaN-passed per the `glm_irls_fit` doc comment (ignored
+/// outside the NB family).
+const LOGIT_NB_THETA: f64 = f64::NAN;
 
 /// Build a `GlmScratch` borrowing every IRLS field of `ws`. Used by tests
 /// to avoid duplicating the inline struct literal at each call site.
@@ -89,8 +95,10 @@ fn logit_spec(n_non_factor: u32, effect_sizes: Vec<f64>) -> SimulationSpec {
         residual_dist: ResidualDist::Normal,
         residual_pinned: false,
         outcome_kind: OutcomeKind::Binary,
+        link: None,
         estimator: EstimatorSpec::Glm,
         wald_se: Default::default(),
+        nagq: 1,
         intercept,
         posthoc: vec![],
         max_failed_fraction: 0.1,
@@ -121,7 +129,18 @@ fn glm_converges_on_separable_signal() {
     let (x, y) = copy_xy(&ws, n, p);
 
     let targets: Vec<u32> = vec![0, 1, 2, 3];
-    let fit = glm_irls_fit(x.as_ref(), &y, &targets, None, glm_scratch(&mut ws));
+    let fit = glm_irls_fit(
+        Family::Binomial {
+            link: BinomialLink::Logit,
+        },
+        LOGIT_NB_THETA,
+        x.as_ref(),
+        &y,
+        &targets,
+        None,
+        None, // prior_w: MCPower has no prior-observation-weights feature
+        glm_scratch(&mut ws),
+    );
     assert!(fit.converged, "IRLS should converge on well-behaved data");
     assert!(
         fit.n_iter > 0 && fit.n_iter <= MAX_IRLS_ITERS,
@@ -158,17 +177,33 @@ fn glm_truth_start_matches_cold_fixpoint() {
     let (x, y) = copy_xy(&ws, n, p);
     let targets: Vec<u32> = vec![0, 1, 2, 3];
 
-    let cold = glm_irls_fit(x.as_ref(), &y, &targets, None, glm_scratch(&mut ws));
+    let cold = glm_irls_fit(
+        Family::Binomial {
+            link: BinomialLink::Logit,
+        },
+        LOGIT_NB_THETA,
+        x.as_ref(),
+        &y,
+        &targets,
+        None,
+        None, // prior_w: MCPower has no prior-observation-weights feature
+        glm_scratch(&mut ws),
+    );
     assert!(cold.converged, "cold fit must converge");
     let cold_betas = cold.betas.to_vec();
     let cold_t_sq = cold.t_sq.to_vec();
     let cold_iters = cold.n_iter;
 
     let warm = glm_irls_fit(
+        Family::Binomial {
+            link: BinomialLink::Logit,
+        },
+        LOGIT_NB_THETA,
         x.as_ref(),
         &y,
         &targets,
         Some(&spec.effect_sizes),
+        None, // prior_w: MCPower has no prior-observation-weights feature
         glm_scratch(&mut ws),
     );
     assert!(warm.converged, "warm fit must converge");
@@ -239,10 +274,15 @@ fn glm_fit_warm_path_bounded_alloc() {
     // started like the shipped hot loop — the bound is iteration-count-
     // dependent, so the fixture must walk the same warm path.
     let warm = glm_irls_fit(
+        Family::Binomial {
+            link: BinomialLink::Logit,
+        },
+        LOGIT_NB_THETA,
         x.as_ref(),
         &y,
         &targets,
         Some(&spec.effect_sizes),
+        None, // prior_w: MCPower has no prior-observation-weights feature
         glm_scratch(&mut ws),
     );
     assert!(warm.converged, "bench fixture must converge");
@@ -250,10 +290,15 @@ fn glm_fit_warm_path_bounded_alloc() {
     let profiler = dhat::Profiler::builder().testing().build();
     for _ in 0..N_CALLS {
         let _ = glm_irls_fit(
+            Family::Binomial {
+                link: BinomialLink::Logit,
+            },
+            LOGIT_NB_THETA,
             x.as_ref(),
             &y,
             &targets,
             Some(&spec.effect_sizes),
+            None, // prior_w: MCPower has no prior-observation-weights feature
             glm_scratch(&mut ws),
         );
     }
@@ -283,7 +328,18 @@ fn glm_wald_z_sq_direction_and_ballpark() {
     generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
     let (x, y) = copy_xy(&ws, n, p);
     let targets: Vec<u32> = vec![0, 1, 2, 3];
-    let fit = glm_irls_fit(x.as_ref(), &y, &targets, None, glm_scratch(&mut ws));
+    let fit = glm_irls_fit(
+        Family::Binomial {
+            link: BinomialLink::Logit,
+        },
+        LOGIT_NB_THETA,
+        x.as_ref(),
+        &y,
+        &targets,
+        None,
+        None, // prior_w: MCPower has no prior-observation-weights feature
+        glm_scratch(&mut ws),
+    );
     assert!(fit.converged, "IRLS should converge on well-behaved data");
 
     // β̂₁ should be near +0.5 (positive direction).

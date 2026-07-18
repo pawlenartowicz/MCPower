@@ -356,7 +356,7 @@ impl EstimatorExtras {
                 } else {
                     0.0
                 };
-                // Per-component pin rates: unpack the u32 bitmask for every
+                // Per-component pin rates: unpack the u64 bitmask for every
                 // converged fit in this ss slot, count bit-k hits, then
                 // divide by the same singular_n denominator.
                 let n_comp = batch.shape.n_variance_components as usize;
@@ -791,7 +791,7 @@ mod result_counter_tests {
             posthoc_cor: vec![],
             converged: vec![1, 1, 1, 0],
             boundary_hit: vec![1, 0, 2, 2],
-            pinned_components: vec![0u32; 4],
+            pinned_components: vec![0u64; 4],
             joint_unc: vec![0; 4],
             joint_cor: vec![0; 4],
             overall: vec![],

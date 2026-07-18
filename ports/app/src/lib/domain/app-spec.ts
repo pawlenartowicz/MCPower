@@ -115,6 +115,8 @@ export interface ScenarioWire {
     residual_dists: number[];
     residual_df: number;
     sampled_factor_proportions: boolean;
+    /** Truth-seeded fitter start (mixed/clustered designs) vs. cold (blind) start. */
+    truth_start: boolean;
     /** Random-effect distribution code (normal=0, heavy_tailed=1); see RE_DIST_CODE. */
     random_effect_dist: number;
     /** Degrees of freedom for a heavy-tailed random-effect distribution (0 = unused). */
@@ -154,6 +156,22 @@ export interface LinearSpec {
 
 export interface LogitSpec extends LinearSpec {
     baseline_probability: number;
+    /** Binary link. Omitted when logit (the default; Rust `skip_serializing_if`);
+     *  `'probit'` selects the probit link. */
+    link?: 'logit' | 'probit';
+    /** Adaptive Gauss-Hermite quadrature points for a clustered GLMM fit. Omitted
+     *  when 1 (Laplace; Rust `skip_serializing_if` on the default). */
+    agq?: number;
+}
+
+/** Mirrors `engine_app_spec::PoissonSpec` — LogitSpec field-for-field, but
+ *  `baseline_rate` (a log-link intercept) replaces `baseline_probability` and
+ *  there is no `link` (Poisson is always log link). */
+export interface PoissonSpec extends LinearSpec {
+    baseline_rate: number;
+    /** Adaptive Gauss-Hermite quadrature points for a clustered GLMM fit. Omitted
+     *  when 1 (Laplace). */
+    agq?: number;
 }
 
 export type ClusterDim =
@@ -195,8 +213,17 @@ export interface MixedSpec extends LinearSpec {
     /** Random slopes on the primary grouping factor. Default []. */
     slopes?: AppSlopeTerm[];
     /** Outcome distribution. Absent / `{ kind: 'gaussian' }` → Continuous+Mle (Rust default).
-     *  `{ kind: 'binary', baseline_probability }` → Binary+Glm with logit intercept + latent τ². */
-    outcome?: { kind: 'gaussian' } | { kind: 'binary'; baseline_probability: number };
+     *  `{ kind: 'binary', baseline_probability, link? }` → Binary+Glm (logit intercept +
+     *  latent τ²; `link` omitted = logit, `'probit'` for the probit link).
+     *  `{ kind: 'poisson', baseline_rate, tau_squared }` → Count+Glm with a log intercept
+     *  and RAW random-intercept variance (no ICC conversion). */
+    outcome?:
+        | { kind: 'gaussian' }
+        | { kind: 'binary'; baseline_probability: number; link?: 'logit' | 'probit' }
+        | { kind: 'poisson'; baseline_rate: number; tau_squared: number };
+    /** Adaptive Gauss-Hermite quadrature points for the GLMM fit. Omitted when 1
+     *  (Laplace; Rust `skip_serializing_if` on the default). */
+    agq?: number;
 }
 
 export interface AnovaFactor {
@@ -229,7 +256,8 @@ export interface AnovaSpec {
 }
 
 export type AppSpec =
-    | ({ family: 'linear' } & LinearSpec)
-    | ({ family: 'logit'  } & LogitSpec)
-    | ({ family: 'anova'  } & AnovaSpec)
-    | ({ family: 'mixed'  } & MixedSpec);
+    | ({ family: 'linear'  } & LinearSpec)
+    | ({ family: 'logit'   } & LogitSpec)
+    | ({ family: 'poisson' } & PoissonSpec)
+    | ({ family: 'anova'   } & AnovaSpec)
+    | ({ family: 'mixed'   } & MixedSpec);

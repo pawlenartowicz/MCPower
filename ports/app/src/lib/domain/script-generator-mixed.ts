@@ -44,10 +44,11 @@ function buildMixedFormula(s: MixedSpec): string {
   return `${outcome} ~ ${parts.join(' + ')}`;
 }
 
-/** Invert the adapter's ICC→τ² map (gaussian: τ = icc/(1−icc); a binary
- *  outcome additionally scales τ by π²/3) so the script writes `ICC=` back. */
-function tauToIcc(tau: number, binaryOutcome: boolean): number {
-  const t = binaryOutcome ? tau / (Math.PI ** 2 / 3) : tau;
+/** Invert the adapter's ICC→τ² map (raw: τ = icc/(1−icc); the logit link
+ *  additionally scales τ by π²/3) so the script writes `ICC=` back. `logitScaled`
+ *  is true only for the logit link — probit/Poisson/Gaussian use the raw map. */
+function tauToIcc(tau: number, logitScaled: boolean): number {
+  const t = logitScaled ? tau / (Math.PI ** 2 / 3) : tau;
   const icc = t / (1 + t);
   return Math.round(icc * 1e6) / 1e6;
 }
@@ -63,15 +64,23 @@ function renderList(items: string[], language: ScriptLanguage): string {
  *  Python uses flat kwargs (random_slopes=list, slope_variance=N, slope_intercept_corr=N).
  *  R wraps each slope in a named list (predictor, variance, corr_with_intercept).
  *  cluster_level_vars uses the language list renderer. */
-function buildClusterArgs(s: MixedSpec, language: ScriptLanguage): string[] {
+function buildClusterArgs(
+  s: MixedSpec,
+  language: ScriptLanguage,
+  primaryVariance: number,
+  poissonOutcome: boolean,
+): string[] {
   const dimArg =
     s.cluster_dim.kind === 'n_clusters'
       ? `n_clusters=${s.cluster_dim.value}`
       : `cluster_size=${s.cluster_dim.value}`;
   const sep = language === 'r' ? ' = ' : '=';
 
-  // ICC arg — same name in both ports
-  const iccArg = `ICC${sep}${s.icc}`;
+  // Variance arg — `ICC=` for every family EXCEPT Poisson, which has no ICC and
+  // requires the raw random-intercept variance via `tau_squared=` (the ports
+  // reject `ICC=` for family="poisson"). Same keyword in Python and R.
+  const varKw = poissonOutcome ? 'tau_squared' : 'ICC';
+  const iccArg = `${varKw}${sep}${primaryVariance}`;
 
   const args = [`"${s.cluster_name}"`, dimArg, iccArg];
 
@@ -117,9 +126,13 @@ export function generateMixedScript(
   if (!s.parsed_formula?.outcome) return '# Cannot generate script: missing formula\n';
 
   const binaryOutcome = s.outcome?.kind === 'binary';
-  const family = binaryOutcome ? 'logit' : 'lme';
-  // family="logit" causes the port to use the OLS sim budget (1600); "lme" uses mixed (800).
-  const simsDefault = binaryOutcome ? SIMULATION.n_sims.ols : SIMULATION.n_sims.mixed;
+  const poissonOutcome = s.outcome?.kind === 'poisson';
+  const probit = s.outcome?.kind === 'binary' && s.outcome.link === 'probit';
+  const glmm = binaryOutcome || poissonOutcome;
+  const family = poissonOutcome ? 'poisson' : binaryOutcome ? (probit ? 'probit' : 'logit') : 'lme';
+  // A GLMM outcome (family "logit"/"probit"/"poisson") uses the OLS sim budget
+  // (1600); "lme" (Gaussian) uses the mixed budget (800).
+  const simsDefault = glmm ? SIMULATION.n_sims.ols : SIMULATION.n_sims.mixed;
 
   const lang = langFor(language);
   const lines: string[] = [];
@@ -150,15 +163,20 @@ export function generateMixedScript(
   // Outcome-level knobs
   for (const line of buildOutcomeOptionLines(s, lang)) lines.push(line);
 
-  // Binary GLMM: set baseline probability after outcome options
-  if (binaryOutcome && s.outcome?.kind === 'binary') {
+  // GLMM baseline: probability for binary (logit/probit), rate λ for Poisson.
+  if (s.outcome?.kind === 'binary') {
     lines.push(lang.call('set_baseline_probability', String(s.outcome.baseline_probability)));
+  } else if (s.outcome?.kind === 'poisson') {
+    lines.push(lang.call('set_baseline_rate', String(s.outcome.baseline_rate)));
   }
 
   // Run-config setters — omit values equal to port defaults
   for (const line of buildConfigLines(s, simsDefault, lang)) lines.push(line);
 
-  const clusterArgs = buildClusterArgs(s, language);
+  // Poisson's primary variance is the raw τ² in the outcome (no ICC); every other
+  // outcome uses the top-level icc field directly.
+  const primaryVariance = s.outcome?.kind === 'poisson' ? s.outcome.tau_squared : s.icc;
+  const clusterArgs = buildClusterArgs(s, language, primaryVariance, poissonOutcome);
   if (
     language === 'python' &&
     s.slopes &&
@@ -176,12 +194,16 @@ export function generateMixedScript(
   // Extra groupings: one set_cluster per grouping
   (s.extra_groupings ?? []).forEach((g, i) => {
     const name = extraName(g, i);
-    const icc = tauToIcc(g.tau_squared, binaryOutcome);
+    // Poisson extra groupings carry raw τ² via `tau_squared=` (skip the ICC
+    // inversion AND the ICC keyword); logit inverts through the π²/3 scaling,
+    // probit/Gaussian through the raw map, both emitted as `ICC=`.
+    const variance = poissonOutcome ? g.tau_squared : tauToIcc(g.tau_squared, binaryOutcome && !probit);
+    const varKw = poissonOutcome ? 'tau_squared' : 'ICC';
     const sep = language === 'r' ? ' = ' : '=';
     if (g.relation.kind === 'nested_within') {
-      lines.push(lang.call('set_cluster', `"${name}", n_per_parent${sep}${g.relation.n_per_parent}, ICC${sep}${icc}`));
+      lines.push(lang.call('set_cluster', `"${name}", n_per_parent${sep}${g.relation.n_per_parent}, ${varKw}${sep}${variance}`));
     } else {
-      lines.push(lang.call('set_cluster', `"${name}", n_clusters${sep}${g.relation.n_clusters}, ICC${sep}${icc}`));
+      lines.push(lang.call('set_cluster', `"${name}", n_clusters${sep}${g.relation.n_clusters}, ${varKw}${sep}${variance}`));
     }
   });
 
@@ -190,9 +212,10 @@ export function generateMixedScript(
   // find_power / find_sample_size call
   const correction = toPortCorrection(s.correction);
   const testsArg = buildTestsArg(s);
-  // wald_se is the GLMM SE knob; emitted only when non-default and only meaningful
-  // for the binary (clustered GLMM) outcome — harmless on the Gaussian LME path.
-  for (const line of buildFindCallLines(lang, mode, params, testsArg, correction, s.wald_se))
+  // wald_se is the GLMM SE knob and agq the adaptive-quadrature knob; both are
+  // emitted only when non-default and only meaningful for a clustered GLMM outcome
+  // — harmless (default, omitted) on the Gaussian LME path.
+  for (const line of buildFindCallLines(lang, mode, params, testsArg, correction, s.wald_se, s.agq))
     lines.push(line);
 
   return lines.join('\n') + '\n';

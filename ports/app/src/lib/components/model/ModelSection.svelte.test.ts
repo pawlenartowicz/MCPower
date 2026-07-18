@@ -34,7 +34,10 @@ vi.mock('$lib/api/engine', () => ({
 import ModelSection from './ModelSection.svelte';
 import { familyStore } from '$lib/stores/family.svelte';
 
-function toggleButton(container: HTMLElement, label: 'Continuous' | 'Binary'): HTMLButtonElement {
+function toggleButton(
+  container: HTMLElement,
+  label: 'Continuous' | 'Logit' | 'Probit' | 'Poisson',
+): HTMLButtonElement {
   const btn = Array.from(container.querySelectorAll('button')).find(
     (b) => b.textContent?.trim() === label,
   );
@@ -45,22 +48,64 @@ function toggleButton(container: HTMLElement, label: 'Continuous' | 'Binary'): H
 describe('ModelSection outcome toggle', () => {
   beforeEach(() => familyStore.resetAll());
 
-  it('mixed → Binary sets cluster.binaryOutcome and seeds the baseline; → Continuous clears it', async () => {
+  it('mixed → Logit sets cluster.outcomeKind and seeds the baseline; → Continuous clears it', async () => {
     familyStore.active = 'mixed';
     const { container } = render(ModelSection);
     await tick();
 
-    await fireEvent.click(toggleButton(container, 'Binary'));
+    await fireEvent.click(toggleButton(container, 'Logit'));
     await tick();
     const cl = familyStore.byFamily.mixed.cluster!;
-    expect(cl.binaryOutcome).toBe(true);
+    expect(cl.outcomeKind).toBe('logit');
     expect(cl.baselineProbability).toBe(0.2); // seeded for the adapter's (0,1) requirement
-    expect(familyStore.activeOutcome).toBe('binary');
+    expect(familyStore.activeOutcome).toBe('logit');
 
     await fireEvent.click(toggleButton(container, 'Continuous'));
     await tick();
-    expect(familyStore.byFamily.mixed.cluster!.binaryOutcome).toBe(false);
-    expect(familyStore.activeOutcome).toBe('continuous');
+    expect(familyStore.byFamily.mixed.cluster!.outcomeKind).toBe('linear');
+    expect(familyStore.activeOutcome).toBe('linear');
+  });
+
+  it('mixed → Poisson seeds baseline rate and raw τ²', async () => {
+    familyStore.active = 'mixed';
+    const { container } = render(ModelSection);
+    await tick();
+
+    await fireEvent.click(toggleButton(container, 'Poisson'));
+    await tick();
+    const cl = familyStore.byFamily.mixed.cluster!;
+    expect(cl.outcomeKind).toBe('poisson');
+    expect(cl.baselineRate).toBe(2.0);
+    expect(cl.tauSquared).toBe(0.5);
+    expect(familyStore.activeOutcome).toBe('poisson');
+  });
+
+  it('mixed → Poisson: τ² input is editable and replaces the ICC input (adapter ships the edited value)', async () => {
+    familyStore.active = 'mixed';
+    familyStore.byFamily.mixed.formula = 'y ~ x + (1|school)';
+    familyStore.byFamily.mixed.effects = [{ name: 'x', value: 0.5 }];
+    const { container } = render(ModelSection);
+    await tick();
+
+    await fireEvent.click(toggleButton(container, 'Poisson'));
+    await tick();
+
+    // ICC input must be gone — it does nothing for a log-link count model.
+    expect(container.querySelector('input#cluster-icc')).toBeNull();
+    const tauInput = container.querySelector('input#cluster-tau-squared') as HTMLInputElement;
+    expect(tauInput).not.toBeNull();
+    expect(tauInput.value).toBe('0.5'); // the ModelSection seed
+
+    await fireEvent.change(tauInput, { target: { value: '1.2' } });
+    await tick();
+    expect(familyStore.byFamily.mixed.cluster!.tauSquared).toBe(1.2);
+
+    // The adapter must carry the edited value, not the stale 0.5 seed.
+    const { familyConfigToAppSpec } = await import('$lib/domain/app-spec-adapter');
+    const { spec, errors } = familyConfigToAppSpec('mixed', familyStore.byFamily.mixed);
+    expect(errors).toEqual([]);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect((spec.outcome as { tau_squared: number }).tau_squared).toBe(1.2);
   });
 
   it('regression toggle still writes the store-level outcome and leaves mixed untouched', async () => {
@@ -68,11 +113,11 @@ describe('ModelSection outcome toggle', () => {
     const { container } = render(ModelSection);
     await tick();
 
-    await fireEvent.click(toggleButton(container, 'Binary'));
+    await fireEvent.click(toggleButton(container, 'Probit'));
     await tick();
-    expect(familyStore.regressionOutcome).toBe('binary');
-    expect(familyStore.activeOutcome).toBe('binary');
-    // Regression's binary flag lives in the store, never on the mixed cluster.
-    expect(familyStore.byFamily.mixed.cluster!.binaryOutcome).toBeUndefined();
+    expect(familyStore.regressionOutcome).toBe('probit');
+    expect(familyStore.activeOutcome).toBe('probit');
+    // Regression's outcome lives in the store, never on the mixed cluster.
+    expect(familyStore.byFamily.mixed.cluster!.outcomeKind).toBeUndefined();
   });
 });

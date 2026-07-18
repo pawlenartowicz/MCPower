@@ -13,6 +13,9 @@ here.
 
 from __future__ import annotations
 
+import math
+import statistics
+
 import numpy as np
 import pytest
 
@@ -239,6 +242,129 @@ def test_get_effects_from_data_reports_icc_logistic_latent(capsys):
     p_hat = float(bline.split(":", 1)[1].split("(")[0].strip())
     assert 0.0 < p_hat < 1.0
     assert "set_baseline_probability(" in out
+
+
+def test_get_effects_from_data_probit_recovers_baseline_probability(capsys):
+    """B1 round-trip: data generated from a probit model with true baseline
+    p=0.30 must recover ≈0.30, not the logit-mistaken 0.372 (logistic applied
+    to a probit intercept). The recovery is `Φ(β̂0)` — using `logistic` here
+    would systematically overshoot because `Φ⁻¹(0.30) ≈ -0.524` and
+    `logistic(-0.524) ≈ 0.372 != 0.30`."""
+    nd = statistics.NormalDist()
+    rng = np.random.default_rng(21)
+    n = 8000
+    x = rng.normal(size=n)
+    beta_true = 0.5
+    b0_true = nd.inv_cdf(0.30)
+    eta = b0_true + beta_true * x
+    p = np.array([nd.cdf(e) for e in eta])
+    y = (rng.uniform(size=n) < p).astype(float)
+
+    m = MCPower("y = x", family="probit")
+    m.set_baseline_probability(0.30)
+    m.upload_data({"x": x.tolist(), "y": y.tolist()}, verbose=False)
+
+    m.get_effects_from_data("y")
+    out = capsys.readouterr().out
+    bline = next(
+        ln for ln in out.splitlines() if ln.startswith("Estimated baseline probability:")
+    )
+    p_hat = float(bline.split(":", 1)[1].split("(")[0].strip())
+    assert abs(p_hat - 0.30) < 0.05, (
+        f"probit baseline recovery {p_hat} should be close to the true 0.30"
+    )
+
+
+def test_get_effects_from_data_logit_recovers_baseline_probability(capsys):
+    """B1 companion: pin the logit path at the same time so the link branch
+    cannot collapse silently (both arms recovering the same wrong number
+    would otherwise pass a probit-only regression test)."""
+    rng = np.random.default_rng(23)
+    n = 8000
+    x = rng.normal(size=n)
+    beta_true = 0.5
+    b0_true = math.log(0.30 / 0.70)
+    eta = b0_true + beta_true * x
+    p = 1.0 / (1.0 + np.exp(-eta))
+    y = (rng.uniform(size=n) < p).astype(float)
+
+    m = MCPower("y = x", family="logit")
+    m.set_baseline_probability(0.30)
+    m.upload_data({"x": x.tolist(), "y": y.tolist()}, verbose=False)
+
+    m.get_effects_from_data("y")
+    out = capsys.readouterr().out
+    bline = next(
+        ln for ln in out.splitlines() if ln.startswith("Estimated baseline probability:")
+    )
+    p_hat = float(bline.split(":", 1)[1].split("(")[0].strip())
+    assert abs(p_hat - 0.30) < 0.05, (
+        f"logit baseline recovery {p_hat} should be close to the true 0.30"
+    )
+
+
+def test_get_effects_from_data_reports_icc_probit_latent(capsys):
+    """Clustered probit upload (M9): the verbose note must use the probit
+    latent-scale formula (residual variance fixed at 1, not logit's π²/3) —
+    mirrors driver.rs's cluster_icc branching for ``BinaryLink::Probit``."""
+    nd = statistics.NormalDist()
+    rng = np.random.default_rng(17)
+    n_clusters, csize = 30, 40
+    n = n_clusters * csize
+    x = rng.normal(size=n)
+    u = rng.normal(scale=1.0, size=n_clusters)
+    group = np.repeat(np.arange(n_clusters), csize).astype(float)
+    eta = 0.7 * x + u[np.repeat(np.arange(n_clusters), csize)]
+    p = np.array([nd.cdf(e) for e in eta])
+    y = (rng.uniform(size=n) < p).astype(float)
+
+    m = MCPower("y ~ x + (1|group)", family="probit")
+    m.set_cluster("group", ICC=0.2, n_clusters=n_clusters)
+    m.upload_data(
+        {"x": x.tolist(), "group": group.tolist(), "y": y.tolist()},
+        verbose=False,
+    )
+
+    m.get_effects_from_data("y")
+    out = capsys.readouterr().out
+    assert "Estimated ICC (probit latent scale):" in out
+    assert "logit latent scale" not in out
+    icc = _icc_from_note(out)
+    assert 0.0 < icc < 1.0
+
+    # Discriminate against the (wrong) logit residual π²/3: the τ² implied by
+    # the printed ICC under the correct residual=1 formula would print a
+    # materially different ICC under the logit formula.
+    tau_sq_implied = icc / (1.0 - icc)
+    icc_if_logit_formula = tau_sq_implied / (tau_sq_implied + math.pi ** 2 / 3.0)
+    assert abs(icc - icc_if_logit_formula) > 0.05
+
+
+def test_get_effects_from_data_poisson_reports_no_icc_line(capsys):
+    """Clustered Poisson upload (M9): the ICC line is suppressed entirely — a
+    log-link count model has no latent-scale residual to form an ICC ratio
+    against (raw τ², not ICC-derived). Mirrors driver.rs's cluster_icc, which
+    returns ``None`` for ``MixedOutcome::Poisson``."""
+    rng = np.random.default_rng(19)
+    n_clusters, csize = 20, 20
+    n = n_clusters * csize
+    x = rng.normal(size=n)
+    u = rng.normal(scale=np.sqrt(0.3), size=n_clusters)
+    group = np.repeat(np.arange(n_clusters), csize).astype(float)
+    eta = 0.3 * x + u[np.repeat(np.arange(n_clusters), csize)]
+    y = rng.poisson(np.exp(eta)).astype(float)
+
+    m = MCPower("y ~ x + (1|group)", family="poisson")
+    m.set_cluster("group", tau_squared=0.3, n_clusters=n_clusters)
+    m.upload_data(
+        {"x": x.tolist(), "group": group.tolist(), "y": y.tolist()},
+        verbose=False,
+    )
+
+    m.get_effects_from_data("y")
+    out = capsys.readouterr().out
+    assert "APPROXIMATION" in out
+    assert "Estimated ICC" not in out
 
 
 def test_get_effects_from_data_ols_reports_no_icc(capsys):

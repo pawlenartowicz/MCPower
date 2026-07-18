@@ -53,7 +53,7 @@ def _ols_scenarios_bytes(n_predictors: int = 1) -> bytes:
         "scenarios": [],
     }
     _names, scenarios_bytes, _skeleton = _engine.build_contract_from_spec(
-        json.dumps(linear_spec), "continuous", "ols", 0.0, "[]"
+        json.dumps(linear_spec), "continuous", "canonical", "ols", 0.0, "[]"
     )
     return scenarios_bytes
 

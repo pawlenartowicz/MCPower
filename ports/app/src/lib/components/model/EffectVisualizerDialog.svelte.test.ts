@@ -228,7 +228,7 @@ describe('EffectVisualizerDialog — get effects from data', () => {
     cfg.formula = 'y = x';
     cfg.variables = [{ name: 'x', kind: 'continuous' }];
     cfg.effects = [{ name: 'x', value: 0.1 }];
-    familyStore.regressionOutcome = 'binary';
+    familyStore.regressionOutcome = 'logit';
     const baselineBefore = cfg.baselineProbability;
     uploadYandX('binary');
     mockFit.mockResolvedValue({
@@ -260,7 +260,7 @@ describe('EffectVisualizerDialog — get effects from data', () => {
     cfg.formula = 'y = x';
     cfg.variables = [{ name: 'x', kind: 'continuous' }];
     cfg.effects = [{ name: 'x', value: 0.1 }];
-    familyStore.regressionOutcome = 'binary';
+    familyStore.regressionOutcome = 'logit';
     // 'y' detected as continuous under a binary family → warning.
     uploadYandX('continuous');
 

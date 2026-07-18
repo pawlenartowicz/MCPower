@@ -14,7 +14,11 @@ crate-type = ["rlib"]
 
 [dependencies]
 engine-contract = { path = "../engine-contract" }
-glmm = { path = "../../../../FastStats-Project/GLMM", features = ["mcpower"] }
+# Published crate — the parity-pinned f64 fit kernels. loop_advanced = the unstable
+# scratch-explicit hot-path surface. 0.1.x is parity-stable (sets the GLMM goldens),
+# so patches inside it are safe; the caret stops below 0.2.0 so a minor bump is never
+# picked up silently (same discipline as bobyqa/pulp/rand_philox above).
+glmm = { version = "0.1", default-features = false, features = ["loop_advanced"] }
 rayon        = "1.10"
 serde        = { version = "1", features = ["derive"] }
 # Used only by bin/throughput.rs (baseline JSON read/write); already in the

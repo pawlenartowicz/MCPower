@@ -57,6 +57,7 @@ function cfg(overrides: Partial<ScenarioConfig> = {}): ScenarioConfig {
     residual_dists: [],
     residual_df: 5,
     sampled_factor_proportions: false,
+    truth_start: false,
     lme: { random_effect_dist: 'normal', random_effect_df: 0, icc_noise_sd: 0 },
     ...overrides,
   };
@@ -76,6 +77,7 @@ describe('projectScenario (mirrors Python _scenario_dict)', () => {
       residual_dists: [],
       residual_df: 5,
       sampled_factor_proportions: false,
+      truth_start: false,
       // lme fields hoisted onto the wire (default cfg() lme is neutral → all zero)
       random_effect_dist: 0,
       random_effect_df: 0,
@@ -104,6 +106,15 @@ describe('projectScenario (mirrors Python _scenario_dict)', () => {
     expect(
       projectScenario(legacy as unknown as ScenarioConfig).sampled_factor_proportions,
     ).toBe(false);
+  });
+
+  it('carries truth_start true and defaults missing values to false (optimistic warm-starts, realistic/doomer cold-start)', () => {
+    expect(projectScenario(cfg({ name: 'optimistic', truth_start: true })).truth_start).toBe(true);
+    expect(projectScenario(cfg({ name: 'realistic', truth_start: false })).truth_start).toBe(false);
+    // Persisted pre-knob snapshots lack the field at runtime.
+    const legacy = { ...cfg() } as Record<string, unknown>;
+    delete legacy.truth_start;
+    expect(projectScenario(legacy as unknown as ScenarioConfig).truth_start).toBe(false);
   });
 
   it('encodes new_distributions through _DIST_CODE', () => {

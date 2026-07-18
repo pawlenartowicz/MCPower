@@ -58,12 +58,15 @@ pub struct Matrix {
     pub ncol: usize,
 }
 
-/// Generation kind. Serialises to `"continuous"` | `"binary"`.
+/// Generation kind. Serialises to `"continuous"` | `"binary"` | `"count"`.
+/// The probit/logit distinction rides on the contract's `link`, not here — this
+/// is a coarse outcome label for the debug report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutcomeKind {
     Continuous,
     Binary,
+    Count,
 }
 
 /// Estimator family. Serialises to `"ols"` | `"glm"` | `"mle"`.
@@ -361,6 +364,7 @@ mod entry {
                 outcome_kind: match spec.outcome_kind {
                     engine_contract::OutcomeKind::Continuous => OutcomeKind::Continuous,
                     engine_contract::OutcomeKind::Binary => OutcomeKind::Binary,
+                    engine_contract::OutcomeKind::Count => OutcomeKind::Count,
                 },
                 estimator: wire_estimator(spec.estimator),
             })

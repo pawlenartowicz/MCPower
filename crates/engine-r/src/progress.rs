@@ -12,9 +12,11 @@
 //!      off the main thread.
 //!   2. The orchestrator call runs inside `std::thread::scope`, letting the
 //!      background thread borrow `&contracts` / `&cancel` without `'static`.
-//!   3. The main thread polls the queue between checkpoints: each drained event
+//!   3. The main thread blocks on the queue with a bounded timeout: each event
 //!      is translated to a `(current, total)` pair and the user's R callback is
-//!      invoked (safe — we are on the R main thread).
+//!      invoked (safe — we are on the R main thread). Engine completion drops
+//!      the sender, waking the main thread immediately — short runs return
+//!      without waiting out a poll tick.
 //!   4. The main thread also polls `R_CheckUserInterrupt` for Ctrl-C / Escape.
 //!      That symbol **longjmps** on a pending interrupt; a longjmp across Rust
 //!      frames is undefined behaviour. We contain it with `R_ToplevelExec`,
@@ -33,7 +35,7 @@ use engine_orchestrator::{CancellationToken, OrchestratorError, ProgressEvent, P
 use extendr_api::prelude::*;
 use std::os::raw::c_void;
 use std::panic::AssertUnwindSafe;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 
 // `R_CheckUserInterrupt` and `R_ToplevelExec` are stable public R C-API symbols
 // exported by libR, but extendr-ffi 0.9 does not re-export them. Declare them
@@ -135,10 +137,24 @@ where
         });
 
         let mut state = CallbackState;
-        // Poll until the engine thread finishes. Draining the queue and the
-        // interrupt check both happen here on the R main thread.
+        // Wait until the engine thread finishes. Event delivery and the
+        // interrupt check both happen here on the R main thread. Blocking on
+        // `recv_timeout` (rather than a flat sleep) wakes immediately on each
+        // event AND on engine completion — the background thread owns the only
+        // `Sender`, so its exit drops the channel and `recv_timeout` returns
+        // `Disconnected` at once. A flat 50 ms sleep here used to put a ~50 ms
+        // latency floor under every call, dwarfing short OLS runs.
         loop {
-            drain_queue(&rx, &mut state, callback.as_ref());
+            let engine_done =
+                match rx.recv_timeout(std::time::Duration::from_millis(POLL_INTERVAL_MS)) {
+                    Ok(event) => {
+                        deliver(event, &mut state, callback.as_ref());
+                        drain_queue(&rx, &mut state, callback.as_ref());
+                        false
+                    }
+                    Err(RecvTimeoutError::Timeout) => false,
+                    Err(RecvTimeoutError::Disconnected) => true,
+                };
 
             if !cancel.is_cancelled() && user_interrupt_pending() {
                 // Engine acknowledges at its next checkpoint and returns
@@ -146,26 +162,33 @@ where
                 cancel.cancel();
             }
 
-            if handle.is_finished() {
+            if engine_done || handle.is_finished() {
                 // Flush any events the worker sent between our last drain and
                 // its exit, then collect the result.
                 drain_queue(&rx, &mut state, callback.as_ref());
                 return handle.join().expect("orchestrator thread panicked");
             }
-
-            std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
         }
     })
 }
 
-/// Poll interval for the queue/interrupt loop. Short enough that Ctrl-C feels
-/// responsive, long enough that an idle poll costs nothing measurable.
+/// Upper bound on how long the main thread blocks between Ctrl-C checks when
+/// no events arrive. Events and engine completion wake it immediately.
 const POLL_INTERVAL_MS: u64 = 50;
 
-/// Drain every currently-queued event, invoking `callback` for each that folds
-/// to a `(current, total)` report. A user callback that errors is ignored — its
+/// Deliver one event: invoke `callback` if the event folds to a
+/// `(current, total)` report. A user callback that errors is ignored — its
 /// return value is advisory only (cancellation is via Ctrl-C, mirroring the R
 /// idiom), so a throwing callback must not abort the run.
+fn deliver(event: ProgressEvent, state: &mut CallbackState, callback: Option<&Function>) {
+    if let Some((current, total)) = state.fold(event) {
+        if let Some(cb) = callback {
+            let _ = cb.call(pairlist!(current as i32, total as i32));
+        }
+    }
+}
+
+/// Drain and deliver every currently-queued event without blocking.
 fn drain_queue(
     rx: &Receiver<ProgressEvent>,
     state: &mut CallbackState,
@@ -173,13 +196,7 @@ fn drain_queue(
 ) {
     loop {
         match rx.try_recv() {
-            Ok(event) => {
-                if let Some((current, total)) = state.fold(event) {
-                    if let Some(cb) = callback {
-                        let _ = cb.call(pairlist!(current as i32, total as i32));
-                    }
-                }
-            }
+            Ok(event) => deliver(event, state, callback),
             Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => return,
         }
     }

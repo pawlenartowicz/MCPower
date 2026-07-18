@@ -47,6 +47,7 @@ def test_contract_specs_produces_expected_simulationspec() -> None:
     names, payload, _skeleton = _engine.build_contract_from_spec(
         _simple_linear_spec_json(),
         "continuous",
+        "canonical",
         "ols",
         0.0,
         "[]",

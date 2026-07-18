@@ -218,7 +218,7 @@ test_that("build_contract_from_spec returns names + raw contract bytes", {
     '"residual_dists":[4,2],"residual_df":10.0}]}'
   )
 
-  out <- mcpower:::build_contract_from_spec(spec_json, "continuous", "ols", 0.0, "[]")
+  out <- mcpower:::build_contract_from_spec(spec_json, "continuous", "canonical", "ols", 0.0, "[]")
 
   expect_type(out$contracts, "raw")
   expect_true(length(out$names) >= 1)
@@ -236,7 +236,7 @@ test_that("to_linear_spec_json emits the documented field set", {
                test_formula = NULL)
   # heterogeneity removed from the top-level payload (scenario-only now).
   expect_setequal(names(payload), c("formula","predictors","effects","correlations",
-    "alpha","correction","wald_se","targets","report_overall","contrast_pairs","posthoc_requests",
+    "alpha","correction","wald_se","nagq","targets","report_overall","contrast_pairs","posthoc_requests",
     "heteroskedasticity","residual","max_failed_fraction","scenarios"))
   expect_equal(payload$correction, "none")
   expect_equal(payload$targets, list("overall"))
@@ -368,17 +368,17 @@ test_that(".scenario_dict carries sampled_factor_proportions default and overrid
 })
 
 test_that(".encode_outcome_and_clusters maps ols / logit / lme", {
-  ols <- mcpower:::.encode_outcome_and_clusters("normal", "ols", 0.0, list())
+  ols <- mcpower:::.encode_outcome_and_clusters("normal", "canonical", "ols", 0.0, list())
   expect_equal(ols$outcome_kind, "continuous")
   expect_equal(ols$estimator, "ols")
   expect_equal(ols$clusters_json, "[]")
 
-  logit <- mcpower:::.encode_outcome_and_clusters("logit", "glm", 0.0, list())
+  logit <- mcpower:::.encode_outcome_and_clusters("logit", "canonical", "glm", 0.0, list())
   expect_equal(logit$outcome_kind, "binary")
   expect_equal(logit$estimator, "glm")
   expect_equal(logit$clusters_json, "[]")
 
-  lme <- mcpower:::.encode_outcome_and_clusters("lme", "mle", 0.0,
+  lme <- mcpower:::.encode_outcome_and_clusters("lme", "canonical", "mle", 0.0,
             list(g = list(icc = 0.1, n_clusters = 20)))
   expect_equal(lme$outcome_kind, "continuous")
   expect_equal(lme$estimator, "mle")

@@ -20,6 +20,7 @@ fn small_glmm_contract(wald_se: WaldSe) -> SimulationContract {
         &logit_spec(),
         OutcomeKind::Binary, // Binary ⇒ Glm; cluster present ⇒ GLMM path
         None,
+        None,
         -0.5,
         vec![ClusterSpec {
             sizing: ClusterSizing::FixedClusters { n_clusters: 20 },

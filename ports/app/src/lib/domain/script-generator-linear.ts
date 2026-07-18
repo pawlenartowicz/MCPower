@@ -74,8 +74,8 @@ export function buildConfigLines(
 
 /** The find_power / find_sample_size call block, shared by every family generator.
  *  Lines that restate a port default (bounds 30/200, by auto, correction none,
- *  wald_se hessian) are omitted. `waldSe` is the find_* kwarg both ports expose
- *  for the clustered-binary GLMM; omitted/undefined for families that lack it. */
+ *  wald_se rx, agq 1) are omitted. `waldSe` and `agq` are the find_* kwargs both
+ *  ports expose for the clustered GLMM; omitted/undefined for families that lack them. */
 export function buildFindCallLines(
   lang: Lang,
   mode: 'find-power' | 'find-sample-size',
@@ -83,6 +83,7 @@ export function buildFindCallLines(
   testsArg: string | null,
   correction: string,
   waldSe?: string,
+  agq?: number,
 ): string[] {
   const lines: string[] = [];
   if (mode === 'find-power') {
@@ -101,7 +102,10 @@ export function buildFindCallLines(
   }
   if (testsArg !== null) lines.push(`    target_test="${testsArg}",`);
   if (correction !== 'none') lines.push(`    correction="${correction}",`);
-  if (waldSe && waldSe !== 'hessian') lines.push(`    wald_se="${waldSe}",`);
+  // wald_se default flipped to rx at 1.1.0 — omit the default (rx), emit the opt-in.
+  if (waldSe && waldSe !== 'rx') lines.push(`    wald_se="${waldSe}",`);
+  // agq default is 1 (Laplace) → omit; emit only the adaptive-quadrature opt-in.
+  if (agq && agq > 1) lines.push(`    agq=${agq},`);
   lines.push(')');
   return lines;
 }

@@ -37,6 +37,9 @@ build_model <- function(case) {
   if (!is.null(case$baseline_probability)) {
     m$set_baseline_probability(case$baseline_probability)
   }
+  if (!is.null(case$baseline_rate)) {
+    m$set_baseline_rate(case$baseline_rate)
+  }
   if (!is.null(case$cluster)) {
     cl <- case$cluster
     m$set_cluster(cl$var, ICC = cl$ICC,
@@ -178,7 +181,16 @@ true_beta_vector <- function(case, columns) {
   for (j in seq_along(columns)) {
     col <- columns[j]
     if (col == "intercept") {
-      tb[j] <- if (!is.null(case$baseline_probability)) stats::qlogis(case$baseline_probability) else 0
+      # Family-correct link of the baseline: logit -> qlogis(p), probit -> qnorm(p),
+      # poisson -> log(rate); OLS/LME have no intercept term (0). The A<->B recovery
+      # oracle (validation_data_generation.rmd) compares mean(beta_hat) to this, so a
+      # wrong link here would spuriously flag the intercept for probit/poisson.
+      tb[j] <- if (!is.null(case$baseline_probability)) {
+                 if (identical(case$family, "probit")) stats::qnorm(case$baseline_probability)
+                 else stats::qlogis(case$baseline_probability)
+               } else if (!is.null(case$baseline_rate)) {
+                 log(case$baseline_rate)
+               } else 0
     } else if (grepl("^interaction_", col)) {
       ii <- ii + 1L; tb[j] <- inter_eff[[ii]]
     } else {                                          # col_ or factor_dummy_ main effect
@@ -267,6 +279,21 @@ fit_sota <- function(family, design, outcome, cluster_ids = NULL) {
     se   <- sqrt(diag(as.matrix(stats::vcov(fit))))
   } else if (family == "logit") {
     fit <- stats::glm(outcome ~ design + 0, family = stats::binomial())
+    sm  <- summary(fit)$coefficients
+    beta <- sm[, "Estimate"]
+    se   <- sm[, "Std. Error"]
+  } else if (family == "probit") {
+    # Probit-link binomial GLM — the B-side oracle for family="probit" (matches
+    # MCPower's probit DGP + Glm fit). Same coefficient/SE extraction as logit.
+    fit <- stats::glm(outcome ~ design + 0,
+                      family = stats::binomial(link = "probit"))
+    sm  <- summary(fit)$coefficients
+    beta <- sm[, "Estimate"]
+    se   <- sm[, "Std. Error"]
+  } else if (family == "poisson") {
+    # Log-link Poisson GLM — the B-side oracle for family="poisson" (count
+    # outcome, log link). Same extraction as the other GLM fits.
+    fit <- stats::glm(outcome ~ design + 0, family = stats::poisson())
     sm  <- summary(fit)$coefficients
     beta <- sm[, "Estimate"]
     se   <- sm[, "Std. Error"]

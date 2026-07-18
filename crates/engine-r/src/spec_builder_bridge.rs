@@ -14,12 +14,15 @@ use serde::Serialize;
 ///                   aligned), so the R frontend names results from it + its own
 ///                   label store instead of re-deriving the factor layout.
 ///
-/// `outcome_kind` is one of `"continuous"` | `"binary"`.
+/// `outcome_kind` is one of `"continuous"` | `"binary"` | `"count"`.
+/// `link` is `"canonical"` (or `""`) for the canonical link, or `"probit"` to
+/// override a binary outcome to the probit link.
 /// `estimator`    is one of `"ols"` | `"glm"` | `"mle"`.
 #[extendr]
 pub fn build_contract_from_spec(
     json: &str,
     outcome_kind: &str,
+    link: &str,
     estimator: &str,
     intercept: f64,
     clusters_json: &str,
@@ -29,7 +32,13 @@ pub fn build_contract_from_spec(
     let outcome = match outcome_kind {
         "continuous" => engine_contract::OutcomeKind::Continuous,
         "binary" => engine_contract::OutcomeKind::Binary,
+        "count" => engine_contract::OutcomeKind::Count,
         other => return Err(Error::Other(format!("unknown outcome_kind {other:?}"))),
+    };
+    let link = match link {
+        "" | "canonical" => None,
+        "probit" => Some(engine_contract::LinkKind::Probit),
+        other => return Err(Error::Other(format!("unknown link {other:?}"))),
     };
     let est = match estimator {
         "ols" => engine_contract::EstimatorSpec::Ols,
@@ -42,6 +51,7 @@ pub fn build_contract_from_spec(
     let (contracts, skeleton) = engine_spec_builder::build_contract_with_skeleton(
         &spec,
         outcome,
+        link,
         Some(est),
         intercept,
         clusters,

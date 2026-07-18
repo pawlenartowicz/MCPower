@@ -28,27 +28,33 @@ describe('familyStore.activeOutcome — resolved per active family', () => {
 
   it('regression reads its store-level outcome toggle', () => {
     familyStore.active = 'regression';
-    expect(familyStore.activeOutcome).toBe('continuous');
-    familyStore.regressionOutcome = 'binary';
-    expect(familyStore.activeOutcome).toBe('binary');
+    expect(familyStore.activeOutcome).toBe('linear');
+    familyStore.regressionOutcome = 'logit';
+    expect(familyStore.activeOutcome).toBe('logit');
+    familyStore.regressionOutcome = 'poisson';
+    expect(familyStore.activeOutcome).toBe('poisson');
   });
 
-  it('mixed reads its cluster.binaryOutcome flag', () => {
+  it('mixed reads its cluster outcomeKind (and legacy binaryOutcome flag)', () => {
     familyStore.active = 'mixed';
-    expect(familyStore.activeOutcome).toBe('continuous'); // flag absent → Gaussian LME
+    expect(familyStore.activeOutcome).toBe('linear'); // absent → Gaussian LME
+    familyStore.byFamily.mixed.cluster!.outcomeKind = 'probit';
+    expect(familyStore.activeOutcome).toBe('probit');
+    // Legacy persisted state (binaryOutcome flag, no outcomeKind) still resolves.
+    familyStore.byFamily.mixed.cluster!.outcomeKind = undefined;
     familyStore.byFamily.mixed.cluster!.binaryOutcome = true;
-    expect(familyStore.activeOutcome).toBe('binary');
+    expect(familyStore.activeOutcome).toBe('logit');
   });
 
   it('ignores the other family\'s outcome state', () => {
     // Regression binary must not bleed into mixed, and vice-versa.
-    familyStore.regressionOutcome = 'binary';
+    familyStore.regressionOutcome = 'logit';
     familyStore.active = 'mixed';
-    expect(familyStore.activeOutcome).toBe('continuous');
+    expect(familyStore.activeOutcome).toBe('linear');
   });
 
-  it('anova is always continuous', () => {
+  it('anova is always linear', () => {
     familyStore.active = 'anova';
-    expect(familyStore.activeOutcome).toBe('continuous');
+    expect(familyStore.activeOutcome).toBe('linear');
   });
 });

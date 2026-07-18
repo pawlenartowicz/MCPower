@@ -3,6 +3,7 @@ import type { AppSpec } from './app-spec';
 import type { ScriptParams, ScriptLanguage } from './script-generator-linear';
 import { generateLinearScript } from './script-generator-linear';
 import { generateLogitScript } from './script-generator-logit';
+import { generatePoissonScript } from './script-generator-poisson';
 import { generateAnovaScript } from './script-generator-anova';
 import { generateMixedScript } from './script-generator-mixed';
 
@@ -19,6 +20,8 @@ export function generateScript(
       return generateLinearScript(spec, mode, params, language);
     case 'logit':
       return generateLogitScript(spec, mode, params, language);
+    case 'poisson':
+      return generatePoissonScript(spec, mode, params, language);
     case 'anova':
       return generateAnovaScript(spec, mode, params, language);
     case 'mixed':

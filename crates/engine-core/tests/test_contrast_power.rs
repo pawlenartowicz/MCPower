@@ -65,10 +65,12 @@ fn three_level_factor_contract(targets: Vec<TestTarget>) -> SimulationContract {
                 pinned: false,
             },
             heteroskedasticity_driver: None,
+            link: None,
         },
         design_test: Some(DesignSpec { terms }),
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        nagq: 1,
         test: TestSpec {
             targets,
             correction: CorrectionMethod::None,

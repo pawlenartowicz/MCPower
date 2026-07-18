@@ -10,41 +10,92 @@ use engine_spec_builder::{
 use engine_contract::CorrectionMethod;
 
 use crate::app_spec::{
-    AppGroupingRelation, AppGroupingSpec, AppSlopeTerm, AppSpec, ClusterDim, CorrelationMatrix,
-    CsvData, EffectSize, LinearSpec, LogitSpec, MixedOutcome, MixedSpec, NumericDistribution,
-    OutcomeOptions, ParsedFormula, TestSelection, VarType,
+    AppGroupingRelation, AppGroupingSpec, AppSlopeTerm, AppSpec, BinaryLink, ClusterDim,
+    CorrelationMatrix, CsvData, EffectSize, LinearSpec, LogitSpec, MixedOutcome, MixedSpec,
+    NumericDistribution, OutcomeOptions, ParsedFormula, PoissonSpec, TestSelection, VarType,
 };
 use crate::error::AdapterError;
 
-/// Thin wrapper that drops the `EffectSkeleton` for the run path (which only
-/// needs the contracts). The projection lives once in
-/// [`assemble_spec_with_skeleton`].
+/// Thin wrapper that drops the `EffectSkeleton` and non-blocking warnings for
+/// callers that only need the contracts (`get_effects_from_data`'s data-fit
+/// preview, which never runs a quadrature-sensitive simulation, and the test
+/// suite). Run paths that surface a run to a user go through
+/// [`assemble_spec_with_skeleton`] instead so an ineligible `agq` stripped to
+/// Laplace is not silently lost — see `driver.rs`.
 pub fn assemble_spec(spec: &AppSpec) -> Result<Vec<SimulationContract>, AdapterError> {
     Ok(assemble_spec_with_skeleton(spec)?.0)
 }
 
-/// As [`assemble_spec`], but also returns the index-only [`EffectSkeleton`] so a
-/// host (Tauri, WASM) can name results from it + its own label store. The
-/// skeleton is identical across the returned contracts (one design per spec).
+/// As [`assemble_spec`], but also returns the index-only [`EffectSkeleton`] (so
+/// a host can name results from it + its own label store; the skeleton is
+/// identical across the returned contracts — one design per spec) and
+/// non-blocking host-side warnings — currently only an ineligible `agq > 1`
+/// silently stripped to `1` (Laplace). Mirrors the Python/R ports' `{value,
+/// warnings}` shape (`model.py`'s `_resolve_estimation`, which returns the
+/// resolved value alongside a `warnings.warn`).
 pub fn assemble_spec_with_skeleton(
     spec: &AppSpec,
-) -> Result<(Vec<SimulationContract>, EffectSkeleton), AdapterError> {
+) -> Result<(Vec<SimulationContract>, EffectSkeleton, Vec<String>), AdapterError> {
     // Each assembler returns the builder's full contract Vec: empty `scenarios`
     // yields one baseline contract, a non-empty list yields one contract per
     // scenario. The run drivers pass the whole slice to the orchestrator, which
     // fans out N scenarios into a `ScenarioResult` of len N.
     match spec {
-        AppSpec::Linear(linear) => assemble_linear(linear),
+        AppSpec::Linear(linear) => {
+            let (contracts, skeleton) = assemble_linear(linear)?;
+            Ok((contracts, skeleton, vec![]))
+        }
         AppSpec::Logit(logit) => assemble_logit(logit),
         AppSpec::Mixed(mixed) => assemble_mixed(mixed),
+        AppSpec::Poisson(poisson) => assemble_poisson(poisson),
     }
+}
+
+/// Strip an ineligible `requested` agq (adaptive Gauss–Hermite quadrature node
+/// count) to Laplace (`1`) and record a warning; a no-op when `requested <= 1`
+/// or the design is `eligible`. Mirrors `model.py`'s `_agq_eligible` /
+/// `_resolve_estimation` and `mcpower.R`'s `agq_eligible` / `resolve_estimation` —
+/// change the wording and the eligibility rule in all three together.
+/// `invariant_25_nagq_backstop` (engine-contract) is the contract-side backstop
+/// this pre-empts; reaching it from a host is the bug this guards against.
+fn resolve_nagq(requested: u8, eligible: bool, warnings: &mut Vec<String>) -> u8 {
+    if requested > 1 && !eligible {
+        warnings.push(format!(
+            "agq={requested} is not available for this design; running at agq=1 (Laplace). \
+             AGQ requires a clustered binary or count (logit/probit/poisson) model with a \
+             single grouping factor and at most 3 random effects per group."
+        ));
+        1
+    } else {
+        requested
+    }
+}
+
+/// Whether `spec`'s design admits adaptive Gauss–Hermite quadrature: a
+/// clustered Binary/Count GLMM (Gaussian LME never qualifies) with exactly one
+/// grouping factor (no extra groupings — a second grouping factor makes the
+/// likelihood non-separable in the way AGQ assumes) and at most 3 random
+/// effects per group (intercept + slopes). Mirrors `model.py`'s
+/// `_agq_eligible` and `mcpower.R`'s `agq_eligible` — change the rule in all
+/// three together.
+fn mixed_agq_eligible(spec: &MixedSpec) -> bool {
+    matches!(
+        spec.outcome,
+        MixedOutcome::Binary { .. } | MixedOutcome::Poisson { .. }
+    ) && spec.extra_groupings.is_empty()
+        // `1 + slopes` = total REs per group (intercept + slopes); kept in this
+        // form to mirror the ≤ 3 rule in model.py / mcpower.R verbatim.
+        && { #[allow(clippy::int_plus_one)] { 1 + spec.slopes.len() <= 3 } }
 }
 
 /// JSON of the index-only [`EffectSkeleton`] for `spec` — the convenience both
 /// GUI hosts call to name results without re-deriving the factor-expansion
 /// layout. Mirrors the `skeleton` string the Py/R bridges return.
 pub fn effect_skeleton_json(spec: &AppSpec) -> Result<String, AdapterError> {
-    let (_, skeleton) = assemble_spec_with_skeleton(spec)?;
+    // Naming-only helper: the skeleton is a pure function of the design shape,
+    // so the assemble-time warnings (e.g. an ineligible agq) are irrelevant here
+    // and are surfaced instead by the run drivers that actually execute a run.
+    let (_, skeleton, _warnings) = assemble_spec_with_skeleton(spec)?;
     serde_json::to_string(&skeleton).map_err(|e| AdapterError::SkeletonEncode(e.to_string()))
 }
 
@@ -68,6 +119,15 @@ pub(crate) fn icc_to_tau_squared_logit(icc: f64) -> f64 {
     icc_to_tau_squared(icc) * std::f64::consts::PI.powi(2) / 3.0
 }
 
+/// Map the app-layer [`BinaryLink`] to the contract's `Option<LinkKind>`:
+/// `Logit` (canonical) → `None`, `Probit` → `Some(LinkKind::Probit)`.
+pub(crate) fn contract_link(link: BinaryLink) -> Option<engine_contract::LinkKind> {
+    match link {
+        BinaryLink::Logit => None,
+        BinaryLink::Probit => Some(engine_contract::LinkKind::Probit),
+    }
+}
+
 /// Logit (log-odds) of a probability `p ∈ (0, 1)`: `ln(p / (1 − p))`. Turns a
 /// baseline probability into the GLM intercept; the caller guards `p`'s range.
 /// Inverse of [`logistic`] — change the two together so the baseline round-trip
@@ -87,7 +147,8 @@ pub(crate) fn logistic(x: f64) -> f64 {
 
 fn assemble_mixed(
     spec: &MixedSpec,
-) -> Result<(Vec<SimulationContract>, EffectSkeleton), AdapterError> {
+) -> Result<(Vec<SimulationContract>, EffectSkeleton, Vec<String>), AdapterError> {
+    let mut warnings = Vec::new();
     let mut builder_spec = project_to_builder_spec(
         &spec.parsed_formula,
         &spec.var_types,
@@ -104,6 +165,7 @@ fn assemble_mixed(
     builder_spec.scenarios = spec.scenarios.clone();
     builder_spec.cluster_level_vars = spec.cluster_level_vars.clone();
     builder_spec.wald_se = spec.wald_se;
+    builder_spec.nagq = resolve_nagq(spec.agq, mixed_agq_eligible(spec), &mut warnings);
     apply_outcome_options(
         &mut builder_spec,
         spec.outcome_options.as_ref(),
@@ -146,25 +208,55 @@ fn assemble_mixed(
         });
     }
 
-    let (outcome_kind, estimator, intercept, tau_squared) = match &spec.outcome {
+    let (outcome_kind, link, estimator, intercept, tau_squared) = match &spec.outcome {
         MixedOutcome::Gaussian => (
             engine_contract::OutcomeKind::Continuous,
+            None,
             Some(engine_contract::EstimatorSpec::Mle),
             0.0,
             icc_to_tau_squared(spec.icc),
         ),
         MixedOutcome::Binary {
             baseline_probability,
+            link,
         } => {
             let p = *baseline_probability;
             if !(p > 0.0 && p < 1.0) {
                 return Err(AdapterError::BaselineProbabilityOutOfRange { value: p });
             }
+            // Latent-scale τ²: logit's latent residual variance is π²/3 (the
+            // log-odds scale); probit's is 1 (the standard-normal latent scale),
+            // so probit uses the raw icc_to_tau_squared with no extra factor.
+            let tau_squared = match link {
+                BinaryLink::Logit => icc_to_tau_squared_logit(spec.icc),
+                BinaryLink::Probit => icc_to_tau_squared(spec.icc),
+            };
             (
                 engine_contract::OutcomeKind::Binary,
+                contract_link(*link),
                 Some(engine_contract::EstimatorSpec::Glm),
                 logit(p),
-                icc_to_tau_squared_logit(spec.icc),
+                tau_squared,
+            )
+        }
+        MixedOutcome::Poisson {
+            baseline_rate,
+            tau_squared,
+        } => {
+            let rate = *baseline_rate;
+            // NaN-safe: `!(rate > 0.0)` also rejects NaN, `rate <= 0.0` would not.
+            #[allow(clippy::neg_cmp_op_on_partial_ord)]
+            if !(rate > 0.0) {
+                return Err(AdapterError::BaselineRateOutOfRange { value: rate });
+            }
+            (
+                engine_contract::OutcomeKind::Count,
+                None,
+                Some(engine_contract::EstimatorSpec::Glm),
+                rate.ln(),
+                // RAW τ² — Poisson has no residual variance to scale an ICC
+                // against, so the outcome's tau_squared passes straight through.
+                *tau_squared,
             )
         }
     };
@@ -172,6 +264,7 @@ fn assemble_mixed(
     let built = build_contract_with_skeleton(
         &builder_spec,
         outcome_kind,
+        link,
         estimator,
         intercept,
         vec![engine_contract::ClusterSpec {
@@ -182,7 +275,7 @@ fn assemble_mixed(
         }],
     )
     .map_err(AdapterError::from)?;
-    Ok(built)
+    Ok((built.0, built.1, warnings))
 }
 
 /// Convert a UI-layer [`AppGroupingSpec`] to the contract's `GroupingSpec`.
@@ -270,6 +363,7 @@ fn assemble_linear(
         &builder_spec,
         engine_contract::OutcomeKind::Continuous,
         None,
+        None,
         0.0,
         vec![],
     )
@@ -279,7 +373,7 @@ fn assemble_linear(
 
 fn assemble_logit(
     spec: &LogitSpec,
-) -> Result<(Vec<SimulationContract>, EffectSkeleton), AdapterError> {
+) -> Result<(Vec<SimulationContract>, EffectSkeleton, Vec<String>), AdapterError> {
     let p = spec.baseline_probability;
     if !(p > 0.0 && p < 1.0) {
         return Err(AdapterError::BaselineProbabilityOutOfRange { value: p });
@@ -299,6 +393,10 @@ fn assemble_logit(
     builder_spec.test_formula = spec.test_formula.clone();
     builder_spec.scenarios = spec.scenarios.clone();
     builder_spec.wald_se = spec.wald_se;
+    // Unclustered GLM (no grouping factor at all) never admits AGQ — always
+    // strip an ineligible agq > 1 to Laplace, mirroring `model.py`.
+    let mut warnings = Vec::new();
+    builder_spec.nagq = resolve_nagq(spec.agq, false, &mut warnings);
     apply_outcome_options(
         &mut builder_spec,
         spec.outcome_options.as_ref(),
@@ -309,12 +407,60 @@ fn assemble_logit(
     let built = build_contract_with_skeleton(
         &builder_spec,
         engine_contract::OutcomeKind::Binary,
+        contract_link(spec.link),
         None,
         intercept,
         vec![],
     )
     .map_err(AdapterError::from)?;
-    Ok(built)
+    Ok((built.0, built.1, warnings))
+}
+
+fn assemble_poisson(
+    spec: &PoissonSpec,
+) -> Result<(Vec<SimulationContract>, EffectSkeleton, Vec<String>), AdapterError> {
+    let rate = spec.baseline_rate;
+    // NaN-safe: `!(rate > 0.0)` also rejects NaN, `rate <= 0.0` would not.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+    if !(rate > 0.0) {
+        return Err(AdapterError::BaselineRateOutOfRange { value: rate });
+    }
+    let intercept = rate.ln();
+
+    let mut builder_spec = project_to_builder_spec(
+        &spec.parsed_formula,
+        &spec.var_types,
+        &spec.effects,
+        &spec.correlations,
+        spec.correction,
+        &spec.tests,
+        spec.alpha,
+        spec.csv.as_ref(),
+    )?;
+    builder_spec.test_formula = spec.test_formula.clone();
+    builder_spec.scenarios = spec.scenarios.clone();
+    builder_spec.wald_se = spec.wald_se;
+    // Unclustered GLM (no grouping factor at all) never admits AGQ — always
+    // strip an ineligible agq > 1 to Laplace, mirroring `model.py`.
+    let mut warnings = Vec::new();
+    builder_spec.nagq = resolve_nagq(spec.agq, false, &mut warnings);
+    apply_outcome_options(
+        &mut builder_spec,
+        spec.outcome_options.as_ref(),
+        &spec.var_types,
+    )?;
+
+    // estimator None → build_contract default coupling: Count → Glm.
+    let built = build_contract_with_skeleton(
+        &builder_spec,
+        engine_contract::OutcomeKind::Count,
+        None,
+        None,
+        intercept,
+        vec![],
+    )
+    .map_err(AdapterError::from)?;
+    Ok((built.0, built.1, warnings))
 }
 
 /// Convert a `CsvData` attachment to the spec-builder's `UploadInput` envelope.
@@ -576,6 +722,7 @@ fn project_to_builder_spec(
         upload: csv.map(csv_to_upload_input),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     })
 }
 
@@ -1335,11 +1482,18 @@ mod tests {
             Some(csv),
         )
         .expect("undeclared upload column must project without a conflict error");
-        build_contract(&builder_spec, OutcomeKind::Continuous, None, 0.0, vec![])
-            .expect("undeclared upload column must build a valid contract")
-            .into_iter()
-            .next()
-            .expect("one contract")
+        build_contract(
+            &builder_spec,
+            OutcomeKind::Continuous,
+            None,
+            None,
+            0.0,
+            vec![],
+        )
+        .expect("undeclared upload column must build a valid contract")
+        .into_iter()
+        .next()
+        .expect("one contract")
     }
 
     // Undeclared predictor + column detected Binary → no error, and it builds as
@@ -1436,6 +1590,7 @@ mod tests {
             residual_dists: vec![],
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
@@ -1508,6 +1663,7 @@ mod tests {
         let contracts = build_contract(
             &spec,
             engine_contract::OutcomeKind::Continuous,
+            None,
             None,
             0.0,
             vec![],
@@ -1592,7 +1748,84 @@ mod tests {
             extra_groupings: vec![],
             slopes: vec![],
             outcome: MixedOutcome::Gaussian,
+            agq: 1,
         }
+    }
+
+    // ── AGQ eligibility (invariant_25_nagq_backstop pre-empted host-side) ──────
+
+    // Gaussian LME never admits AGQ regardless of grouping/slope shape.
+    #[test]
+    fn mixed_agq_ineligible_for_gaussian_outcome() {
+        let spec = mixed_fixture();
+        assert!(!mixed_agq_eligible(&spec));
+    }
+
+    // A single Binary GLMM grouping factor with no slopes (1 RE) is eligible.
+    #[test]
+    fn mixed_agq_eligible_for_single_group_binary_glmm() {
+        let mut spec = mixed_fixture();
+        spec.outcome = MixedOutcome::Binary {
+            baseline_probability: 0.3,
+            link: Default::default(),
+        };
+        assert!(mixed_agq_eligible(&spec));
+    }
+
+    // A second grouping factor (extra_groupings non-empty) is ineligible even
+    // though the outcome and RE count would otherwise qualify.
+    #[test]
+    fn mixed_agq_ineligible_with_extra_grouping() {
+        let mut spec = mixed_fixture();
+        spec.outcome = MixedOutcome::Binary {
+            baseline_probability: 0.3,
+            link: Default::default(),
+        };
+        spec.extra_groupings = vec![AppGroupingSpec {
+            tau_squared: 0.1,
+            relation: AppGroupingRelation::Crossed { n_clusters: 8 },
+            cluster_name: None,
+            slopes: vec![],
+        }];
+        assert!(!mixed_agq_eligible(&spec));
+    }
+
+    // Intercept + 3 slopes = 4 REs per group exceeds the ≤3 cap — ineligible,
+    // even for an otherwise-qualifying single-grouping Binary GLMM. (A
+    // `resolve_slopes` limitation — its `corr_with` is always empty, so a
+    // built contract with 2+ primary slopes fails `check_slope_terms`'s
+    // corr_with-length invariant independently of AGQ — means this checks the
+    // eligibility rule directly rather than through a full `assemble_mixed`.)
+    #[test]
+    fn mixed_agq_ineligible_with_too_many_slopes() {
+        let mut spec = mixed_fixture();
+        spec.outcome = MixedOutcome::Binary {
+            baseline_probability: 0.3,
+            link: Default::default(),
+        };
+        let slope = |name: &str| AppSlopeTerm {
+            predictor_name: name.into(),
+            slope_variance: 0.1,
+            slope_intercept_corr: 0.0,
+        };
+        spec.slopes = vec![slope("x1"), slope("x2"), slope("x1")];
+        assert!(!mixed_agq_eligible(&spec));
+    }
+
+    // resolve_nagq is a no-op when the request is already Laplace or the
+    // design qualifies; otherwise it strips to 1 and records exactly one warning.
+    #[test]
+    fn resolve_nagq_strips_and_warns_only_when_ineligible() {
+        let mut warnings = Vec::new();
+        assert_eq!(resolve_nagq(1, false, &mut warnings), 1);
+        assert!(warnings.is_empty(), "nagq=1 never warns");
+
+        assert_eq!(resolve_nagq(5, true, &mut warnings), 5);
+        assert!(warnings.is_empty(), "an eligible design never warns");
+
+        assert_eq!(resolve_nagq(5, false, &mut warnings), 1);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("agq=5"));
     }
 
     // A non-empty cluster_level_vars threads through assemble_mixed →
@@ -1602,7 +1835,7 @@ mod tests {
     fn assemble_mixed_forwards_cluster_level_vars() {
         let mut spec = mixed_fixture();
         spec.cluster_level_vars = vec!["x2".into()];
-        let (contracts, _) =
+        let (contracts, _, _) =
             assemble_mixed(&spec).expect("assemble_mixed with cluster_level_vars must not error");
         // x2 must land as a cluster-level column, not be silently dropped (was: is_ok only).
         assert_eq!(
@@ -1623,7 +1856,7 @@ mod tests {
             relation: AppGroupingRelation::Crossed { n_clusters: 8 },
             slopes: vec![],
         }];
-        let (contracts, _) =
+        let (contracts, _, _) =
             assemble_mixed(&spec).expect("assemble_mixed with extra_groupings must succeed");
         // The crossed grouping must land on the contract's cluster (was: is_ok only).
         let cluster = contracts[0]
@@ -1655,7 +1888,7 @@ mod tests {
                 slope_intercept_corr: -0.3,
             }],
         }];
-        let (contracts, _) = assemble_mixed(&spec)
+        let (contracts, _, _) = assemble_mixed(&spec)
             .expect("assemble_mixed with an extra-grouping slope must not error");
         let cluster = contracts[0]
             .generation
@@ -1727,7 +1960,7 @@ mod tests {
             slope_variance: 0.05,
             slope_intercept_corr: -0.2,
         }];
-        let (contracts, _) =
+        let (contracts, _, _) =
             assemble_mixed(&spec).expect("assemble_mixed with slopes must not error");
         // The slope on x1 must land on the cluster with its variance (was: is_ok only).
         // The slope's ColumnId mapping is pinned separately by
@@ -1810,7 +2043,7 @@ mod tests {
             slope_variance: 0.05,
             slope_intercept_corr: 0.0,
         }];
-        let (contracts, _) = assemble_mixed(&spec).expect("assemble ok");
+        let (contracts, _, _) = assemble_mixed(&spec).expect("assemble ok");
         let cluster = contracts[0]
             .generation
             .cluster
@@ -1835,9 +2068,10 @@ mod tests {
         spec.icc = icc;
         spec.outcome = MixedOutcome::Binary {
             baseline_probability: p,
+            link: BinaryLink::Logit,
         };
 
-        let (contracts, _) = assemble_mixed(&spec).expect("binary mixed assembles ok");
+        let (contracts, _, _) = assemble_mixed(&spec).expect("binary mixed assembles ok");
         let c = &contracts[0];
 
         assert_eq!(c.outcome.kind, OutcomeKind::Binary, "binary outcome");
@@ -1866,7 +2100,7 @@ mod tests {
         spec.icc = icc;
         spec.outcome = MixedOutcome::Gaussian;
 
-        let (contracts, _) = assemble_mixed(&spec).expect("gaussian mixed assembles ok");
+        let (contracts, _, _) = assemble_mixed(&spec).expect("gaussian mixed assembles ok");
         let c = &contracts[0];
         assert_eq!(c.outcome.kind, OutcomeKind::Continuous);
         assert_eq!(c.estimator, EstimatorSpec::Mle);
@@ -1921,6 +2155,7 @@ mod tests {
         spec.icc = icc;
         spec.outcome = MixedOutcome::Binary {
             baseline_probability: p,
+            link: BinaryLink::Logit,
         };
 
         let contracts = assemble_spec(&AppSpec::Mixed(spec)).expect("binary mixed assembles");
@@ -1942,11 +2177,162 @@ mod tests {
         let mut spec = mixed_fixture();
         spec.outcome = MixedOutcome::Binary {
             baseline_probability: 0.3,
+            link: BinaryLink::Logit,
         };
         // mixed_fixture has no scenarios, so this produces one baseline contract.
         let contracts = assemble_spec(&AppSpec::Mixed(spec)).expect("assembles ok");
         for c in &contracts {
             assert_eq!(c.outcome.kind, engine_contract::OutcomeKind::Binary);
         }
+    }
+
+    // ── Probit link: latent τ² has no π²/3 factor (residual variance = 1) ────
+
+    #[test]
+    fn assemble_mixed_probit_tau_has_no_pi_squared_factor_while_logit_does() {
+        let icc = 0.2_f64;
+
+        let mut logit_spec = mixed_fixture();
+        logit_spec.icc = icc;
+        logit_spec.outcome = MixedOutcome::Binary {
+            baseline_probability: 0.3,
+            link: BinaryLink::Logit,
+        };
+        let (logit_contracts, _, _) =
+            assemble_mixed(&logit_spec).expect("logit mixed assembles ok");
+        let logit_tau = logit_contracts[0]
+            .generation
+            .cluster
+            .as_ref()
+            .expect("cluster present")
+            .tau_squared;
+        assert!((logit_tau - icc_to_tau_squared_logit(icc)).abs() < 1e-10);
+
+        let mut probit_spec = mixed_fixture();
+        probit_spec.icc = icc;
+        probit_spec.outcome = MixedOutcome::Binary {
+            baseline_probability: 0.3,
+            link: BinaryLink::Probit,
+        };
+        let (probit_contracts, _, _) =
+            assemble_mixed(&probit_spec).expect("probit mixed assembles ok");
+        let probit_tau = probit_contracts[0]
+            .generation
+            .cluster
+            .as_ref()
+            .expect("cluster present")
+            .tau_squared;
+        // Probit's latent residual variance is 1 (not π²/3) — no extra factor.
+        assert!((probit_tau - icc_to_tau_squared(icc)).abs() < 1e-10);
+        assert!(
+            (probit_tau * std::f64::consts::PI.powi(2) / 3.0 - logit_tau).abs() < 1e-10,
+            "logit τ² must be exactly π²/3 times the probit τ² for the same icc"
+        );
+
+        assert_eq!(
+            probit_contracts[0].outcome.link,
+            Some(engine_contract::LinkKind::Probit)
+        );
+        assert_eq!(logit_contracts[0].outcome.link, None);
+    }
+
+    // ── MixedOutcome::Poisson: raw τ² passes straight through, no ICC conversion ──
+
+    #[test]
+    fn assemble_mixed_poisson_outcome_passes_raw_tau_and_log_intercept() {
+        use engine_contract::{EstimatorSpec, OutcomeKind};
+
+        let rate = 4.0_f64;
+        let raw_tau = 0.35_f64;
+        let mut spec = mixed_fixture();
+        // icc is ignored for the Poisson arm; the top-level validation still
+        // runs, so 0.0 (no clustering marker) must pass it.
+        spec.icc = 0.0;
+        spec.outcome = MixedOutcome::Poisson {
+            baseline_rate: rate,
+            tau_squared: raw_tau,
+        };
+
+        let (contracts, _, _) = assemble_mixed(&spec).expect("poisson mixed assembles ok");
+        let c = &contracts[0];
+        assert_eq!(c.outcome.kind, OutcomeKind::Count);
+        assert_eq!(c.estimator, EstimatorSpec::Glm);
+        assert!((c.outcome.intercept - rate.ln()).abs() < 1e-12);
+        let cluster = c.generation.cluster.as_ref().expect("cluster present");
+        assert!(
+            (cluster.tau_squared - raw_tau).abs() < 1e-12,
+            "Poisson tau_squared must pass through raw, not ICC-converted"
+        );
+    }
+
+    // ── assemble_poisson (unclustered): log intercept + baseline_rate validation ──
+
+    #[test]
+    fn assemble_poisson_sets_log_intercept_and_count_outcome() {
+        use engine_contract::{EstimatorSpec, OutcomeKind};
+
+        let spec = PoissonSpec {
+            parsed_formula: pf(vec!["x1"], vec![]),
+            var_types: vec![VarType::Numeric {
+                name: "x1".into(),
+                distribution: NumericDistribution::Normal,
+                pinned: false,
+            }],
+            effects: vec![EffectSize {
+                name: "x1".into(),
+                value: 0.2,
+            }],
+            correlations: None,
+            alpha: 0.05,
+            target_power: 0.8,
+            n_sims: 100,
+            seed: 2137,
+            tests: TestSelection::All,
+            correction: CorrectionMethod::None,
+            wald_se: Default::default(),
+            scenarios: vec![],
+            csv: None,
+            baseline_rate: 5.0,
+            test_formula: None,
+            outcome_options: None,
+            agq: 1,
+        };
+        let (contracts, _, _) = assemble_poisson(&spec).expect("assemble_poisson ok");
+        let c = &contracts[0];
+        assert_eq!(c.outcome.kind, OutcomeKind::Count);
+        assert_eq!(c.estimator, EstimatorSpec::Glm);
+        assert!((c.outcome.intercept - 5.0_f64.ln()).abs() < 1e-12);
+
+        let mut bad = spec;
+        bad.baseline_rate = 0.0;
+        let err = assemble_poisson(&bad).unwrap_err();
+        assert!(matches!(
+            err,
+            AdapterError::BaselineRateOutOfRange { value } if value == 0.0
+        ));
+    }
+
+    // ── BinaryLink serde default: pre-link wires round-trip byte-identically ──
+
+    #[test]
+    fn binary_link_defaults_to_logit_and_skips_serialization_when_default() {
+        // A Binary outcome JSON with no `link` key must deserialize as Logit...
+        let json = r#"{"kind":"binary","baseline_probability":0.3}"#;
+        let outcome: MixedOutcome = serde_json::from_str(json).expect("deserializes");
+        assert!(matches!(
+            outcome,
+            MixedOutcome::Binary {
+                link: BinaryLink::Logit,
+                ..
+            }
+        ));
+
+        // ...and re-serializing must NOT emit a `link` key, so existing wire
+        // payloads (no link) round-trip byte-identically.
+        let re_encoded = serde_json::to_value(&outcome).expect("serializes");
+        assert!(
+            re_encoded.get("link").is_none(),
+            "default link must be skipped on serialize, got {re_encoded:?}"
+        );
     }
 }

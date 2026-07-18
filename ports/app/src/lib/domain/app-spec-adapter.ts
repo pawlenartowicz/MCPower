@@ -22,6 +22,7 @@ import type {
   MixedSpec,
   OutcomeOptions,
   ParsedFormula,
+  PoissonSpec,
   ScenarioWire,
   TestSelection as WireTestSelection,
 } from './app-spec';
@@ -30,9 +31,11 @@ import { expandInteraction, expandMainEffect, factorLevels } from './effect-name
 import { projectScenario } from './scenario-projection';
 import {
   EXTRA_GROUPING_DEFAULTS,
+  mixedOutcomeKind,
   SLOPE_DEFAULTS,
   type Entrypoint,
   type FamilyConfig,
+  type OutcomeKind,
   type SlopeConfig,
   type VariableKind,
 } from './family';
@@ -469,10 +472,17 @@ function warnBaselineProbability(p: number, warnings: string[]): void {
   }
 }
 
+/** Reject a non-positive Poisson baseline rate; the rate is a log-link intercept
+ *  so it must be strictly positive. Hard error (not a soft warn) — mirrors the
+ *  (0,1) reject for binary baseline probability. */
+function isValidBaselineRate(rate: number | undefined): rate is number {
+  return typeof rate === 'number' && Number.isFinite(rate) && rate > 0;
+}
+
 export function familyConfigToAppSpec(
   entrypoint: Entrypoint,
   config: FamilyConfig,
-  outcomeKind: 'continuous' | 'binary' = 'continuous',
+  outcomeKind: OutcomeKind = 'linear',
 ): AdaptResult {
   if (entrypoint === 'regression') {
     const st = parsedFormulaStore.get(config.formula);
@@ -484,7 +494,12 @@ export function familyConfigToAppSpec(
     const { ok, errors, warnings } = projectCommon(parsed, config);
     if (!ok) return { spec: null, errors, warnings };
 
-    if (outcomeKind === 'binary') {
+    // AGQ is a GLMM knob; on the wire only when >1 (Rust skip-serialize-if-default).
+    // Unclustered GLMs never set it above 1, so this stays omitted for regression.
+    const agq = config.advanced.agq;
+    const agqField = agq > 1 ? { agq } : {};
+
+    if (outcomeKind === 'logit' || outcomeKind === 'probit') {
       const p = config.baselineProbability;
       if (typeof p !== 'number' || p <= 0 || p >= 1) {
         return {
@@ -499,8 +514,31 @@ export function familyConfigToAppSpec(
         family: 'logit',
         ...ok,
         baseline_probability: p,
+        // link omitted for logit (default) — keeps existing logit wires byte-identical.
+        ...(outcomeKind === 'probit' ? { link: 'probit' as const } : {}),
+        ...agqField,
         ...(outcome_options ? { outcome_options } : {}),
       } satisfies { family: 'logit' } & LogitSpec;
+      return { spec, errors, warnings };
+    }
+
+    if (outcomeKind === 'poisson') {
+      const rate = config.baselineRate;
+      if (!isValidBaselineRate(rate)) {
+        return {
+          spec: null,
+          errors: [...errors, `baseline_rate must be > 0: ${rate}`],
+          warnings,
+        };
+      }
+      const outcome_options = projectOutcomeOptions(config, false, errors);
+      const spec: AppSpec = {
+        family: 'poisson',
+        ...ok,
+        baseline_rate: rate,
+        ...agqField,
+        ...(outcome_options ? { outcome_options } : {}),
+      } satisfies { family: 'poisson' } & PoissonSpec;
       return { spec, errors, warnings };
     }
 
@@ -558,14 +596,19 @@ export function familyConfigToAppSpec(
         ? { kind: 'cluster_size', value: cl.clusterSize }
         : { kind: 'n_clusters', value: cl.nClusters };
 
-    const binaryOutcome = cl.binaryOutcome === true;
-    // ICC → τ² for extra groupings, mirroring assemble.rs (`icc_to_tau_squared`
-    // / `icc_to_tau_squared_logit`): the primary's ICC converts Rust-side, but
-    // the wire takes secondaries as τ² directly.
+    const mixedKind = mixedOutcomeKind(cl);
+    // Only the logit link scales latent variance by π²/3 (logistic residual
+    // variance); probit's latent residual variance is 1 and Gaussian has none —
+    // both take the raw icc/(1−icc). Mirrors assemble.rs (`icc_to_tau_squared_logit`
+    // only for BinaryLink::Logit). Poisson never reaches this helper — it has no
+    // residual scale to convert an ICC against, so its extras take a raw τ² below.
+    const logitScaled = mixedKind === 'logit';
+    // ICC → τ² for non-Poisson extra groupings, mirroring assemble.rs: the
+    // primary's ICC converts Rust-side, but the wire takes secondaries as τ² directly.
     const iccToTau = (icc: number): number => {
       const denom = 1 - icc;
       const tau = denom > 0 ? icc / denom : 0;
-      return binaryOutcome ? (tau * Math.PI ** 2) / 3 : tau;
+      return logitScaled ? (tau * Math.PI ** 2) / 3 : tau;
     };
 
     // Extra groupings: structure comes from formula syntax ((1|a)+(1|b) →
@@ -584,11 +627,24 @@ export function familyConfigToAppSpec(
     const predictorSet = new Set(parsed.predictors);
     const extra_groupings: AppGroupingSpec[] = extraTerms.map((t) => {
       const g = extrasByName.get(t.cluster);
-      const icc = g?.icc ?? EXTRA_GROUPING_DEFAULTS.icc;
-      if (!(icc >= 0 && icc < 1)) {
-        errors.push(`grouping '${t.cluster}': icc out of range [0, 1): ${icc}`);
-      } else if (icc !== 0 && (icc < iccLo || icc > iccHi)) {
-        errors.push(`grouping '${t.cluster}': icc ${icc} outside the stable band [${iccLo}, ${iccHi}] (use 0 for no clustering)`);
+      // Poisson takes a raw τ² for every grouping (primary and extras alike) —
+      // same reason as the primary's outcome branch below: no residual scale
+      // to convert an ICC against. Every other outcome keeps the icc/(1−icc) map.
+      let tau_squared: number;
+      if (mixedKind === 'poisson') {
+        const tau = g?.tauSquared ?? EXTRA_GROUPING_DEFAULTS.tauSquared;
+        if (!Number.isFinite(tau) || tau < 0) {
+          errors.push(`grouping '${t.cluster}': tau_squared must be >= 0: ${tau}`);
+        }
+        tau_squared = tau;
+      } else {
+        const icc = g?.icc ?? EXTRA_GROUPING_DEFAULTS.icc;
+        if (!(icc >= 0 && icc < 1)) {
+          errors.push(`grouping '${t.cluster}': icc out of range [0, 1): ${icc}`);
+        } else if (icc !== 0 && (icc < iccLo || icc > iccHi)) {
+          errors.push(`grouping '${t.cluster}': icc ${icc} outside the stable band [${iccLo}, ${iccHi}] (use 0 for no clustering)`);
+        }
+        tau_squared = iccToTau(icc);
       }
       // Slopes on this grouping are formula-driven (its `(1+x|g)` vars), with
       // variance/corr from the card — same machinery as the primary below.
@@ -596,7 +652,7 @@ export function familyConfigToAppSpec(
       if (t.parent !== null) {
         const n = g?.n ?? EXTRA_GROUPING_DEFAULTS.nestedN;
         return {
-          tau_squared: iccToTau(icc),
+          tau_squared,
           relation: { kind: 'nested_within' as const, n_per_parent: n },
           cluster_name: t.cluster,
           slopes,
@@ -605,7 +661,7 @@ export function familyConfigToAppSpec(
       const n = g?.n ?? EXTRA_GROUPING_DEFAULTS.crossedN;
       if (n < 2) errors.push(`crossed grouping '${t.cluster}' needs at least 2 clusters`);
       return {
-        tau_squared: iccToTau(icc),
+        tau_squared,
         relation: { kind: 'crossed' as const, n_clusters: n },
         cluster_name: t.cluster,
         slopes,
@@ -626,17 +682,43 @@ export function familyConfigToAppSpec(
 
     // Absent → Rust #[serde(default)] = Gaussian; UI toggle is user-owned.
     let outcome: MixedSpec['outcome'];
-    if (binaryOutcome) {
+    if (mixedKind === 'logit' || mixedKind === 'probit') {
       const p = cl.baselineProbability;
       if (typeof p !== 'number' || p <= 0 || p >= 1) {
         errors.push(`binary mixed: baseline_probability out of range (0, 1): ${p}`);
       } else {
         warnBaselineProbability(p, warnings);
-        outcome = { kind: 'binary', baseline_probability: p };
+        // link omitted for logit (default); probit sends it explicitly.
+        outcome = {
+          kind: 'binary',
+          baseline_probability: p,
+          ...(mixedKind === 'probit' ? { link: 'probit' as const } : {}),
+        };
+      }
+    } else if (mixedKind === 'poisson') {
+      // Poisson mixed carries the RAW random-intercept variance τ² inside the
+      // outcome (no ICC conversion — Poisson has no residual variance to scale
+      // against). The top-level `icc` field still ships (Rust requires it in
+      // [0,1)) but the engine ignores it for Poisson.
+      const rate = cl.baselineRate;
+      const tau = cl.tauSquared;
+      if (!isValidBaselineRate(rate)) {
+        errors.push(`poisson mixed: baseline_rate must be > 0: ${rate}`);
+      } else if (typeof tau !== 'number' || !Number.isFinite(tau) || tau < 0) {
+        errors.push(`poisson mixed: tau_squared must be >= 0: ${tau}`);
+      } else {
+        outcome = { kind: 'poisson', baseline_rate: rate, tau_squared: tau };
       }
     }
 
-    const outcome_options = projectOutcomeOptions(config, !binaryOutcome, errors);
+    const outcome_options = projectOutcomeOptions(config, mixedKind === 'linear', errors);
+    // AGQ is a GLMM knob; on the wire only when >1 AND the outcome is actually a
+    // GLMM (binary/probit/poisson). Gaussian LME never sets it — gating on
+    // outcome kind (not just agq > 1) matters because `agq` is persisted
+    // per-family: switching the outcome back to Gaussian only hides the
+    // EstimationSelect control, it does not clear the stored value, so a stale
+    // agq > 1 from an earlier binary/count run must not leak onto a Gaussian wire.
+    const agq = config.advanced.agq;
     const spec: AppSpec = {
       family: 'mixed',
       ...ok,
@@ -647,6 +729,7 @@ export function familyConfigToAppSpec(
       extra_groupings,
       slopes,
       ...(outcome !== undefined ? { outcome } : {}),
+      ...(mixedKind !== 'linear' && agq > 1 ? { agq } : {}),
       ...(outcome_options ? { outcome_options } : {}),
     } satisfies { family: 'mixed' } & MixedSpec;
     return { spec, errors, warnings };

@@ -258,6 +258,11 @@ const COHEN_PRESETS: readonly Preset[] = [
 // Logit-outcome (beta) presets: β = log(OR) for OR = 1.5 / 2.5 / 4.0 (Chen et al.
 // 2010). Replaces both rows above for every predictor when the outcome is binary
 // (logistic regression / binary GLMM) — β stays the wire scale, the host shows OR.
+// Poisson reuses the same triple as rate-ratio anchors (β = log(RR) under a log
+// link) — Chen's convention is an odds-ratio one, borrowed here as a multiplicative
+// anchor for rates; the caller (EffectControls) swaps the OR label for RR. Probit
+// does NOT use this set: a probit β is Cohen's-d scale (latent variance 1), so it
+// falls through to COHEN_PRESETS/CONTINUOUS_PRESETS below like any other outcome.
 const ODDS_PRESETS: readonly Preset[] = [
   { short: 'S', long: 'small', value: BENCHMARKS.odds[0]! },
   { short: 'M', long: 'medium', value: BENCHMARKS.odds[1]! },
@@ -267,9 +272,9 @@ const ODDS_PRESETS: readonly Preset[] = [
 export function presetsFor(
   name: string,
   variables: VariableRow[],
-  isLogit = false,
+  useOddsPresets = false,
 ): readonly Preset[] {
-  if (isLogit) return ODDS_PRESETS;
+  if (useOddsPresets) return ODDS_PRESETS;
   if (name.includes('[')) return COHEN_PRESETS;
   if (name.includes(':')) return CONTINUOUS_PRESETS;
   const v = variables.find((x) => x.name === name);

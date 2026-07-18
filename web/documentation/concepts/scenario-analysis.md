@@ -179,6 +179,12 @@ Mixed models support three scenario knobs for stress-testing the random-effect s
 
 These knobs apply to every grouping in the model (primary plus any crossed/nested extras), on both the Gaussian (LMM) and clustered-logistic (GLMM) mixed-model paths. They are independent of the other knobs (heterogeneity, correlation noise, residual swaps), which target the residual/linear-predictor structure of OLS and non-clustered logistic models.
 
+### Estimation conditions
+
+Fitting a mixed model means searching for the random-effect variances, and where that search starts matters — the optimiser can settle in different places depending on its starting point. The optimistic scenario assumes well-behaved estimation: it seeds the search at the true random-effect structure, as if the fitter already knew where to look. Realistic and doomer start blind, from a neutral guess, the way a real analyst's software does when it has no prior knowledge of the answer.
+
+So the optimistic → realistic gap on a mixed model reflects two things at once, not one. Part of it is the data getting messier (the knobs above). Part of it is the estimation getting harder — the blind search can miss the variance structure that the truth-seeded start would have found. This is deliberate: optimistic is the best case on both fronts, and the drop to realistic shows what you give up when both the data and the fit stop being ideal. It affects mixed models only; OLS and non-clustered logistic fits have a closed-form or single-mode solution, so their start never changes the answer.
+
 > [!note] Empirical values in research
 > - Thompson et al. (2012) — within-practice ICCs across 61 primary-care practices span 0.007 to 0.265 for different outcomes in the *same* dataset; realistic `icc_noise_sd` 0.15 sits inside that spread, and doomer 0.30 covers its upper (demographic) tail.
 > - Adams et al. (2004) — 1,039 ICC estimates from primary-care research: the typical ICC is small (median ≈ 0.01), but the same measure varies 10–50× across datasets (e.g. diastolic blood pressure 0–0.108) — exactly the planning uncertainty the jitter models. (These anchors are ICC-scale; at small ICCs the τ²-space jitter the engine applies has closely similar magnitude on the Gaussian path.)

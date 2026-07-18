@@ -58,11 +58,13 @@ fn base_spec(outcome_kind: OutcomeKind, effect_sizes: Vec<f64>) -> SimulationSpe
         residual_dist: ResidualDist::Normal,
         residual_pinned: false,
         outcome_kind,
+        link: None,
         estimator: match outcome_kind {
             OutcomeKind::Continuous => EstimatorSpec::Ols,
-            OutcomeKind::Binary => EstimatorSpec::Glm,
+            OutcomeKind::Binary | OutcomeKind::Count => EstimatorSpec::Glm,
         },
         wald_se: Default::default(),
+        nagq: 1,
         intercept,
         posthoc: vec![],
         max_failed_fraction: 0.1,
@@ -294,6 +296,7 @@ fn binary_doomer_power_below_optimistic() {
         residual_dists: vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
         residual_df: 5.0,
         sampled_factor_proportions: true,
+        truth_start: false,
         lme: None,
     };
 

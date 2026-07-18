@@ -73,7 +73,15 @@ DGP_TOL <- list(
   #     detectable-vs-null effect, so gate it on an ABSOLUTE band (mirrors
   #     SCENARIO_TOL$glm_beta_abs): |mean beta_hat - true|.
   bias_fdr_q     = 0.001,  # OLS/LME: Benjamini-Hochberg FDR level on pooled z-recovery p-values
-  bias_logit_abs = 0.02,   # logit: |mean beta_hat - true| (absolute, like glm_beta_abs)
+  bias_logit_abs = 0.02,   # logit: |mean beta_hat - true| (absolute, like glm_beta_abs).
+                           # Also used for PROBIT recovery: the probit MLE's finite-sample bias
+                           # is the same regime as logit; measured worst |mean beta_hat - true|
+                           # over the 4 probit cases = 0.0087 (probit_simple_b, x1, K=1600) ->
+                           # 2.3x margin under this band, so probit needs no separate constant.
+  bias_poisson_abs = 0.005,# poisson: |mean beta_hat - true| (absolute). Log-link Poisson MLE has
+                           # its own (much smaller) finite-sample bias; measured worst over the 4
+                           # poisson cases = 0.0013 (poisson_simple_a, intercept, K=1600) -> ~3.8x
+                           # margin. A wrong DGP shifts means by 0.05-0.5, far outside this band.
   parabola_abs = 1e-5    # strict-bootstrap parabola-preservation: max |x2_std - f(x1_std)|
                          # per draw. Strict floor ~3e-8 (CSV float precision); NORTA would
                          # be O(1). 1e-5 is fully discriminating between the two paths.
@@ -182,5 +190,13 @@ GLMM_TOL <- list(
   corr_abs       = SOLVING_TOL$slope_corr_abs,     # RE correlation, same bytes
   collapse_beta  = 1e-3,    # τ²→0: MCPower-GLMM β̂ vs plain glm() β̂, same bytes
   collapse_stat  = 1e-2,    # τ²→0: Wald z agreement, same bytes
-  laplace_bias_beta_abs = 0.05  # Laplace vs nAGQ=7 β̂: the approximation gap itself
+  laplace_bias_beta_abs = 0.05, # Laplace vs nAGQ=7 β̂: the approximation gap itself
+  agq_beta_abs   = 0.15     # AGQ B<->C absolute band (agq_parity.R): MCPower-AGQ(k) vs
+                             # glmer(nAGQ=k) worst |Δβ|, same bytes. Wider than beta_abs_floor
+                             # (a different quantity — the B<->C relative-comparison noise
+                             # floor) because few-cluster AGQ has its own quadrature-placement
+                             # noise; set from measured worst-case AGQ parity gaps, not derived
+                             # from the GLMM xfail_backstop beta_abs band (that band is 0.05,
+                             # a different quantity — the Laplace-vs-Hessian gross-regression
+                             # backstop, not AGQ quadrature-placement noise).
 )

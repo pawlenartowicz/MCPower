@@ -1,8 +1,8 @@
 // Tests for F1 (CsvData real fields + assemble wiring) and F2 (get_effects_from_data driver).
 
 use engine_app_spec::{
-    AppSpec, ClusterDim, CsvData, EffectSize, LinearSpec, LogitSpec, MixedOutcome, MixedSpec,
-    ParsedFormula, TestSelection, VarType,
+    AppSpec, BinaryLink, ClusterDim, CsvData, EffectSize, LinearSpec, LogitSpec, MixedOutcome,
+    MixedSpec, ParsedFormula, TestSelection, VarType,
 };
 use engine_contract::CorrectionMethod;
 use engine_spec_builder::input::{UploadColumn, UploadColumnType, UploadMode};
@@ -337,8 +337,10 @@ fn f2_get_effects_glm_recovers_log_odds() {
             ],
         }),
         baseline_probability: 0.5,
+        link: Default::default(),
         test_formula: None,
         outcome_options: None,
+        agq: 1,
     });
 
     let recovered = get_effects_from_data(&spec).expect("get_effects_from_data succeeds for logit");
@@ -450,6 +452,7 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
         extra_groupings: vec![],
         slopes: vec![],
         outcome: MixedOutcome::Gaussian,
+        agq: 1,
     });
 
     let recovered = get_effects_from_data(&spec).expect("get_effects_from_data succeeds for mixed");
@@ -610,5 +613,183 @@ fn f2_get_effects_with_factor_predictor() {
         treat_b.value.abs() < 0.1,
         "g[treatB] should be near zero, got {}",
         treat_b.value
+    );
+}
+
+// ─── B1 tests: baseline probability must be recovered through the outcome's
+// own link, not always through logistic ───────────────────────────────────
+//
+// Both tests below share a saturated 2-group design where each group's true
+// probability (p1, p0) is NOT complementary (p1 + p0 != 1), so the fitted
+// intercept is not 0 and `logistic`/`Φ` disagree on it — the earlier GLM
+// baseline test (`f2_get_effects_glm_recovers_log_odds`, OR = 4 with
+// complementary 2/3 vs 1/3 group proportions) happened to land on intercept
+// 0, where logistic(0) == Φ(0) == 0.5 and the two links are indistinguishable.
+//
+// With 50/50 group sizes and the binary predictor centered at its mean
+// (0.5), the saturated GLM reproduces each group's proportion exactly:
+// g(p1) = β0 + 0.5·β1, g(p0) = β0 − 0.5·β1 ⇒ β0 = (g(p1) + g(p0)) / 2. The
+// expected baseline below is that closed form's inverse-link, computed with
+// `p1 = 0.9`, `p0 = 0.3` for both link functions.
+
+/// B1 (logit): the recovered baseline probability is `logistic(β0)` with
+/// `β0 = (logit(0.9) + logit(0.3)) / 2`, expected ≈ 0.662614 (computed via
+/// Python `math`/`statistics.NormalDist`, cross-checked by hand).
+#[test]
+fn f2_get_effects_glm_logit_recovers_asymmetric_baseline() {
+    use engine_app_spec::driver::get_effects_from_data;
+
+    // x=1 group (50 rows): p1 = 0.9 → 45 successes, 5 failures.
+    // x=0 group (50 rows): p0 = 0.3 → 15 successes, 35 failures.
+    let mut x_vals: Vec<f64> = Vec::new();
+    let mut y_vals: Vec<f64> = Vec::new();
+    x_vals.extend(std::iter::repeat_n(1.0, 50));
+    y_vals.extend(std::iter::repeat_n(1.0, 45));
+    y_vals.extend(std::iter::repeat_n(0.0, 5));
+    x_vals.extend(std::iter::repeat_n(0.0, 50));
+    y_vals.extend(std::iter::repeat_n(1.0, 15));
+    y_vals.extend(std::iter::repeat_n(0.0, 35));
+    let n = x_vals.len() as u32;
+
+    let spec = AppSpec::Logit(LogitSpec {
+        parsed_formula: ParsedFormula {
+            outcome: "y".into(),
+            predictors: vec!["x".into()],
+            interaction_terms: vec![],
+        },
+        var_types: vec![VarType::Binary {
+            name: "x".into(),
+            binary_proportion: 0.5,
+        }],
+        effects: vec![EffectSize {
+            name: "x".into(),
+            value: 0.0,
+        }],
+        correlations: None,
+        alpha: 0.05,
+        target_power: 0.8,
+        n_sims: 32,
+        seed: 42,
+        tests: TestSelection::Effects {
+            names: vec!["x".into()],
+        },
+        correction: CorrectionMethod::None,
+        wald_se: Default::default(),
+        scenarios: vec![],
+        csv: Some(CsvData {
+            mode: UploadMode::Partial,
+            n_rows: n,
+            columns: vec![
+                UploadColumn {
+                    name: "x".into(),
+                    col_type: UploadColumnType::Binary,
+                    values: x_vals,
+                    labels: vec![],
+                },
+                UploadColumn {
+                    name: "y".into(),
+                    col_type: UploadColumnType::Binary,
+                    values: y_vals,
+                    labels: vec![],
+                },
+            ],
+        }),
+        baseline_probability: 0.5,
+        link: BinaryLink::Logit,
+        test_formula: None,
+        outcome_options: None,
+        agq: 1,
+    });
+
+    let recovered = get_effects_from_data(&spec).expect("get_effects_from_data succeeds for logit");
+    let baseline = recovered
+        .baseline_probability
+        .expect("logit arm reports a baseline probability");
+    let expected = 0.662_613_645_756_624;
+    assert!(
+        (baseline - expected).abs() < 1e-4,
+        "expected logit baseline ≈ {expected}, got {baseline}"
+    );
+}
+
+/// B1 (probit): same design as the logit test above, fit with a probit link.
+/// The recovered baseline must be `Φ(β0)` with
+/// `β0 = (Φ⁻¹(0.9) + Φ⁻¹(0.3)) / 2`, expected ≈ 0.647498 — a different
+/// number from the logit case's 0.662614 despite identical data, pinning
+/// that the driver picks the inverse link from `spec.link` rather than
+/// always applying `logistic`.
+#[test]
+fn f2_get_effects_glm_probit_recovers_asymmetric_baseline() {
+    use engine_app_spec::driver::get_effects_from_data;
+
+    let mut x_vals: Vec<f64> = Vec::new();
+    let mut y_vals: Vec<f64> = Vec::new();
+    x_vals.extend(std::iter::repeat_n(1.0, 50));
+    y_vals.extend(std::iter::repeat_n(1.0, 45));
+    y_vals.extend(std::iter::repeat_n(0.0, 5));
+    x_vals.extend(std::iter::repeat_n(0.0, 50));
+    y_vals.extend(std::iter::repeat_n(1.0, 15));
+    y_vals.extend(std::iter::repeat_n(0.0, 35));
+    let n = x_vals.len() as u32;
+
+    let spec = AppSpec::Logit(LogitSpec {
+        parsed_formula: ParsedFormula {
+            outcome: "y".into(),
+            predictors: vec!["x".into()],
+            interaction_terms: vec![],
+        },
+        var_types: vec![VarType::Binary {
+            name: "x".into(),
+            binary_proportion: 0.5,
+        }],
+        effects: vec![EffectSize {
+            name: "x".into(),
+            value: 0.0,
+        }],
+        correlations: None,
+        alpha: 0.05,
+        target_power: 0.8,
+        n_sims: 32,
+        seed: 42,
+        tests: TestSelection::Effects {
+            names: vec!["x".into()],
+        },
+        correction: CorrectionMethod::None,
+        wald_se: Default::default(),
+        scenarios: vec![],
+        csv: Some(CsvData {
+            mode: UploadMode::Partial,
+            n_rows: n,
+            columns: vec![
+                UploadColumn {
+                    name: "x".into(),
+                    col_type: UploadColumnType::Binary,
+                    values: x_vals,
+                    labels: vec![],
+                },
+                UploadColumn {
+                    name: "y".into(),
+                    col_type: UploadColumnType::Binary,
+                    values: y_vals,
+                    labels: vec![],
+                },
+            ],
+        }),
+        baseline_probability: 0.5,
+        link: BinaryLink::Probit,
+        test_formula: None,
+        outcome_options: None,
+        agq: 1,
+    });
+
+    let recovered =
+        get_effects_from_data(&spec).expect("get_effects_from_data succeeds for probit");
+    let baseline = recovered
+        .baseline_probability
+        .expect("probit arm reports a baseline probability");
+    let expected = 0.647_498_450_588_966_3;
+    assert!(
+        (baseline - expected).abs() < 1e-4,
+        "expected probit baseline ≈ {expected}, got {baseline}"
     );
 }

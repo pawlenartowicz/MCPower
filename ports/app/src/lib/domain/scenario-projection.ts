@@ -92,6 +92,9 @@ export function projectScenario(cfg: ScenarioConfig): ScenarioWire {
     // Persisted scenario snapshots from before the knob lack the field;
     // default to the exact-allocation engine default.
     sampled_factor_proportions: cfg.sampled_factor_proportions ?? false,
+    // Persisted scenario snapshots from before the knob lack the field;
+    // default to the engine's cold-start default (matches the wire's serde default).
+    truth_start: cfg.truth_start ?? false,
     // Pre-lme snapshots lack the sub-object; default to a neutral (no-op) RE
     // perturbation so the wire is always complete.
     random_effect_dist: RE_DIST_CODE[cfg.lme?.random_effect_dist ?? 'normal'] ?? 0,

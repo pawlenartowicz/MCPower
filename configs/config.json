@@ -8,6 +8,11 @@
     "sample_size_bounds": { "from": 30, "to": 200, "by": "auto" },
     "cluster_auto_count": 12
   },
+  "estimation": {
+    "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'rx' (fastmode: rx + Laplace) is the 1.1.0 default; 'hessian' is the accurate/AGQ opt-in. nagq: 1 = Laplace. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq) — change together.",
+    "wald_se": "rx",
+    "nagq": 1
+  },
   "benchmarks": {
     "continuous": [0.1, 0.25, 0.4],
     "binary_factor": [0.2, 0.5, 0.8],
@@ -72,7 +77,7 @@
   },
   "upload": {
     "max_rows": 1000000,
-    "max_rows_wasm": 10000,
+    "max_rows_wasm": 100000,
     "min_rows": 20,
     "max_factor_k_soft": 7,
     "max_factor_ratio": 15,

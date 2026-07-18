@@ -127,6 +127,43 @@ test_that("set_baseline_probability: p=0.96 warns (outside [0.05, 0.95])", {
   )
 })
 
+# ── set_baseline_rate / set_baseline_probability family gate (B4) ─────────
+# Before the gate, calling both setters on the same model let the second
+# call's intercept silently win with no error and no warning.
+
+test_that("set_baseline_rate: rejects family='logit'", {
+  m <- MCPower$new("y ~ x1", family = "logit")
+  expect_error(
+    m$set_baseline_rate(2.0),
+    regexp = "set_baseline_rate is only for family='poisson'"
+  )
+})
+
+test_that("set_baseline_rate: rejects family='probit'", {
+  m <- MCPower$new("y ~ x1", family = "probit")
+  expect_error(
+    m$set_baseline_rate(2.0),
+    regexp = "set_baseline_rate is only for family='poisson'"
+  )
+})
+
+test_that("set_baseline_probability: rejects family='poisson'", {
+  m <- MCPower$new("y ~ x1", family = "poisson")
+  expect_error(
+    m$set_baseline_probability(0.3),
+    regexp = "set_baseline_probability is only for family='logit'/'probit'"
+  )
+})
+
+test_that("set_baseline_probability: correct pairings unaffected (logit/probit)", {
+  expect_silent(MCPower$new("y ~ x1", family = "logit")$set_baseline_probability(0.3))
+  expect_silent(MCPower$new("y ~ x1", family = "probit")$set_baseline_probability(0.3))
+})
+
+test_that("set_baseline_rate: correct pairing unaffected (poisson)", {
+  expect_silent(MCPower$new("y ~ x1", family = "poisson")$set_baseline_rate(2.0))
+})
+
 # ── set_alpha gates ───────────────────────────────────────────────────────
 
 test_that("set_alpha: alpha=0.3 warns (above max_alpha=0.25)", {

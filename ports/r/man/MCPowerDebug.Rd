@@ -34,6 +34,7 @@ describes the same simulated run.
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="get_effects_from_data"><a href='../../mcpower/html/MCPower.html#method-MCPower-get_effects_from_data'><code>mcpower::MCPower$get_effects_from_data()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_alpha"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_alpha'><code>mcpower::MCPower$set_alpha()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_baseline_probability"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_baseline_probability'><code>mcpower::MCPower$set_baseline_probability()</code></a></span></li>
+<li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_baseline_rate"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_baseline_rate'><code>mcpower::MCPower$set_baseline_rate()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_cluster"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_cluster'><code>mcpower::MCPower$set_cluster()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_correlation"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_correlation'><code>mcpower::MCPower$set_correlation()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_correlations"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_correlations'><code>mcpower::MCPower$set_correlations()</code></a></span></li>
@@ -112,7 +113,7 @@ critical_value back.}
 \if{latex}{\out{\hypertarget{method-MCPowerDebug-load_data}{}}}
 \subsection{Method \code{load_data()}}{
 \subsection{Usage}{
-\if{html}{\out{<div class="r">}}\preformatted{MCPowerDebug$load_data(d, wald_se = NULL)}\if{html}{\out{</div>}}
+\if{html}{\out{<div class="r">}}\preformatted{MCPowerDebug$load_data(d, wald_se = NULL, nagq = 1L)}\if{html}{\out{</div>}}
 }
 
 \subsection{Arguments}{

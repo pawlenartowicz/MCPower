@@ -3,7 +3,7 @@
 // shared config.json (configs/config.json → "upload"), not a per-port copy.
 import config from '$configs/config.json';
 
-const MAX_ROWS_WASM: number = config.upload.max_rows_wasm; // 10_000
+const MAX_ROWS_WASM: number = config.upload.max_rows_wasm;
 
 /** Thrown by `validateUploadRows` when the row count exceeds the browser limit
  *  (`max_rows_wasm` from `configs/config.json`). The message includes the

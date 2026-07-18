@@ -18,12 +18,14 @@
 //! independent of outcome_kind and estimator (generate-clustered/solve-OLS is valid).
 
 use crate::distributions::{marginal_uniform, phi, sample_t};
-use crate::rng::{fill_normal_column, fill_uniform_column, SimRng, CLASS_RESID, CLASS_XNORM};
+use crate::rng::{
+    fill_normal_column, fill_uniform_column, poisson_quantile, SimRng, CLASS_RESID, CLASS_XNORM,
+};
 use crate::scenarios::{
     perturb_correlation, perturb_var_types, pick_residual, scenario_rng, STREAM_TAG_HET,
 };
 use crate::spec::{
-    ClusterSizing, Distribution, EngineError, OutcomeKind, ResidualDist, SimulationSpec,
+    ClusterSizing, Distribution, EngineError, LinkKind, OutcomeKind, ResidualDist, SimulationSpec,
 };
 use crate::workspace::SimWorkspace;
 use crate::FLOAT_NEAR_ZERO;
@@ -38,6 +40,39 @@ const EXP_CAP: f64 = 6.959_255_993_647_11;
 const EXP_CENSORED_MEAN: f64 = 0.999_050_197_028_828_9;
 const EXP_CENSORED_STD: f64 = 0.993_367_632_769_713_4;
 const SQRT3: f64 = 1.732_050_807_568_877_2;
+
+/// Lower Cholesky factor of a symmetric PSD `q×q` matrix (row-major in/out).
+/// validate() guarantees PSD, so a zero pivot is treated as exact 0 (its
+/// below-diagonal column entries become 0).
+///
+/// Inlined verbatim from glmm 0.0.1's `linalg::chol_lower`, which the crate
+/// dropped from its public API. This is DGP code on the golden-pinned RNG path,
+/// so the body must stay bit-identical to that source — do not "improve" it.
+///
+/// Also reused by `mixed_workspace::truth_theta` to derive the truth-start θ, so
+/// the warm start factors D with the SAME Cholesky the generator drew the REs
+/// from — change together.
+pub(crate) fn chol_lower(a: &[f64], q: usize) -> Vec<f64> {
+    let mut l = vec![0.0f64; q * q];
+    for j in 0..q {
+        let mut diag = a[j * q + j];
+        for k in 0..j {
+            diag -= l[j * q + k] * l[j * q + k];
+        }
+        let ljj = diag.max(0.0).sqrt();
+        l[j * q + j] = ljj;
+        for i in (j + 1)..q {
+            if ljj > 0.0 {
+                let mut s = a[i * q + j];
+                for k in 0..j {
+                    s -= l[i * q + k] * l[j * q + k];
+                }
+                l[i * q + j] = s / ljj;
+            }
+        }
+    }
+    l
+}
 
 /// Generate one full simulation into `ws.x_full` / `ws.y_full`.
 ///
@@ -152,7 +187,7 @@ pub fn generate_sim_data(
                     dmat[i * q + j] = tau_vec[i] * r[i * q + j] * tau_vec[j];
                 }
             }
-            let l = glmm::linalg::chol_lower(&dmat, q);
+            let l = chol_lower(&dmat, q);
             let tau0 = tau_vec[0];
             let n_clusters_sl = cluster_spec.sizing.n_clusters_at(max_n);
             let mut z = vec![0.0f64; q];
@@ -224,7 +259,7 @@ pub fn generate_sim_data(
                     dmat[i * q_g + j] = tau_vec[i] * r[i * q_g + j] * tau_vec[j];
                 }
             }
-            let l = glmm::linalg::chol_lower(&dmat, q_g);
+            let l = chol_lower(&dmat, q_g);
             let n_levels = ws.extra_u_draws[g].len() / q_g;
             let mut z = vec![0.0f64; q_g];
             for c in 0..n_levels {
@@ -338,12 +373,39 @@ pub fn generate_sim_data(
     // .max(1) here is applied before the u32 cast rather than at the loop
     // bound — equivalent under the df ≥ 3 clamp.
     match spec.outcome_kind {
+        OutcomeKind::Binary if matches!(spec.link, Some(LinkKind::Probit)) => {
+            // Probit latent-normal formulation: draw z ~ N(0,1); the link site
+            // compares z < η directly (no sigmoid). Same one-draw-per-row budget
+            // as the logit uniform below — a distinct outcome path with no
+            // pre-existing golden, so the normal draw here shifts no logit bytes.
+            fill_normal_column(
+                key,
+                CLASS_RESID,
+                0,
+                &mut ws.gen_words,
+                &mut ws.gen_tail_idx,
+                &mut ws.residuals[..max_n],
+            );
+        }
         OutcomeKind::Binary => {
             fill_uniform_column(
                 key,
                 CLASS_RESID,
                 0,
                 &mut ws.gen_words,
+                &mut ws.residuals[..max_n],
+            );
+        }
+        OutcomeKind::Count => {
+            // Poisson inverse-CDF is driven by a standard normal z: the walk
+            // maps z → u = Φ(z) internally, the large-λ arm uses z directly.
+            // One N(0,1) per row (fixed-draw, no rejection) — prefix-stable.
+            fill_normal_column(
+                key,
+                CLASS_RESID,
+                0,
+                &mut ws.gen_words,
+                &mut ws.gen_tail_idx,
                 &mut ws.residuals[..max_n],
             );
         }
@@ -626,8 +688,10 @@ pub fn generate_sim_data(
     // using the population moments in spec.het_coeffs) and γ = ln(λ)/4. λ is the
     // model ratio if pinned, else the scenario's ratio (1.0 = homoskedastic).
     // Applies to ALL continuous outcomes including LME, where it scales the level-1
-    // residual only — the cluster draw u_c (added below) stays homoskedastic. Binary
-    // variance is fixed by p_i, so het never applies there. The /exp(γ²/2) factor
+    // residual only — the cluster draw u_c (added below) stays homoskedastic.
+    // Heteroskedasticity is a documented no-op for the mean-locked outcomes: Binary
+    // variance is fixed by p_i, and Poisson (Count) variance is fixed by λ (= mean) —
+    // neither has a free residual-variance parameter to scale. The /exp(γ²/2) factor
     // preserves mean residual variance (exact for a normal driver), so dialing λ
     // does not change total noise. Uses lp_clean, not lp_eff: het scaling is about
     // the *true* signal magnitude, not jittered draws.
@@ -644,10 +708,15 @@ pub fn generate_sim_data(
     // window-dependent normalisation (v1's empirical-SD residual rescaling is dropped).
     let het_total = spec.scenario.heterogeneity.max(0.0);
     let use_het_jitter = het_total > FLOAT_NEAR_ZERO;
-    // Intercept (j = 0) jitter SD — see the comment block above.
+    // Intercept (j = 0) jitter SD — see the comment block above. Binary and
+    // Count share the additive latent-scale form: for Binary it shifts the
+    // link-scale intercept (log-odds for logit, Φ⁻¹ for probit); for Count it
+    // shifts the log-rate intercept. Both are absolute latent shifts, not
+    // relative — same reasoning as the effect-column jitter. Continuous carries
+    // the intercept shift in its additive-noise path, so 0 here.
     let het_intercept_sd = match spec.outcome_kind {
         OutcomeKind::Continuous => 0.0,
-        OutcomeKind::Binary => het_total,
+        OutcomeKind::Binary | OutcomeKind::Count => het_total,
     };
 
     // Per-study effect draw β_eff: one δ per sim from the domain-separated het
@@ -788,9 +857,17 @@ pub fn generate_sim_data(
                 }
             }
             OutcomeKind::Binary => {
-                // η staged into eta_acc; the sigmoid runs as one SIMD column pass
-                // after this loop instead of a per-row libm exp. residuals[i] holds
-                // the pre-drawn Uniform[0,1). lp carries the log-odds β-jitter when on.
+                // η staged into eta_acc; the link pass (sigmoid for logit, or a
+                // bare threshold for probit) runs as one SIMD column pass after
+                // this loop instead of a per-row libm call. residuals[i] holds the
+                // pre-drawn Uniform[0,1) (logit) or N(0,1) (probit). lp carries the
+                // link-scale β-jitter when het is on.
+                ws.eta_acc[i] = lp + u_re;
+            }
+            OutcomeKind::Count => {
+                // η = log-rate staged into eta_acc; λ = exp(η) and the
+                // inverse-CDF y = Q(z; λ) run as a post-loop pass. residuals[i]
+                // holds the pre-drawn N(0,1). lp carries the log-rate β-jitter.
                 ws.eta_acc[i] = lp + u_re;
             }
         }
@@ -810,18 +887,38 @@ pub fn generate_sim_data(
         }
     }
 
-    if matches!(spec.outcome_kind, OutcomeKind::Binary) {
-        // p_i = σ(η_i) via the owned SIMD kernel (≤2 ULP of the old libm
-        // sigmoid_stable — a y flip needs the uniform inside that gap, ~2⁻⁵²/row;
-        // formally result-moving, rides the golden campaign).
-        glmm::simd_transcendental::sigmoid_fill(&mut ws.eta_acc[..max_n]);
-        for i in 0..max_n {
-            ws.y_full[i] = if (ws.residuals[i] as f64) < ws.eta_acc[i] {
-                1.0f32
-            } else {
-                0.0f32
-            };
+    match spec.outcome_kind {
+        OutcomeKind::Binary => {
+            if !matches!(spec.link, Some(LinkKind::Probit)) {
+                // Logit: p_i = σ(η_i) via the owned SIMD kernel (≤2 ULP of the
+                // old libm sigmoid_stable — a y flip needs the uniform inside that
+                // gap, ~2⁻⁵²/row; formally result-moving, rides the golden
+                // campaign). Probit skips this: its η IS the latent threshold the
+                // N(0,1) residual is compared against below.
+                glmm::simd_transcendental::sigmoid_fill(&mut ws.eta_acc[..max_n]);
+            }
+            for i in 0..max_n {
+                // Logit: residuals = Uniform, eta_acc = σ(η) ⇒ Bernoulli(σ(η)).
+                // Probit: residuals = N(0,1), eta_acc = η ⇒ 1{z < η} =
+                // Bernoulli(Φ(η)). The comparison is identical; only the residual
+                // marginal and the sigmoid presence differ.
+                ws.y_full[i] = if (ws.residuals[i] as f64) < ws.eta_acc[i] {
+                    1.0f32
+                } else {
+                    0.0f32
+                };
+            }
         }
+        OutcomeKind::Count => {
+            // λ_i = exp(η_i) via the owned SIMD exp (same kernel the hsk pass
+            // uses); y_i = Q(z_i; λ_i) by fixed-draw inverse-CDF. residuals[i]
+            // holds the pre-drawn N(0,1).
+            glmm::simd_transcendental::exp_fill(&mut ws.eta_acc[..max_n]);
+            for i in 0..max_n {
+                ws.y_full[i] = poisson_quantile(ws.residuals[i] as f64, ws.eta_acc[i]) as f32;
+            }
+        }
+        OutcomeKind::Continuous => {}
     }
 
     Ok(())
@@ -1273,8 +1370,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -1858,8 +1957,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
+            link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            nagq: 1,
             intercept,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -1946,6 +2047,53 @@ mod tests {
         assert!(
             p_neg < 0.3,
             "rows with x<0 should have p<0.3, got {p_neg} ({neg_n} rows)"
+        );
+    }
+
+    #[test]
+    fn probit_intercept_only_rate_matches_phi() {
+        // No predictor effect (β₁ = 0) ⇒ every row shares the same latent
+        // threshold η = b0, so the empirical event rate should converge to
+        // Φ(b0). Large n keeps Monte Carlo noise well under the 0.02 band
+        // used by the analogous logit checks above.
+        let b0 = 0.4;
+        let mut spec = logit_spec_simple(b0, 0.0);
+        spec.link = Some(LinkKind::Probit);
+        let n = 20_000;
+        let mut ws = SimWorkspace::new(n, 2, 1, 0, None);
+        generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
+        let mut ones = 0.0_f64;
+        for i in 0..n {
+            ones += ws.y_full[i] as f64;
+        }
+        let rate = ones / n as f64;
+        let expected = phi(b0);
+        assert!(
+            (rate - expected).abs() < 0.02,
+            "probit event rate {rate} should be close to Φ({b0}) = {expected}"
+        );
+    }
+
+    #[test]
+    fn count_intercept_only_mean_matches_lambda() {
+        // No predictor effect (β₁ = 0) ⇒ every row shares the same log-rate
+        // η = ln(λ), so λ_i = λ for all i and the empirical mean of y should
+        // converge to λ. Large n keeps Monte Carlo noise well under the
+        // tolerance used by the analogous logit/probit checks above.
+        let lambda: f64 = 5.0;
+        let mut spec = logit_spec_simple(lambda.ln(), 0.0);
+        spec.outcome_kind = OutcomeKind::Count;
+        let n = 20_000;
+        let mut ws = SimWorkspace::new(n, 2, 1, 0, None);
+        generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
+        let mut total = 0.0_f64;
+        for i in 0..n {
+            total += ws.y_full[i] as f64;
+        }
+        let mean = total / n as f64;
+        assert!(
+            (mean - lambda).abs() < 0.1,
+            "count mean {mean} should be close to λ = {lambda}"
         );
     }
 
@@ -3105,8 +3253,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -3258,7 +3408,7 @@ mod tests {
             // n_sl == 1, so cluster_slope_u_draws[g * 1 + 0] == cluster_slope_u_draws[g]
             let u_re = ws.cluster_u_draws[g] as f64
                 + ws.cluster_slope_u_draws[g] as f64 * ws.x_full[(i, 1)] as f64;
-            let p = glmm::mcpower::sigmoid_stable(lp + u_re);
+            let p = glmm::loop_advanced::sigmoid_stable(lp + u_re);
             let expect = if (ws.residuals[i] as f64) < p {
                 1.0f32
             } else {

@@ -1,5 +1,12 @@
 // Family store: active model family selection and per-family config state.
-import { defaultFamilyConfig, FAMILIES, type Entrypoint, type FamilyConfig } from '$lib/domain/family';
+import {
+  defaultFamilyConfig,
+  FAMILIES,
+  mixedOutcomeKind,
+  type Entrypoint,
+  type FamilyConfig,
+  type OutcomeKind,
+} from '$lib/domain/family';
 import { loadFamily, saveFamily } from '$lib/persistence/per-family';
 
 function buildByFamily(): Record<Entrypoint, FamilyConfig> {
@@ -10,8 +17,9 @@ function buildByFamily(): Record<Entrypoint, FamilyConfig> {
 
 function createFamilyStore() {
   let active = $state<Entrypoint>('regression');
-  /** Outcome toggle for the Regression entrypoint. Continuous → Ols; Binary → Glm. */
-  let regressionOutcome = $state<'continuous' | 'binary'>('continuous');
+  /** Outcome toggle for the Regression entrypoint. linear → Ols; logit/probit →
+   *  binary Glm; poisson → count Glm. */
+  let regressionOutcome = $state<OutcomeKind>('linear');
   const byFamily = $state<Record<Entrypoint, FamilyConfig>>(buildByFamily());
   const hydrated = new Set<Entrypoint>();
 
@@ -44,14 +52,14 @@ function createFamilyStore() {
     },
     get byFamily() { return byFamily; },
     get regressionOutcome() { return regressionOutcome; },
-    set regressionOutcome(v: 'continuous' | 'binary') { regressionOutcome = v; },
+    set regressionOutcome(v: OutcomeKind) { regressionOutcome = v; },
     /** Resolved outcome for the active family: regression reads its store-level toggle,
-     *  mixed reads its persisted cluster.binaryOutcome. Read-only; writes still target
+     *  mixed reads its persisted cluster outcome. Read-only; writes still target
      *  each family's home (ModelSection.setOutcome). */
-    get activeOutcome(): 'continuous' | 'binary' {
+    get activeOutcome(): OutcomeKind {
       if (active === 'regression') return regressionOutcome;
-      if (active === 'mixed') return byFamily.mixed.cluster?.binaryOutcome ? 'binary' : 'continuous';
-      return 'continuous';
+      if (active === 'mixed') return mixedOutcomeKind(byFamily.mixed.cluster);
+      return 'linear';
     },
     resetActive() {
       byFamily[active] = defaultFamilyConfig(active);
@@ -59,7 +67,7 @@ function createFamilyStore() {
     },
     resetAll() {
       active = 'regression';
-      regressionOutcome = 'continuous';
+      regressionOutcome = 'linear';
       for (const f of FAMILIES) {
         byFamily[f] = defaultFamilyConfig(f);
         persist(f);

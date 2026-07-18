@@ -1,4 +1,4 @@
-//! `SimulationContract::validate()` and helpers; numbered invariants (01–21) are the sole gate before the kernel sees a contract.
+//! `SimulationContract::validate()` and helpers; numbered invariants (01–25) are the sole gate before the kernel sees a contract.
 
 use crate::contract::SimulationContract;
 use crate::design::DesignTerm;
@@ -44,6 +44,8 @@ impl SimulationContract {
         self.invariant_21_primary_slope_structure()?;
         self.invariant_22_scenario_perturbations_well_formed()?;
         self.invariant_23_binary_probabilities_in_range()?;
+        self.invariant_24_link_matches_kind()?;
+        self.invariant_25_nagq_backstop()?;
         Ok(())
     }
 
@@ -79,6 +81,14 @@ impl SimulationContract {
         self.invariant_21_primary_slope_structure()?;
         self.invariant_22_scenario_perturbations_well_formed()?;
         self.invariant_23_binary_probabilities_in_range()?;
+        // invariant_24_link_matches_kind / invariant_25_nagq_backstop
+        // intentionally omitted (mirrors the invariant_13 omission above):
+        // outcome.kind, outcome.link, and generation.cluster are still
+        // placeholders here (Ols/Continuous/no-cluster), while nagq is already
+        // set from the LinearSpec — running the backstops now would reject an
+        // eligible nagq>1 against the un-patched template. The outer
+        // build_contract_with_skeleton pass patches those fields and calls full
+        // validate(), which enforces both.
         Ok(())
     }
 
@@ -430,8 +440,10 @@ impl SimulationContract {
         match self.estimator {
             EstimatorSpec::Ols => {} // accepts any outcome; clustered generation allowed (ignore-clustering OLS)
             EstimatorSpec::Glm => {
-                if self.outcome.kind != OutcomeKind::Binary {
-                    return Err(ContractError::GlmRequiresBinary);
+                // GLM/GLMM fits the non-Gaussian kinds: Binary (logit/probit)
+                // and Count (Poisson log). Continuous stays OLS/LMM.
+                if !matches!(self.outcome.kind, OutcomeKind::Binary | OutcomeKind::Count) {
+                    return Err(ContractError::GlmRequiresBinaryOrCount);
                 }
             }
             EstimatorSpec::Mle => {
@@ -887,6 +899,46 @@ impl SimulationContract {
                 }
                 _ => {}
             }
+        }
+        Ok(())
+    }
+
+    /// A non-canonical link override is only defined for one kind: probit on
+    /// Binary. Reject `Some(Probit)` on Continuous/Count (Count is log-only,
+    /// Continuous has no link).
+    fn invariant_24_link_matches_kind(&self) -> Result<(), ContractError> {
+        if self.outcome.link == Some(crate::outcome::LinkKind::Probit)
+            && self.outcome.kind != OutcomeKind::Binary
+        {
+            return Err(ContractError::ProbitRequiresBinary);
+        }
+        Ok(())
+    }
+
+    /// Backstop for the AGQ node count. `nagq` must be odd and in `1..=25`
+    /// always; `nagq > 1` additionally requires an eligible shape: a
+    /// Binary/Count outcome, a clustered spec, no crossed/nested extra
+    /// groupings, and ≤ 3 REs per group (intercept + slopes). Hosts strip
+    /// ineligible `nagq > 1` to 1 with a warning before building the contract,
+    /// so reaching either error here indicates a host bug. Mirrors glmm's
+    /// `fit.rs::assert_model_shape` and each port's spec-builder eligibility
+    /// check — change all three together.
+    fn invariant_25_nagq_backstop(&self) -> Result<(), ContractError> {
+        let k = self.nagq;
+        if k == 0 || k > 25 || k % 2 == 0 {
+            return Err(ContractError::NagqOutOfRange { got: k });
+        }
+        if k == 1 {
+            return Ok(());
+        }
+        let kind_ok = matches!(self.outcome.kind, OutcomeKind::Binary | OutcomeKind::Count);
+        let Some(cluster) = &self.generation.cluster else {
+            return Err(ContractError::NagqIneligibleShape { got: k });
+        };
+        let single_grouping = cluster.extra_groupings.is_empty();
+        let re_count = 1 + cluster.slopes.len(); // intercept + random slopes
+        if !(kind_ok && single_grouping && re_count <= 3) {
+            return Err(ContractError::NagqIneligibleShape { got: k });
         }
         Ok(())
     }
@@ -1453,5 +1505,184 @@ mod tests {
     fn inv23_resampled_binary_proportion_one_passes() {
         let c = resampled_binary_contract(1.0);
         assert!(c.validate().is_ok());
+    }
+
+    // ---- invariant_24: probit link only on Binary ---------------------------
+
+    #[test]
+    fn inv24_probit_on_continuous_rejects() {
+        let mut c = example1_simple_ols();
+        // example1 is Continuous; force a probit link override.
+        c.outcome.link = Some(crate::outcome::LinkKind::Probit);
+        let err = c.validate().unwrap_err();
+        assert!(
+            matches!(err, ContractError::ProbitRequiresBinary),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn inv24_probit_on_binary_passes() {
+        use crate::estimator::EstimatorSpec;
+        let mut c = example1_simple_ols();
+        c.estimator = EstimatorSpec::Glm;
+        c.outcome.kind = OutcomeKind::Binary;
+        c.outcome.link = Some(crate::outcome::LinkKind::Probit);
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+    }
+
+    // ---- invariant_25: nagq backstop ----------------------------------------
+
+    /// Eligible AGQ base: a clustered Binary GLMM with a single grouping factor
+    /// and an intercept-only random-effect structure (1 RE ≤ 3).
+    fn eligible_glmm() -> SimulationContract {
+        use crate::estimator::EstimatorSpec;
+        let mut c = example1_simple_ols();
+        c.estimator = EstimatorSpec::Mle;
+        c.outcome.kind = OutcomeKind::Binary;
+        c.generation.cluster = Some(ClusterSpec::intercept_only(
+            ClusterSizing::FixedClusters { n_clusters: 10 },
+            0.25,
+        ));
+        c
+    }
+
+    #[test]
+    fn inv25_nagq_three_eligible_passes() {
+        let mut c = eligible_glmm();
+        c.nagq = 3;
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+    }
+
+    #[test]
+    fn inv25_nagq_upper_bound_25_eligible_passes() {
+        // 25 is the top of the odd `1..=25` range; an off-by-one such as
+        // `k >= 25` would wrongly reject the boundary value itself.
+        let mut c = eligible_glmm();
+        c.nagq = 25;
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+    }
+
+    #[test]
+    fn inv25_nagq_three_res_eligible_passes() {
+        // Intercept + 2 slopes = 3 REs, the max allowed; an off-by-one such
+        // as `re_count < 3` would wrongly reject this shape.
+        use crate::generation::SlopeTerm;
+        use crate::ids::ColumnId;
+        let mut c = eligible_glmm();
+        let cluster = c.generation.cluster.as_mut().unwrap();
+        for (i, col) in [0u32, 1].into_iter().enumerate() {
+            cluster.slopes.push(SlopeTerm {
+                column: ColumnId(col),
+                variance: 0.2,
+                corr_with_intercept: 0.0,
+                corr_with: vec![0.0; i],
+            });
+        }
+        c.nagq = 3;
+        assert!(c.validate().is_ok(), "{:?}", c.validate());
+    }
+
+    #[test]
+    fn inv25_nagq_one_on_ineligible_shape_passes() {
+        // nagq = 1 is the Laplace default and always allowed, even on an
+        // ineligible (OLS/Continuous) shape.
+        let mut c = example1_simple_ols();
+        c.nagq = 1;
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn inv25_nagq_even_rejects() {
+        let mut c = eligible_glmm();
+        c.nagq = 4;
+        let err = c.validate().unwrap_err();
+        assert!(
+            matches!(err, ContractError::NagqOutOfRange { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn inv25_nagq_above_range_rejects() {
+        let mut c = eligible_glmm();
+        c.nagq = 27;
+        let err = c.validate().unwrap_err();
+        assert!(
+            matches!(err, ContractError::NagqOutOfRange { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn inv25_nagq_on_ols_continuous_rejects() {
+        let mut c = example1_simple_ols();
+        c.nagq = 3;
+        let err = c.validate().unwrap_err();
+        assert!(
+            matches!(err, ContractError::NagqIneligibleShape { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn inv25_nagq_on_unclustered_glm_rejects() {
+        use crate::estimator::EstimatorSpec;
+        let mut c = example1_simple_ols();
+        c.estimator = EstimatorSpec::Glm;
+        c.outcome.kind = OutcomeKind::Binary;
+        // No cluster → ineligible shape for nagq > 1.
+        c.nagq = 3;
+        let err = c.validate().unwrap_err();
+        assert!(
+            matches!(err, ContractError::NagqIneligibleShape { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn inv25_nagq_with_second_grouping_rejects() {
+        use crate::generation::{GroupingRelation, GroupingSpec};
+        let mut c = eligible_glmm();
+        c.generation
+            .cluster
+            .as_mut()
+            .unwrap()
+            .extra_groupings
+            .push(GroupingSpec {
+                relation: GroupingRelation::Crossed { n_clusters: 8 },
+                tau_squared: 0.1,
+                slopes: vec![],
+            });
+        c.nagq = 3;
+        let err = c.validate().unwrap_err();
+        assert!(
+            matches!(err, ContractError::NagqIneligibleShape { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn inv25_nagq_with_too_many_res_rejects() {
+        use crate::generation::SlopeTerm;
+        use crate::ids::ColumnId;
+        let mut c = eligible_glmm();
+        // intercept + 3 slopes = 4 REs > 3. Each slope's `corr_with` lists the
+        // correlations with the earlier slopes, so lengths grow 0, 1, 2.
+        let cluster = c.generation.cluster.as_mut().unwrap();
+        for (i, col) in [0u32, 1, 0].into_iter().enumerate() {
+            cluster.slopes.push(SlopeTerm {
+                column: ColumnId(col),
+                variance: 0.2,
+                corr_with_intercept: 0.0,
+                corr_with: vec![0.0; i],
+            });
+        }
+        c.nagq = 3;
+        let err = c.validate().unwrap_err();
+        assert!(
+            matches!(err, ContractError::NagqIneligibleShape { .. }),
+            "got {err:?}"
+        );
     }
 }

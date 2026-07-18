@@ -117,6 +117,7 @@ pub fn build_linear_contract_with_skeleton(
             coefficients,
             residual,
             heteroskedasticity_driver,
+            link: None,
         },
         design_test: if spec.test_formula.is_some() {
             Some(design_test)
@@ -125,6 +126,7 @@ pub fn build_linear_contract_with_skeleton(
         },
         estimator: EstimatorSpec::Ols, // overwritten by build_contract
         wald_se: spec.wald_se,
+        nagq: spec.nagq,
         test: TestSpec {
             targets: target_terms,
             correction: spec.correction,
@@ -156,9 +158,9 @@ pub fn build_linear_contract_with_skeleton(
 /// no post-hoc patching from any host.
 ///
 /// Default coupling (when `estimator` is None):
-/// - `outcome_kind == Binary`        ⇒ `Glm`
-/// - `!clusters.is_empty()`          ⇒ `Mle`
-/// - else                            ⇒ `Ols`
+/// - `outcome_kind == Binary | Count` ⇒ `Glm`
+/// - `!clusters.is_empty()`           ⇒ `Mle`
+/// - else                             ⇒ `Ols`
 ///
 /// Invariants:
 /// - `estimator == Mle` ⇒ `clusters.len() == 1`.
@@ -172,11 +174,12 @@ pub fn build_linear_contract_with_skeleton(
 pub fn build_contract(
     spec: &LinearSpec,
     outcome_kind: engine_contract::OutcomeKind,
+    link: Option<engine_contract::LinkKind>,
     estimator: Option<engine_contract::EstimatorSpec>,
     intercept: f64,
     clusters: Vec<engine_contract::ClusterSpec>,
 ) -> Result<Vec<engine_contract::SimulationContract>, SpecError> {
-    Ok(build_contract_with_skeleton(spec, outcome_kind, estimator, intercept, clusters)?.0)
+    Ok(build_contract_with_skeleton(spec, outcome_kind, link, estimator, intercept, clusters)?.0)
 }
 
 /// As [`build_contract`], but also returns the `EffectSkeleton` so a host can
@@ -189,6 +192,7 @@ pub fn build_contract(
 pub fn build_contract_with_skeleton(
     spec: &LinearSpec,
     outcome_kind: engine_contract::OutcomeKind,
+    link: Option<engine_contract::LinkKind>,
     estimator: Option<engine_contract::EstimatorSpec>,
     intercept: f64,
     clusters: Vec<engine_contract::ClusterSpec>,
@@ -199,15 +203,17 @@ pub fn build_contract_with_skeleton(
         return Err(SpecError::ClusterFamilyMismatch);
     }
     // Default coupling: derive the matching estimator when the caller didn't state one.
-    let estimator = estimator.unwrap_or_else(|| {
-        if outcome_kind == OutcomeKind::Binary {
+    // Binary (logit/probit) and Count (Poisson) fit via GLM/GLMM (Glm + cluster ⇒
+    // GLMM by invariant_12_estimator_outcome_matrix); Continuous stays Mle (clustered LMM) or Ols.
+    let estimator = estimator.unwrap_or(
+        if matches!(outcome_kind, OutcomeKind::Binary | OutcomeKind::Count) {
             EstimatorSpec::Glm
         } else if !clusters.is_empty() {
             EstimatorSpec::Mle
         } else {
             EstimatorSpec::Ols
-        }
-    });
+        },
+    );
     // Mle must have exactly one cluster; everything else is gated by validate().
     if estimator == EstimatorSpec::Mle && clusters.len() != 1 {
         return Err(SpecError::ClusterFamilyMismatch);
@@ -227,6 +233,7 @@ pub fn build_contract_with_skeleton(
 
     for c in &mut contracts {
         c.outcome.kind = outcome_kind;
+        c.outcome.link = link;
         c.outcome.intercept = intercept;
         c.estimator = estimator;
         c.generation.cluster = clusters.first().cloned();
@@ -999,6 +1006,7 @@ fn scenario_to_contract(s: &ScenarioInput) -> Result<ContractScenario, SpecError
         residual_dists,
         residual_df: s.residual_df,
         sampled_factor_proportions: s.sampled_factor_proportions,
+        truth_start: s.truth_start,
         lme,
     })
 }
@@ -1026,6 +1034,7 @@ mod tests {
             residual_dists: vec![],
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 1, // t / heavy-tailed
             random_effect_df: 5.0,
             icc_noise_sd: 0.15,
@@ -1048,6 +1057,7 @@ mod tests {
             residual_dists: vec![],
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
@@ -1095,6 +1105,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            nagq: 1,
         }
     }
 
@@ -1293,7 +1304,7 @@ mod tests {
     fn build_contract_accepts_outcome_kind_intercept_clusters() {
         use engine_contract::{ClusterSizing, ClusterSpec};
         let lspec = simple_spec();
-        let c = build_contract(&lspec, OutcomeKind::Binary, None, -0.5, vec![])
+        let c = build_contract(&lspec, OutcomeKind::Binary, None, None, -0.5, vec![])
             .expect("build_contract")
             .pop()
             .unwrap();
@@ -1305,6 +1316,7 @@ mod tests {
         let c_mle = build_contract(
             &lspec,
             OutcomeKind::Continuous,
+            None,
             Some(EstimatorSpec::Mle),
             0.0,
             vec![ClusterSpec {
@@ -1331,6 +1343,7 @@ mod tests {
         let err = build_contract(
             &lspec,
             OutcomeKind::Continuous,
+            None,
             Some(EstimatorSpec::Mle),
             0.0,
             vec![
@@ -1358,6 +1371,7 @@ mod tests {
         let err = build_contract(
             &lspec,
             OutcomeKind::Continuous,
+            None,
             Some(EstimatorSpec::Mle),
             0.0,
             vec![],
@@ -1383,11 +1397,12 @@ mod tests {
             residual_dists: vec![],
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
         }];
-        let contracts = build_contract(&spec, OutcomeKind::Binary, None, -0.5, vec![])
+        let contracts = build_contract(&spec, OutcomeKind::Binary, None, None, -0.5, vec![])
             .expect("binary with scenario heterogeneity>0 should validate");
         assert_eq!(contracts[0].scenario.heterogeneity, 0.2);
     }
@@ -1396,7 +1411,8 @@ mod tests {
     fn build_contract_rejects_random_slopes() {
         let mut spec = simple_spec();
         spec.formula = "y ~ x1 + x2 + (1+x1|g)".into();
-        let err = build_contract(&spec, OutcomeKind::Continuous, None, 0.0, vec![]).unwrap_err();
+        let err =
+            build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![]).unwrap_err();
         assert!(matches!(err, SpecError::RandomSlopesUnsupported));
     }
 
@@ -1407,7 +1423,8 @@ mod tests {
         // FormulaSyntax error. Mirrors build_contract_rejects_random_slopes.
         let mut spec = simple_spec();
         spec.formula = "y ~ x1 + x2 + (x1|g)".into();
-        let err = build_contract(&spec, OutcomeKind::Continuous, None, 0.0, vec![]).unwrap_err();
+        let err =
+            build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![]).unwrap_err();
         assert!(matches!(err, SpecError::RandomSlopesUnsupported));
     }
 
@@ -1418,6 +1435,7 @@ mod tests {
         let c = build_contract(
             &spec,
             OutcomeKind::Continuous,
+            None,
             Some(EstimatorSpec::Mle),
             0.0,
             vec![engine_contract::ClusterSpec {
@@ -1523,6 +1541,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            nagq: 1,
         }
     }
 
@@ -1567,6 +1586,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            nagq: 1,
         };
         let c = build_linear_contract(&spec).unwrap().pop().unwrap();
         // group[2] and group[3] must resolve to the non-reference dummy
@@ -1660,6 +1680,7 @@ mod tests {
                 residual_dists: vec![],
                 residual_df: 0.0,
                 sampled_factor_proportions: false,
+                truth_start: false,
                 random_effect_dist: 0,
                 random_effect_df: 0.0,
                 icc_noise_sd: 0.0,
@@ -1675,6 +1696,7 @@ mod tests {
                 residual_dists: vec![],
                 residual_df: 0.0,
                 sampled_factor_proportions: true,
+                truth_start: false,
                 random_effect_dist: 0,
                 random_effect_df: 0.0,
                 icc_noise_sd: 0.0,
@@ -2054,6 +2076,7 @@ mod tests {
             &lspec,
             OutcomeKind::Continuous,
             None,
+            None,
             0.0,
             vec![ClusterSpec {
                 sizing: ClusterSizing::FixedClusters { n_clusters: 20 },
@@ -2118,6 +2141,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            nagq: 1,
         }
     }
 
@@ -2414,6 +2438,7 @@ mod tests {
             residual_dists: vec![],
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             random_effect_dist: 1, // t — triggers lme = Some(...)
             random_effect_df: 5.0,
             icc_noise_sd: 0.0,
@@ -2423,6 +2448,7 @@ mod tests {
         let result = build_contract_with_skeleton(
             &spec,
             OutcomeKind::Continuous,
+            None,
             None, // default coupling → Mle (because clusters non-empty)
             0.0,
             vec![cluster],
@@ -2481,6 +2507,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            nagq: 1,
         };
         let contracts = build_linear_contract(&spec).unwrap();
         let c = &contracts[0];

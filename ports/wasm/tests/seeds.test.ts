@@ -123,6 +123,21 @@ describe('classifyCase', () => {
       slopes: [{ predictor_name: 'x', slope_variance: 0.05, slope_intercept_corr: 0 }],
     }))).toBe('glmm_slopes');
   });
+  it('mixed probit (binary + link) → glmm_intercept', () => {
+    expect(classifyCase(spec({ family: 'mixed', outcome: { kind: 'binary', link: 'probit' } }))).toBe('glmm_intercept');
+  });
+  it('mixed poisson, empty/absent slopes → glmm_intercept', () => {
+    expect(classifyCase(spec({ family: 'mixed', outcome: { kind: 'poisson', baseline_rate: 2, tau_squared: 0.5 } }))).toBe('glmm_intercept');
+  });
+  it('mixed poisson, non-empty slopes → glmm_slopes', () => {
+    expect(classifyCase(spec({
+      family: 'mixed', outcome: { kind: 'poisson', baseline_rate: 2, tau_squared: 0.5 },
+      slopes: [{ predictor_name: 'x', slope_variance: 0.05, slope_intercept_corr: 0 }],
+    }))).toBe('glmm_slopes');
+  });
+  it('top-level poisson (unclustered) → simple', () => {
+    expect(classifyCase(spec({ family: 'poisson' }))).toBe('simple');
+  });
 });
 
 describe('splitSims', () => {

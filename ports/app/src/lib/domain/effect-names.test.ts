@@ -49,7 +49,7 @@ describe('presetsFor', () => {
   const cont = [{ kind: 'continuous' as const, name: 'x' }];
   const fac = [{ kind: 'factor' as const, name: 'g', nLevels: 3 }];
 
-  it('returns the odds (beta) set for every predictor when the outcome is logit', () => {
+  it('returns the odds (beta) set for every predictor when useOddsPresets is set (logit)', () => {
     const vals = (rows: VariableRow[], name: string) =>
       presetsFor(name, rows, true).map((p) => p.value);
     // Same odds triple regardless of predictor kind — it replaces both rows.
@@ -58,7 +58,13 @@ describe('presetsFor', () => {
     expect(vals([], 'x1:x2')).toEqual(BENCHMARKS.odds);
   });
 
-  it('keeps the continuous/Cohen split when the outcome is not logit', () => {
+  it('poisson reuses the same odds triple as rate-ratio anchors (no new constants)', () => {
+    expect(presetsFor('x', cont, true).map((p) => p.value)).toEqual(BENCHMARKS.odds);
+  });
+
+  it('keeps the continuous/Cohen split when useOddsPresets is unset (linear, probit)', () => {
+    // Probit's β is Cohen's-d scale, so it takes the same split a linear
+    // outcome would — the caller never passes useOddsPresets=true for probit.
     expect(presetsFor('x', cont, false).map((p) => p.value)).toEqual(BENCHMARKS.continuous);
     expect(presetsFor('g[2]', fac, false).map((p) => p.value)).toEqual(BENCHMARKS.binary_factor);
   });

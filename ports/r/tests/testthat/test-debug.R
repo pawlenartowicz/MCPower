@@ -1,6 +1,6 @@
 test_that("debug_report returns selected stages as a nested list", {
   cj <- mcpower:::build_contract_from_spec(.ols_spec_json("y ~ x1", x1 = 0.5),
-                                            "continuous", "ols", 0.0, "[]")$contracts
+                                            "continuous", "canonical", "ols", 0.0, "[]")$contracts
   rep <- mcpower:::debug_report(cj, scenario_index = 0L, seed = 2137, n = 50L, n_sims = 100L,
             stage_input = TRUE, stage_data = TRUE, stage_dispatch = TRUE,
             stage_stats = TRUE, stage_crit = TRUE)
@@ -262,6 +262,107 @@ test_that("get_effects_from_data reports a latent-scale ICC for a logistic uploa
   p_hat <- as.numeric(sub("^.*:\\s*([0-9.]+).*$", "\\1", bline))
   expect_true(p_hat > 0 && p_hat < 1)
   expect_match(joined, "set_baseline_probability\\(")
+})
+
+test_that("get_effects_from_data reports a probit-latent-scale ICC (M9)", {
+  # Clustered probit upload: the residual variance for the probit latent
+  # scale is fixed at 1 (Phi's scale), not logit's pi^2/3 — mirrors
+  # driver.rs's cluster_icc branching for BinaryLink::Probit.
+  set.seed(17)
+  n_clusters <- 30L; csize <- 40L; n <- n_clusters * csize
+  x <- rnorm(n)
+  u <- rnorm(n_clusters, sd = 1.0)
+  group <- rep(seq_len(n_clusters) - 1L, each = csize)
+  eta <- 0.7 * x + u[group + 1L]
+  p <- pnorm(eta)
+  y <- as.numeric(runif(n) < p)
+
+  m <- MCPower$new("y ~ x + (1|group)", family = "probit")
+  m$set_cluster("group", ICC = 0.2, n_clusters = n_clusters)
+  m$upload_data(data.frame(y = y, x = x, group = group), mode = "partial", verbose = FALSE)
+
+  msgs <- testthat::capture_messages(m$get_effects_from_data("y"))
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "Estimated ICC \\(probit latent scale\\):")
+  expect_false(grepl("logit latent scale", joined))
+  icc <- .icc_from_msgs(msgs)
+  expect_true(icc > 0 && icc < 1)
+
+  # Discriminate against the (wrong) logit residual pi^2/3: the tau^2
+  # implied by the printed ICC under the correct residual=1 formula would
+  # print a materially different ICC under the logit formula.
+  tau_sq_implied <- icc / (1 - icc)
+  icc_if_logit_formula <- tau_sq_implied / (tau_sq_implied + pi^2 / 3)
+  expect_true(abs(icc - icc_if_logit_formula) > 0.05)
+})
+
+test_that("get_effects_from_data emits no ICC line for a clustered Poisson upload (M9)", {
+  # A log-link count model has no latent-scale residual to form an ICC ratio
+  # against (raw tau^2, not ICC-derived) — mirrors driver.rs's cluster_icc,
+  # which returns None for MixedOutcome::Poisson.
+  set.seed(19)
+  n_clusters <- 20L; csize <- 20L; n <- n_clusters * csize
+  x <- rnorm(n)
+  u <- rnorm(n_clusters, sd = sqrt(0.3))
+  group <- rep(seq_len(n_clusters) - 1L, each = csize)
+  eta <- 0.3 * x + u[group + 1L]
+  y <- rpois(n, lambda = exp(eta))
+
+  m <- MCPower$new("y ~ x + (1|group)", family = "poisson")
+  m$set_cluster("group", tau_squared = 0.3, n_clusters = n_clusters)
+  m$upload_data(data.frame(y = y, x = x, group = group), mode = "partial", verbose = FALSE)
+
+  msgs <- testthat::capture_messages(m$get_effects_from_data("y"))
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "APPROXIMATION")
+  expect_false(grepl("Estimated ICC", joined))
+})
+
+test_that("get_effects_from_data probit round-trip recovers the true baseline probability", {
+  # B1 round-trip: data generated from a probit model with true baseline
+  # p=0.30 must recover ~0.30, not the logit-mistaken 0.372 (logistic applied
+  # to a probit intercept: qnorm(0.30) ~ -0.524, and 1/(1+exp(0.524)) ~ 0.372).
+  set.seed(21)
+  n <- 8000L
+  x <- rnorm(n)
+  beta_true <- 0.5
+  b0_true <- qnorm(0.30)
+  eta <- b0_true + beta_true * x
+  p <- pnorm(eta)
+  y <- as.numeric(runif(n) < p)
+
+  m <- MCPower$new("y ~ x", family = "probit")
+  m$set_baseline_probability(0.30)
+  m$upload_data(data.frame(y = y, x = x), mode = "partial", verbose = FALSE)
+
+  msgs <- testthat::capture_messages(m$get_effects_from_data("y"))
+  bline <- grep("Estimated baseline probability:", msgs, value = TRUE)[1]
+  expect_false(is.na(bline))
+  p_hat <- as.numeric(sub("^.*:\\s*([0-9.]+).*$", "\\1", bline))
+  expect_equal(p_hat, 0.30, tolerance = 0.05)
+})
+
+test_that("get_effects_from_data logit round-trip recovers the true baseline probability", {
+  # Companion to the probit round-trip above so the link branch cannot
+  # collapse silently.
+  set.seed(23)
+  n <- 8000L
+  x <- rnorm(n)
+  beta_true <- 0.5
+  b0_true <- log(0.30 / 0.70)
+  eta <- b0_true + beta_true * x
+  p <- 1 / (1 + exp(-eta))
+  y <- as.numeric(runif(n) < p)
+
+  m <- MCPower$new("y ~ x", family = "logit")
+  m$set_baseline_probability(0.30)
+  m$upload_data(data.frame(y = y, x = x), mode = "partial", verbose = FALSE)
+
+  msgs <- testthat::capture_messages(m$get_effects_from_data("y"))
+  bline <- grep("Estimated baseline probability:", msgs, value = TRUE)[1]
+  expect_false(is.na(bline))
+  p_hat <- as.numeric(sub("^.*:\\s*([0-9.]+).*$", "\\1", bline))
+  expect_equal(p_hat, 0.30, tolerance = 0.05)
 })
 
 test_that("get_effects_from_data emits no ICC line for non-clustered OLS", {

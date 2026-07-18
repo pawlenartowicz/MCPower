@@ -14,25 +14,33 @@
   import AnovaFactorEditor from './AnovaFactorEditor.svelte';
   import AnovaCovariateEditor from './AnovaCovariateEditor.svelte';
   import BaselineProbabilityInput from './BaselineProbabilityInput.svelte';
+  import BaselineRateInput from './BaselineRateInput.svelte';
   import ModelOptionsDialog from './ModelOptionsDialog.svelte';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
+  import { OUTCOME_KINDS, type OutcomeKind } from '$lib/domain/family';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
   let modelOptionsOpen = $state(false);
 
-  // Regression and mixed use different storage (store field vs cluster flag); kept
-  // inline rather than extracted to avoid a wrapper for two callers.
-  const outcomeIsBinary = $derived(familyStore.activeOutcome === 'binary');
+  const activeOutcome = $derived(familyStore.activeOutcome);
+  const outcomeIsBinary = $derived(activeOutcome === 'logit' || activeOutcome === 'probit');
+  const outcomeIsPoisson = $derived(activeOutcome === 'poisson');
 
-  function setOutcome(binary: boolean) {
+  // Regression and mixed use different storage (store field vs cluster config); kept
+  // inline rather than extracted to avoid a wrapper for two callers. Seed the
+  // baseline the chosen outcome needs (binary → probability in (0,1); Poisson →
+  // rate λ + raw τ²) so the adapter's validation has a value to read.
+  function setOutcome(kind: OutcomeKind) {
     if (familyStore.active === 'regression') {
-      familyStore.regressionOutcome = binary ? 'binary' : 'continuous';
+      familyStore.regressionOutcome = kind;
     } else if (familyStore.active === 'mixed' && cfg.cluster) {
-      cfg.cluster.binaryOutcome = binary;
-      // The adapter requires a baseline in (0,1) for binary mixed; seed the default
-      // (mirrors regression's always-defined cfg.baselineProbability = 0.2).
-      if (binary && cfg.cluster.baselineProbability === undefined) {
+      cfg.cluster.outcomeKind = kind;
+      if ((kind === 'logit' || kind === 'probit') && cfg.cluster.baselineProbability === undefined) {
         cfg.cluster.baselineProbability = 0.2;
+      }
+      if (kind === 'poisson') {
+        if (cfg.cluster.baselineRate === undefined) cfg.cluster.baselineRate = 2.0;
+        if (cfg.cluster.tauSquared === undefined) cfg.cluster.tauSquared = 0.5;
       }
     }
   }
@@ -45,23 +53,21 @@
 
 <CollapsibleSection title="Model" {summary} bind:open={sharedPrefs.modelExpanded}>
   {#if familyStore.active === 'regression' || familyStore.active === 'mixed'}
-    <div role="group" aria-label="Outcome type" class="flex items-center gap-2 text-sm">
+    <div role="group" aria-label="Outcome type" class="flex flex-wrap items-center gap-2 text-sm">
       <span class="text-sm font-medium">Outcome type</span>
       <InfoIcon tipKey="outcomeType" />
-      <button
-        type="button"
-        class="rounded px-3 py-1 {!outcomeIsBinary
-          ? 'bg-primary text-primary-foreground'
-          : 'bg-muted text-muted-foreground hover:bg-muted/70'}"
-        onclick={() => setOutcome(false)}
-      >Continuous</button>
-      <button
-        type="button"
-        class="rounded px-3 py-1 {outcomeIsBinary
-          ? 'bg-primary text-primary-foreground'
-          : 'bg-muted text-muted-foreground hover:bg-muted/70'}"
-        onclick={() => setOutcome(true)}
-      >Binary</button>
+      {#each OUTCOME_KINDS as entry, i (entry.kind)}
+        {#if entry.group === 'advanced' && (i === 0 || OUTCOME_KINDS[i - 1]?.group !== 'advanced')}
+          <span aria-hidden="true" class="mx-1 h-5 w-px bg-border"></span>
+        {/if}
+        <button
+          type="button"
+          class="rounded px-3 py-1 {activeOutcome === entry.kind
+            ? 'bg-primary text-primary-foreground'
+            : 'bg-muted text-muted-foreground hover:bg-muted/70'}"
+          onclick={() => setOutcome(entry.kind)}
+        >{entry.label}</button>
+      {/each}
     </div>
   {/if}
   {#if familyStore.active === 'anova'}
@@ -76,6 +82,9 @@
   {/if}
   {#if outcomeIsBinary}
     <BaselineProbabilityInput />
+  {/if}
+  {#if outcomeIsPoisson}
+    <BaselineRateInput />
   {/if}
   {#if familyStore.active !== 'anova'}
     <div class="flex justify-end">

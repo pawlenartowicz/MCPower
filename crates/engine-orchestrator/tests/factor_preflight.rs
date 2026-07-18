@@ -57,6 +57,7 @@ fn factor_contract(probs: [f64; 2]) -> SimulationContract {
             distribution: ResidualDist::Normal,
             pinned: false,
         },
+        link: None,
         heteroskedasticity_driver: None,
     };
     let test = TestSpec {
@@ -75,6 +76,7 @@ fn factor_contract(probs: [f64; 2]) -> SimulationContract {
         design_test: None,
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        nagq: 1,
         test,
         posthoc: vec![],
         scenario,

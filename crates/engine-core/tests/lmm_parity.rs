@@ -17,7 +17,7 @@ use engine_core::spec::{
     HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
 };
 use faer::Mat;
-use glmm::mcpower::{fit_lmm, LmmWorkspace};
+use glmm::loop_advanced::{fit_lmm, LmmWorkspace};
 
 const BASE_SEED: u64 = 2137;
 /// Datasets per case — 6 cases × 25 seeds = 150 same-bytes comparisons.
@@ -126,8 +126,10 @@ fn spec_for(c: &CaseDef) -> SimulationSpec {
         residual_dist: ResidualDist::Normal,
         residual_pinned: false,
         outcome_kind: OutcomeKind::Continuous,
+        link: None,
         estimator: EstimatorSpec::Mle,
         wald_se: Default::default(),
+        nagq: 1,
         intercept: 0.0,
         posthoc: vec![],
         max_failed_fraction: 0.25,

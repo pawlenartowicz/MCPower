@@ -772,6 +772,7 @@ RVariableRegistry <- R6::R6Class(
     residual_dists = I(as.integer(residual_dists)),
     residual_df = as.numeric(getf("residual_df", 0.0)),
     sampled_factor_proportions = as.logical(getf("sampled_factor_proportions", FALSE)),
+    truth_start = as.logical(getf("truth_start", FALSE)),
     random_effect_dist = re_dist_code,
     random_effect_df = as.numeric(getf("random_effect_df", 0.0)),
     icc_noise_sd = as.numeric(getf("icc_noise_sd", 0.0))
@@ -969,7 +970,8 @@ RVariableRegistry <- R6::R6Class(
 # list ready for jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null", digits = NA)
 # (the production serialization in MCPower's build_contract_bytes).
 .to_linear_spec_list <- function(reg, scenario_names, alpha, correction,
-                                  wald_se = NULL, target_test, heteroskedasticity,
+                                  wald_se = NULL, nagq = 1L, target_test,
+                                  heteroskedasticity,
                                   residual_name, residual_pinned = FALSE, max_failed,
                                   test_formula, scenario_configs = .scenario_defaults(),
                                   pending_data = NULL, cluster_level_vars = NULL,
@@ -1132,6 +1134,7 @@ RVariableRegistry <- R6::R6Class(
     alpha = as.numeric(alpha),
     correction = correction_wire,
     wald_se = wald_se_wire,
+    nagq = as.integer(nagq),
     targets = wire_targets,
     report_overall = wire_report_overall,
     contrast_pairs = wire_contrast_pairs,
@@ -1207,8 +1210,28 @@ RVariableRegistry <- R6::R6Class(
 # each entry list(icc = <num>, n_clusters = <int>). Returns the four wire
 # values matching `_engine.build_contract_from_spec`'s signature; clusters_json
 # is a JSON string serialized with jsonlite to match Python's json.dumps.
-.encode_outcome_and_clusters <- function(family, estimator, intercept, pending_clusters) {
-  outcome_kind <- if (identical(family, "logit")) "binary" else "continuous"
+.encode_outcome_and_clusters <- function(family, link, estimator, intercept,
+                                         pending_clusters) {
+  # outcome_kind from family: logit/probit -> binary, poisson -> count, else
+  # continuous. link is "canonical" | "probit" (probit sets the non-canonical
+  # binary link). Mirrors Python model.py _encode_outcome_and_clusters.
+  outcome_kind <- if (family %in% c("logit", "probit")) {
+    "binary"
+  } else if (identical(family, "poisson")) {
+    "count"
+  } else {
+    "continuous"
+  }
+  link_wire <- if (identical(link, "probit")) "probit" else "canonical"
+
+  # Family/link-aware ICC->τ² factor for the primary + extra groupings
+  # (model.py _re_tau_squared): logit log-odds ×π²/3; probit latent variance 1;
+  # Gaussian σ²=1. Poisson is sized by raw τ² and never reaches this branch.
+  tau_factor <- if (identical(outcome_kind, "binary") && !identical(link, "probit")) {
+    pi^2 / 3
+  } else {
+    1.0
+  }
 
   if (length(pending_clusters) > 0L) {
     grouping_var <- names(pending_clusters)[1]
@@ -1219,13 +1242,15 @@ RVariableRegistry <- R6::R6Class(
       stop(paste0("cluster_size-only LME specs need a runtime sample_size; ",
                   "call find_power / find_sample_size or set n_clusters directly"))
     }
-    denom <- 1.0 - icc
-    # Latent-scale logistic conversion (Snijders & Bosker): binary outcome
-    # multiplies the Gaussian ICC->tau^2 by pi^2/3 (logistic variance ~= 3.29).
-    # Gaussian path (lme/continuous) uses tau^2 = ICC/(1-ICC) unchanged.
-    # Mirrors the Python port's _build_cluster_spec_dict latent branch — change together.
-    tau_raw     <- if (denom > 0) icc / denom else 0.0
-    tau_squared <- if (identical(outcome_kind, "binary")) tau_raw * (pi^2 / 3) else tau_raw
+    # Poisson (count) mixed: raw τ² the user supplied (Decision 8), no latent
+    # ICC. Every other family: τ² = ICC/(1-ICC) × latent factor.
+    if (identical(family, "poisson")) {
+      tau_squared <- as.numeric(cfg$tau_squared %||% 0.0)
+    } else {
+      denom       <- 1.0 - icc
+      tau_raw     <- if (denom > 0) icc / denom else 0.0
+      tau_squared <- tau_raw * tau_factor
+    }
     cluster_spec <- list(
       sizing      = list(FixedClusters = list(n_clusters = as.integer(n_clusters))),
       tau_squared = as.numeric(tau_squared)
@@ -1240,12 +1265,16 @@ RVariableRegistry <- R6::R6Class(
     if (length(gvars) > 1L) {
       for (gv in gvars[-1L]) {
         gcfg  <- pending_clusters[[gv]]
-        gicc  <- as.numeric(gcfg$icc %||% 0.0)
-        gdenom <- 1.0 - gicc
-        # Same latent-scale branch as the primary grouping — binary outcome
-        # requires the pi^2/3 factor; mirrors primary conversion above.
-        gtau_raw <- if (gdenom > 0) gicc / gdenom else 0.0
-        gtau     <- if (identical(outcome_kind, "binary")) gtau_raw * (pi^2 / 3) else gtau_raw
+        # Same family/link-aware conversion as the primary grouping. Poisson
+        # uses raw τ²; others use ICC/(1-ICC) × the latent factor.
+        if (identical(family, "poisson")) {
+          gtau <- as.numeric(gcfg$tau_squared %||% 0.0)
+        } else {
+          gicc   <- as.numeric(gcfg$icc %||% 0.0)
+          gdenom <- 1.0 - gicc
+          gtau_raw <- if (gdenom > 0) gicc / gdenom else 0.0
+          gtau     <- gtau_raw * tau_factor
+        }
         # Relation: NestedWithin when n_per_parent supplied, Crossed otherwise.
         if (!is.null(gcfg$n_per_parent)) {
           relation <- list(NestedWithin = list(n_per_parent = as.integer(gcfg$n_per_parent)))
@@ -1306,6 +1335,7 @@ RVariableRegistry <- R6::R6Class(
 
   list(
     outcome_kind = outcome_kind,
+    link = link_wire,
     estimator = estimator,
     intercept = as.numeric(intercept),
     clusters_json = as.character(clusters_json)

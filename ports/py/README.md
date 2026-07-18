@@ -116,7 +116,7 @@ Two entry points, a fluent `set_*` chain:
 
 | Call | What it does |
 |---|---|
-| `MCPower("y = x1 + x2", family="ols")` | Define the model (R-style formula; `family` ∈ `"ols"`/`"logit"`/`"lme"`) |
+| `MCPower("y = x1 + x2", family="ols")` | Define the model (R-style formula; `family` ∈ `"ols"`/`"logit"`/`"probit"`/`"poisson"`/`"lme"`) |
 | `.set_effects("x1=0.5, x2=0.3")` | Standardised effect sizes |
 | `.set_variable_type("x1=binary, g=(factor,3)")` | Predictor distributions |
 | `.set_correlations("corr(x1, x2)=0.3")` | Correlations between predictors |
@@ -129,6 +129,13 @@ Two entry points, a fluent `set_*` chain:
 | `.find_sample_size(target_test="x1", from_size=50, to_size=400)` | Smallest N for target power |
 
 All `set_*` methods chain and return `self`; add `scenarios=True` to either `find_*` for optimistic/realistic/doomer robustness.
+
+## What's new in 1.1.0
+
+Clustered binary/count models (logit, probit, Poisson GLMMs) now default to a
+faster Wald standard-error method (`wald_se="rx"`, fastmode) instead of the
+old per-fit Hessian. Results shift slightly from 1.0.x runs of the same
+design; pass `wald_se="hessian"` to restore the previous behaviour exactly.
 
 ## Docs
 

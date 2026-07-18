@@ -52,6 +52,13 @@ export default defineConfig({
       { find: '$lib', replacement: path.resolve(__dirname, 'src/lib') },
       { find: '$configs', replacement: path.resolve(__dirname, '../../configs') },
       { find: '$docs', replacement: path.resolve(__dirname, '../../web/documentation') },
+      // sav-reader (SPSS .sav upload) has a broken `exports` map (only a `require`
+      // condition) and needs real readable-stream semantics — point directly at its
+      // dist entry, and redirect every `import 'stream'` (in sav-reader and its deps)
+      // to readable-stream. The `stream` alias is unconditional and global across all
+      // three build modes; nothing else in the app imports Node's native `stream`.
+      { find: 'sav-reader', replacement: fileURLToPath(new URL('./node_modules/sav-reader/dist/index.js', import.meta.url)) },
+      { find: 'stream', replacement: fileURLToPath(new URL('./node_modules/readable-stream/lib/ours/index.js', import.meta.url)) },
     ],
     conditions: process.env['VITEST'] ? ['browser', 'module', 'import', 'default'] : undefined,
   },
@@ -69,6 +76,8 @@ export default defineConfig({
   },
   define: {
     __MCPOWER_VERSION__: JSON.stringify(appVersion),
+    // sav-reader's stream stack references the Node `global`; map it to `globalThis`.
+    global: 'globalThis',
   },
   clearScreen: false,
   server: {

@@ -123,6 +123,60 @@ describe('generateScript (mixed)', () => {
     expect(out).toContain('model.set_baseline_probability(0.3)');
   });
 
+  it('probit outcome → family="probit"', () => {
+    const s = {
+      ...mixedSpec({ kind: 'n_clusters', value: 20 }),
+      outcome: { kind: 'binary' as const, baseline_probability: 0.3, link: 'probit' as const },
+    } as AppSpec;
+    const out = generateMixedScript(s, 'find-power', { sample_size: 100 }, 'python');
+    expect(out).toContain('family="probit"');
+    expect(out).toContain('model.set_baseline_probability(0.3)');
+  });
+
+  it('poisson outcome → family="poisson", set_baseline_rate, and set_cluster(tau_squared=)', () => {
+    const s = {
+      ...mixedSpec({ kind: 'n_clusters', value: 20 }),
+      outcome: { kind: 'poisson' as const, baseline_rate: 3, tau_squared: 0.7 },
+    } as AppSpec;
+    const out = generateMixedScript(s, 'find-power', { sample_size: 100 }, 'python');
+    expect(out).toContain('family="poisson"');
+    expect(out).toContain('model.set_baseline_rate(3)');
+    // Poisson uses the raw τ² via tau_squared=, NOT ICC= (ports reject ICC for poisson).
+    expect(out).toContain('model.set_cluster("school", n_clusters=20, tau_squared=0.7)');
+    expect(out).not.toContain('ICC=');
+  });
+
+  it('poisson extra groupings use tau_squared= too', () => {
+    const s = {
+      ...mixedSpec({ kind: 'n_clusters', value: 20 }),
+      outcome: { kind: 'poisson' as const, baseline_rate: 3, tau_squared: 0.7 },
+      extra_groupings: [
+        { tau_squared: 0.4, relation: { kind: 'crossed', n_clusters: 8 }, cluster_name: 'item' },
+      ],
+    } as AppSpec;
+    const out = generateMixedScript(s, 'find-power', { sample_size: 100 }, 'python');
+    expect(out).toContain('model.set_cluster("item", n_clusters=8, tau_squared=0.4)');
+    expect(out).not.toContain('ICC=');
+  });
+
+  it('emits wald_se only for the opt-in (hessian), never the default rx', () => {
+    const base = mixedSpec({ kind: 'n_clusters', value: 20 });
+    const binary = { kind: 'binary' as const, baseline_probability: 0.3 };
+    const rx = generateMixedScript({ ...base, outcome: binary, wald_se: 'rx' } as AppSpec, 'find-power', { sample_size: 100 });
+    expect(rx).not.toContain('wald_se');
+    const hess = generateMixedScript({ ...base, outcome: binary, wald_se: 'hessian' } as AppSpec, 'find-power', { sample_size: 100 });
+    expect(hess).toContain('wald_se="hessian"');
+  });
+
+  it('emits agq only when > 1 (adaptive quadrature opt-in)', () => {
+    const base = mixedSpec({ kind: 'n_clusters', value: 20 });
+    const binary = { kind: 'binary' as const, baseline_probability: 0.3 };
+    const laplace = generateMixedScript({ ...base, outcome: binary, agq: 1 } as AppSpec, 'find-power', { sample_size: 100 });
+    expect(laplace).not.toContain('agq');
+    const agq = generateMixedScript({ ...base, outcome: binary, agq: 7 } as AppSpec, 'find-power', { sample_size: 100 });
+    expect(agq).toContain('agq=7,');
+  });
+
   it('R output', () => {
     const spec = mixedSpec({ kind: 'n_clusters', value: 20 });
     const out = generateMixedScript(spec, 'find-power', { sample_size: 100 }, 'r');

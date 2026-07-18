@@ -37,7 +37,7 @@ def test_family_lme_constructs():
 def test_family_unknown_still_rejected():
     """Unknown families are still rejected by _validate_family."""
     with pytest.raises(ValueError, match="family must be"):
-        MCPower("y = x", family="poisson")
+        MCPower("y = x", family="gamma")
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +340,7 @@ def test_clusters_json_two_crossed_groupings():
     m.set_cluster("school", ICC=0.2, n_clusters=20)
     m.set_cluster("teacher", ICC=0.1, n_clusters=30)
     m._effective_n_clusters = 20  # simulate post-_validate_lme_runtime
-    _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert len(specs) == 1  # one top-level ClusterSpec entry
     primary = specs[0]
@@ -361,7 +361,7 @@ def test_clusters_json_nested_grouping():
     m.set_cluster("school", ICC=0.15, n_clusters=10)
     m.set_cluster("school:classroom", ICC=0.10, n_clusters=30, n_per_parent=3)
     m._effective_n_clusters = 10
-    _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert len(specs) == 1
     primary = specs[0]
@@ -433,7 +433,7 @@ def test_clusters_json_random_slope_shape():
         slope_intercept_corr=0.3,
     )
     m._effective_n_clusters = 20
-    _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     primary = specs[0]
     assert "slopes" in primary
@@ -452,7 +452,7 @@ def test_clusters_json_no_slopes_key_absent():
     m.set_effects("x1=0.3")
     m.set_cluster("school", ICC=0.2, n_clusters=20)
     m._effective_n_clusters = 20
-    _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert "slopes" not in specs[0]
 

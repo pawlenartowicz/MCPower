@@ -36,6 +36,18 @@ describe('family domain', () => {
     expect(defaultFamilyConfig('mixed').baselineProbability).toBeUndefined();
   });
 
+  it('attaches a baselineRate to Regression only', () => {
+    expect(defaultFamilyConfig('regression').baselineRate).toBe(2.0);
+    expect(defaultFamilyConfig('anova').baselineRate).toBeUndefined();
+    expect(defaultFamilyConfig('mixed').baselineRate).toBeUndefined();
+  });
+
+  it('defaults the estimation control to Fast (wald_se rx, agq 1)', () => {
+    const adv = defaultFamilyConfig('regression').advanced;
+    expect(adv.wald_se).toBe('rx');
+    expect(adv.agq).toBe(1);
+  });
+
   it('defaults reportOverall to true for all families', () => {
     expect(defaultFamilyConfig('regression').reportOverall).toBe(true);
     expect(defaultFamilyConfig('mixed').reportOverall).toBe(true);

@@ -47,7 +47,9 @@ simulate_case <- function(case) {
   cmean <- matrix(NA_real_, K, length(cont)); csd <- matrix(NA_real_, K, length(cont))
   corr  <- if (!is.null(pc)) numeric(K) else NULL
   props <- if (!is.null(pf)) matrix(NA_real_, K, length(pf)) else NULL
-  rvar  <- if (fam != "logit") numeric(K) else NULL
+  # No Gaussian residual variance for the non-linear-outcome MLE families
+  # (logit/probit/poisson) — only OLS (noise var) and LME (within-cluster var) fill rvar.
+  rvar  <- if (fam %in% c("logit", "probit", "poisson")) NULL else numeric(K)
   icc   <- if (!is.null(case$cluster)) numeric(K) else NULL
   micc  <- if (!is.null(case$cluster)) numeric(K) else NULL  # observed (marginal) ICC of raw outcome
   pmarg <- if (!is.null(case$cluster)) numeric(K) else NULL  # predicted marginal ICC (same-draw components)
@@ -195,8 +197,11 @@ desc_rows <- function(s) {
 # Global A<->B recovery decision. OLS/LME: pool every coefficient's two-sided
 # z-of-the-mean p-value across ALL such cases and control the FDR via
 # Benjamini-Hochberg at DGP_TOL$bias_fdr_q (a single hard per-coef z-gate over
-# ~103 coefficients would abort ~all clean renders on noise). logit: absolute band
-# (its finite-sample bias is systematic, not a detectable-vs-null effect).
+# ~103 coefficients would abort ~all clean renders on noise). The iterative-MLE
+# families (logit/probit/poisson) instead use an ABSOLUTE band: their finite-sample
+# bias is systematic (not a detectable-vs-null effect), so the z-gate would flag it.
+# logit + probit share bias_logit_abs (same binary-MLE regime); poisson (log-link
+# count) has its own, much smaller bias_poisson_abs. See DGP_TOL comments.
 recovery_decision <- function(RES) {
   rows <- do.call(rbind, lapply(RES, function(s) {
     mb <- colMeans(s$betas); sb <- apply(s$betas, 2, stats::sd)
@@ -207,10 +212,12 @@ recovery_decision <- function(RES) {
                stringsAsFactors = FALSE)
   }))
   off <- logical(nrow(rows))
-  is_logit <- rows$family == "logit"
-  off[is_logit]  <- rows$absdiff[is_logit] > DGP_TOL$bias_logit_abs
-  p <- 2 * stats::pnorm(-abs(rows$z[!is_logit]))            # two-sided; ~Uniform under clean DGP
-  off[!is_logit] <- stats::p.adjust(p, method = "BH") <= DGP_TOL$bias_fdr_q
+  abs_band <- c(logit = DGP_TOL$bias_logit_abs, probit = DGP_TOL$bias_logit_abs,
+                poisson = DGP_TOL$bias_poisson_abs)
+  is_mle <- rows$family %in% names(abs_band)
+  off[is_mle]  <- rows$absdiff[is_mle] > abs_band[rows$family[is_mle]]
+  p <- 2 * stats::pnorm(-abs(rows$z[!is_mle]))             # two-sided; ~Uniform under clean DGP
+  off[!is_mle] <- stats::p.adjust(p, method = "BH") <= DGP_TOL$bias_fdr_q
   setNames(off, rows$key)
 }
 
@@ -233,9 +240,10 @@ recovery_note <- function(s) {
   br <- beta_rows(s); eff <- br[br$Term != "intercept", ]
   bad <- eff[eff$Result != "OK", ]
   msg <- if (nrow(bad)) {
-    if (s$case$family == "logit")
+    if (s$case$family %in% c("logit", "probit", "poisson"))
       sprintf(paste0("A few coefficients sit slightly off the true value (%s). This is the small, well-known ",
-              "finite-sample bias of logistic-regression estimates — expected, not a generator fault."),
+              "finite-sample bias of maximum-likelihood (logistic / probit / Poisson) estimates — expected, ",
+              "not a generator fault."),
               paste(bad$Term, collapse = ", "))
     else
       sprintf(paste0("Some coefficients were flagged by the pooled Benjamini-Hochberg recovery gate (%s) — ",
@@ -349,9 +357,10 @@ by the square root of the number of draws). For OLS and mixed-effects models, th
 ~103 per-coefficient z-scores are pooled across all cases and the
 **false-discovery rate** is controlled via Benjamini-Hochberg at q = `r DGP_TOL$bias_fdr_q`
 (a fixed per-coefficient z-threshold below ~4 would abort nearly every clean
-render on sampling noise alone). For logistic regression we use an **absolute
-band** instead (|mean − true| ≤ `r DGP_TOL$bias_logit_abs`), because logistic
-MLE's finite-sample bias swamps the z-score at this K — see below.
+render on sampling noise alone). For the maximum-likelihood families (logistic,
+probit, Poisson) we use an **absolute band** instead — logistic/probit within
+`r DGP_TOL$bias_logit_abs`, Poisson within `r DGP_TOL$bias_poisson_abs` — because
+their finite-sample bias is systematic and swamps the z-score at this K (see below).
 
 **3. File reproduces.** The dataset saved to disk for each formula is regenerated
 from its random seed, and its content fingerprint (a SHA-256 hash) is compared to
@@ -370,7 +379,8 @@ later comparison against the saved file would be meaningless.
 | intra-cluster correlation (ICC), conditional | the value you set | within `r BANDS$icc` |
 | observed (marginal) ICC vs predicted | τ²/(τ²+σ²+Var(Xβ)) | within `r BANDS$icc_marginal` |
 | **coefficient recovery (OLS/LME)** | the true coefficient | pooled BH-FDR ≤ **`r DGP_TOL$bias_fdr_q`** across all cases |
-| **coefficient recovery (logit)** | the true coefficient | absolute difference within **`r DGP_TOL$bias_logit_abs`** |
+| **coefficient recovery (logit / probit)** | the true coefficient | absolute difference within **`r DGP_TOL$bias_logit_abs`** |
+| **coefficient recovery (Poisson)** | the true coefficient | absolute difference within **`r DGP_TOL$bias_poisson_abs`** |
 
 The data-check tolerances are tight because they apply to the *average over all
 draws*, not to a single dataset — averaging thousands of draws removes the random
@@ -478,8 +488,10 @@ prov <- data.frame(
             as.character(utils::packageVersion("mcpower")),
             as.character(utils::packageVersion("lme4")),
             format(K_FAST, big.mark = ","), format(K_LME, big.mark = ","),
-            sprintf("OLS/LME: pooled BH-FDR ≤ %g (Benjamini-Hochberg); logit: |mean−true| ≤ %g (absolute)",
-                    DGP_TOL$bias_fdr_q, DGP_TOL$bias_logit_abs), as.character(length(RES))),
+            sprintf(paste0("OLS/LME: pooled BH-FDR ≤ %g (Benjamini-Hochberg); logit/probit: ",
+                    "|mean−true| ≤ %g; Poisson: |mean−true| ≤ %g (absolute)"),
+                    DGP_TOL$bias_fdr_q, DGP_TOL$bias_logit_abs, DGP_TOL$bias_poisson_abs),
+            as.character(length(RES))),
   check.names = FALSE)
 knitr::kable(prov)
 ```

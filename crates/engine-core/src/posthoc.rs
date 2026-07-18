@@ -10,7 +10,7 @@
 use crate::correction::apply_correction;
 use crate::spec::CorrectionMethod;
 use faer::MatRef;
-use glmm::mcpower::OlsFitView;
+use glmm::loop_advanced::OlsFitView;
 
 use crate::FLOAT_NEAR_ZERO;
 
@@ -157,7 +157,7 @@ mod tests {
     use crate::rng::SimRng;
     use crate::workspace::SimWorkspace;
     use faer::Mat;
-    use glmm::mcpower::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
+    use glmm::loop_advanced::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
 
     /// EST-29: posthoc pass/fail is monotone in the uncorrected threshold —
     /// lowering the threshold can only turn failures into passes, never the

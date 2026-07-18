@@ -515,7 +515,7 @@ def test_encode_clusters_json_present_for_clustered_ols():  # APIC-64
     m = MCPower("y ~ x + (1|g)", family="lme", estimator="ols")
     m.set_effects("x=0.4")
     m.set_cluster("g", ICC=0.2, n_clusters=12)
-    _, estimator_wire, _, clusters_json = m._encode_outcome_and_clusters()
+    _, _, estimator_wire, _, clusters_json = m._encode_outcome_and_clusters()
     assert estimator_wire == "ols"                 # estimator stays OLS
     assert clusters_json not in ("", "[]")         # cluster block still emitted
 

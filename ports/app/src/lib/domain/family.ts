@@ -40,6 +40,38 @@ export const FAMILY_ICON: Record<Entrypoint, FamilyIcon> = {
 
 export type VariableKind = 'continuous' | 'binary' | 'factor';
 
+/**
+ * Resolved outcome distribution for the regression / mixed entrypoints. Widens
+ * the former two-way continuous/binary toggle: `linear` (OLS / Gaussian LME),
+ * `logit` and `probit` (binary GLM / GLMM, differing only in link), and
+ * `poisson` (count GLM / GLMM). `poisson` is grouped under Advanced in the UI.
+ */
+export type OutcomeKind = 'linear' | 'logit' | 'probit' | 'poisson';
+
+export interface OutcomeKindEntry {
+  kind: OutcomeKind;
+  label: string;
+  /** UI grouping: `standard` renders inline; `advanced` sits behind a separator. */
+  group: 'standard' | 'advanced';
+}
+
+/** Outcome toggle entries in display order: Linear, Logit, Probit, then (behind a
+ *  separator) the Advanced Poisson. The renderer inserts the separator before the
+ *  first `advanced` entry. */
+export const OUTCOME_KINDS: readonly OutcomeKindEntry[] = [
+  { kind: 'linear', label: 'Continuous', group: 'standard' },
+  { kind: 'logit', label: 'Logit', group: 'standard' },
+  { kind: 'probit', label: 'Probit', group: 'standard' },
+  { kind: 'poisson', label: 'Poisson', group: 'advanced' },
+] as const;
+
+export const OUTCOME_KIND_LABEL: Record<OutcomeKind, string> = {
+  linear: 'Continuous',
+  logit: 'Logit',
+  probit: 'Probit',
+  poisson: 'Poisson',
+};
+
 /** Continuous-predictor synthetic distribution (UI copy of the wire's NumericDistribution). */
 export type ContinuousDistribution = 'normal' | 'right_skewed' | 'left_skewed' | 'high_kurtosis' | 'uniform';
 
@@ -75,7 +107,8 @@ export interface EffectRow {
 export interface ExtraGroupingConfig {
   /** Cluster name from the secondary RE term. Read-only (formula-synced). */
   clusterName: string;
-  /** ICC of this grouping; converted to τ² by the adapter (same map as the primary). */
+  /** ICC of this grouping; converted to τ² by the adapter (same map as the primary).
+   *  Ignored for a Poisson mixed outcome — use `tauSquared` instead. */
   icc: number;
   /** 'crossed': fixed N levels across all primary clusters; 'nested': N children per primary. */
   relation: 'crossed' | 'nested';
@@ -84,6 +117,10 @@ export interface ExtraGroupingConfig {
   /** Random slopes on this grouping factor (mirrors the primary's `slopes`).
    *  Formula-driven from this term's `(1+x|name)` vars; default []. */
   slopes?: SlopeConfig[];
+  /** Raw random-intercept variance τ² for a Poisson GLMM outcome (no ICC
+   *  conversion, same reason as `ClusterConfig.tauSquared`). Read instead of
+   *  `icc` only when the mixed outcome is Poisson. */
+  tauSquared?: number;
 }
 
 /** One random slope on the primary grouping factor. `predictorName` names a
@@ -97,7 +134,7 @@ export interface SlopeConfig {
 /** Defaults for an extra grouping freshly declared in the formula, before the
  *  user touches its card. Shared by the cluster-cards reconcile and the engine
  *  adapter so the UI always shows the values a run would use. */
-export const EXTRA_GROUPING_DEFAULTS = { icc: 0.05, crossedN: 10, nestedN: 2 } as const;
+export const EXTRA_GROUPING_DEFAULTS = { icc: 0.05, crossedN: 10, nestedN: 2, tauSquared: 0.5 } as const;
 
 /** Defaults for a random slope pre-checked from formula syntax (`(1+x|g)`)
  *  before the user sets its parameters. Shared like EXTRA_GROUPING_DEFAULTS. */
@@ -117,10 +154,28 @@ export interface ClusterConfig {
   extraGroupings?: ExtraGroupingConfig[];
   /** Random slopes on the primary grouping factor. Default []. */
   slopes?: SlopeConfig[];
-  /** Whether the outcome is binary (GLMM). false/absent → Gaussian LME. */
+  /** Mixed outcome distribution. Absent → read the legacy `binaryOutcome` flag
+   *  (persisted state written before the four-way toggle); otherwise the source
+   *  of truth. Resolve with `mixedOutcomeKind`. */
+  outcomeKind?: OutcomeKind;
+  /** Legacy binary flag from the pre-four-way persisted state. Kept only so old
+   *  saved configs still resolve (`mixedOutcomeKind`); new code writes `outcomeKind`. */
   binaryOutcome?: boolean;
-  /** Baseline event probability for binary GLMM. Used only when binaryOutcome=true. */
+  /** Baseline event probability for a binary GLMM (logit/probit outcome). */
   baselineProbability?: number;
+  /** Baseline event rate λ for a Poisson GLMM outcome. */
+  baselineRate?: number;
+  /** Raw random-intercept variance τ² for a Poisson GLMM (no ICC conversion —
+   *  Poisson has no residual variance to scale an ICC against). */
+  tauSquared?: number;
+}
+
+/** Resolve a mixed cluster's outcome distribution, falling back to the legacy
+ *  `binaryOutcome` flag for configs persisted before the four-way toggle. */
+export function mixedOutcomeKind(cl: ClusterConfig | undefined): OutcomeKind {
+  if (!cl) return 'linear';
+  if (cl.outcomeKind) return cl.outcomeKind;
+  return cl.binaryOutcome ? 'logit' : 'linear';
 }
 
 export interface AdvancedConfig {
@@ -129,6 +184,10 @@ export interface AdvancedConfig {
   correction: 'none' | 'bonferroni' | 'bh' | 'holm' | 'tukey';
   /** Wald SE method for GLMM families (mixed/logit). Engine ignores it for OLS/LME. */
   wald_se: WaldSe;
+  /** Adaptive Gauss-Hermite quadrature points for a GLMM fit. 1 (default) =
+   *  Laplace. The estimation control (Fast/Accurate/AGQ) sets this alongside
+   *  `wald_se`; only >1 reaches the wire. */
+  agq: number;
   maxFailedSimulations: number;
   testFormulaOverride: string;
 }
@@ -178,6 +237,8 @@ export interface FamilyConfig {
   advanced: AdvancedConfig;
   cluster?: ClusterConfig;
   baselineProbability?: number;
+  /** Baseline event rate λ for a regression Poisson outcome. */
+  baselineRate?: number;
   /** Model "More options" knobs. Absent (older saved state) = all neutral. */
   outcomeOptions?: OutcomeOptionsConfig;
 }
@@ -186,7 +247,10 @@ const baseAdvanced = (): AdvancedConfig => ({
   simulations: SIMULATION.n_sims.anova,
   seed: SIMULATION.seed,
   correction: 'none',
-  wald_se: 'hessian',
+  // Default flipped hessian→rx at 1.1.0: the fast Schur SE is the default arm of
+  // the Fast/Accurate/AGQ estimation control.
+  wald_se: 'rx',
+  agq: 1,
   maxFailedSimulations: SIMULATION.max_failed_fraction,
   testFormulaOverride: '',
 });
@@ -217,6 +281,7 @@ export function defaultFamilyConfig(family: Entrypoint): FamilyConfig {
   }
   if (family === 'regression') {
     base.baselineProbability = 0.2;
+    base.baselineRate = 2.0;
     base.advanced.simulations = SIMULATION.n_sims.ols;
   }
   if (family === 'anova') {

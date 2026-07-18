@@ -104,7 +104,7 @@ test_that("clusters_json slopes block has column/variance/corr_with_intercept/co
          corr_with_intercept = 0.3, corr_with = I(numeric(0)))
   )
   enc <- mcpower:::.encode_outcome_and_clusters(
-    m$family, m$estimator, m$intercept, pending)
+    m$family, "canonical", m$estimator, m$intercept, pending)
   cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   slp <- cj[[1]]$slopes[[1]]
   expect_equal(slp$column, col_idx)
@@ -124,7 +124,7 @@ test_that("corr_with serializes as empty JSON array, not omitted", {
                          corr_with_intercept = 0.3, corr_with = I(numeric(0)))
                   ))
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   raw <- as.character(enc$clusters_json)
   expect_true(grepl('"corr_with":\\s*\\[\\]', raw))
 })
@@ -134,7 +134,7 @@ test_that("no random_slopes → slopes key absent from clusters_json", {
   pending <- list(
     school = list(icc = 0.1, n_clusters = 20L, cluster_size = 15L)
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   expect_null(cj[[1]]$slopes)
 })
@@ -152,7 +152,7 @@ test_that("two slopes produce correctly chained corr_with entries", {
       )
     )
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   slp2 <- cj[[1]]$slopes[[2]]
   expect_equal(slp2$corr_with[[1]], 0.1, tolerance = 1e-12)

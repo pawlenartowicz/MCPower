@@ -35,7 +35,7 @@ use crate::spec::{
     ResultShape, SimulationSpec,
 };
 use crate::workspace::{ReducedCritEntry, SimWorkspace};
-use glmm::mcpower::{fit_suff_stats_t_sq, ols_contrast_t_sq, OlsScratch, OlsSuffStats};
+use glmm::loop_advanced::{fit_suff_stats_t_sq, ols_contrast_t_sq, OlsScratch, OlsSuffStats};
 
 /// Rank-deficiency epsilon for the Cholesky pivot ratio (min|L_diag|/max|L_diag|).
 pub(crate) const EPS_RANK: f64 = 1e-12;
@@ -361,7 +361,7 @@ fn run_batch_impl(
     let mut boundary_hit = vec![0u8; converged_count];
     // Parallel to boundary_hit: per-component pinned bitmask (general lmm path);
     // Brent path writes bit 0 = boundary_hit == 1; OLS/Glm leave 0.
-    let mut pinned_components = vec![0u32; converged_count];
+    let mut pinned_components = vec![0u64; converged_count];
     // Parallel to converged: estimated random-intercept variance τ̂² (GLMM branch
     // only). NaN-initialised; only the Glm+cluster path writes it, so every other
     // estimator leaves NaN (mirrors the contract — finite ⇒ a GLMM fit ran).
@@ -463,7 +463,7 @@ fn run_batch_impl(
     let bh_per_sim: Vec<&mut [u8]> = boundary_hit
         .chunks_exact_mut(sim_converged_stride)
         .collect();
-    let pc_per_sim: Vec<&mut [u32]> = pinned_components
+    let pc_per_sim: Vec<&mut [u64]> = pinned_components
         .chunks_exact_mut(sim_converged_stride)
         .collect();
     let tau_per_sim: Vec<&mut [f64]> = tau_squared_hat
@@ -787,7 +787,7 @@ fn run_one_sim(
     cor: &mut [u8],
     conv: &mut [u8],
     bh: &mut [u8],
-    pc: &mut [u32],
+    pc: &mut [u64],
     tau_hat: &mut [f64], // per-N τ̂² row; NaN except where the GLMM branch writes it
     joint_unc_slice: &mut [u8],
     joint_cor_slice: &mut [u8],
@@ -1237,7 +1237,7 @@ fn run_one_sim(
                 // Stays `None` on the hot/Brent paths; the cold general branch
                 // overwrites it before the LmeFitView borrows it.
                 #[allow(unused_assignments)]
-                let mut excl_lmm: Option<Box<glmm::mcpower::LmmWorkspace>> = None;
+                let mut excl_lmm: Option<Box<glmm::loop_advanced::LmmWorkspace>> = None;
 
                 // p_red: reduced predictor count — n_predictors_total on the hot path.
                 let p_red: usize;
@@ -1368,7 +1368,7 @@ fn run_one_sim(
                                     red_lme_sum_xc.as_mut(),
                                 )
                             };
-                        let mut suff = glmm::mcpower::LmeSuffStats {
+                        let mut suff = glmm::loop_advanced::LmeSuffStats {
                             xtx: suff_xtx,
                             xty: suff_xty,
                             yty: suff_yty,
@@ -1409,7 +1409,7 @@ fn run_one_sim(
                 // path (LmmFit.pinned_components); Brent path encodes bit 0 from
                 // boundary_hit; OLS/Glm leave the pre-zeroed 0. Written to
                 // pc[n_idx] at the common write-site below.
-                let mut lmm_pc = 0u32;
+                let mut lmm_pc = 0u64;
                 let (targets_fit, fit) = if ws.lmm.is_some() {
                     // ---- general lmm path (non-degenerate ClusterSpec) ----
                     // Field-disjoint borrows: `lmm` lives behind ws.lmm; the
@@ -1424,26 +1424,25 @@ fn run_one_sim(
                             y_slice,
                             cid_slice,
                             &ws.extra_grouping_ids,
+                            None, // weights: MCPower has no prior-observation-weights feature
                         );
-                        // Truth-start (P1, activated post-blind-parity). MIRRORS
-                        // introspect::fit_provided_data's general arm — hot loop
-                        // and debug path must derive the same hint; change
-                        // together. The stack buffer sidesteps the
-                        // &lmm.theta_truth vs &mut lmm borrow conflict (zero-alloc).
-                        // Sized MAX_THETA (mirrors MAX_THETA — change together);
-                        // validate() (invariants 20/21) ensure nt ≤ MAX_THETA.
-                        let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
-                        let nt = lmm.theta_truth.len();
-                        debug_assert!(nt <= tbuf.len(), "nt={nt} exceeds MAX_THETA");
-                        tbuf[..nt].copy_from_slice(&lmm.theta_truth);
-                        let f =
-                            glmm::mcpower::fit_lmm(lmm, &spec.target_indices, Some(&tbuf[..nt]));
+                        // Truth-start under the scenario's `truth_start` assumption:
+                        // seed the optimizer at the DGP-truth θ (well-behaved
+                        // estimation) or start blind. NOT a speed knob — the MLE is
+                        // start-sensitive, so warm vs cold can converge to different
+                        // optima; that is the assumption's whole point. MIRRORS
+                        // introspect::fit_provided_data's general arm — hot loop and
+                        // debug path must derive the same hint; change together.
+                        let cluster = spec.cluster.as_ref().expect("lmm ⇒ cluster");
+                        let theta = crate::mixed_workspace::truth_theta(cluster, true);
+                        let start = spec.scenario.truth_start.then_some(&theta[..]);
+                        let f = glmm::loop_advanced::fit_lmm(lmm, &spec.target_indices, start);
                         optim_diag::record_fit(f.n_eval, f.converged, f.boundary_hit == 1);
                         lmm_pc = f.pinned_components; // general lmm arm: full bitmask
                         let lmm = ws.lmm.as_deref().expect("checked is_some");
                         (
                             &spec.target_indices[..],
-                            glmm::mcpower::LmeFitView {
+                            glmm::loop_advanced::LmeFitView {
                                 betas: &lmm.fit.betas,
                                 var_diag: &lmm.fit.var_diag,
                                 t_sq: &lmm.fit.t_sq,
@@ -1469,45 +1468,46 @@ fn run_one_sim(
                         let cluster = spec.cluster.as_ref().expect("lmm ⇒ cluster");
                         let mut model = crate::mixed_workspace::cluster_to_model_spec(
                             cluster,
-                            spec.estimator,
-                            spec.wald_se,
+                            glmm::Family::Gaussian,
                         );
                         // The reduced-p exclusion fit drops random slopes (primary via
                         // the `&[]` slope_cols below; extras here) — the full-design
                         // slope columns don't map to p_red. Stripping the extra slopes
                         // keeps q_g = 1 so the scalar tail (not the blocked path) runs.
-                        for grp in &mut model.extra_groupings {
+                        // `re` is always `Some` (cluster_to_model_spec is mixed-only).
+                        for grp in &mut model.re.as_mut().expect("mixed model").extra_groupings {
                             grp.slopes.clear();
                         }
-                        excl_lmm = Some(Box::new(glmm::mcpower::LmmWorkspace::for_cluster_spec(
-                            p_red,
-                            &model,
-                            n_usize,
-                            &[],
-                        )));
+                        excl_lmm = Some(Box::new(
+                            glmm::loop_advanced::LmmWorkspace::for_cluster_spec(
+                                p_red,
+                                &model,
+                                n_usize,
+                                &[],
+                            ),
+                        ));
                         let lmm = excl_lmm.as_deref_mut().expect("just set");
                         lmm.suff.add_rows_multi(
                             excl_x.as_ref(),
                             y_slice,
                             cid_slice,
                             &ws.extra_grouping_ids,
+                            None, // weights: MCPower has no prior-observation-weights feature
                         );
-                        // Truth-start (P1) — the cold reduced-p workspace carries
-                        // its own theta_truth (for_cluster_spec). Mirrors the hot
-                        // branch + introspect; change together.
-                        // Sized MAX_THETA (mirrors MAX_THETA — change together);
-                        // validate() (invariants 20/21) ensure nt ≤ MAX_THETA.
-                        let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
-                        let nt = lmm.theta_truth.len();
-                        debug_assert!(nt <= tbuf.len(), "nt={nt} exceeds MAX_THETA");
-                        tbuf[..nt].copy_from_slice(&lmm.theta_truth);
-                        let f = glmm::mcpower::fit_lmm(lmm, &excl_targets, Some(&tbuf[..nt]));
+                        // Truth-start under the scenario's `truth_start` assumption
+                        // — mirrors the hot branch + introspect; change together.
+                        // The exclusion fit drops all random slopes (q_g = 1 per
+                        // grouping), so the θ must too: `include_slopes = false`
+                        // yields one intercept scalar τ per grouping.
+                        let theta = crate::mixed_workspace::truth_theta(cluster, false);
+                        let start = spec.scenario.truth_start.then_some(&theta[..]);
+                        let f = glmm::loop_advanced::fit_lmm(lmm, &excl_targets, start);
                         optim_diag::record_fit(f.n_eval, f.converged, f.boundary_hit == 1);
                         lmm_pc = f.pinned_components; // general lmm arm: full bitmask
                         let lmm = excl_lmm.as_deref().expect("just set");
                         (
                             &excl_targets[..],
-                            glmm::mcpower::LmeFitView {
+                            glmm::loop_advanced::LmeFitView {
                                 betas: &lmm.fit.betas,
                                 var_diag: &lmm.fit.var_diag,
                                 t_sq: &lmm.fit.t_sq,
@@ -1525,7 +1525,7 @@ fn run_one_sim(
                         )
                     }
                 } else if !needs_reduced_fit {
-                    let scratch = glmm::mcpower::LmeScratch {
+                    let scratch = glmm::loop_advanced::LmeScratch {
                         xtx: ws.lme_xtx.as_ref(),
                         xty: &ws.lme_xty,
                         yty: ws.lme_yty,
@@ -1564,7 +1564,7 @@ fn run_one_sim(
                     let x_slice = ws.x_full_f64.as_ref().subrows(0, n_usize);
                     let y_slice = &ws.y_full_f64[..n_usize];
                     let cid_slice = &ws.cluster_ids[..n_usize];
-                    let f = glmm::mcpower::lme_fit(
+                    let f = glmm::loop_advanced::lme_fit(
                         x_slice,
                         y_slice,
                         cid_slice,
@@ -1578,7 +1578,7 @@ fn run_one_sim(
                     // by the struct but unused by lme_fit today (τ̂≈0 path uses
                     // profiled_deviance, not fit_suff_stats_t_sq). Views are sized
                     // p_red to satisfy the struct; no other invariant is load-bearing.
-                    let scratch = glmm::mcpower::LmeScratch {
+                    let scratch = glmm::loop_advanced::LmeScratch {
                         xtx: red_lme_xtx.as_ref(),
                         xty: &red_lme_xty,
                         yty: red_lme_yty,
@@ -1616,7 +1616,7 @@ fn run_one_sim(
                     };
                     let y_slice = &ws.y_full_f64[..n_usize];
                     let cid_slice = &ws.cluster_ids[..n_usize];
-                    let f = glmm::mcpower::lme_fit(
+                    let f = glmm::loop_advanced::lme_fit(
                         excl_x.as_ref(),
                         y_slice,
                         cid_slice,
@@ -1632,7 +1632,7 @@ fn run_one_sim(
                 // Brent path (ws.lmm.is_none()): derive bit 0 from boundary_hit.
                 // General lmm path: lmm_pc was set from LmmFit.pinned_components above.
                 pc[n_idx] = if ws.lmm.is_none() {
-                    u32::from(fit.boundary_hit == 1)
+                    u64::from(fit.boundary_hit == 1)
                 } else {
                     lmm_pc
                 };
@@ -1845,7 +1845,7 @@ fn run_one_sim(
                     {
                         let glmm = ws.glmm.as_deref_mut().expect("is_some");
                         if !glmm.groupings.extra_offsets.is_empty() {
-                            glmm::mcpower::build_z(
+                            glmm::loop_advanced::build_z(
                                 glmm,
                                 ws.x_full_f64.as_ref().subrows(0, n_usize),
                                 &ws.cluster_ids[..n_usize],
@@ -1854,23 +1854,27 @@ fn run_one_sim(
                             );
                         }
                     }
-                    // Truth start θ from the workspace's per-spec recipe (mirrors
-                    // the LME arm's stack-buffer trick to sidestep the &theta_truth
-                    // vs &mut glmm borrow conflict). Sized MAX_THETA — change with
-                    // the LME arm.
-                    let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
+                    // Truth-start under the scenario's `truth_start` assumption:
+                    // seed the optimizer at the DGP-truth θ (well-behaved
+                    // estimation) or start blind. The GLMM RE covariance is built
+                    // from the same tau_squared/variance/corr the generator used, and
+                    // GLMM families fix dispersion at 1, so `truth_theta` seeds it the
+                    // same way as the LME arms. NOT a speed knob — the MLE is
+                    // start-sensitive; warm vs cold can settle in different optima.
+                    // Mirrors introspect::fit_provided_data's clustered-GLMM arm —
+                    // change together.
+                    let cluster = spec.cluster.as_ref().expect("glmm ⇒ cluster");
+                    let theta = crate::mixed_workspace::truth_theta(cluster, true);
+                    let start = spec.scenario.truth_start.then_some(&theta[..]);
                     let f = {
                         let glmm = ws.glmm.as_deref_mut().expect("is_some");
-                        let nt = glmm.theta_truth.len();
-                        debug_assert!(nt <= tbuf.len(), "nt={nt} exceeds MAX_THETA");
-                        tbuf[..nt].copy_from_slice(&glmm.theta_truth);
-                        glmm::mcpower::fit_glmm(
+                        glmm::loop_advanced::fit_glmm(
                             glmm,
                             fit_x,
                             &ws.y_full_f64[..n_usize],
                             &ws.cluster_ids[..n_usize],
                             fit_targets,
-                            Some(&tbuf[..nt]),
+                            start,
                             fit_beta,
                             n_usize,
                             crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
@@ -2089,7 +2093,7 @@ fn run_one_sim(
                     };
                     let t_red = targets_fit.len();
 
-                    let scratch = glmm::mcpower::GlmScratch {
+                    let scratch = glmm::loop_advanced::GlmScratch {
                         irls_eta: &mut ws.irls_eta[..n_usize],
                         irls_p: &mut ws.irls_p[..n_usize],
                         irls_w: &mut ws.irls_w[..n_usize],
@@ -2104,11 +2108,16 @@ fn run_one_sim(
                         irls_l: ws.irls_l.as_mut().submatrix_mut(0, 0, p_red, p_red),
                         irls_wx: &mut ws.irls_wx[..n_usize * p_red],
                     };
-                    let fit = glmm::mcpower::glm_irls_fit(
+                    let fit = glmm::loop_advanced::glm_irls_fit(
+                        // Unclustered GLM family: Binary→logit/probit, Count→Poisson
+                        // log (mirrors the GLMM site — see mixed_workspace::glmm_family).
+                        crate::mixed_workspace::glmm_family(spec.outcome_kind, spec.link),
+                        f64::NAN, // nb_theta: ignored outside NB family (glm.rs doc comment)
                         x_fit,
                         y_slice,
                         targets_fit,
                         beta_start,
+                        None, // prior_w: MCPower has no prior-observation-weights feature
                         scratch,
                     );
 
@@ -2771,8 +2780,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -3100,8 +3111,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
+            link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            nagq: 1,
             intercept,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -3228,8 +3241,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -3557,8 +3572,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![crate::spec::PosthocSpec {
                 factor_index: 0,
@@ -3713,8 +3730,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -4262,8 +4281,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -4487,8 +4508,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![crate::spec::PosthocSpec {
                 factor_index: 0,
@@ -4600,8 +4623,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
+            link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            nagq: 1,
             intercept,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -4772,8 +4797,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -4830,8 +4857,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
+            link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            nagq: 1,
             intercept,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -4952,8 +4981,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,

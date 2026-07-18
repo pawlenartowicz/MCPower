@@ -19,15 +19,34 @@ pub struct OutcomeSpec {
     /// scenario (`ScenarioPerturbations.heteroskedasticity_ratio`).
     #[serde(default)]
     pub heteroskedasticity_driver: Option<ColumnId>,
+    /// Non-canonical link override. `None` = canonical for the kind
+    /// (`Binary` → logit, `Count` → log); `Some(Probit)` overrides `Binary` to
+    /// a probit link. Rejected by validate() for any `kind` other than `Binary`
+    /// (invariant_24_link_matches_kind). Additive at 1.1.0 — old payloads
+    /// default to `None`.
+    #[serde(default)]
+    pub link: Option<LinkKind>,
 }
 
-/// How the linear predictor becomes Y. `Binary` implies a logit link in 1.0
-/// (probit is a later additive parameter). Carries no solver role.
+/// How the linear predictor becomes Y. Canonical link per kind (`Binary` →
+/// logit, `Count` → Poisson log); a non-canonical override rides on
+/// `OutcomeSpec.link`. Carries no solver role — the estimator dispatch reads
+/// kind + link to pick the `glmm::Family`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OutcomeKind {
     Continuous,
     Binary,
+    Count,
+}
+
+/// Non-canonical link override for an outcome kind. Names only the overrides
+/// that exist — canonical links (Binary→logit, Count→log) are the `None` case
+/// on `OutcomeSpec.link`, not variants here.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkKind {
+    Probit,
 }
 
 /// Residual marginal for continuous outcomes. No df field: `HighKurtosis` is
@@ -70,10 +89,59 @@ mod tests {
                 pinned: true,
             },
             heteroskedasticity_driver: Some(ColumnId(0)),
+            link: None,
         };
         let bytes = rmp_serde::to_vec_named(&spec).unwrap();
         let back: OutcomeSpec = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(spec, back);
+    }
+
+    #[test]
+    fn outcome_spec_roundtrip_probit_and_count() {
+        for (kind, link) in [
+            (OutcomeKind::Binary, Some(LinkKind::Probit)),
+            (OutcomeKind::Count, None),
+        ] {
+            let spec = OutcomeSpec {
+                kind,
+                intercept: 0.5,
+                coefficients: vec![0.5, 0.3],
+                residual: ResidualSpec {
+                    distribution: ResidualDist::Normal,
+                    pinned: false,
+                },
+                heteroskedasticity_driver: None,
+                link,
+            };
+            let bytes = rmp_serde::to_vec_named(&spec).unwrap();
+            let back: OutcomeSpec = rmp_serde::from_slice(&bytes).unwrap();
+            assert_eq!(spec, back);
+        }
+    }
+
+    #[test]
+    fn outcome_spec_link_defaults_none_on_old_payload() {
+        // Pre-1.1.0 payloads carry no `link` field; serde default fills None
+        // (= canonical link for the kind).
+        #[derive(Serialize)]
+        struct OldOutcomeSpec {
+            kind: OutcomeKind,
+            intercept: f64,
+            coefficients: Vec<f64>,
+            residual: ResidualSpec,
+        }
+        let bytes = rmp_serde::to_vec_named(&OldOutcomeSpec {
+            kind: OutcomeKind::Binary,
+            intercept: 0.0,
+            coefficients: vec![0.0],
+            residual: ResidualSpec {
+                distribution: ResidualDist::Normal,
+                pinned: false,
+            },
+        })
+        .unwrap();
+        let back: OutcomeSpec = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(back.link, None);
     }
 
     #[test]

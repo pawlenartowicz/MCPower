@@ -239,12 +239,12 @@ test_that("set_correlation_spec raises with fewer than 2 non-factor variables (A
 # --- _build_cluster_spec_dict tau transform (APIC-52) ----------------------
 
 test_that(".encode_outcome_and_clusters computes tau = ICC/(1-ICC); ICC=0 -> 0 (APIC-52)", {
-  enc <- mcpower:::.encode_outcome_and_clusters("lme", "mle", 0.0,
+  enc <- mcpower:::.encode_outcome_and_clusters("lme", "canonical", "mle", 0.0,
             list(g = list(icc = 0.2, n_clusters = 10)))
   rp <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   # transform identity (ratio), not an oracle value: 0.2/(1-0.2)
   expect_equal(rp[[1]]$tau_squared, 0.2 / 0.8)
-  enc0 <- mcpower:::.encode_outcome_and_clusters("lme", "mle", 0.0,
+  enc0 <- mcpower:::.encode_outcome_and_clusters("lme", "canonical", "mle", 0.0,
             list(g = list(icc = 0.0, n_clusters = 10)))
   rp0 <- jsonlite::fromJSON(enc0$clusters_json, simplifyVector = FALSE)
   expect_equal(rp0[[1]]$tau_squared, 0.0)
@@ -331,7 +331,7 @@ test_that(".to_linear_spec_list strips random-effect terms from the builder form
 # --- _encode_outcome_and_clusters clusters_json present for clustered OLS (APIC-64) ---
 
 test_that(".encode_outcome_and_clusters emits non-empty clusters_json for clustered OLS (APIC-64)", {
-  enc <- mcpower:::.encode_outcome_and_clusters("lme", "ols", 0.0,
+  enc <- mcpower:::.encode_outcome_and_clusters("lme", "canonical", "ols", 0.0,
             list(g = list(icc = 0.1, n_clusters = 20)))
   expect_equal(enc$estimator, "ols")
   expect_false(identical(enc$clusters_json, "[]"))

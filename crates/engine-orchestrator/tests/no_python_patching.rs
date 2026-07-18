@@ -11,7 +11,8 @@ use engine_spec_builder::build_contract;
 
 #[test]
 fn no_python_glm() {
-    let contracts = build_contract(&logit_spec(), OutcomeKind::Binary, None, -0.5, vec![]).unwrap();
+    let contracts =
+        build_contract(&logit_spec(), OutcomeKind::Binary, None, None, -0.5, vec![]).unwrap();
     let cancel = CancellationToken::new();
     let result = find_power(&contracts, 200, 64, 2137, None, &cancel).expect("find_power");
     assert_eq!(result.scenarios.len(), 1);
@@ -37,6 +38,7 @@ fn no_python_mle() {
     let contracts = build_contract(
         &lme_spec(),
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Mle),
         0.0,
         vec![ClusterSpec {

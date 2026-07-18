@@ -207,7 +207,7 @@ class MCPower:
         family_result = _validate_family(family)
         family_result.raise_if_invalid()
         family_norm = family.lower()
-        self.family: str = family_norm                 # "ols" | "logit" | "lme"
+        self.family: str = family_norm  # "ols"|"logit"|"probit"|"poisson"|"lme"
 
         # estimator= / solve_as= override.  solve_as is a synonym; estimator wins
         # when both are supplied.
@@ -215,17 +215,26 @@ class MCPower:
         est_result = _validate_estimator(_estimator_raw)
         est_result.raise_if_invalid()
 
-        # Derive outcome_kind from family.
-        # "logit" → binary; "ols" and "lme" → continuous.
-        self.outcome_kind: str = "binary" if family_norm == "logit" else "continuous"
+        # Derive outcome_kind + link from family.
+        #   "logit"/"probit" → binary  (probit sets the non-canonical link)
+        #   "poisson"        → count
+        #   "ols"/"lme"      → continuous
+        if family_norm in ("logit", "probit"):
+            self.outcome_kind: str = "binary"
+        elif family_norm == "poisson":
+            self.outcome_kind = "count"
+        else:
+            self.outcome_kind = "continuous"
+        # Non-canonical link override sent on the wire ("probit"), else canonical.
+        self.link: str = "probit" if family_norm == "probit" else "canonical"
 
         # Default estimator coupling (matches spec-builder default coupling):
-        #   binary outcome → "glm"
+        #   binary/count outcome (logit/probit/poisson) → "glm" (GLMM when clustered)
         #   cluster present (lme) → "mle"
         #   else → "ols"
         # The user may override via estimator= / solve_as=.
         _default_estimator: str
-        if family_norm == "logit":
+        if family_norm in ("logit", "probit", "poisson"):
             _default_estimator = "glm"
         elif family_norm == "lme":
             _default_estimator = "mle"
@@ -283,11 +292,13 @@ class MCPower:
         self._applied: bool = False
         self._effects_set: bool = False
 
-        # Logit-specific state. _pending_baseline_probability stays set after
+        # Binary-outcome state. _pending_baseline_probability stays set after
         # _apply_baseline_probability runs (v1 semantics — used by the runtime
-        # gate in _validate_logit_runtime). intercept is logit(p) once
-        # set_baseline_probability has been called; 0.0 for OLS.
+        # gate in _validate_logit_runtime). intercept is logit(p) (logit) or
+        # Φ⁻¹(p) (probit) once set_baseline_probability has been called.
         self._pending_baseline_probability: Optional[float] = None
+        # Poisson-outcome state. Baseline rate λ₀ > 0; intercept becomes ln(λ₀).
+        self._pending_baseline_rate: Optional[float] = None
         self.intercept: float = 0.0
 
         # Empirical data (uploaded): stored in slots that match
@@ -368,6 +379,7 @@ class MCPower:
         n_clusters: Optional[int] = None,
         cluster_size: Optional[int] = None,
         *,
+        tau_squared: Optional[float] = None,
         random_slopes: Optional[List[str]] = None,
         slope_variance: float = 0.0,
         slope_intercept_corr: float = 0.0,
@@ -396,6 +408,11 @@ class MCPower:
                 ``Var(X*beta)`` to the denominator), so the observed correlation
                 of the generated ``y`` can sit below the value you set --
                 expected, not a bug.
+            tau_squared: Raw random-intercept variance τ² (>= 0), for
+                ``family='poisson'`` only. A log-link count model has no
+                standard latent-scale ICC, so Poisson mixed models are sized by
+                τ² directly instead of ``ICC=``. Passing both, or passing
+                ``tau_squared`` for a non-Poisson family, is an error.
             n_clusters: Number of clusters. Mutually exclusive with
                 ``cluster_size``.
             cluster_size: Number of observations per cluster. Mutually
@@ -442,6 +459,28 @@ class MCPower:
 
         from .spec.validators import _validate_cluster_config
 
+        # Poisson (count) mixed models size the random effect by a RAW τ² — no
+        # standard latent-scale ICC exists for a log-link count model
+        # (Decision 8). Every other family uses ICC. Gate the two so they can't
+        # be mixed up.
+        if self.family == "poisson":
+            if ICC is not None:
+                raise ValueError(
+                    "family='poisson' sizes the random effect by tau_squared, "
+                    "not ICC; pass tau_squared= (raw τ²) instead of ICC="
+                )
+            if tau_squared is None:
+                tau_squared = 0.0
+            if not (isinstance(tau_squared, (int, float)) and not isinstance(tau_squared, bool) and float(tau_squared) >= 0.0):
+                raise ValueError(
+                    f"tau_squared must be a non-negative number, got {tau_squared!r}"
+                )
+        elif tau_squared is not None:
+            raise ValueError(
+                f"tau_squared= is only for family='poisson'; family={self.family!r} "
+                "sizes the random effect by ICC="
+            )
+
         if ICC is None:
             ICC = 0.0
         _validate_cluster_config(
@@ -484,6 +523,8 @@ class MCPower:
             "n_clusters": n_clusters,
             "cluster_size": cluster_size,
             "icc": float(ICC),
+            # Poisson raw τ² (Decision 8); None for ICC-sized families.
+            "tau_squared": float(tau_squared) if tau_squared is not None else None,
             "cluster_level_vars": list(cluster_level_vars) if cluster_level_vars else [],
             "n_per_parent": n_per_parent,
             "random_slopes": list(random_slopes) if random_slopes else [],
@@ -494,23 +535,68 @@ class MCPower:
         return self
 
     def set_baseline_probability(self, p: float) -> "MCPower":
-        """Set the baseline probability for ``family="logit"`` models.
+        """Set the baseline probability for ``family="logit"`` / ``"probit"``.
 
         The baseline is the conditional probability of ``y=1`` when all
-        predictors equal their reference value. It is converted to
-        ``self.intercept = log(p / (1 - p))`` and used as the constant term
-        in every Monte Carlo iteration.
+        predictors equal their reference value. It becomes the intercept on the
+        link scale — ``log(p / (1 - p))`` for logit, ``Φ⁻¹(p)`` for probit —
+        used as the constant term in every Monte Carlo iteration.
 
         Args:
             p: Probability in the open interval (0, 1).
 
         Returns:
             self: For method chaining.
+
+        Raises:
+            ValueError: ``family`` is not ``"logit"``/``"probit"``. Passing a
+                probability for a Poisson model would silently overwrite
+                whichever baseline was set last (rate or probability) with no
+                warning; mirrors the ``set_cluster`` ICC/tau_squared gate.
         """
+        if self.family not in ("logit", "probit"):
+            raise ValueError(
+                "set_baseline_probability is only for family='logit'/'probit'; "
+                f"family={self.family!r} sizes the intercept by set_baseline_rate="
+            )
+
         from .spec.validators import _validate_baseline_probability
 
         _validate_baseline_probability(p).raise_or_warn()
         self._pending_baseline_probability = float(p)
+        self._applied = False
+        return self
+
+    def set_baseline_rate(self, rate: float) -> "MCPower":
+        """Set the baseline event rate λ₀ for ``family="poisson"`` models.
+
+        The baseline is the expected count when all predictors equal their
+        reference value. It is converted to ``self.intercept = ln(λ₀)`` (the
+        log-link intercept) and used as the constant term in every Monte Carlo
+        iteration.
+
+        Args:
+            rate: Event rate λ₀ > 0.
+
+        Returns:
+            self: For method chaining.
+
+        Raises:
+            ValueError: ``family`` is not ``"poisson"``. Passing a rate for a
+                logit/probit model would silently overwrite whichever
+                baseline was set last (rate or probability) with no warning;
+                mirrors the ``set_cluster`` ICC/tau_squared gate.
+        """
+        if self.family != "poisson":
+            raise ValueError(
+                "set_baseline_rate is only for family='poisson'; "
+                f"family={self.family!r} sizes the intercept by set_baseline_probability="
+            )
+
+        from .spec.validators import _validate_baseline_rate
+
+        _validate_baseline_rate(rate).raise_or_warn()
+        self._pending_baseline_rate = float(rate)
         self._applied = False
         return self
 
@@ -685,14 +771,58 @@ class MCPower:
     def _validate_wald_se_arg(self, wald_se: str) -> None:
         """Validate a per-call ``wald_se=`` kwarg.
 
-        Accepts ``"hessian"`` (default) and ``"rx"`` only.
+        Accepts ``"hessian"`` and ``"rx"`` only.
         """
-        key = (wald_se or "hessian").lower().replace("-", "_").replace(" ", "_")
+        key = (wald_se or "rx").lower().replace("-", "_").replace(" ", "_")
         if key not in {"hessian", "rx"}:
             raise ValueError(
                 f"wald_se={wald_se!r} is not recognised. "
-                "Valid values: 'hessian' (default) or 'rx'."
+                "Valid values: 'rx' (default, fastmode) or 'hessian'."
             )
+
+    def _agq_eligible(self) -> bool:
+        """Whether the current design admits adaptive Gauss–Hermite quadrature
+        (``agq > 1``). Mirrors the contract backstop (invariant 25) and glmm's
+        ``assert_model_shape`` — change all three together: a Binary/Count GLMM
+        with a single grouping factor and at most 3 random effects per group
+        (intercept + slopes)."""
+        if self.outcome_kind not in ("binary", "count"):
+            return False
+        # Clustered (GLMM) with exactly one grouping factor — crossed/nested
+        # extra groupings (a second _pending_clusters entry) are ineligible.
+        if len(self._pending_clusters) != 1:
+            return False
+        cfg = next(iter(self._pending_clusters.values()))
+        n_re = 1 + len(cfg.get("random_slopes") or [])  # intercept + slopes
+        return n_re <= 3
+
+    def _resolve_estimation(self, wald_se, agq):
+        """Resolve the ``wald_se`` / ``agq`` kwargs against the config defaults,
+        validate them, and warn-and-strip an ineligible ``agq > 1`` to Laplace.
+
+        Returns ``(wald_se_str, nagq_int)``. ``None`` inputs fall back to the
+        ``configs/config.json`` ``estimation`` block (the cross-port home)."""
+        from .config import get_estimation_defaults
+        _est = get_estimation_defaults()
+        if wald_se is None:
+            wald_se = _est["wald_se"]
+        self._validate_wald_se_arg(wald_se)
+        nagq = int(_est["nagq"]) if agq is None else int(agq)
+        if nagq < 1 or nagq > 25 or nagq % 2 == 0:
+            raise ValueError(
+                f"agq must be an odd integer in 1..=25, got {agq!r}"
+            )
+        if nagq > 1 and not self._agq_eligible():
+            import warnings as _warnings
+            _warnings.warn(
+                f"agq={nagq} is not available for this design; running at "
+                "agq=1 (Laplace). AGQ requires a clustered binary or count "
+                "(logit/probit/poisson) model with a single grouping factor "
+                "and at most 3 random effects per group.",
+                stacklevel=3,
+            )
+            nagq = 1
+        return wald_se, nagq
 
     def _resolve_tests(self, target_test: str) -> Dict[str, Any]:
         """Parse a ``target_test`` DSL string into the wire dict.
@@ -900,7 +1030,7 @@ class MCPower:
         else:
             outcome = y_raw
 
-        outcome_kind_wire, estimator_wire, intercept_arg, clusters_json = (
+        outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
         )
 
@@ -933,6 +1063,7 @@ class MCPower:
         _names, contracts_bytes, _skeleton_json = _engine.build_contract_from_spec(
             _json.dumps(payload),
             outcome_kind_wire,
+            link_wire,
             estimator_wire,
             intercept_arg,
             clusters_json,
@@ -977,15 +1108,23 @@ class MCPower:
             # τ̂² — exactly the quantity set_cluster(ICC=...) reconstructs. A
             # degenerate (non-converged) fit yields an empty list; note that the
             # ICC is unavailable rather than crashing on the missing component.
+            # Poisson has no residual-variance scale to form an ICC ratio
+            # against (raw τ², not ICC-derived) — no meaningful ICC to report;
+            # mirrors driver.rs's cluster_icc, which returns None for it.
             vc = fit["variance_components"]
-            if self._pending_clusters and not vc:
+            if self._pending_clusters and self.family != "poisson" and not vc:
                 print(
                     "Estimated ICC: unavailable (the random-intercept fit did "
                     "not converge to a variance estimate)."
                 )
-            elif self._pending_clusters:
+            elif self._pending_clusters and self.family != "poisson":
                 tau_sq = float(vc[0])
-                if self.outcome_kind == "binary":
+                if self.family == "probit":
+                    # Probit's latent-variable residual variance is fixed at 1
+                    # (Φ's scale), unlike logit's π²/3 — mirrors driver.rs.
+                    icc = tau_sq / (tau_sq + 1.0)
+                    scale_note = " (probit latent scale)"
+                elif self.outcome_kind == "binary":
                     # Latent (log-odds) scale: residual variance is π²/3, not σ̂²
                     # (sigma_sq_hat is a 1.0 placeholder for the binomial fit).
                     # Inverse of the set_cluster latent conversion.
@@ -1010,11 +1149,16 @@ class MCPower:
                     )
 
             # Binary fits also recover the baseline event probability: the
-            # inverse-logit of the fitted intercept betas[0], undoing the forward
-            # logit(p) the generator applies. Reported for any binary outcome
-            # (clustered or not), unlike the ICC, which is clustered-only.
+            # inverse link of the fitted intercept betas[0], undoing the forward
+            # link (logit(p) or probit's Phi^-1(p)) the generator applies.
+            # Reported for any binary outcome (clustered or not), unlike the
+            # ICC, which is clustered-only.
             if self.outcome_kind == "binary":
-                p_hat = 1.0 / (1.0 + math.exp(-float(betas[0])))
+                if self.family == "probit":
+                    import statistics
+                    p_hat = statistics.NormalDist().cdf(float(betas[0]))
+                else:
+                    p_hat = 1.0 / (1.0 + math.exp(-float(betas[0])))
                 print(
                     f"Estimated baseline probability: {p_hat:.4f} (APPROXIMATION; "
                     f"not auto-applied). To use it: "
@@ -1032,7 +1176,10 @@ class MCPower:
             ``realistic``, ``doomer``), the user fields *update* the preset —
             unspecified keys keep their preset values.
           * If a scenario name is brand-new (custom), it inherits every key
-            from ``optimistic`` and then applies the user overrides on top.
+            from ``optimistic`` and then applies the user overrides on top —
+            EXCEPT ``truth_start``: it is a scenario assumption ("estimation
+            is well-behaved"), not a generic knob, so a custom scenario stays
+            cold-start (``False``) unless the user sets it explicitly.
 
         User-supplied keys are validated: an unknown key raises ``ValueError``
         (a typo would otherwise silently no-op). The mixed-model knobs
@@ -1061,7 +1208,10 @@ class MCPower:
             if name in merged:
                 merged[name].update(user_cfg)
             else:
-                merged[name] = {**get_default_scenario_config()["optimistic"], **user_cfg}
+                custom_cfg = {**get_default_scenario_config()["optimistic"], **user_cfg}
+                if "truth_start" not in user_cfg:
+                    custom_cfg["truth_start"] = False
+                merged[name] = custom_cfg
 
         self._scenario_configs = merged
         return self
@@ -1071,16 +1221,22 @@ class MCPower:
     # ------------------------------------------------------------------
 
     def _apply_baseline_probability(self) -> None:
-        """Translate the pending baseline probability into self.intercept.
+        """Translate the pending baseline into ``self.intercept`` on the link scale.
 
-        No-op when nothing is pending. _pending_baseline_probability is NOT
-        cleared after applying — it remains as the canonical record that the
-        user supplied a baseline, used by _validate_logit_runtime.
+        Binary: ``log(p/(1-p))`` (logit) or ``Φ⁻¹(p)`` (probit). Count (Poisson):
+        ``ln(λ₀)`` (log link). No-op when nothing is pending. The pending value
+        is NOT cleared — it remains the canonical record that the user supplied a
+        baseline, used by ``_validate_logit_runtime``.
         """
-        if self._pending_baseline_probability is None:
-            return
-        p = self._pending_baseline_probability
-        self.intercept = math.log(p / (1.0 - p))
+        if self._pending_baseline_probability is not None:
+            p = self._pending_baseline_probability
+            if self.family == "probit":
+                import statistics
+                self.intercept = statistics.NormalDist().inv_cdf(p)
+            else:  # logit
+                self.intercept = math.log(p / (1.0 - p))
+        if self._pending_baseline_rate is not None:
+            self.intercept = math.log(self._pending_baseline_rate)
 
     def _validate_logit_runtime(
         self, scenario_filter: Optional[List[str]]
@@ -1097,23 +1253,30 @@ class MCPower:
                 stay symmetric with ``_validate_lme_runtime``.
 
         Raises:
-            ValueError: Missing baseline probability or intercept-only model.
+            ValueError: Missing baseline (probability/rate) or intercept-only model.
         """
-        if self.family != "logit":
+        if self.family not in ("logit", "probit", "poisson"):
             return
 
-        # Missing baseline probability.
-        if self._pending_baseline_probability is None:
-            raise ValueError(
-                "baseline probability required for family='logit'; call "
-                "set_baseline_probability(p) before find_power"
-            )
+        # Missing baseline. Binary families need a probability; Poisson needs a rate.
+        if self.family in ("logit", "probit"):
+            if self._pending_baseline_probability is None:
+                raise ValueError(
+                    f"baseline probability required for family={self.family!r}; "
+                    "call set_baseline_probability(p) before find_power"
+                )
+        else:  # poisson
+            if self._pending_baseline_rate is None:
+                raise ValueError(
+                    "baseline rate required for family='poisson'; call "
+                    "set_baseline_rate(rate) before find_power"
+                )
 
         # Intercept-only model (no testable effect).
         effects = self._registry.effect_names
         if len(effects) == 0:
             raise ValueError(
-                "family='logit' requires at least one predictor; "
+                f"family={self.family!r} requires at least one predictor; "
                 "intercept-only models have no testable effect"
             )
 
@@ -1412,16 +1575,25 @@ class MCPower:
         test_formula: Optional[str] = None,
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
-        wald_se: str = "hessian",
+        wald_se: Optional[str] = None,
+        nagq: int = 1,
     ) -> Dict[str, Any]:
         """Project current state into the Rust ``LinearSpec`` JSON contract.
 
         Ensures pending state is applied first, then assembles the contract
         dict: registry (predictors, betas, factor dummies), cluster groupings,
         scenario perturbations, correction method, and formula/target overrides.
+
+        ``wald_se=None`` falls back to the config ``estimation.wald_se`` default
+        (the cross-port home — no hardcoded per-port default). ``find_power`` /
+        ``find_sample_size`` pass the already-resolved value; the direct callers
+        (``to_simulation_spec``, golden fixtures) rely on this fallback.
         """
         if not self._applied:
             self._apply()
+        if wald_se is None:
+            from .config import get_estimation_defaults
+            wald_se = get_estimation_defaults()["wald_se"]
         # Collect cluster_level_vars across all pending cluster specs.
         _clv: List[str] = []
         for _cfg in self._pending_clusters.values():
@@ -1435,6 +1607,7 @@ class MCPower:
             alpha=self.alpha,
             correction=correction,
             wald_se=wald_se,
+            nagq=nagq,
             target_test=target_test,
             test_formula=test_formula,
             pending_data=getattr(self, "_pending_data", None),
@@ -1474,12 +1647,13 @@ class MCPower:
         from . import _engine
 
         payload = self._to_linear_spec_dict([scenario_name], test_formula=test_formula)
-        outcome_kind_wire, estimator_wire, intercept_arg, clusters_json = (
+        outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
         )
         names, contracts_bytes, _skeleton_json = _engine.build_contract_from_spec(
             _json.dumps(payload),
             outcome_kind_wire,
+            link_wire,
             estimator_wire,
             intercept_arg,
             clusters_json,
@@ -1490,12 +1664,15 @@ class MCPower:
                 return contract
         raise RuntimeError(f"builder did not return scenario {scenario_name!r}")
 
-    def _encode_outcome_and_clusters(self) -> Tuple[str, str, float, str]:
-        """Encode ``(outcome_kind_wire, estimator_wire, intercept, clusters_json)``
-        for the new ``_engine.build_contract_from_spec`` signature.
+    def _encode_outcome_and_clusters(self) -> Tuple[str, str, str, float, str]:
+        """Encode ``(outcome_kind_wire, link_wire, estimator_wire, intercept,
+        clusters_json)`` for the ``_engine.build_contract_from_spec`` signature.
 
-        ``outcome_kind_wire``: "continuous" or "binary" (matches OutcomeKind
-          snake_case serde names).
+        ``outcome_kind_wire``: "continuous", "binary", or "count" (matches
+          OutcomeKind snake_case serde names).
+
+        ``link_wire``: "canonical" or "probit" — the non-canonical link override
+          for a binary outcome (probit); "canonical" for every other family.
 
         ``estimator_wire``: "ols", "glm", or "mle" (matches EstimatorSpec
           snake_case serde names).
@@ -1517,7 +1694,8 @@ class MCPower:
             clusters_json = "[]"
 
         return (
-            self.outcome_kind,          # "continuous" | "binary"
+            self.outcome_kind,          # "continuous" | "binary" | "count"
+            self.link,                  # "canonical" | "probit"
             self.estimator,             # "ols" | "glm" | "mle"
             float(self.intercept),
             clusters_json,
@@ -1556,6 +1734,29 @@ class MCPower:
             })
         return _terms
 
+    def _re_tau_squared(self, cfg: Dict[str, Any]) -> float:
+        """Family/link-aware random-effect variance τ² for one grouping.
+
+        - Poisson (count): the raw ``tau_squared`` the user supplied — no
+          standard latent-scale ICC exists for a log-link count model
+          (Decision 8).
+        - Binary logit: ``icc/(1−icc) · π²/3`` (log-odds residual variance).
+        - Binary probit: ``icc/(1−icc) · 1`` — the probit latent residual
+          variance is 1, not π²/3 (Decision 9).
+        - Gaussian: ``icc/(1−icc)`` (σ²=1).
+
+        Mirrors R spec-builder.R:.encode_outcome_and_clusters — change together.
+        """
+        if self.family == "poisson":
+            return float(cfg.get("tau_squared") or 0.0)
+        icc = float(cfg["icc"])
+        denom = 1.0 - icc
+        tau = icc / denom if denom > 0 else 0.0
+        if self.outcome_kind == "binary" and self.link != "probit":
+            tau *= _PI_SQ_OVER_3  # logit log-odds residual variance
+        # probit (latent variance 1) and Gaussian (σ²=1) take no extra factor.
+        return tau
+
     def _build_cluster_spec_dict(self) -> Dict[str, Any]:
         """Project all pending LME cluster specs into a single engine ClusterSpec.
 
@@ -1564,8 +1765,7 @@ class MCPower:
         relation — Nested when n_per_parent is set (composite "A:B" grouping
         var from (1|A/B) formula syntax), Crossed otherwise.
 
-        Gaussian RE convention per grouping: tau_g² = ICC_g / (1 − ICC_g), σ²=1.
-        Mirrors R spec-builder.R:.encode_outcome_and_clusters.
+        Per-grouping τ² is family/link-aware — see `_re_tau_squared`.
         """
         if not self._pending_clusters:
             raise RuntimeError(
@@ -1575,13 +1775,7 @@ class MCPower:
         items = list(self._pending_clusters.items())
         primary_var, primary_cfg = items[0]
 
-        icc = float(primary_cfg["icc"])
-        denom = 1.0 - icc
-        tau_squared = icc / denom if denom > 0 else 0.0
-        if self.outcome_kind == "binary":
-            # Latent-scale conversion: residual variance on the log-odds
-            # scale is π²/3, not 1. Gaussian path unchanged.
-            tau_squared *= _PI_SQ_OVER_3
+        tau_squared = self._re_tau_squared(primary_cfg)
 
         n_clusters = self._effective_n_clusters
         if n_clusters is None:
@@ -1607,11 +1801,7 @@ class MCPower:
         if len(items) > 1:
             extra: List[Dict[str, Any]] = []
             for _gvar, _cfg in items[1:]:
-                _icc = float(_cfg["icc"])
-                _denom = 1.0 - _icc
-                _tau = _icc / _denom if _denom > 0 else 0.0
-                if self.outcome_kind == "binary":
-                    _tau *= _PI_SQ_OVER_3
+                _tau = self._re_tau_squared(_cfg)
                 _n_per_parent = _cfg.get("n_per_parent")
                 _n_cls = _cfg.get("n_clusters")
                 if _n_per_parent is not None:
@@ -1686,7 +1876,8 @@ class MCPower:
         *,
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
-        wald_se: str = "hessian",
+        wald_se: Optional[str] = None,
+        agq: Optional[int] = None,
         test_formula: Optional[str] = None,
         n_sims: Optional[int] = None,
         seed: Optional[int] = None,
@@ -1707,10 +1898,16 @@ class MCPower:
         is the multiple-comparison correction (``"none"`` /
         ``"bonferroni"`` / ``"holm"`` / ``"bh"`` aka ``"fdr"``,
         case-insensitive); ``None`` means no correction. ``wald_se`` selects
-        the standard-error flavour for the clustered-binary GLMM estimator:
-        ``"hessian"`` (default, per-fit FD-Hessian SE, lme4 ``use.hessian =
-        TRUE``) or ``"rx"`` (the opt-in Schur speed knob, faster but
-        anticonservative).
+        the standard-error flavour for the clustered-binary/count GLMM
+        estimator: ``"rx"`` (default, the Schur speed knob, lme4
+        ``use.hessian = FALSE``) or ``"hessian"`` (per-fit FD-Hessian SE,
+        lme4 ``use.hessian = TRUE`` — slower, the rigor opt-in). ``agq`` sets
+        the adaptive Gauss-Hermite quadrature node count for a clustered
+        binary/count GLMM fit; ``None``/``1`` uses Laplace (the default).
+        An odd value in ``3..=25`` opts into AGQ, but only when the design is
+        eligible (a Binary or Count GLMM with a single grouping factor and at
+        most 3 random effects per group) — an ineligible or even/out-of-range
+        value warns and runs at Laplace instead. No-op for OLS/LMM.
 
         Returns a result dict (single scenario) or a scenarios envelope
         (``{"scenarios": {...}, "comparison": {...}}``) when ``scenarios`` is
@@ -1723,7 +1920,7 @@ class MCPower:
         n_variables = len(self._registry.effect_names)
         _validate_sample_size_for_model(sample_size, n_variables).raise_if_invalid()
         self._validate_correction_arg(correction)
-        self._validate_wald_se_arg(wald_se)
+        wald_se, nagq = self._resolve_estimation(wald_se, agq)
 
         if test_formula is not None:
             available = self._registry.non_factor_names + self._registry.factor_names
@@ -1762,13 +1959,15 @@ class MCPower:
             target_test=target_test,
             correction=correction,
             wald_se=wald_se,
+            nagq=nagq,
         )
-        outcome_kind_wire, estimator_wire, intercept_arg, clusters_json = (
+        outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
         )
         _names, scenarios_bytes, skeleton_json = _engine.build_contract_from_spec(
             _json.dumps(payload),
             outcome_kind_wire,
+            link_wire,
             estimator_wire,
             intercept_arg,
             clusters_json,
@@ -1904,7 +2103,8 @@ class MCPower:
         *,
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
-        wald_se: str = "hessian",
+        wald_se: Optional[str] = None,
+        agq: Optional[int] = None,
         test_formula: Optional[str] = None,
         target_power: Optional[float] = None,
         from_size: Optional[int] = None,
@@ -1921,7 +2121,7 @@ class MCPower:
 
         ``target_test`` / ``correction`` mirror :meth:`find_power` — they
         select the tested effect(s) and the multiple-comparison correction for
-        this call (see that method's docstring). ``wald_se`` mirrors
+        this call (see that method's docstring). ``wald_se`` / ``agq`` mirror
         :meth:`find_power` — see that docstring for details.
 
         The search sweeps ``from_size .. to_size`` and reports the smallest N
@@ -1959,7 +2159,7 @@ class MCPower:
             by = _ssb["by"]  # "auto"
 
         self._validate_correction_arg(correction)
-        self._validate_wald_se_arg(wald_se)
+        wald_se, nagq = self._resolve_estimation(wald_se, agq)
 
         _validate_sample_size_range(from_size, to_size, by).raise_if_invalid()
 
@@ -1995,13 +2195,15 @@ class MCPower:
             target_test=target_test,
             correction=correction,
             wald_se=wald_se,
+            nagq=nagq,
         )
-        outcome_kind_wire, estimator_wire, intercept_arg, clusters_json = (
+        outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
         )
         _names, scenarios_bytes, skeleton_json = _engine.build_contract_from_spec(
             _json.dumps(payload),
             outcome_kind_wire,
+            link_wire,
             estimator_wire,
             intercept_arg,
             clusters_json,

@@ -23,9 +23,12 @@ def test_f1_accepts_ols_logit_lme():
     # set_cluster wires the cluster spec downstream.
     m_lme = MCPower("y ~ x1 + (1|school)", family="lme")
     assert m_lme.family == "lme"
-    # Unknown families still rejected.
+    # probit and poisson are now accepted families.
+    assert MCPower("y = x", family="probit").family == "probit"
+    assert MCPower("y = x", family="poisson").family == "poisson"
+    # Deferred / unknown families still rejected (Gamma is out of scope).
     with pytest.raises(ValueError, match="family must be"):
-        MCPower("y = x", family="poisson")
+        MCPower("y = x", family="gamma")
 
 
 def test_f1_set_parallel_raises_attribute_error():

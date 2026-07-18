@@ -159,6 +159,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            nagq: 1,
         }
     }
 

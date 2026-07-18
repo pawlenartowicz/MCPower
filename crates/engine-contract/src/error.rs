@@ -58,8 +58,20 @@ pub enum ContractError {
     #[error("estimator Mle requires generation.cluster to be Some(_)")]
     MleWithoutCluster,
 
-    #[error("estimator Glm requires outcome.kind == Binary")]
-    GlmRequiresBinary,
+    #[error("estimator Glm requires outcome.kind == Binary or Count")]
+    GlmRequiresBinaryOrCount,
+
+    #[error("outcome.link == Some(Probit) requires outcome.kind == Binary")]
+    ProbitRequiresBinary,
+
+    #[error("nagq must be odd and in 1..=25; got {got}")]
+    NagqOutOfRange { got: u8 },
+
+    #[error(
+        "nagq > 1 requires an eligible AGQ shape (Binary/Count GLMM, clustered, \
+         single grouping factor, ≤ 3 REs per group); got nagq = {got}"
+    )]
+    NagqIneligibleShape { got: u8 },
 
     #[error("posthoc tests require estimator == Ols")]
     PosthocRequiresOls,

@@ -29,7 +29,7 @@ def _tau_from_icc_logistic(icc: float) -> float:
 def _cluster_spec(model: MCPower) -> dict:
     """Extract the first ClusterSpec dict from _encode_outcome_and_clusters."""
     import json as _json
-    _, _, _, clusters_json = model._encode_outcome_and_clusters()
+    _, _, _, _, clusters_json = model._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert specs, "expected non-empty clusters_json"
     return specs[0]
@@ -80,6 +80,33 @@ def test_continuous_cluster_tau_squared_unchanged():
     assert abs(spec["tau_squared"] - _tau_from_icc_logistic(icc)) > 1e-6
 
 
+def test_probit_cluster_tau_squared_no_pi_sq_factor():
+    """Binary+cluster path on probit uses τ² = ICC/(1−ICC) with NO π²/3 factor —
+    the probit latent residual variance is 1, unlike logit's π²/3. Pins the
+    `link != "probit"` guard in `_re_tau_squared`: dropping it would inflate
+    probit τ² by 3.29x."""
+    icc = 0.3
+    m = (
+        MCPower("y ~ x + (1|group)", family="probit")
+        .set_effects("x=0.5")
+        .set_baseline_probability(0.3)
+        .set_cluster("group", ICC=icc, n_clusters=20)
+    )
+    m._apply()
+    # Expected low-obs warning (5 obs/cluster) is incidental here
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        m._validate_lme_runtime(100, ["optimistic"])
+
+    spec = _cluster_spec(m)
+    expected = _tau_from_icc_gaussian(icc)
+    assert abs(spec["tau_squared"] - expected) < 1e-12, (
+        f"tau_squared={spec['tau_squared']!r}, expected unscaled {expected!r}"
+    )
+    # Confirm the logit π²/3 factor was NOT applied.
+    assert abs(spec["tau_squared"] - _tau_from_icc_logistic(icc)) > 1e-6
+
+
 def test_logit_cluster_extra_groupings_tau_squared_latent_scale():
     """Extra groupings on the binary+cluster path also get π²/3 scaling."""
     icc_primary = 0.2
@@ -95,7 +122,7 @@ def test_logit_cluster_extra_groupings_tau_squared_latent_scale():
     m._validate_lme_runtime(150, ["optimistic"])
 
     import json as _json
-    _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     primary_spec = specs[0]
     assert abs(primary_spec["tau_squared"] - _tau_from_icc_logistic(icc_primary)) < 1e-12

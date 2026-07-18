@@ -42,6 +42,7 @@ fn minimal_mixed(cluster_dim: ClusterDim) -> MixedSpec {
         extra_groupings: vec![],
         slopes: vec![],
         outcome: MixedOutcome::Gaussian,
+        agq: 1,
     }
 }
 
@@ -124,10 +125,65 @@ fn icc_zero_yields_zero_tau() {
     );
 }
 
+// ── AGQ eligibility (invariant_25_nagq_backstop pre-empted host-side) ─────────
+
+use engine_app_spec::app_spec::{AppGroupingRelation, AppGroupingSpec};
+use engine_app_spec::assemble::assemble_spec_with_skeleton;
+
+/// An ineligible shape (a second grouping factor) with `agq=5` must strip to
+/// Laplace (`nagq=1`) and surface a warning — not reach the engine's
+/// `invariant_25_nagq_backstop` error. Mirrors `model.py`'s
+/// `_resolve_estimation` warn-and-strip behavior.
+#[test]
+fn ineligible_second_grouping_strips_agq_to_laplace_with_warning() {
+    let mut m = minimal_mixed(ClusterDim::NClusters { value: 20 });
+    m.outcome = MixedOutcome::Binary {
+        baseline_probability: 0.3,
+        link: Default::default(),
+    };
+    m.agq = 5;
+    m.extra_groupings = vec![AppGroupingSpec {
+        tau_squared: 0.1,
+        relation: AppGroupingRelation::Crossed { n_clusters: 10 },
+        cluster_name: Some("teacher".into()),
+        slopes: vec![],
+    }];
+    let (contracts, _skeleton, warnings) =
+        assemble_spec_with_skeleton(&AppSpec::Mixed(m)).expect("ineligible agq must not error");
+    assert_eq!(contracts[0].nagq, 1, "must strip to Laplace");
+    assert!(
+        warnings.iter().any(|w| w.contains("agq=5")),
+        "expected an agq warning, got: {warnings:?}"
+    );
+    contracts[0]
+        .validate()
+        .expect("stripped contract must self-validate");
+}
+
+/// An eligible shape (single grouping, ≤3 REs, Binary GLMM) keeps the
+/// requested `agq` untouched and emits no warning.
+#[test]
+fn eligible_binary_glmm_keeps_agq_with_no_warning() {
+    let mut m = minimal_mixed(ClusterDim::NClusters { value: 20 });
+    m.outcome = MixedOutcome::Binary {
+        baseline_probability: 0.3,
+        link: Default::default(),
+    };
+    m.agq = 5;
+    let (contracts, _skeleton, warnings) =
+        assemble_spec_with_skeleton(&AppSpec::Mixed(m)).expect("eligible agq must not error");
+    assert_eq!(contracts[0].nagq, 5);
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings, got: {warnings:?}"
+    );
+}
+
 // ── driver tests ──────────────────────────────────────────────────────────────
 
 use engine_app_spec::{
-    run_find_power, run_find_sample_size, run_single_core_find_sample_size, NullEmitter,
+    run_find_power, run_find_sample_size, run_single_core_find_power,
+    run_single_core_find_sample_size, NullEmitter,
 };
 use engine_orchestrator::{ByValue, CancellationToken, GridMode, SampleSizeMethod};
 
@@ -202,6 +258,66 @@ fn run_find_power_cluster_size_runs_as_fixed_size() {
     assert_eq!(pr.target_indices.len(), pr.power_uncorrected.len());
     assert!(!pr.target_indices.is_empty());
     assert!(pr.n_sims > 0, "n_sims must be positive, got {}", pr.n_sims);
+}
+
+/// End-to-end pin for the B3 fix: an actual `run_find_power` call (the real
+/// production entry point Tauri/WASM invoke, not just the assembler) with an
+/// ineligible `agq=5` must reach the user through `PowerResult.grid_warnings` —
+/// the same field `ConvergenceNotice.svelte` already renders — instead of the
+/// warning being silently dropped between assembly and the returned result.
+#[test]
+fn run_find_power_surfaces_agq_strip_warning_in_grid_warnings() {
+    let mut m = minimal_mixed_with_effect(ClusterDim::NClusters { value: 20 });
+    m.outcome = MixedOutcome::Binary {
+        baseline_probability: 0.3,
+        link: Default::default(),
+    };
+    m.agq = 5;
+    // A second grouping factor makes this shape AGQ-ineligible.
+    m.extra_groupings = vec![AppGroupingSpec {
+        tau_squared: 0.1,
+        relation: AppGroupingRelation::Crossed { n_clusters: 10 },
+        cluster_name: Some("teacher".into()),
+        slopes: vec![],
+    }];
+    let spec = AppSpec::Mixed(m);
+    let cancel = CancellationToken::new();
+    let res = run_find_power(&spec, 200, &NullEmitter, &cancel).expect("find_power ok");
+    let (_, pr) = &res.scenarios[0];
+    assert!(
+        pr.grid_warnings.iter().any(|w| w.contains("agq=5")),
+        "expected the agq strip warning in grid_warnings, got: {:?}",
+        pr.grid_warnings
+    );
+}
+
+/// WASM-dispatch twin of the test above: `run_single_core_find_power` is the
+/// per-worker entry a browser worker actually calls; it must carry the same
+/// warning (the driver-level invariant is that these two never drift).
+#[test]
+fn run_single_core_find_power_surfaces_agq_strip_warning_in_grid_warnings() {
+    let mut m = minimal_mixed_with_effect(ClusterDim::NClusters { value: 20 });
+    m.outcome = MixedOutcome::Binary {
+        baseline_probability: 0.3,
+        link: Default::default(),
+    };
+    m.agq = 5;
+    m.extra_groupings = vec![AppGroupingSpec {
+        tau_squared: 0.1,
+        relation: AppGroupingRelation::Crossed { n_clusters: 10 },
+        cluster_name: Some("teacher".into()),
+        slopes: vec![],
+    }];
+    let spec = AppSpec::Mixed(m);
+    let cancel = CancellationToken::new();
+    let res = run_single_core_find_power(&spec, 200, 20, 2137, &NullEmitter, &cancel)
+        .expect("single_core find_power ok");
+    let (_, pr) = &res.scenarios[0];
+    assert!(
+        pr.grid_warnings.iter().any(|w| w.contains("agq=5")),
+        "expected the agq strip warning in grid_warnings, got: {:?}",
+        pr.grid_warnings
+    );
 }
 
 // ── Snapshot test ──────────────────────────────────────────────────────────────

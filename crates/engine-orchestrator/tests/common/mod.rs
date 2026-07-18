@@ -53,10 +53,12 @@ pub fn minimal_ols_contract() -> SimulationContract {
                 pinned: false,
             },
             heteroskedasticity_driver: None,
+            link: None,
         },
         design_test: None,
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        nagq: 1,
         test: TestSpec {
             targets: vec![TestTarget::Marginal { term: 1 }],
             correction: CorrectionMethod::None,
@@ -167,6 +169,7 @@ pub fn logit_spec() -> LinearSpec {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     }
 }
 
@@ -216,5 +219,6 @@ pub fn lme_spec() -> LinearSpec {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     }
 }

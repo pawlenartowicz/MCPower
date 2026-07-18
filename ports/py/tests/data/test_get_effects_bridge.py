@@ -55,7 +55,7 @@ _SEED = 2137
 
 def _build_contracts() -> bytes:
     _names, contracts_bytes, _skeleton = _engine.build_contract_from_spec(
-        _LINEAR_SPEC_JSON, "continuous", "ols", 0.0, "[]"
+        _LINEAR_SPEC_JSON, "continuous", "canonical", "ols", 0.0, "[]"
     )
     return contracts_bytes
 
@@ -210,7 +210,7 @@ def test_fit_uploaded_data_lme_debug_fields_populated():
         random_slopes=["x"], slope_variance=0.3
     )
 
-    _, estimator_wire, intercept_arg, clusters_json = m._encode_outcome_and_clusters()
+    _, _, estimator_wire, intercept_arg, clusters_json = m._encode_outcome_and_clusters()
     # Pin n_clusters to the data so the fitter's per-cluster buffers are correct.
     clusters = json.loads(clusters_json)
     clusters[0]["sizing"] = {"FixedClusters": {"n_clusters": n_clusters}}
@@ -230,7 +230,7 @@ def test_fit_uploaded_data_lme_debug_fields_populated():
         "scenarios": [],
     })
     _names, contracts_bytes, _sk = _engine.build_contract_from_spec(
-        spec_json, "continuous", estimator_wire, intercept_arg, clusters_json
+        spec_json, "continuous", "canonical", estimator_wire, intercept_arg, clusters_json
     )
 
     # Design: intercept (col_0) + z-scored x (col_1), column-major.

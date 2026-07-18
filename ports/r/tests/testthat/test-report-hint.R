@@ -21,7 +21,7 @@ test_that("a validation error does not carry the report hint", {
 
 test_that("a cancellation error does not carry the report hint", {
   cj <- mcpower:::build_contract_from_spec(.ols_spec_json("y ~ x1", x1 = 0.3),
-                                           "continuous", "ols", 0.0, "[]")$contracts
+                                           "continuous", "canonical", "ols", 0.0, "[]")$contracts
   err <- tryCatch(
     mcpower:::find_power_precancelled(cj, 200L, 400L, 2137),
     error = function(e) conditionMessage(e)

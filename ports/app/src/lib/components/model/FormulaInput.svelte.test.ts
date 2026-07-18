@@ -45,7 +45,7 @@ describe('FormulaInput example formulas follow (entrypoint, outcome)', () => {
   });
 
   it('Regression Binary swaps only the outcome word in the examples', () => {
-    familyStore.regressionOutcome = 'binary';
+    familyStore.regressionOutcome = 'logit';
     const { getByText, queryByText } = render(FormulaInput);
     expect(getByText('passed = hours_studied + sleep')).toBeTruthy();
     expect(getByText('promoted = education + experience')).toBeTruthy();
@@ -55,11 +55,11 @@ describe('FormulaInput example formulas follow (entrypoint, outcome)', () => {
   it('toggling Mixed to Binary flips its example to the binary form', async () => {
     familyStore.active = 'mixed';
     const { getByText, queryByText } = render(FormulaInput);
-    expect(getByText('score = lesson_time + (1|classroom)')).toBeTruthy();
+    expect(getByText('score = lesson_time + (1 | classroom)')).toBeTruthy();
 
     familyStore.byFamily.mixed.cluster!.binaryOutcome = true;
     await tick();
-    expect(getByText('passed = lesson_time + (1|classroom)')).toBeTruthy();
-    expect(queryByText('score = lesson_time + (1|classroom)')).toBeNull();
+    expect(getByText('passed = lesson_time + (1 | classroom)')).toBeTruthy();
+    expect(queryByText('score = lesson_time + (1 | classroom)')).toBeNull();
   });
 });

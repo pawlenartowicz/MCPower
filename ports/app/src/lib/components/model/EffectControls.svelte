@@ -17,19 +17,32 @@
 
   // A binary outcome (logistic regression / binary GLMM) makes β a log-odds, so
   // the presets switch to the odds (beta) set and each input gains a live
-  // OR = exp(β) readout. The β value is unchanged — only the scale's reading is.
-  const isLogit = $derived(familyStore.activeOutcome === 'binary');
-  const presets = $derived(presetsFor(effect.name, variables, isLogit));
-  const orText = $derived(`OR ${Math.exp(effect.value).toFixed(2)}`);
+  // OR = exp(β) readout. Poisson mirrors this on the rate scale (β = log(RR)),
+  // reusing the same anchor triple with an RR readout instead. Probit's β is
+  // Cohen's-d scale (latent variance 1), NOT log-odds, so it is excluded here
+  // and falls through presetsFor's own binary/factor-vs-continuous split.
+  const isLogit = $derived(familyStore.activeOutcome === 'logit');
+  const isPoisson = $derived(familyStore.activeOutcome === 'poisson');
+  const useOddsPresets = $derived(isLogit || isPoisson);
+  const presets = $derived(presetsFor(effect.name, variables, useOddsPresets));
+  const ratioLabel = $derived(isPoisson ? 'RR' : 'OR');
+  const ratioText = $derived(`${ratioLabel} ${Math.exp(effect.value).toFixed(2)}`);
   // exp(β) is per-1-SD for a continuous predictor, per-category for binary/factor;
   // the number is the same, only the interpretation differs.
-  const orTooltip =
-    'Odds ratio = exp(β). Per 1 SD for a continuous predictor, per category for a binary/factor predictor.';
+  const ratioTooltip = $derived(
+    isPoisson
+      ? 'Rate ratio = exp(β). Per 1 SD for a continuous predictor, per category for a binary/factor predictor.'
+      : 'Odds ratio = exp(β). Per 1 SD for a continuous predictor, per category for a binary/factor predictor.',
+  );
 
   function presetTitle(p: { long: string; value: number }): string {
-    return isLogit
-      ? `${p.long} effect = OR ${Math.exp(p.value).toFixed(2)} (β ${p.value}, Chen et al.)`
-      : `${p.long} effect = ${p.value} (Cohen)`;
+    if (!useOddsPresets) return `${p.long} effect = ${p.value} (Cohen)`;
+    const ratio = Math.exp(p.value).toFixed(2);
+    // Chen et al. 2010 is an odds-ratio convention; poisson borrows its anchors
+    // as a multiplicative rate-ratio scale, so the citation is honestly qualified.
+    return isPoisson
+      ? `${p.long} effect = RR ${ratio} (β ${p.value}, Chen et al. odds anchor reused for rate)`
+      : `${p.long} effect = OR ${ratio} (β ${p.value}, Chen et al.)`;
   }
 
   function applyPreset(magnitude: number) {
@@ -49,13 +62,13 @@
     bind:value={effect.value}
     data-testid={`effect-${effect.name}`}
   />
-  {#if isLogit}
+  {#if useOddsPresets}
     <span
       class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
-      title={orTooltip}
+      title={ratioTooltip}
       data-testid={`effect-or-${effect.name}`}
     >
-      {orText}
+      {ratioText}
     </span>
   {/if}
   <button
@@ -82,10 +95,12 @@
         <span class="hidden @[22rem]/effects:inline">{p.long}</span>
       </button>
     {/each}
-    {#if isLogit}
+    {#if useOddsPresets}
       <span
         class="rounded bg-muted px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground"
-        title="Odds-ratio benchmarks (Chen et al. 2010) — beta"
+        title={isPoisson
+          ? 'Rate-ratio benchmarks (Chen et al. 2010 odds anchor reused for rate) — beta'
+          : 'Odds-ratio benchmarks (Chen et al. 2010) — beta'}
       >
         beta
       </span>

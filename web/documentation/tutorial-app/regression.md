@@ -4,7 +4,7 @@ description: "Power & sample-size analysis for OLS and logistic regression in th
 ---
 # Regression power (app)
 
-Regression covers two outcome types in one panel — a **continuous** outcome (OLS) and a **binary** outcome (logistic regression). Pick the outcome with the toggle at the top; the controls below adapt. Top to bottom:
+Regression covers four outcome types in one panel — **Linear** (continuous, OLS), **Logit** and **Probit** (binary), and **Poisson** (counts). Pick the outcome with the dropdown at the top; the controls below adapt. See [[concepts/supported-families|supported families]] for the link function and baseline setter behind each choice. Top to bottom:
 
 ## 1. Formula
 
@@ -21,7 +21,8 @@ The **Robustness scenarios** toggle in the status bar repeats every run under th
 ## 4. Optional settings
 
 - **Correlations** — a collapsed, optional sub-section: set pairwise correlations if predictors are not independent; correlated predictors share information and usually lower power. Leave it collapsed (all zero) for independence. Only **continuous** predictors appear in the triangle — binary and factor predictors are excluded. [[concepts/correlations|predictor correlations]]
-- **Baseline probability** (binary only) — the outcome probability when every predictor is at its reference level. It fixes the logistic intercept and strongly affects power (outcomes near 0 or 1 are harder). Hidden for continuous outcomes.
+- **Baseline probability** (Logit / Probit) — the outcome probability when every predictor is at its reference level. It fixes the model intercept and strongly affects power (outcomes near 0 or 1 are harder). Hidden for Linear and Poisson outcomes.
+- **Baseline rate** (Poisson only) — the expected count when every predictor is at its reference level; fixes the log-link intercept the same way baseline probability does for the binary families.
 - **Tests & corrections** — test all coefficients, the first only, or a custom subset; correcting several (Bonferroni, Holm, Benjamini–Hochberg) controls the error rate at the cost of power. [[concepts/multiple-testing|multiple testing]]
 - **Advanced** — number of simulations (continuous defaults to 1,600), α (0.05), seed (2137), and the failed-simulation tolerance.
 

@@ -17,8 +17,9 @@ MCPower <- R6::R6Class(
   "MCPower",
   public = list(
     # Public Python-parity fields (model.py __init__).
-    family = NULL,           # "ols" | "logit" | "lme"
-    outcome_kind = NULL,     # "continuous" | "binary"
+    family = NULL,           # "ols" | "logit" | "probit" | "poisson" | "lme"
+    outcome_kind = NULL,     # "continuous" | "binary" | "count"
+    link = NULL,             # "canonical" | "probit"
     estimator = NULL,        # "ols" | "glm" | "mle"
     seed = NULL,             # base RNG seed (default 2137; NULL = seed 0, still deterministic)
     power = NULL,            # target power for find_sample_size (default 80)
@@ -28,7 +29,7 @@ MCPower <- R6::R6Class(
     intercept = NULL,        # logit(p) once set_baseline_probability is called
 
     #' @param formula An R `formula` or a string (e.g. `"y ~ x1 + x2"`).
-    #' @param family  "ols" (default), "logit", or "lme".
+    #' @param family  "ols" (default), "logit", "probit", "poisson", or "lme".
     #' @param estimator Override the analysis estimator ("ols"/"glm"/"mle"); NULL derives from family.
     #' @param solve_as Synonym for estimator; estimator wins when both are given.
     initialize = function(formula, family = "ols", estimator = NULL, solve_as = NULL) {
@@ -46,9 +47,10 @@ MCPower <- R6::R6Class(
         stop("family must be a single string")
       }
       family_norm <- tolower(family)
-      if (!family_norm %in% c("ols", "logit", "lme")) {
-        stop(sprintf("unsupported family %s; expected 'ols', 'logit', or 'lme'",
-                     sQuote(family)))
+      if (!family_norm %in% c("ols", "logit", "probit", "poisson", "lme")) {
+        stop(sprintf(
+          "unsupported family %s; expected 'ols', 'logit', 'probit', 'poisson', or 'lme'",
+          sQuote(family)))
       }
       self$family <- family_norm
 
@@ -65,11 +67,23 @@ MCPower <- R6::R6Class(
         }
       }
 
-      # outcome_kind: "binary" iff logit, else "continuous".
-      self$outcome_kind <- if (family_norm == "logit") "binary" else "continuous"
+      # outcome_kind + link from family (mirrors Python model.py __init__):
+      #   logit/probit -> binary  (probit sets the non-canonical link)
+      #   poisson      -> count
+      #   ols/lme      -> continuous
+      self$outcome_kind <- if (family_norm %in% c("logit", "probit")) {
+        "binary"
+      } else if (family_norm == "poisson") {
+        "count"
+      } else {
+        "continuous"
+      }
+      # Non-canonical link override sent on the wire ("probit"), else canonical.
+      self$link <- if (family_norm == "probit") "probit" else "canonical"
 
-      # Default estimator coupling: logit -> glm, lme -> mle, else ols.
-      default_estimator <- if (family_norm == "logit") {
+      # Default estimator coupling: logit/probit/poisson -> glm (GLMM when
+      # clustered), lme -> mle, else ols.
+      default_estimator <- if (family_norm %in% c("logit", "probit", "poisson")) {
         "glm"
       } else if (family_norm == "lme") {
         "mle"
@@ -113,9 +127,11 @@ MCPower <- R6::R6Class(
       private$applied <- FALSE
       private$effects_set <- FALSE
 
-      # Logit-specific pending state. pending_baseline_probability stays set
-      # after applying (v1 semantics).
+      # Binary/count-specific pending state. Both stay set after applying (v1
+      # semantics): the canonical record that the user supplied a baseline.
+      # probability → logit/probit intercept; rate → Poisson log-link intercept.
       private$pending_baseline_probability <- NULL
+      private$pending_baseline_rate <- NULL
 
       # LME state: pending_clusters keyed by grouping var, each entry holds
       # icc / n_clusters / cluster_size. effective_n_clusters is populated at
@@ -287,10 +303,15 @@ MCPower <- R6::R6Class(
     #' @param n_per_parent For nested random effects \code{(1|A/B)}: the number of
     #'   B-units per A-unit. Use with the child grouping var (e.g.
     #'   \code{set_cluster("A:B", n_per_parent = 5)}).
+    #' @param tau_squared Raw random-intercept variance, for
+    #'   \code{family = "poisson"} only (Poisson has no residual-variance term
+    #'   for \code{ICC} to divide against). Mutually exclusive with \code{ICC}.
     #' @return The \code{MCPower} object invisibly (for chaining).
     set_cluster = function(grouping_var, ICC = NULL, n_clusters = NULL,
-                           cluster_size = NULL, random_slopes = NULL,
-                           cluster_level_vars = NULL, n_per_parent = NULL, ...) {
+                           cluster_size = NULL,
+                           random_slopes = NULL,
+                           cluster_level_vars = NULL, n_per_parent = NULL,
+                           tau_squared = NULL, ...) {
       # ICC is the CONDITIONAL (residual) ICC tau^2/(tau^2+sigma^2): the
       # within-cluster correlation after the predictors are accounted for. The
       # random intercept is sized tau^2 = ICC/(1-ICC). The raw outcome's marginal
@@ -357,6 +378,27 @@ MCPower <- R6::R6Class(
         }
       }
 
+      # Poisson (count) mixed models size the random effect by a RAW τ² — no
+      # standard latent-scale ICC exists for a log-link count model (Decision 8).
+      # Every other family uses ICC. Gate the two so they can't be mixed up.
+      if (identical(self$family, "poisson")) {
+        if (!is.null(ICC)) {
+          stop(paste0(
+            "family='poisson' sizes the random effect by tau_squared, not ICC; ",
+            "pass tau_squared= (raw τ²) instead of ICC="), call. = FALSE)
+        }
+        if (is.null(tau_squared)) tau_squared <- 0.0
+        if (!is.numeric(tau_squared) || length(tau_squared) != 1L ||
+            is.na(tau_squared) || tau_squared < 0) {
+          stop(sprintf("tau_squared must be a non-negative number, got %s",
+                       format(tau_squared)), call. = FALSE)
+        }
+      } else if (!is.null(tau_squared)) {
+        stop(sprintf(paste0(
+          "tau_squared= is only for family='poisson'; family='%s' sizes the ",
+          "random effect by ICC="), self$family), call. = FALSE)
+      }
+
       if (is.null(ICC)) ICC <- 0.0
       icc_val <- as.numeric(ICC)
       # Hard range: ICC must be in [0, 1).
@@ -397,6 +439,8 @@ MCPower <- R6::R6Class(
         n_clusters   = n_clusters,
         cluster_size = cluster_size,
         icc          = as.numeric(ICC),
+        # Poisson raw τ² (Decision 8); NULL for ICC-sized families.
+        tau_squared  = if (!is.null(tau_squared)) as.numeric(tau_squared) else NULL,
         n_per_parent = n_per_parent,   # NULL for crossed; integer for nested
         raw_slopes   = if (!is.null(random_slopes) && length(random_slopes) > 0L)
                          random_slopes else NULL,
@@ -412,6 +456,15 @@ MCPower <- R6::R6Class(
     },
 
     set_baseline_probability = function(p) {
+      # family gate: a probability set on a Poisson model would silently
+      # overwrite whichever baseline was set last (rate or probability) with
+      # no warning; mirrors the set_cluster ICC/tau_squared gate.
+      if (!self$family %in% c("logit", "probit")) {
+        stop(sprintf(paste0(
+          "set_baseline_probability is only for family='logit'/'probit'; ",
+          "family='%s' sizes the intercept by set_baseline_rate="), self$family),
+          call. = FALSE)
+      }
       # Store pending p; intercept = log(p/(1-p)) computed at apply time.
       if (!is.numeric(p) || length(p) != 1L) {
         stop("baseline probability must be a number", call. = FALSE)
@@ -435,6 +488,30 @@ MCPower <- R6::R6Class(
         ), call. = FALSE)
       }
       private$pending_baseline_probability <- pv
+      private$applied <- FALSE
+      invisible(self)
+    },
+
+    # model.py set_baseline_rate — baseline event rate λ₀ for family='poisson'.
+    # Stored pending; intercept = log(λ₀) computed at apply time (log link).
+    set_baseline_rate = function(rate) {
+      # family gate: a rate set on a logit/probit model would silently
+      # overwrite whichever baseline was set last (rate or probability) with
+      # no warning; mirrors the set_cluster ICC/tau_squared gate.
+      if (!identical(self$family, "poisson")) {
+        stop(sprintf(paste0(
+          "set_baseline_rate is only for family='poisson'; ",
+          "family='%s' sizes the intercept by set_baseline_probability="), self$family),
+          call. = FALSE)
+      }
+      if (!is.numeric(rate) || length(rate) != 1L) {
+        stop("baseline rate must be a number", call. = FALSE)
+      }
+      rv <- as.numeric(rate)
+      if (rv <= 0) {
+        stop(sprintf("baseline rate must be > 0, got %g", rv), call. = FALSE)
+      }
+      private$pending_baseline_rate <- rv
       private$applied <- FALSE
       invisible(self)
     },
@@ -688,13 +765,22 @@ MCPower <- R6::R6Class(
         # tau^2 — exactly the quantity set_cluster(ICC=...) reconstructs. A
         # degenerate (non-converged) fit yields an empty vector; note that the
         # ICC is unavailable rather than erroring on the missing component.
+        # Poisson has no residual-variance scale to form an ICC ratio against
+        # (raw tau^2, not ICC-derived) — no meaningful ICC to report; mirrors
+        # driver.rs's cluster_icc, which returns None for it.
         vc <- fit$variance_components
-        if (length(private$pending_clusters) > 0L && length(vc) == 0L) {
+        if (length(private$pending_clusters) > 0L && !identical(self$family, "poisson") &&
+            length(vc) == 0L) {
           message("Estimated ICC: unavailable (the random-intercept fit did ",
                   "not converge to a variance estimate).")
-        } else if (length(private$pending_clusters) > 0L) {
+        } else if (length(private$pending_clusters) > 0L && !identical(self$family, "poisson")) {
           tau_sq <- as.numeric(vc[1])
-          if (identical(self$outcome_kind, "binary")) {
+          if (identical(self$family, "probit")) {
+            # Probit's latent-variable residual variance is fixed at 1 (Phi's
+            # scale), unlike logit's pi^2/3 — mirrors driver.rs.
+            icc <- tau_sq / (tau_sq + 1.0)
+            scale_note <- " (probit latent scale)"
+          } else if (identical(self$outcome_kind, "binary")) {
             # Latent (log-odds) scale: residual variance is pi^2/3, not sigma^2
             # (sigma_sq_hat is a 1.0 placeholder for the binomial fit). Inverse
             # of the set_cluster latent conversion. Mirrors spec-builder.R.
@@ -722,11 +808,16 @@ MCPower <- R6::R6Class(
         }
 
         # Binary fits also recover the baseline event probability: the
-        # inverse-logit of the fitted intercept betas[1], undoing the forward
-        # logit(p) the generator applies. Reported for any binary outcome
-        # (clustered or not), unlike the ICC, which is clustered-only.
+        # inverse link of the fitted intercept betas[1], undoing the forward
+        # link (logit(p) or probit's qnorm(p)) the generator applies.
+        # Reported for any binary outcome (clustered or not), unlike the ICC,
+        # which is clustered-only.
         if (identical(self$outcome_kind, "binary")) {
-          p_hat <- 1 / (1 + exp(-as.numeric(betas[1])))
+          p_hat <- if (identical(self$family, "probit")) {
+            stats::pnorm(as.numeric(betas[1]))
+          } else {
+            1 / (1 + exp(-as.numeric(betas[1])))
+          }
           # Straight quotes (copy-paste R snippet): see the set_cluster note above.
           message(sprintf(
             paste0("Estimated baseline probability: %.4f (APPROXIMATION; not auto-applied). ",
@@ -767,7 +858,15 @@ MCPower <- R6::R6Class(
         if (name %in% names(merged)) {
           merged[[name]] <- modifyList(merged[[name]], user_cfg)
         } else {
-          merged[[name]] <- modifyList(.scenario_defaults()[["optimistic"]], user_cfg)
+          # truth_start is a scenario ASSUMPTION ("estimation is well-behaved"),
+          # not a generic knob — a brand-new custom scenario stays cold-start
+          # (FALSE) unless the user sets it explicitly, even though it inherits
+          # every other key from optimistic.
+          custom_cfg <- modifyList(.scenario_defaults()[["optimistic"]], user_cfg)
+          if (is.null(user_cfg[["truth_start"]])) {
+            custom_cfg$truth_start <- FALSE
+          }
+          merged[[name]] <- custom_cfg
         }
       }
       private$scenario_configs <- merged
@@ -778,14 +877,24 @@ MCPower <- R6::R6Class(
     # Analysis entry points (model.py).
     # ------------------------------------------------------------------
 
+    #' @param agq Adaptive Gauss-Hermite quadrature node count for a clustered
+    #'   binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
+    #'   default). An odd value in \code{3..=25} opts into AGQ, but only when
+    #'   the design is eligible (a Binary or Count GLMM with a single grouping
+    #'   factor and at most 3 random effects per group) -- an ineligible or
+    #'   even/out-of-range value warns and runs at Laplace instead. No-op for
+    #'   OLS/LMM.
     find_power = function(sample_size, target_test = NULL, correction = NULL,
-                          wald_se = NULL, test_formula = NULL, n_sims = NULL,
+                          wald_se = NULL, agq = NULL, test_formula = NULL,
+                          n_sims = NULL,
                           seed = NULL, scenarios = FALSE, progress_callback = TRUE,
                           verbose = TRUE) {
       if (!private$applied) private$apply()
 
       # Validate correction (raises on unknown names).
       private$validate_correction_arg(correction)
+      # Resolve wald_se / agq against config; warn-and-strip ineligible agq.
+      est <- private$resolve_estimation(wald_se, agq)
 
       names <- private$resolve_scenarios_arg(scenarios)
 
@@ -819,7 +928,7 @@ MCPower <- R6::R6Class(
 
       contracts <- private$build_contract_bytes(
         names, target_test = target_test, correction = correction,
-        wald_se = wald_se, test_formula = test_formula)
+        wald_se = est$wald_se, nagq = est$nagq, test_formula = test_formula)
 
       progress <- private$resolve_progress(progress_callback)
       raw <- find_power(contracts, as.integer(sample_size), n, base_seed,
@@ -873,8 +982,15 @@ MCPower <- R6::R6Class(
       result
     },
 
+    #' @param agq Adaptive Gauss-Hermite quadrature node count for a clustered
+    #'   binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
+    #'   default). An odd value in \code{3..=25} opts into AGQ, but only when
+    #'   the design is eligible (a Binary or Count GLMM with a single grouping
+    #'   factor and at most 3 random effects per group) -- an ineligible or
+    #'   even/out-of-range value warns and runs at Laplace instead. No-op for
+    #'   OLS/LMM.
     find_sample_size = function(target_test = NULL, correction = NULL,
-                                wald_se = NULL, test_formula = NULL,
+                                wald_se = NULL, agq = NULL, test_formula = NULL,
                                 target_power = NULL,
                                 from_size = NULL, to_size = NULL, by = NULL,
                                 mode = "linear",
@@ -888,6 +1004,8 @@ MCPower <- R6::R6Class(
 
       # Validate correction (raises on unknown names).
       private$validate_correction_arg(correction)
+      # Resolve wald_se / agq against config; warn-and-strip ineligible agq.
+      est <- private$resolve_estimation(wald_se, agq)
 
       # LME cluster_size-only guard (model.py _validate_lme_find_sample_size_cluster_size).
       private$validate_lme_find_sample_size_cluster_size()
@@ -920,7 +1038,7 @@ MCPower <- R6::R6Class(
 
       contracts <- private$build_contract_bytes(
         names, target_test = target_test, correction = correction,
-        wald_se = wald_se, test_formula = test_formula)
+        wald_se = est$wald_se, nagq = est$nagq, test_formula = test_formula)
 
       tp <- if (!is.null(target_power)) as.numeric(target_power) else as.numeric(self$power)
       progress <- private$resolve_progress(progress_callback)
@@ -1044,6 +1162,7 @@ MCPower <- R6::R6Class(
     pending_effects = NULL,
     pending_correlations = NULL,
     pending_baseline_probability = NULL,
+    pending_baseline_rate = NULL,
     pending_clusters = NULL,
     effective_n_clusters = NULL,
     applied = FALSE,
@@ -1160,10 +1279,20 @@ MCPower <- R6::R6Class(
     },
 
     # model.py _apply_baseline_probability.
+    # Binary: log(p/(1-p)) (logit) or qnorm(p) (probit). Count (Poisson):
+    # log(λ₀) (log link). Pending values are NOT cleared (canonical record).
     apply_baseline_probability = function() {
-      if (is.null(private$pending_baseline_probability)) return(invisible(NULL))
-      p <- private$pending_baseline_probability
-      self$intercept <- log(p / (1.0 - p))
+      if (!is.null(private$pending_baseline_probability)) {
+        p <- private$pending_baseline_probability
+        self$intercept <- if (identical(self$family, "probit")) {
+          stats::qnorm(p)
+        } else {
+          log(p / (1.0 - p))
+        }
+      }
+      if (!is.null(private$pending_baseline_rate)) {
+        self$intercept <- log(private$pending_baseline_rate)
+      }
       invisible(NULL)
     },
 
@@ -1186,28 +1315,71 @@ MCPower <- R6::R6Class(
       invisible(NULL)
     },
 
-    # model.py _validate_logit_runtime.
+    # model.py _validate_logit_runtime — pre-flight for logit/probit/poisson.
     # `scenario_names` is the resolved character vector from resolve_scenarios_arg.
     validate_logit_runtime = function(scenario_names) {
-      if (!identical(self$family, "logit")) return(invisible(NULL))
+      if (!self$family %in% c("logit", "probit", "poisson")) return(invisible(NULL))
 
-      # Missing baseline probability.
-      if (is.null(private$pending_baseline_probability)) {
-        stop(paste0(
-          "baseline probability required for family='logit'; call ",
-          "set_baseline_probability(p) before find_power"),
-          call. = FALSE)
+      # Missing baseline. Binary families need a probability; Poisson a rate.
+      if (self$family %in% c("logit", "probit")) {
+        if (is.null(private$pending_baseline_probability)) {
+          stop(sprintf(paste0(
+            "baseline probability required for family='%s'; call ",
+            "set_baseline_probability(p) before find_power"), self$family),
+            call. = FALSE)
+        }
+      } else {  # poisson
+        if (is.null(private$pending_baseline_rate)) {
+          stop(paste0(
+            "baseline rate required for family='poisson'; call ",
+            "set_baseline_rate(rate) before find_power"),
+            call. = FALSE)
+        }
       }
 
       # Intercept-only model.
       if (length(private$registry$effect_names) == 0L) {
-        stop(paste0(
-          "family='logit' requires at least one predictor; ",
-          "intercept-only models have no testable effect"),
+        stop(sprintf(paste0(
+          "family='%s' requires at least one predictor; ",
+          "intercept-only models have no testable effect"), self$family),
           call. = FALSE)
       }
 
       invisible(NULL)
+    },
+
+    # model.py _agq_eligible — whether the design admits AGQ (nagq > 1).
+    # Binary/count GLMM, single grouping factor, ≤3 REs per group (intercept +
+    # slopes). Mirrors contract invariant 25 + glmm assert_model_shape.
+    agq_eligible = function() {
+      if (!self$outcome_kind %in% c("binary", "count")) return(FALSE)
+      if (length(private$pending_clusters) != 1L) return(FALSE)
+      cfg <- private$pending_clusters[[1L]]
+      n_re <- 1L + length(cfg$raw_slopes %||% list())  # intercept + slopes
+      n_re <= 3L
+    },
+
+    # model.py _resolve_estimation — resolve wald_se / agq against the config
+    # `estimation` defaults, validate, and warn-and-strip an ineligible agq > 1
+    # to Laplace (nagq = 1). Returns list(wald_se = <str>, nagq = <int>).
+    resolve_estimation = function(wald_se, agq) {
+      est <- .config()$estimation
+      if (is.null(wald_se)) wald_se <- est$wald_se
+      wald_se_wire <- .wald_se_for_rust(wald_se)  # validates
+      nagq <- if (is.null(agq)) as.integer(est$nagq) else as.integer(agq)
+      if (is.na(nagq) || nagq < 1L || nagq > 25L || nagq %% 2L == 0L) {
+        stop(sprintf("agq must be an odd integer in 1..=25, got %s", format(agq)),
+             call. = FALSE)
+      }
+      if (nagq > 1L && !private$agq_eligible()) {
+        warning(sprintf(paste0(
+          "agq=%d is not available for this design; running at agq=1 (Laplace). ",
+          "AGQ requires a clustered binary or count (logit/probit/poisson) model ",
+          "with a single grouping factor and at most 3 random effects per group."),
+          nagq), call. = FALSE)
+        nagq <- 1L
+      }
+      list(wald_se = wald_se_wire, nagq = nagq)
     },
 
     # cluster_size-only LME guard for find_sample_size (model.py _validate_lme_find_sample_size_cluster_size).
@@ -1332,7 +1504,7 @@ MCPower <- R6::R6Class(
     # .build_report_meta can include the effect_skeleton without a separate call.
     build_contract_bytes = function(scenario_names, target_test = NULL,
                                     correction = NULL, wald_se = NULL,
-                                    test_formula = NULL) {
+                                    nagq = 1L, test_formula = NULL) {
       if (!private$applied) private$apply()
       reg <- private$registry
 
@@ -1346,6 +1518,7 @@ MCPower <- R6::R6Class(
         alpha = self$alpha,
         correction = correction,
         wald_se = wald_se,
+        nagq = nagq,
         target_test = target_test,
         heteroskedasticity = private$heteroskedasticity,
         residual_name = private$residual_dist_name,
@@ -1394,10 +1567,11 @@ MCPower <- R6::R6Class(
       }
 
       enc <- .encode_outcome_and_clusters(
-        self$family, self$estimator, self$intercept, resolved_clusters)
+        self$family, self$link, self$estimator, self$intercept, resolved_clusters)
 
       out <- build_contract_from_spec(
-        json, enc$outcome_kind, enc$estimator, enc$intercept, enc$clusters_json)
+        json, enc$outcome_kind, enc$link, enc$estimator, enc$intercept,
+        enc$clusters_json)
       # Capture the skeleton so .build_report_meta can use it (avoids a second call).
       private$skeleton_json <- out$skeleton
       out$contracts

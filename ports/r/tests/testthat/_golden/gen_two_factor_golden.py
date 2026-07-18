@@ -22,8 +22,8 @@ m.set_variable_type("g2=(factor, 0.6, 0.4)")
 m.set_effects("g1[2]=0.5, g2[2]=0.4, g1[2]:g2[2]=0.3")
 
 payload = m._to_linear_spec_dict(["optimistic"])
-o, e, i, c = m._encode_outcome_and_clusters()
-names, blob, _skeleton_json = _engine.build_contract_from_spec(json.dumps(payload), o, e, i, c)
+o, link, e, i, c = m._encode_outcome_and_clusters()
+names, blob, _skeleton_json = _engine.build_contract_from_spec(json.dumps(payload), o, link, e, i, c)
 
 with open("two_factor_accumulation_contract.msgpack", "wb") as f:
     f.write(blob)

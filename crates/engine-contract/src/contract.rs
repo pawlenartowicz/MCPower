@@ -26,10 +26,19 @@ pub struct SimulationContract {
     #[serde(default)]
     pub design_test: Option<DesignSpec>,
     pub estimator: EstimatorSpec,
-    /// Fixed-effect Wald-SE mode for the clustered-binary GLMM (no-op elsewhere).
-    /// Additive; serde default `Hessian` keeps older payloads valid. (design §7.)
+    /// Fixed-effect Wald-SE mode for the clustered-binary/count GLMM (no-op
+    /// elsewhere). Additive; serde default flipped to `Rx` at 1.1.0 (fastmode),
+    /// mirroring `config.json` estimation.wald_se. (design §7.)
     #[serde(default)]
     pub wald_se: WaldSe,
+    /// Adaptive Gauss–Hermite quadrature node count for the GLMM likelihood.
+    /// `1` = Laplace (the default). `> 1` requires an eligible shape
+    /// (Binary/Count GLMM, single grouping factor, ≤ 3 REs per group, odd
+    /// `k ≤ 25`) — validate() invariant_25_nagq_backstop is the backstop;
+    /// hosts strip ineligible values first. Additive; serde default `1` keeps
+    /// older payloads valid. Mirrors `config.json` estimation.nagq.
+    #[serde(default = "default_nagq")]
+    pub nagq: u8,
     pub test: TestSpec,
     #[serde(default)]
     pub posthoc: Vec<PosthocSpec>,
@@ -39,6 +48,12 @@ pub struct SimulationContract {
     /// Post-batch convergence threshold (fraction of failed sims); evaluated
     /// host-side, not by the kernel.
     pub max_failed_fraction: f64,
+}
+
+/// Serde default for `SimulationContract.nagq` — Laplace (mirrors
+/// `config.json` estimation.nagq).
+fn default_nagq() -> u8 {
+    1
 }
 
 #[cfg(test)]
@@ -63,11 +78,13 @@ mod tests {
         let v = rmp_serde::to_vec_named(&c).unwrap();
         let mut val: rmpv::Value = rmp_serde::from_slice(&v).unwrap();
         if let rmpv::Value::Map(entries) = &mut val {
-            entries.retain(|(k, _)| k.as_str() != Some("wald_se"));
+            entries.retain(|(k, _)| k.as_str() != Some("wald_se") && k.as_str() != Some("nagq"));
         }
         let mut stripped = Vec::new();
         rmpv::encode::write_value(&mut stripped, &val).unwrap();
         let back: SimulationContract = rmp_serde::from_slice(&stripped).unwrap();
-        assert_eq!(back.wald_se, WaldSe::Hessian);
+        // Absent wald_se/nagq deserialize to the 1.1.0 fastmode defaults.
+        assert_eq!(back.wald_se, WaldSe::Rx);
+        assert_eq!(back.nagq, 1);
     }
 }

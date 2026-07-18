@@ -1,6 +1,6 @@
 Package: mcpower
 Title: Statistical Power Analysis via MCPower Engine
-Version: 1.0.3
+Version: 1.1.0
 Authors@R:
     person("Paweł", "Lenartowicz", role = c("aut", "cre"), email = "pawellenartowicz@europe.com",
            comment = c(ORCID = "0000-0002-6906-7217"))

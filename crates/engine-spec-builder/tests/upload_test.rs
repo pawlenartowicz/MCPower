@@ -107,6 +107,7 @@ fn make_two_predictor_spec_with_upload(upload: UploadInput) -> LinearSpec {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     }
 }
 
@@ -137,6 +138,7 @@ fn matched_predictor_becomes_resampled_unmatched_stays_synthetic() {
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -219,10 +221,12 @@ fn binary_matched_column_becomes_resampled_binary_with_proportion() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -326,10 +330,12 @@ fn partial_mode_does_not_correlate_binary_column() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -410,10 +416,12 @@ fn partial_mode_measures_empirical_correlation() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -499,10 +507,12 @@ fn partial_mode_measures_spearman_converted() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -588,10 +598,12 @@ fn explicit_correlation_overrides_measured() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -665,10 +677,12 @@ fn matched_factor_column_becomes_factor_from_frame() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -837,10 +851,12 @@ fn partial_upload_nonpsd_combined_matrix_is_rejected() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let err = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -1001,10 +1017,12 @@ fn partial_mode_measures_nontrivial_and_excludes_binary() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],
@@ -1063,6 +1081,7 @@ fn upload_mode_sets_bootstrap_flag() {
         let contracts = engine_spec_builder::build_contract(
             &spec,
             OutcomeKind::Continuous,
+            None,
             Some(EstimatorSpec::Ols),
             0.0,
             vec![],
@@ -1149,10 +1168,12 @@ fn upload_mode_none_does_not_measure_correlations() {
         upload: Some(upload),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        nagq: 1,
     };
     let contracts = engine_spec_builder::build_contract(
         &spec,
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Ols),
         0.0,
         vec![],

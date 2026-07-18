@@ -54,7 +54,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         { name: 'x2', value: 0.2 },
       ],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     expect(r.spec).not.toBeNull();
     expect(r.spec!.family).toBe('linear');
@@ -74,7 +74,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         { name: 'x1:x2', value: 0.1 },
       ],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     expect(r.spec!.effects.find((e) => e.name === 'x1:x2')!.value).toBe(0.1);
   });
@@ -92,7 +92,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         { name: 'x1:group[3]', value: 0.2 },
       ],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     const names = r.spec!.effects.map((e) => e.name);
     // per-level interaction columns the engine expects, with the user's values
@@ -110,7 +110,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [{ name: 'x2', value: 0.5 }],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors.some((e) => e.includes('x2'))).toBe(true);
   });
 
@@ -120,7 +120,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       variables: [{ name: 'x1', kind: 'binary', binaryProportion: 1.5 }],
       effects: [{ name: 'x1', value: 0.5 }],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors.some((e) => /binary_proportion|\[0,1\]/.test(e))).toBe(true);
   });
 
@@ -133,7 +133,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         { name: 'x1[3]', value: 0.5 },
       ],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     const vt = r.spec.var_types[0]!;
@@ -147,7 +147,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       variables: [{ name: 'x1', kind: 'factor', nLevels: 3, levelProportions: [0.5, 0, 0.5] }],
       effects: [],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors.some((e) => /share must be > 0/.test(e))).toBe(true);
   });
 
@@ -170,7 +170,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         { name: 'origin[USA]', value: 0.2 },
       ],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     const vt = r.spec.var_types[0]!;
@@ -194,7 +194,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       ],
       effects: [],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     const vt = r.spec.var_types[0]!;
@@ -216,7 +216,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       ],
       effects: [],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors.some((e) => /duplicate level label/.test(e))).toBe(true);
   });
 
@@ -229,7 +229,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       ],
       effects: [],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     expect(r.spec.var_types[0]).toEqual({ kind: 'numeric', name: 'x1', distribution: 'right_skewed' });
@@ -242,7 +242,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     expect(r.spec!.effects[0]?.value).toBe(0);
   });
@@ -253,7 +253,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       variables: [], // no entry for x1
       effects: [{ name: 'x1', value: 0.3 }],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     expect(r.spec?.family).toBe('linear');
     if (r.spec?.family === 'linear') {
@@ -263,7 +263,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
 
   it('formula_parse_error_propagates', () => {
     const cfg = linearConfig({ formula: 'y ~ ' });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.spec).toBeNull();
     expect(r.errors[0]).toMatch(/predictor/i);
   });
@@ -282,6 +282,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         residual_dists: [],
         residual_df: 10,
         sampled_factor_proportions: false,
+        truth_start: true,
         lme: { random_effect_dist: 'normal', random_effect_df: 0, icc_noise_sd: 0 },
       },
     ];
@@ -290,7 +291,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [{ name: 'x1', value: 0.3 }],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     // Sends the optimistic scenario (all magnitudes neutral → engine optimistic fast path)
     expect(r.spec!.scenarios).toHaveLength(1);
@@ -300,6 +301,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
     // lme fields zeroed (family-agnostic merge)
     expect(r.spec!.scenarios[0]!.random_effect_dist).toBe(0);
     expect(r.spec!.scenarios[0]!.icc_noise_sd).toBe(0);
+    expect(r.spec!.scenarios[0]!.truth_start).toBe(true);
     scenariosStoreMock.scenarios = [];
   });
 
@@ -317,6 +319,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         residual_dists: ['high_kurtosis'], // canonical name (replaces legacy 'heavy_tailed')
         residual_df: 5,
         sampled_factor_proportions: false,
+        truth_start: false,
         lme: { random_effect_dist: 'normal', random_effect_df: 0, icc_noise_sd: 0 },
       },
     ];
@@ -325,7 +328,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [{ name: 'x1', value: 0.3 }],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     expect(r.spec!.scenarios).toHaveLength(1);
     const wire = r.spec!.scenarios[0]!;
@@ -336,6 +339,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
     expect(wire.random_effect_dist).toBe(0); // 'normal' → 0
     expect(wire.random_effect_df).toBe(0);
     expect(wire.icc_noise_sd).toBe(0);
+    expect(wire.truth_start).toBe(false);
     // restore defaults so later tests see the toggle off
     sharedPrefsMock.scenariosEnabled = false;
     scenariosStoreMock.scenarios = [];
@@ -348,7 +352,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       effects: [{ name: 'x1', value: 0.3 }],
       reportOverall: true,
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     expect(r.spec!.report_overall).toBe(true);
   });
@@ -360,7 +364,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       effects: [{ name: 'x1', value: 0.3 }],
       reportOverall: false,
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.spec!.report_overall).toBe(false);
   });
 });
@@ -377,7 +381,7 @@ describe('familyConfigToAppSpec — Logit', () => {
   }
   it('projects a valid logit config with default baseline_probability', () => {
     const cfg = baseLogitConfig();
-    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'binary');
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(errors).toEqual([]);
     expect(spec).not.toBeNull();
     expect(spec!.family).toBe('logit');
@@ -390,26 +394,70 @@ describe('familyConfigToAppSpec — Logit', () => {
   it('reports an error when baseline_probability is out of range (low)', () => {
     const cfg = baseLogitConfig();
     cfg.baselineProbability = 0;
-    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'binary');
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(spec).toBeNull();
     expect(errors.join(' ')).toMatch(/baseline/i);
   });
   it('reports an error when baseline_probability is out of range (high)', () => {
     const cfg = baseLogitConfig();
     cfg.baselineProbability = 1;
-    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'binary');
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(spec).toBeNull();
     expect(errors.join(' ')).toMatch(/baseline/i);
   });
   it('rejects tukey correction (anova-only) the same way Linear does', () => {
     const cfg = baseLogitConfig();
     cfg.advanced.correction = 'tukey';
-    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'binary');
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(errors.join(' ')).toMatch(/tukey/i);
     expect(spec).not.toBeNull();
     if (spec!.family === 'logit') {
       expect(spec!.correction).toBe('none');
     }
+  });
+  it('omits the link field for a logit outcome (byte-identical to pre-link wire)', () => {
+    const cfg = baseLogitConfig();
+    const { spec } = familyConfigToAppSpec('regression', cfg, 'logit');
+    if (spec!.family !== 'logit') throw new Error('expected logit');
+    expect('link' in spec!).toBe(false);
+    expect('agq' in spec!).toBe(false); // default 1 → omitted
+  });
+  it('probit outcome: family logit with link="probit" and the same baseline', () => {
+    const cfg = baseLogitConfig();
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'probit');
+    expect(errors).toEqual([]);
+    if (spec!.family !== 'logit') throw new Error('expected logit family for probit');
+    expect((spec as { link?: string }).link).toBe('probit');
+    expect(spec!.baseline_probability).toBe(0.2);
+  });
+});
+
+describe('familyConfigToAppSpec — Poisson', () => {
+  function basePoissonConfig() {
+    const cfg = defaultFamilyConfig('regression');
+    cfg.formula = 'y ~ x1 + x2';
+    cfg.effects = [
+      { name: 'x1', value: 0.3 },
+      { name: 'x2', value: 0.2 },
+    ];
+    return cfg;
+  }
+  it('projects a valid poisson config with default baseline_rate and no link', () => {
+    const cfg = basePoissonConfig();
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'poisson');
+    expect(errors).toEqual([]);
+    if (spec!.family !== 'poisson') throw new Error('expected poisson');
+    expect(spec!.baseline_rate).toBe(2.0);
+    expect('link' in spec!).toBe(false);
+    expect('agq' in spec!).toBe(false);
+    expect(spec!.parsed_formula.predictors).toEqual(['x1', 'x2']);
+  });
+  it('rejects a non-positive baseline_rate', () => {
+    const cfg = basePoissonConfig();
+    cfg.baselineRate = 0;
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'poisson');
+    expect(spec).toBeNull();
+    expect(errors.join(' ')).toMatch(/baseline_rate/i);
   });
 });
 
@@ -783,6 +831,107 @@ describe('familyConfigToAppSpec — Mixed', () => {
     if (spec?.family !== 'mixed') throw new Error('expected mixed');
     expect(spec.outcome == null || spec.outcome.kind === 'gaussian').toBe(true);
   });
+
+  it('probit mixed outcome: outcome.kind binary + link probit', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    cfg.cluster = {
+      clusterName: 'school', icc: 0.2, dimKind: 'n_clusters',
+      nClusters: 20, clusterSize: 30,
+      outcomeKind: 'probit', baselineProbability: 0.3,
+    };
+    const { spec, errors } = familyConfigToAppSpec('mixed', cfg);
+    expect(errors).toEqual([]);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect(spec.outcome?.kind).toBe('binary');
+    expect((spec.outcome as { link?: string }).link).toBe('probit');
+    expect((spec.outcome as { baseline_probability: number }).baseline_probability).toBeCloseTo(0.3);
+  });
+
+  it('poisson mixed outcome: raw tau_squared in outcome (no ICC conversion), baseline_rate', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    cfg.cluster = {
+      clusterName: 'school', icc: 0.2, dimKind: 'n_clusters',
+      nClusters: 20, clusterSize: 30,
+      outcomeKind: 'poisson', baselineRate: 3, tauSquared: 0.7,
+    };
+    const { spec, errors } = familyConfigToAppSpec('mixed', cfg);
+    expect(errors).toEqual([]);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect(spec.outcome?.kind).toBe('poisson');
+    const po = spec.outcome as { baseline_rate: number; tau_squared: number };
+    expect(po.baseline_rate).toBe(3);
+    expect(po.tau_squared).toBe(0.7); // raw — NOT icc/(1−icc)
+  });
+
+  it('poisson mixed extra grouping: raw tau_squared, matching the primary (no icc/(1−icc) conversion)', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school) + (1|district)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    cfg.cluster = {
+      clusterName: 'school', icc: 0.2, dimKind: 'n_clusters',
+      nClusters: 20, clusterSize: 30,
+      outcomeKind: 'poisson', baselineRate: 3, tauSquared: 0.7,
+      extraGroupings: [{ clusterName: 'district', icc: 0.9, relation: 'crossed', n: 8, tauSquared: 0.4 }],
+    };
+    const { spec, errors } = familyConfigToAppSpec('mixed', cfg);
+    expect(errors).toEqual([]);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    const g = spec.extra_groupings![0]!;
+    // A 0.9 icc/(1-icc) conversion would give 9 — assert the raw stored value
+    // ships instead, so script-generator-mixed's `tau_squared=` line matches.
+    expect(g.tau_squared).toBe(0.4);
+  });
+});
+
+describe('familyConfigToAppSpec — estimation control (wald_se + agq)', () => {
+  function glmmCfg() {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    cfg.cluster = {
+      clusterName: 'school', icc: 0.2, dimKind: 'n_clusters',
+      nClusters: 20, clusterSize: 30, outcomeKind: 'logit', baselineProbability: 0.3,
+    };
+    return cfg;
+  }
+  it('Fast (rx, agq 1): wald_se on the wire, agq omitted', () => {
+    const cfg = glmmCfg();
+    cfg.advanced.wald_se = 'rx';
+    cfg.advanced.agq = 1;
+    const { spec } = familyConfigToAppSpec('mixed', cfg);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect((spec as { wald_se?: string }).wald_se).toBe('rx');
+    expect('agq' in spec).toBe(false);
+  });
+  it('AGQ (hessian, agq 7): agq threaded onto the wire', () => {
+    const cfg = glmmCfg();
+    cfg.advanced.wald_se = 'hessian';
+    cfg.advanced.agq = 7;
+    const { spec } = familyConfigToAppSpec('mixed', cfg);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect((spec as { agq?: number }).agq).toBe(7);
+    expect((spec as { wald_se?: string }).wald_se).toBe('hessian');
+  });
+
+  // Regression: `agq` is persisted per-family on `cluster`, and SharedParams
+  // only *hides* the EstimationSelect control when the outcome switches back
+  // to Gaussian — it never clears the stored value. Gating the wire on
+  // `agq > 1` alone would leak a stale agq=5 from an earlier binary/count run
+  // onto a Gaussian contract; the adapter must also gate on outcome kind.
+  it('stale agq from a prior binary run is omitted after switching outcome back to Gaussian', () => {
+    const cfg = glmmCfg();
+    cfg.advanced.agq = 5;
+    // Switch the outcome back to Gaussian; `agq` on `advanced` stays 5 (no
+    // control left to clear it), only `cluster.outcomeKind` changes.
+    cfg.cluster!.outcomeKind = 'linear';
+    const { spec } = familyConfigToAppSpec('mixed', cfg);
+    if (spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect('agq' in spec).toBe(false);
+  });
 });
 
 describe('familyConfigToAppSpec — ANOVA', () => {
@@ -918,14 +1067,14 @@ describe('familyConfigToAppSpec — Regression entrypoint + outcome toggle', () 
 
   it('continuous outcome → AppSpec family: linear', () => {
     const cfg = regressionConfig();
-    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(errors).toEqual([]);
     expect(spec?.family).toBe('linear');
   });
 
   it('binary outcome + valid baseline → AppSpec family: logit', () => {
     const cfg = regressionConfig({ baselineProbability: 0.3 });
-    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'binary');
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(errors).toEqual([]);
     expect(spec?.family).toBe('logit');
     if (spec?.family === 'logit') {
@@ -935,14 +1084,14 @@ describe('familyConfigToAppSpec — Regression entrypoint + outcome toggle', () 
 
   it('binary outcome + missing baseline → null spec with baseline error', () => {
     const cfg = regressionConfig({ baselineProbability: undefined });
-    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'binary');
+    const { spec, errors } = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(spec).toBeNull();
     expect(errors.join(' ')).toMatch(/baseline/i);
   });
 
   it('binary outcome + out-of-range baseline → null spec', () => {
     const cfg = regressionConfig({ baselineProbability: 1 });
-    const { spec } = familyConfigToAppSpec('regression', cfg, 'binary');
+    const { spec } = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(spec).toBeNull();
   });
 });
@@ -960,6 +1109,7 @@ describe('familyConfigToAppSpec — lme scenario zeroing (contract invariant 13)
       residual_dists: [],
       residual_df: 0,
       sampled_factor_proportions: false,
+      truth_start: false,
       lme: { random_effect_dist: 'heavy_tailed', random_effect_df: 5, icc_noise_sd: 0.2 },
     } as ScenarioConfig;
   }
@@ -972,7 +1122,7 @@ describe('familyConfigToAppSpec — lme scenario zeroing (contract invariant 13)
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [{ name: 'x1', value: 0.3 }],
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     const wire = r.spec!.scenarios[0]!;
     expect(wire.random_effect_dist).toBe(0);
@@ -1036,7 +1186,7 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
         heteroskedasticityDriver: '',
       },
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     expect(r.spec.outcome_options).toBeUndefined();
@@ -1053,7 +1203,7 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
         heteroskedasticityDriver: '',
       },
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     expect(r.spec.outcome_options).toEqual({ residual_distribution: 'high_kurtosis' });
@@ -1070,7 +1220,7 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
         heteroskedasticityDriver: '',
       },
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     expect(r.spec.outcome_options).toEqual({ residual_distribution: 'normal' });
@@ -1087,7 +1237,7 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
         heteroskedasticityDriver: 'x1',
       },
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
     expect(r.spec.outcome_options).toEqual({ heteroskedasticity_driver: 'x1' });
@@ -1105,7 +1255,7 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
         heteroskedasticityDriver: 'x1',
       },
     });
-    const r = familyConfigToAppSpec('regression', cfg, 'binary');
+    const r = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'logit') throw new Error('expected logit');
     // Residual + driver are continuous-only; binary outcome → no outcome_options
@@ -1150,7 +1300,7 @@ describe('familyConfigToAppSpec — correlation projection filtering', () => {
     corr[0]![2] = 0.4;
     corr[2]![0] = 0.4;
     const cfg = baseConfig(vars, corr);
-    const { spec } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { spec } = familyConfigToAppSpec('regression', cfg, 'linear');
     // correlations is emitted because x1↔x2 has a non-zero value
     expect(spec!.correlations).not.toBeNull();
     expect(spec!.correlations!.names).not.toContain('grp');
@@ -1168,7 +1318,7 @@ describe('familyConfigToAppSpec — correlation projection filtering', () => {
     corr[0]![2] = 0.3;
     corr[2]![0] = 0.3;
     const cfg = baseConfig(vars, corr);
-    const { spec } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { spec } = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(spec!.correlations).not.toBeNull();
     expect(spec!.correlations!.names).not.toContain('treated');
   });
@@ -1187,7 +1337,7 @@ describe('familyConfigToAppSpec — correlation projection filtering', () => {
     // put a non-zero correlation at x1↔x2
     const corr: number[][] = [[1, 0.5], [0.5, 1]];
     const cfg = baseConfig(vars, corr);
-    const { spec } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { spec } = familyConfigToAppSpec('regression', cfg, 'linear');
     // Only x2 is correlatable in strict mode (x1 is uploaded → excluded)
     // With only 1 correlatable variable the submatrix has no off-diagonal → null
     expect(spec!.correlations).toBeNull();
@@ -1209,7 +1359,7 @@ describe('familyConfigToAppSpec — correlation projection filtering', () => {
     ];
     const corr: number[][] = [[1, 0.6], [0.6, 1]];
     const cfg = baseConfig(vars, corr);
-    const { spec } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { spec } = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(spec!.correlations).not.toBeNull();
     expect(spec!.correlations!.names).toContain('x1');
     expect(spec!.correlations!.names).toContain('x2');
@@ -1235,7 +1385,7 @@ describe('familyConfigToAppSpec — correlation projection filtering', () => {
     // Both stored as 0 (untouched) — engine measures the correlation itself
     const corr: number[][] = [[1, 0], [0, 1]];
     const cfg = baseConfig(vars, corr);
-    const { spec } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { spec } = familyConfigToAppSpec('regression', cfg, 'linear');
     // Stored 0 → null guard → null (engine measures it)
     expect(spec!.correlations).toBeNull();
     // Reset
@@ -1282,27 +1432,27 @@ describe('familyConfigToAppSpec — non-finite numeric guards (stale persisted s
   it('rejects a null alpha', () => {
     const cfg = twoPredictorCfg();
     cfg.alpha = null as unknown as number;
-    const { errors } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { errors } = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(errors.join(' ')).toMatch(/alpha/i);
   });
 
   it('rejects a missing targetPower (undefined → NaN via /100)', () => {
     const cfg = twoPredictorCfg();
     cfg.targetPower = undefined as unknown as number;
-    const { errors } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { errors } = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(errors.join(' ')).toMatch(/target power/i);
   });
 
   it('rejects a null effect value', () => {
     const cfg = twoPredictorCfg();
     cfg.effects[0]!.value = null as unknown as number;
-    const { errors } = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const { errors } = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(errors.join(' ')).toMatch(/effect 'x1'/i);
   });
 });
 
 describe('wald_se adapter', () => {
-  it('defaults to hessian and passes rx through for mixed', () => {
+  it('defaults to rx (1.1.0 flip) and passes hessian through for mixed', () => {
     const cfg = defaultFamilyConfig('mixed');
     cfg.formula = 'y ~ x + (1|school)';
     cfg.effects = [{ name: 'x', value: 0.5 }];
@@ -1310,13 +1460,13 @@ describe('wald_se adapter', () => {
     const r1 = familyConfigToAppSpec('mixed', cfg);
     expect(r1.errors).toEqual([]);
     if (r1.spec?.family !== 'mixed') throw new Error('expected mixed');
-    expect((r1.spec as any).wald_se).toBe('hessian');
-    // set to rx → must propagate
-    cfg.advanced.wald_se = 'rx';
+    expect((r1.spec as any).wald_se).toBe('rx');
+    // set to hessian → must propagate
+    cfg.advanced.wald_se = 'hessian';
     const r2 = familyConfigToAppSpec('mixed', cfg);
     expect(r2.errors).toEqual([]);
     if (r2.spec?.family !== 'mixed') throw new Error('expected mixed');
-    expect((r2.spec as any).wald_se).toBe('rx');
+    expect((r2.spec as any).wald_se).toBe('hessian');
   });
 });
 
@@ -1339,7 +1489,7 @@ describe('familyConfigToAppSpec — validation harmonization (soft warns + ICC b
   it('alpha above max_alpha soft-warns but still builds a spec (no error, run not gated)', () => {
     const cfg = oneEffectLinear();
     cfg.alpha = 0.3;
-    const r = familyConfigToAppSpec('regression', cfg, 'continuous');
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     expect(r.spec).not.toBeNull();
     expect(r.warnings.join(' ')).toMatch(/alpha/i);
@@ -1348,13 +1498,13 @@ describe('familyConfigToAppSpec — validation harmonization (soft warns + ICC b
   it('alpha at the max_alpha edge (0.25) produces no warning', () => {
     const cfg = oneEffectLinear();
     cfg.alpha = 0.25;
-    expect(familyConfigToAppSpec('regression', cfg, 'continuous').warnings).toEqual([]);
+    expect(familyConfigToAppSpec('regression', cfg, 'linear').warnings).toEqual([]);
   });
 
   it('extreme (but in-(0,1)) baseline probability soft-warns, still builds', () => {
     const cfg = oneEffectLinear();
     cfg.baselineProbability = 0.02;
-    const r = familyConfigToAppSpec('regression', cfg, 'binary');
+    const r = familyConfigToAppSpec('regression', cfg, 'logit');
     expect(r.spec).not.toBeNull();
     expect(r.errors).toEqual([]);
     expect(r.warnings.join(' ')).toMatch(/baseline/i);
@@ -1363,7 +1513,7 @@ describe('familyConfigToAppSpec — validation harmonization (soft warns + ICC b
   it('baseline probability at the band edge (0.05) produces no warning', () => {
     const cfg = oneEffectLinear();
     cfg.baselineProbability = 0.05;
-    expect(familyConfigToAppSpec('regression', cfg, 'binary').warnings).toEqual([]);
+    expect(familyConfigToAppSpec('regression', cfg, 'logit').warnings).toEqual([]);
   });
 
   it('rejects a nonzero icc below the stability band (0.04)', () => {

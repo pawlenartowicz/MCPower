@@ -16,8 +16,8 @@ m = mcpower.MCPower("y ~ x1 + x2")
 m.set_effects("x1=0.5, x2=0.3")
 
 payload = m._to_linear_spec_dict(["optimistic"])
-o, e, i, c = m._encode_outcome_and_clusters()
-names, blob, _skeleton_json = _engine.build_contract_from_spec(json.dumps(payload), o, e, i, c)
+o, link, e, i, c = m._encode_outcome_and_clusters()
+names, blob, _skeleton_json = _engine.build_contract_from_spec(json.dumps(payload), o, link, e, i, c)
 
 with open("ols_contract.msgpack", "wb") as f:
     f.write(blob)

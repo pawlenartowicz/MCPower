@@ -14,14 +14,14 @@ use engine_spec_builder::upload::standardize_continuous;
 
 use crate::{
     app_spec::{ClusterDim, EffectSize, MixedOutcome, MixedSpec},
-    assemble::assemble_spec,
+    assemble::{assemble_spec, assemble_spec_with_skeleton},
     error::AdapterError,
     progress::{EmitterSink, ProgressEmitter},
     AppSpec,
 };
 
-/// Translate `spec` → contracts via `assemble_spec`, then call the orchestrator's
-/// `find_power` entry point.
+/// Translate `spec` → contracts via `assemble_spec_with_skeleton`, then call the
+/// orchestrator's `find_power` entry point.
 ///
 /// Dispatch twin: `run_single_core_find_power` (WASM worker pool) — change together.
 ///
@@ -34,12 +34,12 @@ pub fn run_find_power(
     emitter: &dyn ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<PowerResult>, AdapterError> {
-    let contracts = assemble_spec(spec)?;
+    let (contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
     let RunInputs {
         base_seed, n_sims, ..
     } = run_inputs_of(spec);
     let mut sink = EmitterSink::new(emitter);
-    let result = find_power(
+    let mut result = find_power(
         &contracts,
         sample_size,
         n_sims,
@@ -47,11 +47,12 @@ pub fn run_find_power(
         Some(&mut sink),
         cancel,
     )?;
+    attach_assemble_warnings(&mut result.scenarios, &warnings, |r| &mut r.grid_warnings);
     Ok(result)
 }
 
-/// Translate `spec` → contracts via `assemble_spec`, then call the orchestrator's
-/// `find_sample_size` entry point. `target_power` is read from `spec`.
+/// Translate `spec` → contracts via `assemble_spec_with_skeleton`, then call the
+/// orchestrator's `find_sample_size` entry point. `target_power` is read from `spec`.
 ///
 /// Dispatch twin: `run_single_core_find_sample_size` (WASM worker pool, Grid only) — change together.
 ///
@@ -65,14 +66,14 @@ pub fn run_find_sample_size(
     emitter: &dyn ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<SampleSizeResult>, AdapterError> {
-    let contracts = assemble_spec(spec)?;
+    let (contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
     let RunInputs {
         base_seed,
         n_sims,
         target_power,
     } = run_inputs_of(spec);
     let mut sink = EmitterSink::new(emitter);
-    let result = find_sample_size(
+    let mut result = find_sample_size(
         &contracts,
         target_power,
         bounds,
@@ -82,6 +83,7 @@ pub fn run_find_sample_size(
         Some(&mut sink),
         cancel,
     )?;
+    attach_assemble_warnings(&mut result.scenarios, &warnings, |r| &mut r.grid_warnings);
     Ok(result)
 }
 
@@ -95,9 +97,9 @@ pub fn run_single_core_find_power(
     emitter: &dyn ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<PowerResult>, AdapterError> {
-    let contracts = assemble_spec(spec)?;
+    let (contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
     let mut sink = EmitterSink::new(emitter);
-    let result = single_core_find_power(
+    let mut result = single_core_find_power(
         &contracts,
         sample_size,
         n_sims,
@@ -105,6 +107,7 @@ pub fn run_single_core_find_power(
         Some(&mut sink),
         cancel,
     )?;
+    attach_assemble_warnings(&mut result.scenarios, &warnings, |r| &mut r.grid_warnings);
     Ok(result)
 }
 
@@ -120,10 +123,10 @@ pub fn run_single_core_find_sample_size(
     emitter: &dyn ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<SampleSizeResult>, AdapterError> {
-    let contracts = assemble_spec(spec)?;
+    let (contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
     let target_power = run_inputs_of(spec).target_power;
     let mut sink = EmitterSink::new(emitter);
-    let result = single_core_find_sample_size(
+    let mut result = single_core_find_sample_size(
         &contracts,
         target_power,
         bounds,
@@ -133,7 +136,30 @@ pub fn run_single_core_find_sample_size(
         Some(&mut sink),
         cancel,
     )?;
+    attach_assemble_warnings(&mut result.scenarios, &warnings, |r| &mut r.grid_warnings);
     Ok(result)
+}
+
+/// Append assemble-time host warnings (currently only an ineligible `agq`
+/// stripped to Laplace) onto every scenario's `grid_warnings`, the field
+/// `ConvergenceNotice.svelte` already renders for both find-power and
+/// find-sample-size tabs as "preflight/grid warnings". Reusing this field
+/// instead of adding a new one keeps a single display path for the app/WASM
+/// hosts; it is safe under the WASM merge, which already treats
+/// `grid_warnings` as identical-per-worker and keeps only one copy — every
+/// worker recomputes the same deterministic list from the same spec, so there
+/// is nothing to deduplicate across workers.
+fn attach_assemble_warnings<T>(
+    scenarios: &mut [(String, T)],
+    warnings: &[String],
+    grid_warnings: impl Fn(&mut T) -> &mut Vec<String>,
+) {
+    if warnings.is_empty() {
+        return;
+    }
+    for (_, r) in scenarios {
+        grid_warnings(r).extend(warnings.iter().cloned());
+    }
 }
 
 struct RunInputs {
@@ -158,6 +184,11 @@ fn run_inputs_of(spec: &AppSpec) -> RunInputs {
             base_seed: m.seed,
             n_sims: m.n_sims as usize,
             target_power: m.target_power,
+        },
+        AppSpec::Poisson(p) => RunInputs {
+            base_seed: p.seed,
+            n_sims: p.n_sims as usize,
+            target_power: p.target_power,
         },
     }
 }
@@ -230,6 +261,7 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
             true,
             Some(m.cluster_name.as_str()),
         ),
+        AppSpec::Poisson(p) => (&p.parsed_formula, &p.var_types, &p.csv, p.seed, true, None),
     };
 
     let csv = csv_opt.as_ref().ok_or(AdapterError::GetEffectsNoCsv)?;
@@ -451,6 +483,14 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
             };
             s
         }),
+        AppSpec::Poisson(p) => AppSpec::Poisson({
+            let mut s = p.clone();
+            for e in &mut s.effects {
+                e.value = 0.0;
+            }
+            s.scenarios.clear();
+            s
+        }),
     };
 
     // `assemble_spec` builds the contract's factor levels as "1".."k"
@@ -500,30 +540,44 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
     // 1.0 placeholder there and must not be used — and σ̂² for a Gaussian LME.
     // Mirrors the Python/R `get_effects_from_data` ICC report.
     let cluster_icc: Option<f64> = match spec {
-        AppSpec::Mixed(m) => result.variance_components.first().map(|&tau_sq| {
+        AppSpec::Mixed(m) => result.variance_components.first().and_then(|&tau_sq| {
             let residual = match m.outcome {
-                MixedOutcome::Binary { .. } => std::f64::consts::PI.powi(2) / 3.0,
+                MixedOutcome::Binary { link, .. } => match link {
+                    crate::app_spec::BinaryLink::Logit => std::f64::consts::PI.powi(2) / 3.0,
+                    crate::app_spec::BinaryLink::Probit => 1.0,
+                },
                 MixedOutcome::Gaussian => result.sigma_sq_hat,
+                // Poisson has no residual-variance scale to form an ICC ratio
+                // against (raw τ², not ICC-derived) — no meaningful ICC to report.
+                MixedOutcome::Poisson { .. } => return None,
             };
-            tau_sq / (tau_sq + residual)
+            Some(tau_sq / (tau_sq + residual))
         }),
         _ => None,
     };
 
-    // Baseline probability from the fitted intercept — the inverse-logit of
-    // `betas[0]`, undoing the forward `logit(p)` the assembler applies. Only a
-    // binary outcome has a baseline-probability knob (Logit, or Mixed+Binary);
-    // for the Gaussian/linear arms `betas[0]` is a raw mean offset, not a
-    // probability, so there is nothing to recover.
-    let is_binary = matches!(
-        spec,
-        AppSpec::Logit(_)
-            | AppSpec::Mixed(MixedSpec {
-                outcome: MixedOutcome::Binary { .. },
-                ..
-            })
-    );
-    let baseline_probability = is_binary.then(|| crate::assemble::logistic(result.betas[0]));
+    // Baseline probability from the fitted intercept — the inverse link of
+    // `betas[0]`, undoing the forward link the assembler applies to a
+    // baseline probability. Only a binary outcome has a baseline-probability
+    // knob (Logit, or Mixed+Binary); for the Gaussian/linear arms `betas[0]`
+    // is a raw mean offset, not a probability, so there is nothing to
+    // recover. The inverse link must match the outcome's link: logit's
+    // inverse is `logistic`, probit's inverse link is Φ (the standard-normal
+    // CDF) — using `logistic` for a probit fit recovers the wrong number
+    // (e.g. true p=0.30 → probit intercept Φ⁻¹(0.30)=−0.524 →
+    // logistic(−0.524)=0.372, not 0.30).
+    let binary_link = match spec {
+        AppSpec::Logit(l) => Some(l.link),
+        AppSpec::Mixed(MixedSpec {
+            outcome: MixedOutcome::Binary { link, .. },
+            ..
+        }) => Some(*link),
+        _ => None,
+    };
+    let baseline_probability = binary_link.map(|link| match link {
+        crate::app_spec::BinaryLink::Logit => crate::assemble::logistic(result.betas[0]),
+        crate::app_spec::BinaryLink::Probit => engine_core::distributions::phi(result.betas[0]),
+    });
 
     Ok(EffectsFromData {
         effects,

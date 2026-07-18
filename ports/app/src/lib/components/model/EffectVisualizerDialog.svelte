@@ -30,12 +30,18 @@
   let { open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void } = $props();
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
-  const outcomeKind = $derived(familyStore.activeOutcome); // 'continuous' | 'binary'
+  const outcomeKind = $derived(familyStore.activeOutcome); // OutcomeKind
+  const isBinary = $derived(outcomeKind === 'logit' || outcomeKind === 'probit');
+  // EffectCartoon only illustrates binary vs continuous; collapse the four-way
+  // OutcomeKind to that pair (Poisson falls through to the continuous cartoon).
+  const cartoonOutcome = $derived<'continuous' | 'binary'>(isBinary ? 'binary' : 'continuous');
   // Baseline lives on the cluster config for mixed (binary GLMM), on the family
   // config for regression — mirror BaselineProbabilityInput's resolution.
   const baselineTarget = $derived(familyStore.active === 'mixed' ? cfg.cluster : cfg);
+  // The cartoon only illustrates binary vs continuous; probit reuses the logit
+  // transform as a visual approximation and Poisson falls through to a 0 intercept.
   const intercept = $derived(
-    outcomeKind === 'binary' ? logit(baselineTarget?.baselineProbability ?? 0.2) : 0,
+    isBinary ? logit(baselineTarget?.baselineProbability ?? 0.2) : 0,
   );
 
   const colors = readChartColors();
@@ -157,15 +163,17 @@
   const fitNote = $derived(
     familyStore.active === 'mixed'
       ? 'mixed-model fixed-effect approximations'
-      : familyStore.regressionOutcome === 'binary'
-        ? 'logistic log-odds approximations'
-        : 'standardized OLS approximations',
+      : familyStore.regressionOutcome === 'logit' || familyStore.regressionOutcome === 'probit'
+        ? 'binary log-odds approximations'
+        : familyStore.regressionOutcome === 'poisson'
+          ? 'Poisson log-rate approximations'
+          : 'standardized OLS approximations',
   );
   // Non-blocking warning: the outcome the engine will fit is binary, but the
   // uploaded column the user designated isn't detected as binary. col_type is
   // already on the upload column, so this costs nothing.
   const binaryOutcomeWarning = $derived.by(() => {
-    if (!canFitFromData || outcomeKind !== 'binary') return null;
+    if (!canFitFromData || !isBinary) return null;
     const col = uploadedColumnByName(uploadStore.csvData).get(parsed?.dependent ?? '');
     return col && col.col_type !== 'binary'
       ? `Outcome '${parsed!.dependent}' is detected as ${col.col_type}, not binary — the binary fit treats any non-zero value as a "1".`
@@ -295,7 +303,7 @@
       </nav>
 
       <div class="space-y-3">
-        {#if outcomeKind === 'binary'}
+        {#if isBinary}
           <!-- Model-level baseline (intercept) — shapes every binary illustration,
                so it sits once above the per-term controls and writes the live config. -->
           <div class="rounded-md border border-[var(--border)] bg-[var(--muted)]/40 p-2">
@@ -304,13 +312,13 @@
         {/if}
         {#if selVar && selVar.kind === 'continuous'}
           {@const eff = effEntry(selVar.rows[0]?.name ?? selVar.name)}
-          <EffectCartoon {outcomeKind} predictorKind="continuous" role="main" beta={varBeta} {intercept} />
+          <EffectCartoon outcomeKind={cartoonOutcome} predictorKind="continuous" role="main" beta={varBeta} {intercept} />
           {#if eff}
             <EffectControls effect={eff} variables={cfg.variables} />
           {/if}
         {:else if selVar && detail}
           <EffectCartoon
-            {outcomeKind}
+            outcomeKind={cartoonOutcome}
             predictorKind={selVar.kind}
             role="main"
             beta={varBeta}
@@ -318,7 +326,7 @@
             {intercept} />
           <div class="text-xs text-[var(--muted-foreground)]">
             Effect of each level vs. <strong class="text-[var(--foreground)]">{detail.referenceLabel}</strong>
-            (in {outcomeKind === 'binary' ? 'log-odds' : 'SD'} units)
+            (in {isBinary ? 'log-odds' : 'SD'} units)
           </div>
           <!-- reference row: shown but not editable -->
           <div class="flex items-center gap-2 text-sm">
@@ -338,7 +346,7 @@
           {/each}
         {:else if selInter && inter}
           <EffectCartoon
-            {outcomeKind}
+            outcomeKind={cartoonOutcome}
             predictorKind={inter.kindA}
             partnerKind={inter.kindB}
             role="interaction"

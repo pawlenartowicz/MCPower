@@ -47,9 +47,11 @@ debug_load_data <- function(contracts, scenario_index, seed, design, nrow, ncol,
 #'                   aligned), so the R frontend names results from it + its own
 #'                   label store instead of re-deriving the factor layout.
 #'
-#' `outcome_kind` is one of `"continuous"` | `"binary"`.
+#' `outcome_kind` is one of `"continuous"` | `"binary"` | `"count"`.
+#' `link` is `"canonical"` (or `""`) for the canonical link, or `"probit"` to
+#' override a binary outcome to the probit link.
 #' `estimator`    is one of `"ols"` | `"glm"` | `"mle"`.
-build_contract_from_spec <- function(json, outcome_kind, estimator, intercept, clusters_json) .Call(wrap__build_contract_from_spec, json, outcome_kind, estimator, intercept, clusters_json)
+build_contract_from_spec <- function(json, outcome_kind, link, estimator, intercept, clusters_json) .Call(wrap__build_contract_from_spec, json, outcome_kind, link, estimator, intercept, clusters_json)
 
 #' Parse a model formula string into a JSON string.
 #'

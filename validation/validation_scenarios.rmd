@@ -54,6 +54,36 @@ run_he <- function(case) {
   list(gates = gates)
 }
 
+# He under a GLM link (probit latent / Poisson log-rate). The He β-jitter is
+# family-general (drawn once per study, slopes clipped at s_j = h|β_j|), so each
+# study fits a clean GLM at its own β_eff and the mean β̂ over K studies recovers
+# glm_perstudy_beta(β, h). Gate the SLOPES against that per-study pseudo-true
+# within glm_beta_abs (same oracle as run_b1's logit branch). The intercept
+# carries an extra link-nonlinearity (Jensen) shift the per-study oracle omits, so
+# it is reported (int_shift), not gated — mirrors run_fg_flip's Jensen note.
+run_he_glm <- function(case) {
+  m  <- scenario_model(case)
+  d0 <- scen_draw(m, case$scenario, case$seed + 1)
+  tb <- true_beta_vector(case, d0$columns)
+  terms <- term_labels(case, d0$columns)
+  h  <- case$scenario_configs[[case$scenario]]$heterogeneity
+  ps <- glm_perstudy_beta(tb, h)
+  B  <- vapply(seq_len(case$K), function(k) {
+    d <- scen_draw(m, case$scenario, case$seed + k)
+    fit_sota(case$family, d$design, d$outcome, d$cluster_ids)$beta
+  }, numeric(length(tb)))
+  gates <- list()
+  for (j in which(d0$columns != "intercept")) {
+    g <- zgate(B[j, ] - ps[j], 0)
+    g$est <- mean(B[j, ]); g$law <- ps[j]
+    g$ok  <- abs(g$est - g$law) <= SCENARIO_TOL$glm_beta_abs && abs(g$z) <= SCENARIO_TOL$z_c
+    gates[[sprintf("β̂[%s] = per-study pseudo-true (h=%.1f)", terms[j], h)]] <- g
+  }
+  int <- which(d0$columns == "intercept")
+  list(gates = gates,
+       int_shift = if (length(int)) mean(B[int, ]) - tb[int] else NA_real_, h = h)
+}
+
 # Hs: log-e² slope vs ln(lambda)/4 (z = x1 since lp = b1·x1 standardized).
 run_hs <- function(case) {
   m  <- scenario_model(case)
@@ -428,7 +458,7 @@ run_fg_ident <- function(case) {
       db <- scen_draw(m, p[2], case$seed + k)
       identical(da$design, db$design) && identical(da$outcome, db$outcome)
     }, logical(1)))
-    gates[[sprintf("bit-identity under logit: %s ≡ %s", p[1], p[2])]] <-
+    gates[[sprintf("bit-identity under %s: %s ≡ %s", case$family, p[1], p[2])]] <-
       dgate(ok, as.numeric(ok), 1)
   }
   list(gates = gates)
@@ -496,6 +526,8 @@ R5 <- list(
   scen_fa_ols     = run_fa(SCENARIO_CASES$scen_fa_ols),
   scen_fa_mle     = run_fa(SCENARIO_CASES$scen_fa_mle),
   scen_fa_mle_fp  = run_fa_mle_smoke(SCENARIO_CASES$scen_fa_mle),
+  scen_he_probit  = run_he_glm(SCENARIO_CASES$scen_he_probit),
+  scen_he_poisson = run_he_glm(SCENARIO_CASES$scen_he_poisson),
   scen_b0         = run_b0(SCENARIO_CASES$scen_b0),
   scen_b1_ols     = run_b1(SCENARIO_CASES$scen_b1_ols),
   scen_b1_glm     = run_b1(SCENARIO_CASES$scen_b1_glm),
@@ -504,7 +536,9 @@ R5 <- list(
   scen_b4         = run_b4(SCENARIO_CASES$scen_b4),
   scen_b5         = run_b5(SCENARIO_CASES$scen_b5),
   fg_glm_ident    = run_fg_ident(SCENARIO_CASES$scen_fg_glm_ident),
-  fg_glm_flip     = run_fg_flip(SCENARIO_CASES$scen_fg_glm_flip)
+  fg_glm_flip     = run_fg_flip(SCENARIO_CASES$scen_fg_glm_flip),
+  fg_probit_ident = run_fg_ident(SCENARIO_CASES$scen_fg_probit_ident),
+  fg_poisson_ident= run_fg_ident(SCENARIO_CASES$scen_fg_poisson_ident)
 )
 
 ALL_GATES <- do.call(rbind, lapply(names(R5), function(lbl) {
@@ -569,6 +603,20 @@ per predictor, separating He from anything that only moves pooled moments.
 
 ```{r he}
 knitr::kable(gates_table("scen_he", R5$scen_he$gates), digits = 5)
+```
+
+The same knob under the non-linear GLM links (probit latent scale, Poisson
+log-rate): the β-jitter is drawn once per study, so each study fits a clean GLM at
+its own β_eff and the mean β̂ recovers the per-study pseudo-true
+`glm_perstudy_beta(β, h)`. The **slopes** land on that oracle within the leak band;
+the intercept carries an additional link-nonlinearity (Jensen) shift that the
+per-study oracle omits — reported, not gated.
+
+```{r he-glm}
+knitr::kable(rbind(gates_table("scen_he_probit",  R5$scen_he_probit$gates),
+                   gates_table("scen_he_poisson", R5$scen_he_poisson$gates)), digits = 5)
+cat(sprintf("\nReported intercept Jensen shift (not gated): probit %+.4f, Poisson %+.4f.\n",
+            R5$scen_he_probit$int_shift, R5$scen_he_poisson$int_shift))
 ```
 
 ## Heteroskedasticity (residual-variance trend)
@@ -797,8 +845,10 @@ shown — second-order next to the perturbations themselves.
 Knobs must be live or inert exactly per family.
 
 ```{r fg}
-knitr::kable(rbind(gates_table("fg_glm_ident", R5$fg_glm_ident$gates),
-                   gates_table("fg_glm_flip",  R5$fg_glm_flip$gates)), digits = 5)
+knitr::kable(rbind(gates_table("fg_glm_ident",     R5$fg_glm_ident$gates),
+                   gates_table("fg_glm_flip",      R5$fg_glm_flip$gates),
+                   gates_table("fg_probit_ident",  R5$fg_probit_ident$gates),
+                   gates_table("fg_poisson_ident", R5$fg_poisson_ident$gates)), digits = 5)
 fg <- R5$fg_glm_flip
 ```
 
@@ -815,6 +865,11 @@ fg <- R5$fg_glm_flip
   The Jensen mean-rate shift (`r sprintf("%+.4f", mean(fg$res[3, ]))`) is
   expected and reported, not gated — median latent-rate invariance is
   unobservable.
+- **Probit / Poisson λ + residual swaps — inert by bit-identity.** Same premise
+  as logit: `apply_hsk` needs a continuous Gaussian outcome and consumes no RNG,
+  so a λ toggle is an exact no-op under probit (binary) and Poisson (count), and a
+  forced residual swap leaves the outcomes bit-identical. Both pairs reproduce
+  bit-for-bit across K draws (`fg_probit_ident`, `fg_poisson_ident`).
 - **MLE — only `sampled_factor_proportions` is live** (see the Fa section above);
   every other knob is rejected by the engine's estimator gate.
 

@@ -71,6 +71,7 @@ fn load_data_reproduces_glm_sim0_statistic_and_crit_bit_for_bit() {
         &common::logit_spec(),
         OutcomeKind::Binary,
         None,
+        None,
         -0.5,
         vec![],
     )
@@ -119,6 +120,7 @@ fn load_data_reproduces_mle_sim0_statistic_and_crit_bit_for_bit() {
     let contracts = build_contract(
         &common::lme_spec(),
         OutcomeKind::Continuous,
+        None,
         None,
         0.0,
         vec![ClusterSpec {
@@ -173,6 +175,7 @@ fn debug_surfaces_extra_grouping_ids_and_variance_components() {
     let contracts = build_contract(
         &common::lme_spec(),
         OutcomeKind::Continuous,
+        None,
         None,
         0.0,
         vec![ClusterSpec {
@@ -246,6 +249,7 @@ fn load_data_wald_se_override_hessian_ge_rx_same_betas() {
     let contracts = build_contract(
         &common::logit_spec(),
         OutcomeKind::Binary,
+        None,
         None,
         -0.5,
         vec![ClusterSpec {

@@ -5,7 +5,7 @@
 //! is host-agnostic.
 
 pub use engine_contract::{
-    CorrectionMethod, Distribution, EstimatorSpec, OutcomeKind, ResidualDist, WaldSe,
+    CorrectionMethod, Distribution, EstimatorSpec, LinkKind, OutcomeKind, ResidualDist, WaldSe,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -159,6 +159,17 @@ pub struct ScenarioPerturbations {
     #[serde(default)]
     pub sampled_factor_proportions: bool,
 
+    /// Scenario assumption about the fitter's starting values, not a speed knob:
+    /// `true` seeds the mixed-model optimizer at the DGP-truth θ (asserting
+    /// well-behaved estimation); `false` starts blind, as a real analyst would.
+    /// Read at the `fit_lmm`/`fit_glmm` call sites (batch + introspect) to decide
+    /// warm vs cold start. Deliberately NOT part of `is_optimistic()` — it
+    /// changes only the optimizer's start, not the per-sim data, so it is
+    /// orthogonal to the fast-path predicate. Additive serde-stable field: absent
+    /// in older payloads, defaulting to `false` (cold start), preserving prior output.
+    #[serde(default)]
+    pub truth_start: bool,
+
     /// LME-only knobs. Rejected by the engine if set without `estimator == Mle`.
     /// Unused for OLS / Logit designs.
     pub lme: Option<LmeScenarioPerturbations>,
@@ -181,6 +192,7 @@ impl Default for ScenarioPerturbations {
             residual_dists: Vec::new(),
             residual_df: 0.0,
             sampled_factor_proportions: false,
+            truth_start: false,
             lme: None,
         }
     }
@@ -227,6 +239,11 @@ impl ScenarioPerturbations {
 // ---------------------------------------------------------------------------
 // SimulationSpec — full POD layout consumed by `run_batch`.
 // ---------------------------------------------------------------------------
+
+/// Serde default for `SimulationSpec.nagq` — Laplace.
+fn default_nagq_spec() -> u8 {
+    1
+}
 
 /// Full POD layout consumed by `run_batch` — the kernel-facing spec every
 /// host contract lowers to. Carries no seed; hosts pass `base_seed` alongside.
@@ -329,14 +346,24 @@ pub struct SimulationSpec {
     /// t-kernel residual always comes from `scenario.residual_df`.
     #[serde(default)]
     pub residual_pinned: bool,
-    /// Consumed by data generation (Gaussian vs Bernoulli draw).
+    /// Consumed by data generation (Gaussian vs Bernoulli vs Poisson draw).
     pub outcome_kind: OutcomeKind,
+    /// Non-canonical link override. `None` = canonical (Binary→logit,
+    /// Count→log); `Some(Probit)` picks the probit link for `Binary`. Read by
+    /// both data-gen (latent-normal vs logistic draw) and the fit dispatch
+    /// (`glmm::Family` selection). Threaded from `outcome.link`.
+    #[serde(default)]
+    pub link: Option<LinkKind>,
     /// Consumed by the solver dispatch.
     pub estimator: EstimatorSpec,
-    /// Fixed-effect Wald-SE mode for the clustered-binary GLMM (no-op elsewhere).
-    /// Threaded from the contract field of the same name. (design §7.)
+    /// Fixed-effect Wald-SE mode for the clustered-binary/count GLMM (no-op
+    /// elsewhere). Threaded from the contract field of the same name. (design §7.)
     #[serde(default)]
     pub wald_se: WaldSe,
+    /// AGQ node count for the GLMM likelihood (1 = Laplace). Threaded from the
+    /// contract `nagq`; the eligibility backstop already ran in `validate()`.
+    #[serde(default = "default_nagq_spec")]
+    pub nagq: u8,
     /// Baseline intercept used by GLM data-gen and surfaced to result
     /// formatters. The kernel does NOT consume this in the linear-predictor
     /// computation — that comes from `effect_sizes[0]` instead. It exists as
@@ -541,7 +568,9 @@ pub struct BatchResult {
     /// `LmmGroupings::diagonal_theta()` order `[intercept, slope_0, …, extra_1, …]`
     /// (general lmm path; Brent path writes bit 0 = `boundary_hit == 1`; OLS/Glm
     /// write 0). Unpacked into per-component pin rates by `EstimatorExtras::from_batch`.
-    pub pinned_components: Vec<u32>,
+    /// `u64`: mirrors `glmm::{LmmFit,GlmmFit}::pinned_components` (the sparse path's
+    /// over-envelope component count can exceed the 32-bit ceiling).
+    pub pinned_components: Vec<u64>,
     /// `(n_sims × n_sample_sizes)`, parallel to `converged`. Joint Wald-χ²
     /// significance: 1 if `joint_t_sq > χ²(k, 1-α)`, else 0. Written by the
     /// Mle branch only (Ols/Glm always emit 0). The Python bridge / `results.py`
@@ -609,8 +638,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: WaldSe::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -652,6 +683,7 @@ mod tests {
             residual_dists: vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
             residual_df: 8.0,
             sampled_factor_proportions: true,
+            truth_start: true,
             lme: None,
         };
         spec.heteroskedasticity_driver = Some(1);

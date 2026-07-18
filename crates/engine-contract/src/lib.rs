@@ -35,7 +35,7 @@ pub use generation::{
     GroupingSpec, SlopeTerm, SyntheticKind, UploadedFrame, MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q,
 };
 pub use ids::ColumnId;
-pub use outcome::{OutcomeKind, OutcomeSpec, ResidualDist, ResidualSpec};
+pub use outcome::{LinkKind, OutcomeKind, OutcomeSpec, ResidualDist, ResidualSpec};
 pub use scenarios::{LmeScenarioPerturbations, ScenarioPerturbations};
 pub use scenarios_config::validate_scenarios;
 pub use test_spec::{CorrectionMethod, PosthocSpec, TestSpec, TestTarget};

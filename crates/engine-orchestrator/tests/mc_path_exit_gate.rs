@@ -56,7 +56,7 @@ fn assert_bit_equal_across_workers(contracts: Vec<SimulationContract>) {
 
 #[test]
 fn mc_path_exit_gate_glm() {
-    let contracts = build_contract(&logit_spec(), OutcomeKind::Binary, None, -0.5, vec![])
+    let contracts = build_contract(&logit_spec(), OutcomeKind::Binary, None, None, -0.5, vec![])
         .expect("build_contract glm");
     // Sanity-check the estimator_extras variant before paying for the full
     // two-pool run.
@@ -82,6 +82,7 @@ fn find_power_clustered_logit_surfaces_glm_extras() {
     let contracts = build_contract(
         &logit_spec(),
         OutcomeKind::Binary,
+        None,
         None, // Binary ⇒ estimator defaults to Glm; cluster present ⇒ GLMM path
         -0.5,
         vec![ClusterSpec {
@@ -146,6 +147,7 @@ fn ep3_glmm_extras_through_single_core_merge_path() {
     let contracts = build_contract(
         &logit_spec(),
         OutcomeKind::Binary,
+        None,
         None,
         -0.5,
         vec![ClusterSpec {
@@ -241,6 +243,7 @@ fn mle_tau_estimate_nan_pre_zero_post_through_merge() {
     let contracts = build_contract(
         &lme_spec(),
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Mle),
         0.0,
         vec![ClusterSpec {
@@ -284,6 +287,7 @@ fn mc_path_exit_gate_mle() {
     let contracts = build_contract(
         &lme_spec(),
         OutcomeKind::Continuous,
+        None,
         Some(EstimatorSpec::Mle),
         0.0,
         vec![ClusterSpec {

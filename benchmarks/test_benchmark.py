@@ -37,12 +37,12 @@ def test_load_cases_new_fields():
     assert by_id["lme_simple"].tool == "simr"
     assert by_id["ols_correlated"].tool is None
     assert by_id["ols_simple"].n_sims["tool"] == 100                   # family-default tool count
-    # GLMM is a 4th family (logit outcome + clusters); tool is cliff (simr
-    # GLMM adapter not yet wired), baseline_p comes from the glmm family default.
+    # GLMM is a 4th family (logit outcome + clusters); simr covers it via the
+    # glmer adapter, baseline_p comes from the glmm family default.
     assert by_id["glmm_simple"].family == "glmm"
     assert by_id["glmm_simple"].baseline_p == 0.3
     assert by_id["glmm_simple"].cluster["n_clusters"] == 20
-    assert by_id["glmm_simple"].tool is None
+    assert by_id["glmm_simple"].tool == "simr"
     # GLMM random-slope cases (LOSF 24/25): slope config rides inside the
     # cluster dict, consumed by build_model + the R glmer loop.
     assert by_id["glmm_slope"].cluster["random_slopes"] == ["x1"]

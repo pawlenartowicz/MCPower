@@ -13,7 +13,8 @@ TOOLS <- list(
 )
 
 # ---------------------------------------------------------------------------
-# simr -- the 6 lme cases. True-parameter workflow: generate one DGP draw with
+# simr -- the lme and glmm cases. True-parameter workflow: generate one DGP
+# draw with
 # tau^2 = ICC/(1-ICC), sigma = 1 (matching the loop kernels' TAU
 # parameterisation: TAU = sqrt(ICC/(1-ICC)), b ~ N(0,TAU^2)); fit lme4::lmer
 # on it; then PIN the generating parameters into the fit (slot assignment:
@@ -32,6 +33,8 @@ TOOLS <- list(
 # ---------------------------------------------------------------------------
 
 tool_simr <- function(case, n, nsim, seed) {
+  if (identical(case$family, "glmm"))
+    return(tool_simr_glmm(case, n, nsim, seed))
   set.seed(seed)
   spec <- loop_design(case)
 
@@ -74,6 +77,66 @@ tool_simr <- function(case, n, nsim, seed) {
   fit@theta <- TAU
   fit@devcomp$cmp[["sigmaML"]]   <- 1.0
   fit@devcomp$cmp[["sigmaREML"]] <- 1.0
+  attr(fit, "simrTag") <- TRUE
+
+  ps <- simr::powerSim(fit, test = simr::fixed(case$targets[1], "z"),
+                       nsim = nsim, progress = FALSE)
+  s <- summary(ps)
+  list(power = as.numeric(s$mean))
+}
+
+# The glmm cases: same true-parameter workflow on the logit scale. The random
+# intercept lives on the LATENT logit scale where the residual variance is
+# pi^2/3, so TAU = sqrt(ICC/(1-ICC) * pi^2/3), and slope REs are independent
+# with sd sqrt(slope_variance) -- both matching glmm_best_chunk's DGP in
+# loops_r.R. For a binomial glmer theta IS the lower Cholesky of the RE
+# covariance (no sigma scaling, no devcomp pin); independent REs make it the
+# diagonal c(TAU, SLOPE_SD, ...) laid out column-major over the lower triangle.
+tool_simr_glmm <- function(case, n, nsim, seed) {
+  set.seed(seed)
+  spec <- loop_design(case)
+
+  N_CLUSTERS <- case$cluster$n_clusters
+  ICC        <- case$cluster$ICC
+  TAU        <- sqrt(ICC / (1.0 - ICC) * pi^2 / 3.0)   # latent-scale logit ICC
+  INTERCEPT  <- qlogis(case$baseline_p)
+  SLOPE_COLS <- spec$slope_cols
+  SLOPE_SD   <- if (length(SLOPE_COLS)) sqrt(case$cluster$slope_variance) else numeric(0)
+
+  # Pilot data from the DGP (matches glmm_best_chunk's data generation)
+  d <- as.data.frame(matrix(rnorm(n * spec$n_cont), n, spec$n_cont))
+  if (spec$n_cont > 0L) names(d) <- spec$cont_names
+  for (fi in seq_along(spec$fac_names)) {
+    L <- length(spec$proportions[[fi]])
+    d[[spec$fac_names[fi]]] <- factor(rep(seq_len(L), length.out = n))
+  }
+  cluster_ids <- factor(rep(seq_len(N_CLUSTERS), length.out = n))
+  d[[case$cluster$var]] <- cluster_ids
+
+  rhs_fixed <- sub("\\s*\\+\\s*\\([^)]*\\|[^)]*\\).*", "",
+                   sub("^[^~]*~\\s*", "", case$formula))
+  fml_fixed <- stats::as.formula(paste("~", rhs_fixed))
+  X_full <- stats::model.matrix(fml_fixed, data = d)[, -1L, drop = FALSE]
+  b_cluster <- rnorm(N_CLUSTERS) * TAU
+  eta <- INTERCEPT + as.numeric(X_full %*% spec$beta) +
+         b_cluster[as.integer(cluster_ids)]
+  for (sc in SLOPE_COLS)
+    eta <- eta + (rnorm(N_CLUSTERS) * SLOPE_SD)[as.integer(cluster_ids)] * X_full[, sc]
+  d[[".y_simr"]] <- rbinom(n, 1L, plogis(eta))
+
+  fml_fit <- stats::as.formula(
+    paste(".y_simr ~", sub("^[^~]*~", "", case$formula))
+  )
+  fit <- suppressWarnings(suppressMessages(
+    lme4::glmer(fml_fit, data = d, family = binomial(),
+                control = lme4::glmerControl(calc.derivs = FALSE))
+  ))
+
+  # Pin the generating parameters (true intercept + betas, diagonal Cholesky).
+  k <- 1L + length(SLOPE_COLS)
+  L <- diag(c(TAU, rep(SLOPE_SD, length(SLOPE_COLS))), k, k)
+  fit@beta  <- c(INTERCEPT, spec$beta)
+  fit@theta <- L[lower.tri(L, diag = TRUE)]
   attr(fit, "simrTag") <- TRUE
 
   ps <- simr::powerSim(fit, test = simr::fixed(case$targets[1], "z"),

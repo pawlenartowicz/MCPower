@@ -1,10 +1,10 @@
 // Vitest tests for upload-detect.ts; asserts detectColumnTypes verdicts and factor levels
 // against the shared golden fixture — identical to Python's test_upload_type_detection.py
-// and R's test-upload-detection.R.
+// and R's test-upload-detection.R. Raw parsing (CSV/TSV/XLSX/.sav) is covered separately in
+// upload-parsers.test.ts.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   detectColumnTypes,
-  parseCsvText,
   uploadedColumnByName,
   validateUploadRowCount,
   valueToLabel,
@@ -71,28 +71,6 @@ describe('valueToLabel', () => {
     it('passes through strings', () => {
         expect(valueToLabel('Japan')).toBe('Japan');
         expect(valueToLabel('USA')).toBe('USA');
-    });
-});
-
-describe('parseCsvText — quoted fields', () => {
-    it('does not emit a phantom trailing field when a row ends with a quoted field', () => {
-        // R-exported CSVs quote every header name, so the header ends with a closing quote.
-        const { header } = parseCsvText('"a","b","c"\n1,2,3');
-        expect(header).toEqual(['a', 'b', 'c']);
-    });
-
-    it('parses an mtcars-style header without producing a duplicate empty column name', () => {
-        // mtcars: empty-named row-names column up front + quoted trailing "carb".
-        // A phantom trailing "" would collide with the leading "" → duplicate keyed-each key.
-        const { header, columns } = parseCsvText('"","mpg","carb"\n"Mazda RX4",21,4');
-        expect(header).toEqual(['', 'mpg', 'carb']);
-        expect(columns).toHaveLength(3);
-        expect(columns[0]).toEqual(['Mazda RX4']);
-    });
-
-    it('still parses an unquoted trailing field (regression guard)', () => {
-        const { header } = parseCsvText('a,b,c\n1,2,3');
-        expect(header).toEqual(['a', 'b', 'c']);
     });
 });
 
@@ -173,15 +151,15 @@ describe('validateUploadRowCount', () => {
 
     it('native target: accepts up to 1,000,000 and rejects 1,000,001', () => {
         // Default (non-wasm) build target is native.
-        expect(validateUploadRowCount(10_001)).toBeNull(); // fine on native — well under 1M
+        expect(validateUploadRowCount(100_001)).toBeNull(); // fine on native — well under 1M
         expect(validateUploadRowCount(1_000_000)).toBeNull();
         expect(validateUploadRowCount(1_000_001)).toMatch(/maximum is 1000000/);
     });
 
-    it('wasm target: accepts up to 10,000 and rejects 10,001', () => {
+    it('wasm target: accepts up to 100,000 and rejects 100,001', () => {
         vi.stubEnv('VITE_TARGET', 'wasm');
-        expect(validateUploadRowCount(10_000)).toBeNull();
-        expect(validateUploadRowCount(10_001)).toMatch(/browser limit is 10000/);
+        expect(validateUploadRowCount(100_000)).toBeNull();
+        expect(validateUploadRowCount(100_001)).toMatch(/browser limit is 100000/);
         expect(validateUploadRowCount(19)).toMatch(/at least 20/); // min still applies on wasm
     });
 });

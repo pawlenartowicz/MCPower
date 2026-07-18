@@ -305,10 +305,10 @@ pub struct SimWorkspace {
     /// batch/introspect construction sites via `lmm::build_lmm_workspace`
     /// (the ctor doesn't know the estimator). Boxed: the tail/zx buffers are
     /// large relative to the rest of the workspace.
-    pub lmm: Option<Box<glmm::mcpower::LmmWorkspace>>,
+    pub lmm: Option<Box<glmm::loop_advanced::LmmWorkspace>>,
     /// GLMM solver workspace — `Some` for Glm + cluster specs (built at the batch
     /// entry, like `lmm`). `None` for OLS / plain logistic / LME paths.
-    pub glmm: Option<Box<glmm::mcpower::GlmmWorkspace>>,
+    pub glmm: Option<Box<glmm::loop_advanced::GlmmWorkspace>>,
 }
 
 impl SimWorkspace {
@@ -380,8 +380,8 @@ impl SimWorkspace {
             suff_sum_y: 0.0,
             suff_n_rows: 0,
             suff_xtx_work: Mat::<f64>::zeros(n_predictors, n_predictors),
-            panel_x: vec![0.0f64; glmm::mcpower::PANEL_ROWS * n_predictors],
-            panel_y: vec![0.0f64; glmm::mcpower::PANEL_ROWS],
+            panel_x: vec![0.0f64; glmm::loop_advanced::PANEL_ROWS * n_predictors],
+            panel_y: vec![0.0f64; glmm::loop_advanced::PANEL_ROWS],
 
             irls_eta: vec![0.0; max_n],
             irls_p: vec![0.0; max_n],
@@ -572,8 +572,8 @@ mod tests {
         assert_eq!(ws.suff_n_rows, 0);
         assert_eq!(ws.suff_xtx_work.nrows(), 5);
         assert_eq!(ws.suff_xtx_work.ncols(), 5);
-        assert_eq!(ws.panel_x.len(), glmm::mcpower::PANEL_ROWS * 5);
-        assert_eq!(ws.panel_y.len(), glmm::mcpower::PANEL_ROWS);
+        assert_eq!(ws.panel_x.len(), glmm::loop_advanced::PANEL_ROWS * 5);
+        assert_eq!(ws.panel_y.len(), glmm::loop_advanced::PANEL_ROWS);
 
         // IRLS scratch (Logit).
         assert_eq!(ws.irls_eta.len(), 100);

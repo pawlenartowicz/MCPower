@@ -40,13 +40,16 @@ pub fn build_contract_from_json(json: &str) -> PyResult<Vec<(String, Py<PyBytes>
 /// instead of re-deriving the factor-expansion layout. The skeleton is JSON
 /// (`Vec<EffectDescriptor>`); it is identical across scenarios, so it is
 /// returned once per build.
-/// `outcome_kind` is one of `"continuous"` | `"binary"`.
+/// `outcome_kind` is one of `"continuous"` | `"binary"` | `"count"`.
+/// `link` is `"canonical"` (or `""`) for the kind's canonical link, or
+/// `"probit"` to override a binary outcome to the probit link.
 /// `estimator` is one of `"ols"` | `"glm"` | `"mle"`.
 ///
 #[pyfunction]
 pub fn build_contract_from_spec(
     json: &str,
     outcome_kind: &str,
+    link: &str,
     estimator: &str,
     intercept: f64,
     clusters_json: &str,
@@ -56,11 +59,17 @@ pub fn build_contract_from_spec(
     let outcome_kind = match outcome_kind {
         "continuous" => engine_contract::OutcomeKind::Continuous,
         "binary" => engine_contract::OutcomeKind::Binary,
+        "count" => engine_contract::OutcomeKind::Count,
         other => {
             return Err(PyValueError::new_err(format!(
                 "unknown outcome_kind {other:?}"
             )))
         }
+    };
+    let link = match link {
+        "" | "canonical" => None,
+        "probit" => Some(engine_contract::LinkKind::Probit),
+        other => return Err(PyValueError::new_err(format!("unknown link {other:?}"))),
     };
     let estimator = match estimator {
         "ols" => engine_contract::EstimatorSpec::Ols,
@@ -74,9 +83,15 @@ pub fn build_contract_from_spec(
     };
     let clusters: Vec<engine_contract::ClusterSpec> = serde_json::from_str(clusters_json)
         .map_err(|e| PyValueError::new_err(format!("invalid clusters JSON: {e}")))?;
-    let (contracts, skeleton) =
-        build_contract_with_skeleton(&spec, outcome_kind, Some(estimator), intercept, clusters)
-            .map_err(map_spec_error)?;
+    let (contracts, skeleton) = build_contract_with_skeleton(
+        &spec,
+        outcome_kind,
+        link,
+        Some(estimator),
+        intercept,
+        clusters,
+    )
+    .map_err(map_spec_error)?;
     let names: Vec<String> = contracts.iter().map(|c| c.scenario.name.clone()).collect();
     let bytes = rmp_serde::to_vec_named(&contracts)
         .map_err(|e| PyRuntimeError::new_err(format!("msgpack encode: {e}")))?;

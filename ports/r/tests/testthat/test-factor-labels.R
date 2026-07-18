@@ -76,7 +76,7 @@ test_that("build_contract_from_spec returns a non-empty $skeleton JSON string", 
     '"new_distributions":[2,3,5],"residual_change_prob":0.0,',
     '"residual_dists":[4,2],"residual_df":10.0,"lme":null}]}'
   )
-  out <- mcpower:::build_contract_from_spec(spec_json, "continuous", "ols", 0.0, "[]")
+  out <- mcpower:::build_contract_from_spec(spec_json, "continuous", "canonical", "ols", 0.0, "[]")
   expect_type(out$skeleton, "character")
   expect_true(nzchar(out$skeleton))
   # Parse and confirm it is a non-empty JSON array

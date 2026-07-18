@@ -115,6 +115,12 @@ describe('generateLogitScript', () => {
     expect(out).not.toContain('by=');
   });
 
+  it('emits family="probit" when the link is probit', () => {
+    const out = generateLogitScript({ ...sampleLogitSpec(), link: 'probit' } as AppSpec, 'find-power', { sample_size: 80 });
+    expect(out).toContain('MCPower("y = x1 + x2", family="probit")');
+    expect(out).toContain('model.set_baseline_probability(0.3)');
+  });
+
   it('generates an R script', () => {
     const out = generateLogitScript(sampleLogitSpec(), 'find-power', { sample_size: 100 }, 'r');
     expect(out).toContain('library(mcpower)');

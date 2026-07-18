@@ -46,6 +46,9 @@ pub enum AdapterError {
     #[error("invalid baseline_probability: {value} (must be strictly in (0, 1))")]
     BaselineProbabilityOutOfRange { value: f64 },
 
+    #[error("invalid baseline_rate: {value} (must be > 0)")]
+    BaselineRateOutOfRange { value: f64 },
+
     #[error("ICC must be between 0 and 1 (exclusive on upper end), got {value}")]
     IccOutOfRange { value: f64 },
 

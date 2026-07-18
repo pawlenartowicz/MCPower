@@ -25,6 +25,8 @@ export interface ScenarioConfig {
   residual_dists: ResidualDist[];
   residual_df: number;
   sampled_factor_proportions: boolean;
+  /** Truth-seeded fitter start (mixed/clustered designs) vs. cold (blind) start. */
+  truth_start: boolean;
   lme: LmeScenario;
 }
 

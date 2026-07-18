@@ -18,18 +18,21 @@ export type CaseClass = 'simple' | 'glmm_intercept' | 'glmm_slopes';
 
 /**
  * Classify an AppSpec into a routing case class. Mirror of the `app-spec.ts`
- * `family` union (change together): `linear` ⇒ ols, `logit` ⇒ glm, `anova` ⇒
- * ols-like — all `simple`; `mixed` is `lmm` (simple) unless its outcome is
- * binary, in which case it is a GLMM, split intercept-only (empty/absent
- * `slopes`) vs random-slopes. Cracks the otherwise-opaque AppSpec for the four
- * structural fields `family`, `outcome.kind`, `slopes` only — pinned by the
- * schema-drift test in `tests/seeds.test.ts`.
+ * `family` union (change together): `linear` ⇒ ols, `logit`/`poisson` ⇒ glm,
+ * `anova` ⇒ ols-like — all `simple` at the top level; `mixed` is `lmm` (simple)
+ * unless its outcome is a GLMM one (`binary` — logit/probit — or `poisson`), in
+ * which case it is a GLMM, split intercept-only (empty/absent `slopes`) vs
+ * random-slopes. Cracks the otherwise-opaque AppSpec for the structural fields
+ * `family`, `outcome.kind`, `slopes` only — pinned by the schema-drift test in
+ * `tests/seeds.test.ts`.
  */
 export function classifyCase(spec: AppSpec): CaseClass {
   const s = spec as Record<string, unknown>;
   if (s['family'] !== 'mixed') return 'simple';
   const outcome = s['outcome'] as { kind?: string } | undefined;
-  if (outcome?.kind !== 'binary') return 'simple'; // gaussian / absent ⇒ lmm
+  // A clustered binary (logit/probit) OR Poisson outcome is a GLMM; gaussian /
+  // absent is a plain LMM (simple).
+  if (outcome?.kind !== 'binary' && outcome?.kind !== 'poisson') return 'simple';
   const slopes = s['slopes'] as unknown[] | undefined;
   return slopes && slopes.length > 0 ? 'glmm_slopes' : 'glmm_intercept';
 }

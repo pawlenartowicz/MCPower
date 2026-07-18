@@ -100,9 +100,12 @@ MCPowerDebug <- R6::R6Class(
     #'   single fit. NULL (default) uses the contract's configured mode; accepts
     #'   "rx" (Schur SE) or "hessian" (FD-Hessian SE). Used by the GLMM Oracle
     #'   harness to read per-fit rx vs hessian SE on one dataset.
-    load_data = function(d, wald_se = NULL) {
+    load_data = function(d, wald_se = NULL, nagq = 1L) {
       if (!private$applied) private$apply()
-      blob <- private$build_contract_bytes(self$.debug_scenario)
+      # nagq is baked into the contract (build_contract_bytes -> LinearSpec.nagq);
+      # the engine's fit_provided_data honours it (AGQ when > 1). Used by the
+      # GLMM Oracle harness to read a per-fit AGQ solve on one dataset.
+      blob <- private$build_contract_bytes(self$.debug_scenario, nagq = as.integer(nagq))
       design <- d$design
       stopifnot(is.matrix(design), is.numeric(d$outcome),
                 nrow(design) == length(d$outcome))

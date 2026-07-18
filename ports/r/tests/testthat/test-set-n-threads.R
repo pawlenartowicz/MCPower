@@ -15,7 +15,7 @@ test_that("set_n_threads raises once the pool is already initialised", {
   # a minimal find_power call, then verify a second set_n_threads call errors.
   # Mirrors Python test_e3_set_n_threads_double_set_raises.
   cj <- mcpower:::build_contract_from_spec(
-    .ols_spec_json("y ~ x1", x1 = 0.3), "continuous", "ols", 0.0, "[]")$contracts
+    .ols_spec_json("y ~ x1", x1 = 0.3), "continuous", "canonical", "ols", 0.0, "[]")$contracts
   mcpower:::find_power(cj, 50L, 50L, 2137, NULL)  # initialises the pool
   expect_error(set_n_threads(2L),
     regexp = "already initialized|already initialised",

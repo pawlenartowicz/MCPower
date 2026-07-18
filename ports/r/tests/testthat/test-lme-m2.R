@@ -76,7 +76,7 @@ test_that("two public set_cluster calls produce correct extra_groupings in clust
     set_cluster("district", ICC = 0.05, n_clusters = 10L)
   m$.__enclos_env__$private$apply()
   enc <- mcpower:::.encode_outcome_and_clusters(
-    m$family, m$estimator, m$intercept,
+    m$family, "canonical", m$estimator, m$intercept,
     m$.__enclos_env__$private$pending_clusters)
   cj <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   expect_equal(length(cj), 1L)          # one cluster spec (the primary)
@@ -96,7 +96,7 @@ test_that("nested grouping with n_per_parent emits NestedWithin relation in clus
     set_cluster("school:district", ICC = 0.05, n_per_parent = 5L)
   m$.__enclos_env__$private$apply()
   enc <- mcpower:::.encode_outcome_and_clusters(
-    m$family, m$estimator, m$intercept,
+    m$family, "canonical", m$estimator, m$intercept,
     m$.__enclos_env__$private$pending_clusters)
   cj <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   eg <- cj[[1]]$extra_groupings
@@ -110,7 +110,7 @@ test_that("single set_cluster produces no extra_groupings key in clusters_json",
   pending <- list(
     school = list(icc = 0.1, n_clusters = 20L, cluster_size = 15L)
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   cj <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   expect_null(cj[[1]]$extra_groupings)
 })
@@ -130,7 +130,7 @@ test_that("debug seam extra_groupings takes precedence over public-path extra_gr
     # second entry in pending_clusters (would normally trigger the public path)
     district = list(icc = 0.05, n_clusters = 10L)
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   eg  <- cj[[1]]$extra_groupings
   # Debug seam wins — n_clusters=99 from the debug value, not 10 from public path
@@ -174,7 +174,7 @@ test_that("extra grouping slopes survive into clusters_json (public path)", {
                          corr_with_intercept = 0.2, corr_with = I(numeric(0)))
                   ))
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   eg  <- cj[[1]]$extra_groupings
   expect_length(eg[[1]]$slopes, 1L)
@@ -205,7 +205,7 @@ test_that("debug seam extra_groupings with slopes survive into clusters_json", {
       ))
     )
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   eg  <- cj[[1]]$extra_groupings
   expect_length(eg[[1]]$slopes, 1L)
@@ -230,7 +230,7 @@ test_that("length-1 corr_with in extra-grouping slope serialises as array not sc
                          corr_with_intercept = 0.1, corr_with = c(0.5))
                   ))
   )
-  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "lme", 0.0, pending)
+  enc <- mcpower:::.encode_outcome_and_clusters("gaussian", "canonical", "lme", 0.0, pending)
   cj  <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   eg  <- cj[[1]]$extra_groupings
   corr_with_1 <- eg[[1]]$slopes[[2]]$corr_with

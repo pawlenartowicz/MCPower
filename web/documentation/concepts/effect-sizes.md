@@ -69,9 +69,12 @@ When it is easier to think in **odds ratios** than in log-odds betas, MCPower of
 | Medium | 2.5 | 0.92 |
 | Large | 4.0 | 1.39 |
 
-This is a **beta** feature. The values are stored as the log-odds beta MCPower already works in, so nothing about data generation changes — only the benchmark you reach for. In the app, the small/medium/large preset buttons switch to this odds set for every predictor whenever the outcome is binary, and each effect input shows its live odds ratio ($\mathrm{OR} = e^{\beta}$) beside the value. In Python and R the printed summary echoes the OR beside each beta you set and adds an **OR** column to the per-test power table.
+This is a **beta** feature. The values are stored as the log-odds beta MCPower already works in, so nothing about data generation changes — only the benchmark you reach for. In the app, the small/medium/large preset buttons switch to this odds set for every predictor whenever the outcome is **logit**, and each effect input shows its live odds ratio ($\mathrm{OR} = e^{\beta}$) beside the value. In Python and R the printed summary echoes the OR beside each beta you set and adds an **OR** column to the per-test power table.
 
 Read the odds ratio on the **same scale as the beta**: **per 1 SD** for a continuous predictor, **per category** (reference → level) for a binary or factor predictor. The number $e^{\beta}$ is the same either way; only the wording of the unit differs.
+
+> [!note] Probit and Poisson read this table differently
+> **Probit** does not use this odds-scale set at all: a probit beta's latent variable has variance exactly 1, so the beta already *is* Cohen's *d* — the app keeps the plain continuous/binary Cohen presets for probit and shows no OR readout ($e^{\beta}$ there is not an odds ratio). **Poisson** reuses the same three beta values (0.41 / 0.92 / 1.39) as **rate-ratio** anchors, since its beta is a log-rate-ratio: $\mathrm{RR} = e^{\beta}$ replaces the OR readout, small/medium/large corresponding to RR 1.5 / 2.5 / 4.0. The anchors are the same numbers Chen et al. (2010) derived for odds ratios, borrowed here as a multiplicative scale for rates — the citation doesn't carry over, only the magnitudes do.
 
 To convert an odds ratio reported per **raw unit** of $x$ in the literature:
 

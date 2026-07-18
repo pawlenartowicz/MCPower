@@ -285,9 +285,9 @@ def _validate_correction_method(correction: Optional[str]) -> _ValidationResult:
 def _validate_family(family: Any) -> _ValidationResult:
     """Validate the GLM family kwarg.
 
-    Accepts "ols", "logit", and "lme" (mixed-effects: random intercepts,
-    random slopes, crossed/nested groupings, and cluster-level predictors,
-    all configured at ``set_cluster`` time).
+    Accepts "ols", "logit", "probit", "poisson", and "lme" (mixed-effects:
+    random intercepts, random slopes, crossed/nested groupings, and
+    cluster-level predictors, all configured at ``set_cluster`` time).
     """
     if not isinstance(family, str):
         return _ValidationResult(
@@ -295,10 +295,13 @@ def _validate_family(family: Any) -> _ValidationResult:
             [f"family must be a string, got {type(family).__name__}"],
             [],
         )
-    if family.lower() not in ("ols", "logit", "lme"):
+    if family.lower() not in ("ols", "logit", "probit", "poisson", "lme"):
         return _ValidationResult(
             False,
-            [f"family must be 'ols', 'logit', or 'lme', got {family!r}"],
+            [
+                f"family must be 'ols', 'logit', 'probit', 'poisson', or 'lme', "
+                f"got {family!r}"
+            ],
             [],
         )
     return _ValidationResult(True, [], [])
@@ -354,6 +357,28 @@ def _validate_baseline_probability(p: Any) -> _ValidationResult:
     lo, hi = get_limits()["baseline_p_warn"]
     if pv < lo or pv > hi:
         warnings.append(f"baseline probability {pv} is extreme (outside [{lo}, {hi}]); expect near-separation and unstable power estimates")
+
+    return _ValidationResult.from_errors(errors, warnings)
+
+
+def _validate_baseline_rate(rate: Any) -> _ValidationResult:
+    """Validate the baseline event rate λ₀ for family='poisson'.
+
+    Errors:
+        - rate not numeric
+        - rate not strictly positive (the log link needs λ₀ > 0)
+    """
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not isinstance(rate, (int, float)) or isinstance(rate, bool):
+        errors.append(f"baseline rate must be a number, got {type(rate).__name__}")
+        return _ValidationResult(False, errors, warnings)
+
+    rv = float(rate)
+    if not (rv > 0.0):
+        errors.append(f"baseline rate must be strictly positive (λ₀ > 0), got {rv}")
+        return _ValidationResult(False, errors, warnings)
 
     return _ValidationResult.from_errors(errors, warnings)
 

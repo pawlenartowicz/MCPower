@@ -10,11 +10,14 @@ Mixed models add **random effects** for clustered or repeated-measures data — 
 
 Write the fixed part as in regression, then add a grouping term in parentheses — a random intercept for `cluster` is `(1 | cluster)`, e.g. `y = x1 + x2 + (1 | cluster)`. Fixed-effect operators match regression: `:` is the interaction term on its own and `*` expands to `a + b + a:b`. See [[concepts/model-specification|formula syntax]] and [[concepts/mixed-effects|mixed effects]].
 
-## 2. Outcome type — continuous or binary
+## 2. Outcome type — Linear, Logit, Probit, or Poisson
 
-The **Outcome type** toggle at the top of the Model section switches the mixed model between a **continuous** outcome (a Gaussian linear mixed model) and a **binary** one (a clustered logistic GLMM — logistic regression with a cluster-level random intercept). Continuous is the default; flip to **Binary** for yes/no outcomes like passed/failed or relapsed/recovered.
+The **Outcome type** dropdown at the top of the Model section switches the mixed model's family — the same four choices as plain regression, see [[concepts/supported-families|supported families]]. **Linear** (the default) is a Gaussian linear mixed model; **Logit** and **Probit** are a clustered GLMM for a binary outcome (a logistic or probit regression with a cluster-level random intercept); **Poisson** is a clustered GLMM for a count outcome.
 
-Under **Binary** a **baseline probability** input appears — the event probability when every predictor sits at its reference level, which fixes the model intercept. Predictor effects are then read on the **log-odds** scale, the same interpretation as plain logistic regression; see [[concepts/effect-sizes#Logistic regression|logistic effect sizes]] for what a log-odds beta means in probability terms. Switching back to Continuous restores the Gaussian fit.
+Under **Logit** or **Probit** a **baseline probability** input appears — the event probability when every predictor sits at its reference level, which fixes the model intercept. Predictor effects are then read on the **log-odds** (Logit) or **probit** scale; see [[concepts/effect-sizes#Logistic regression|logistic effect sizes]] for what a log-odds beta means in probability terms. Under **Poisson** a **baseline rate** input appears instead — the expected count at the reference level — and effects read as log-rate shifts. Switching back to Linear restores the Gaussian fit.
+
+> [!note] Poisson clustering uses raw variance, not ICC
+> The other three families size their random intercept with an **ICC** (0–1). Poisson has no natural latent-scale ICC, so its cluster panel asks for **τ² (tau-squared)** — the random intercept's raw variance — instead. See [[concepts/supported-families#clustered-counts-and-probits|clustered counts and probits]].
 
 ## 3. Cluster configuration
 
@@ -34,3 +37,5 @@ The **Robustness scenarios** toggle in the status bar repeats every run under th
 ## 6. Optional settings
 
 The **Advanced** section exposes the number of simulations (mixed models default to 800, since each fit is heavier), α (0.05), seed (2137), and the failed-simulation tolerance.
+
+For a clustered **Logit**, **Probit**, or **Poisson** model, Advanced also shows the estimation-mode switch — **Fast**, **Accurate**, or **AGQ** — see [[concepts/simulation-settings#estimation-mode|estimation mode]] for what each does and when AGQ is available.

@@ -190,6 +190,7 @@ fn outcome_kind_string(ok: &OutcomeKind) -> &'static str {
     match ok {
         OutcomeKind::Continuous => "continuous",
         OutcomeKind::Binary => "binary",
+        OutcomeKind::Count => "count",
     }
 }
 

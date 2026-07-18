@@ -13,7 +13,7 @@ workspace = true
 test-fixtures = []
 
 [dependencies]
-glmm       = { path = "../../../../FastStats-Project/GLMM" }   # constants re-export only — NO mcpower feature
+glmm       = { version = "0.1", default-features = false }   # published crate; constants re-export only — no loop_advanced feature. 0.1.x is parity-stable (goldens), a 0.2 bump is deliberate; caret stops below 0.2.0.
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror  = "2"

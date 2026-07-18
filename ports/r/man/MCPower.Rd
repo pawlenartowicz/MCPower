@@ -28,6 +28,7 @@ sample sizes, so it is smooth and the reported N is stable from run to run.
 \item \href{#method-MCPower-set_heteroskedasticity_driver}{\code{MCPower$set_heteroskedasticity_driver()}}
 \item \href{#method-MCPower-set_cluster}{\code{MCPower$set_cluster()}}
 \item \href{#method-MCPower-set_baseline_probability}{\code{MCPower$set_baseline_probability()}}
+\item \href{#method-MCPower-set_baseline_rate}{\code{MCPower$set_baseline_rate()}}
 \item \href{#method-MCPower-upload_data}{\code{MCPower$upload_data()}}
 \item \href{#method-MCPower-get_effects_from_data}{\code{MCPower$get_effects_from_data()}}
 \item \href{#method-MCPower-set_parallel}{\code{MCPower$set_parallel()}}
@@ -51,7 +52,7 @@ sample sizes, so it is smooth and the reported N is stable from run to run.
 \describe{
 \item{\code{formula}}{An R \code{formula} or a string (e.g. \code{"y ~ x1 + x2"}).}
 
-\item{\code{family}}{"ols" (default), "logit", or "lme".}
+\item{\code{family}}{"ols" (default), "logit", "probit", "poisson", or "lme".}
 
 \item{\code{estimator}}{Override the analysis estimator ("ols"/"glm"/"mle"); NULL derives from family.}
 
@@ -173,6 +174,7 @@ Add a random-intercept grouping factor to the model.}
   random_slopes = NULL,
   cluster_level_vars = NULL,
   n_per_parent = NULL,
+  tau_squared = NULL,
   ...
 )}\if{html}{\out{</div>}}
 }
@@ -204,6 +206,10 @@ modeled predictors. Default \code{NULL} (no cluster-level covariates).}
 \item{\code{n_per_parent}}{For nested random effects \code{(1|A/B)}: the number of
 B-units per A-unit. Use with the child grouping var (e.g.
 \code{set_cluster("A:B", n_per_parent = 5)}).}
+
+\item{\code{tau_squared}}{Raw random-intercept variance, for
+\code{family = "poisson"} only (Poisson has no residual-variance term
+for \code{ICC} to divide against). Mutually exclusive with \code{ICC}.}
 }
 \if{html}{\out{</div>}}
 }
@@ -217,6 +223,15 @@ The \code{MCPower} object invisibly (for chaining).
 \subsection{Method \code{set_baseline_probability()}}{
 \subsection{Usage}{
 \if{html}{\out{<div class="r">}}\preformatted{MCPower$set_baseline_probability(p)}\if{html}{\out{</div>}}
+}
+
+}
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-MCPower-set_baseline_rate"></a>}}
+\if{latex}{\out{\hypertarget{method-MCPower-set_baseline_rate}{}}}
+\subsection{Method \code{set_baseline_rate()}}{
+\subsection{Usage}{
+\if{html}{\out{<div class="r">}}\preformatted{MCPower$set_baseline_rate(rate)}\if{html}{\out{</div>}}
 }
 
 }
@@ -266,6 +281,7 @@ The \code{MCPower} object invisibly (for chaining).
   target_test = NULL,
   correction = NULL,
   wald_se = NULL,
+  agq = NULL,
   test_formula = NULL,
   n_sims = NULL,
   seed = NULL,
@@ -275,6 +291,19 @@ The \code{MCPower} object invisibly (for chaining).
 )}\if{html}{\out{</div>}}
 }
 
+\subsection{Arguments}{
+\if{html}{\out{<div class="arguments">}}
+\describe{
+\item{\code{agq}}{Adaptive Gauss-Hermite quadrature node count for a clustered
+binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
+default). An odd value in \code{3..=25} opts into AGQ, but only when
+the design is eligible (a Binary or Count GLMM with a single grouping
+factor and at most 3 random effects per group) -- an ineligible or
+even/out-of-range value warns and runs at Laplace instead. No-op for
+OLS/LMM.}
+}
+\if{html}{\out{</div>}}
+}
 }
 \if{html}{\out{<hr>}}
 \if{html}{\out{<a id="method-MCPower-find_sample_size"></a>}}
@@ -285,6 +314,7 @@ The \code{MCPower} object invisibly (for chaining).
   target_test = NULL,
   correction = NULL,
   wald_se = NULL,
+  agq = NULL,
   test_formula = NULL,
   target_power = NULL,
   from_size = NULL,
@@ -299,6 +329,19 @@ The \code{MCPower} object invisibly (for chaining).
 )}\if{html}{\out{</div>}}
 }
 
+\subsection{Arguments}{
+\if{html}{\out{<div class="arguments">}}
+\describe{
+\item{\code{agq}}{Adaptive Gauss-Hermite quadrature node count for a clustered
+binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
+default). An odd value in \code{3..=25} opts into AGQ, but only when
+the design is eligible (a Binary or Count GLMM with a single grouping
+factor and at most 3 random effects per group) -- an ineligible or
+even/out-of-range value warns and runs at Laplace instead. No-op for
+OLS/LMM.}
+}
+\if{html}{\out{</div>}}
+}
 }
 \if{html}{\out{<hr>}}
 \if{html}{\out{<a id="method-MCPower-summary"></a>}}

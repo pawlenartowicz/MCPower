@@ -32,8 +32,9 @@
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
 
-  // Residual + heteroskedasticity controls are continuous-outcome-only.
-  const continuousOutcome = $derived(familyStore.activeOutcome !== 'binary');
+  // Residual + heteroskedasticity controls are continuous-outcome-only (excludes
+  // every non-linear GLM family: logit, probit, and Poisson).
+  const continuousOutcome = $derived(familyStore.activeOutcome === 'linear');
 
   // Lazily attach options so older saved configs stay untouched until the dialog opens.
   $effect(() => {

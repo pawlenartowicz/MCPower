@@ -142,6 +142,10 @@ def aggregate(series, cases):
     only the cases that tool covers (each compared to mcpower on its own cases);
     every other bar uses the whole tool-covered subset. Points without an
     mcpower:py measurement cannot be normalized and are skipped.
+
+    A family with NO tool-covered cases falls back to all its measured cases
+    (annotated "no tool coverage") — otherwise the family vanishes from the
+    aggregate table and both plots even though its mcpower/loop tiers ran.
     """
     by_case = {}
     for (cid, _n), times in series.items():
@@ -159,6 +163,9 @@ def aggregate(series, cases):
         if not fam_cases:
             continue
         subset = [c.id for c in fam_cases if c.tool and c.id in case_ratio]
+        no_tool = not subset
+        if no_tool:
+            subset = [c.id for c in fam_cases if c.id in case_ratio]
         keys = sorted({k for cid in subset for k in case_ratio[cid]})
         agg[fam] = {}
         for k in keys:
@@ -173,6 +180,10 @@ def aggregate(series, cases):
             vals = [case_ratio[cid][k] for cid in sub_k if k in case_ratio[cid]]
             if vals:
                 agg[fam][k] = _geomean(vals)
+        if no_tool:
+            coverage[fam] = (f"no tool coverage — all {len(subset)}/{len(fam_cases)} "
+                             f"{FAMILY_LABEL[fam]} cases")
+            continue
         counts = {}
         for c in fam_cases:
             if c.tool:
@@ -222,7 +233,8 @@ def print_table(series, tool_names):
 
 def print_aggregates(agg, coverage):
     print("\nPer-family aggregate (per-sim time ratio, mcpower:py = 1, geometric means"
-          " over the tool-covered subset; each tool over its own covered cases):")
+          " over the tool-covered subset; each tool over its own covered cases;"
+          " tool-less families over all their cases):")
     for fam, d in agg.items():
         print(f"\n  {FAMILY_LABEL[fam]} — {coverage[fam]}")
         for k in sorted(d, key=d.get):
@@ -373,7 +385,8 @@ def aggregate_fss(rows, cases):
     """Per-family geomean of each tier's grid-search time / find_sample_size:py
     at the same case (baseline mcpower_fss:py = 1). Tools over their own covered
     cases, every other tier over the family's tool-covered subset — mirrors
-    aggregate(). Returns (agg, coverage)."""
+    aggregate(), including the no-tool-coverage fallback to all measured cases.
+    Returns (agg, coverage)."""
     tool_of = {c.id: c.tool for c in cases}
     fam_of = {c.id: c.family for c in cases}
     by_case = {}
@@ -387,6 +400,9 @@ def aggregate_fss(rows, cases):
     for fam in ("ols", "logit", "lme", "glmm"):
         fam_ids = [cid for cid in by_case if fam_of.get(cid) == fam]
         subset = [cid for cid in fam_ids if tool_of.get(cid)]
+        no_tool = not subset
+        if no_tool:
+            subset = fam_ids
         if not subset:
             continue
         keys = sorted({k for cid in subset for k in by_case[cid]})
@@ -398,6 +414,10 @@ def aggregate_fss(rows, cases):
             vals = [by_case[cid][k] for cid in sub if k in by_case[cid]]
             if vals:
                 agg[fam][k] = _geomean(vals)
+        if no_tool:
+            coverage[fam] = (f"no tool coverage — all {len(subset)}/{len(fam_ids)} "
+                             f"{FAMILY_LABEL[fam]} cases")
+            continue
         counts = {}
         for cid in subset:
             counts[tool_of[cid]] = counts.get(tool_of[cid], 0) + 1
@@ -475,13 +495,14 @@ def write_plot(panel, out_path):
     def _mult(v):
         return f"{v:.1f}×" if v < 10 else f"{v:,.0f}×"
 
-    labeled, max_v = set(), 1.0
+    labeled, max_v, min_v = set(), 1.0, 1.0
     for j, f in enumerate(fams):
         present = [k for k in keys if k in agg[f]]  # packed, no gaps; keeps series_order
         for slot, k in enumerate(present):
             method, lang = k.split(":")
             x, y = j + slot * width, agg[f][k]
             max_v = max(max_v, y)
+            min_v = min(min_v, y)
             ax.bar(x, y, width=width, color=METHOD_COLORS[method],
                    hatch={"r": "//", "jl": ".."}.get(lang), edgecolor="black", linewidth=0.4,
                    label=k if k not in labeled else None)
@@ -490,7 +511,9 @@ def write_plot(panel, out_path):
                         ha="center", va="bottom", fontsize=8)
 
     ax.set_yscale("log")
-    ax.set_ylim(bottom=0.8, top=max_v * 3)  # headroom for the value labels
+    # bottom follows the smallest ratio so a sub-1 bar (a tier beating the
+    # mcpower:py baseline) stays visible instead of clipping below the axis
+    ax.set_ylim(bottom=min(0.8, min_v * 0.8), top=max_v * 3)  # headroom for the value labels
     ax.axhline(1.0, color="grey", linewidth=0.8, linestyle="--")
     ax.set_xticks([j + (len([k for k in keys if k in agg[f]]) - 1) * width / 2
                    for j, f in enumerate(fams)])

@@ -12,6 +12,7 @@ Formally, power is the chance of rejecting the null hypothesis when it is genuin
 
 Power is never a single number — it is the product of every modeling choice you make. Each driver below has its own page; together they trace the path from a research idea to a defensible sample size.
 
+- **Outcome family** — linear, logit, probit, or Poisson; each has its own link function and baseline setter. See [[concepts/supported-families|supported families]].
 - **Effect size** — how large the effect you expect is; the single most important input. See [[concepts/effect-sizes|effect sizes]].
 - **Sample size (N)** — more observations mean more power; this is the lever a power analysis usually solves for.
 - **Significance level (α)** — the false-positive rate you allow, **0.05** by default; a stricter α lowers power. See [[concepts/simulation-settings|simulation settings]].

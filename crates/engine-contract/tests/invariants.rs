@@ -564,10 +564,12 @@ fn example2_logit_with_uploaded_data_validates_cleanly() {
                 pinned: false,
             },
             heteroskedasticity_driver: None,
+            link: None,
         },
         design_test: None,
         estimator: EstimatorSpec::Glm,
         wald_se: Default::default(),
+        nagq: 1,
         test: TestSpec {
             targets: vec![
                 TestTarget::Marginal { term: 1 },
@@ -599,7 +601,7 @@ fn glm_requires_binary_outcome() {
     c.estimator = EstimatorSpec::Glm; // outcome.kind stays Continuous
     assert!(matches!(
         c.validate(),
-        Err(ContractError::GlmRequiresBinary)
+        Err(ContractError::GlmRequiresBinaryOrCount)
     ));
 }
 
@@ -609,6 +611,152 @@ fn glm_with_binary_is_ok() {
     c.outcome.kind = OutcomeKind::Binary;
     c.estimator = EstimatorSpec::Glm;
     assert!(c.validate().is_ok());
+}
+
+#[test]
+fn glm_with_count_is_ok() {
+    let mut c = example1_simple_ols();
+    c.outcome.kind = OutcomeKind::Count;
+    c.estimator = EstimatorSpec::Glm;
+    assert!(c.validate().is_ok());
+}
+
+// --- invariant 24: link matches kind ---
+
+#[test]
+fn probit_on_binary_is_ok() {
+    let mut c = example1_simple_ols();
+    c.outcome.kind = OutcomeKind::Binary;
+    c.outcome.link = Some(LinkKind::Probit);
+    c.estimator = EstimatorSpec::Glm;
+    assert!(c.validate().is_ok());
+}
+
+#[test]
+fn probit_on_non_binary_rejected() {
+    for kind in [OutcomeKind::Continuous, OutcomeKind::Count] {
+        let mut c = example1_simple_ols();
+        c.outcome.kind = kind;
+        c.outcome.link = Some(LinkKind::Probit);
+        c.estimator = if kind == OutcomeKind::Count {
+            EstimatorSpec::Glm
+        } else {
+            EstimatorSpec::Ols
+        };
+        assert!(
+            matches!(c.validate(), Err(ContractError::ProbitRequiresBinary)),
+            "probit on {kind:?} must be rejected"
+        );
+    }
+}
+
+// --- invariant 25: nagq backstop ---
+
+#[test]
+fn nagq_even_or_out_of_range_rejected() {
+    let mut c = example1_simple_ols();
+    c.outcome.kind = OutcomeKind::Binary;
+    c.estimator = EstimatorSpec::Glm;
+    c.generation.cluster = Some(some_valid_cluster_spec());
+    for bad in [0u8, 2, 4, 26, 100] {
+        c.nagq = bad;
+        assert!(
+            matches!(c.validate(), Err(ContractError::NagqOutOfRange { got }) if got == bad),
+            "nagq = {bad} must be rejected as out-of-range"
+        );
+    }
+}
+
+#[test]
+fn nagq_gt1_on_eligible_binary_glmm_is_ok() {
+    let mut c = example1_simple_ols();
+    c.outcome.kind = OutcomeKind::Binary;
+    c.estimator = EstimatorSpec::Glm;
+    c.generation.cluster = Some(some_valid_cluster_spec()); // single grouping, intercept-only (q=1)
+    c.nagq = 7;
+    assert!(
+        c.validate().is_ok(),
+        "eligible clustered-binary AGQ must validate"
+    );
+}
+
+#[test]
+fn nagq_upper_bound_25_eligible_is_ok() {
+    // 25 is the top of the odd `1..=25` range; an off-by-one such as
+    // `k >= 25` would wrongly reject the boundary value itself.
+    let mut c = example1_simple_ols();
+    c.outcome.kind = OutcomeKind::Binary;
+    c.estimator = EstimatorSpec::Glm;
+    c.generation.cluster = Some(some_valid_cluster_spec());
+    c.nagq = 25;
+    assert!(
+        c.validate().is_ok(),
+        "nagq = 25 on an eligible shape must validate"
+    );
+}
+
+#[test]
+fn nagq_three_res_eligible_is_ok() {
+    // Intercept + 2 slopes = 3 REs, the max allowed; an off-by-one such as
+    // `re_count < 3` would wrongly reject this shape.
+    let mut c = example1_simple_ols();
+    c.outcome.kind = OutcomeKind::Binary;
+    c.estimator = EstimatorSpec::Glm;
+    let mut cl = some_valid_cluster_spec();
+    for (i, col) in [0u32, 1].into_iter().enumerate() {
+        cl.slopes.push(SlopeTerm {
+            column: ColumnId(col),
+            variance: 0.2,
+            corr_with_intercept: 0.0,
+            corr_with: vec![0.0; i],
+        });
+    }
+    c.generation.cluster = Some(cl);
+    c.nagq = 3;
+    assert!(
+        c.validate().is_ok(),
+        "3 REs (intercept + 2 slopes) with nagq = 3 must validate"
+    );
+}
+
+#[test]
+fn nagq_gt1_ineligible_axes_rejected() {
+    // Unclustered: no random effects to integrate over.
+    let mut unclustered = example1_simple_ols();
+    unclustered.outcome.kind = OutcomeKind::Binary;
+    unclustered.estimator = EstimatorSpec::Glm;
+    unclustered.nagq = 7;
+    assert!(matches!(
+        unclustered.validate(),
+        Err(ContractError::NagqIneligibleShape { got: 7 })
+    ));
+
+    // Continuous outcome (LMM): AGQ is Binomial/Poisson-only.
+    let mut gaussian = example1_simple_ols();
+    gaussian.estimator = EstimatorSpec::Mle;
+    gaussian.generation.cluster = Some(some_valid_cluster_spec());
+    gaussian.nagq = 7;
+    assert!(matches!(
+        gaussian.validate(),
+        Err(ContractError::NagqIneligibleShape { got: 7 })
+    ));
+
+    // Crossed/nested extra grouping: single-grouping-factor rule.
+    let mut crossed = example1_simple_ols();
+    crossed.outcome.kind = OutcomeKind::Count;
+    crossed.estimator = EstimatorSpec::Glm;
+    let mut cl = some_valid_cluster_spec();
+    cl.extra_groupings = vec![GroupingSpec {
+        relation: GroupingRelation::Crossed { n_clusters: 4 },
+        tau_squared: 0.1,
+        slopes: vec![],
+    }];
+    crossed.generation.cluster = Some(cl);
+    crossed.nagq = 7;
+    assert!(matches!(
+        crossed.validate(),
+        Err(ContractError::NagqIneligibleShape { got: 7 })
+    ));
 }
 
 #[test]

@@ -7,16 +7,16 @@
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import CorrectionSelect from './CorrectionSelect.svelte';
-  import WaldSeSelect from './WaldSeSelect.svelte';
+  import EstimationSelect from './EstimationSelect.svelte';
   import TestChooser from './TestChooser.svelte';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
-  // Show the Wald SE selector ONLY for the clustered-binary GLMM (mixed family +
-  // binary outcome) — the single estimator wald_se affects (see WaldSe::affects:
-  // Glm && clustered). OLS, Gaussian LME, and unclustered logit have exact SEs and
-  // ignore it, so surfacing the knob there reads as a control that does nothing.
-  const showWaldSe = $derived(
-    familyStore.active === 'mixed' && familyStore.activeOutcome === 'binary',
+  // Show the estimation control (Fast/Accurate/AGQ) ONLY for a GLMM — the mixed
+  // family with a non-Gaussian outcome (logit, probit, or Poisson). OLS, Gaussian
+  // LME, and unclustered GLMs have exact/fixed SEs and no random effect to
+  // integrate, so the knob would read as a control that does nothing.
+  const showEstimation = $derived(
+    familyStore.active === 'mixed' && familyStore.activeOutcome !== 'linear',
   );
 </script>
 
@@ -50,9 +50,9 @@
     <div class="min-w-40">
       <CorrectionSelect />
     </div>
-    {#if showWaldSe}
+    {#if showEstimation}
       <div class="min-w-40">
-        <WaldSeSelect />
+        <EstimationSelect />
       </div>
     {/if}
   </div>

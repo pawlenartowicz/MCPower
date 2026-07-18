@@ -49,10 +49,12 @@ pub fn example1_simple_ols() -> SimulationContract {
                 pinned: false,
             },
             heteroskedasticity_driver: None,
+            link: None,
         },
         design_test: None, // None = correctly-specified (uses design_generation)
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        nagq: 1,
         test: TestSpec {
             targets: vec![
                 TestTarget::Marginal { term: 1 },

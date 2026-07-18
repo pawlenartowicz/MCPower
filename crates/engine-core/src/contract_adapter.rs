@@ -213,6 +213,7 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         residual_dist,
         residual_pinned: c.outcome.residual.pinned,
         outcome_kind,
+        link: c.outcome.link,
         estimator,
         intercept: c.outcome.intercept,
         posthoc,
@@ -224,6 +225,7 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         report_overall,
         factor_min_level_count: 0,
         wald_se: c.wald_se,
+        nagq: c.nagq,
     })
 }
 
@@ -882,6 +884,7 @@ fn translate_scenario(s: &engine_contract::ScenarioPerturbations) -> KernelScena
         residual_dists: s.residual_dists.clone(),
         residual_df: s.residual_df,
         sampled_factor_proportions: s.sampled_factor_proportions,
+        truth_start: s.truth_start,
         // `LmeScenarioPerturbations` is re-exported verbatim from
         // engine_contract (see crate::spec), so the perturbations clone through.
         lme: s.lme.clone(),
@@ -962,6 +965,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -981,6 +985,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 3 }],
                 correction: CorrectionMethod::None,
@@ -1031,6 +1036,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -1042,6 +1048,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -1107,6 +1114,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -1118,6 +1126,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -1189,6 +1198,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 // keep x2 (ColumnId(1)), drop the leading x1.
@@ -1201,6 +1211,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 // term 1 in design_test names x2.
                 targets: vec![TestTarget::Marginal { term: 1 }],
@@ -1293,6 +1304,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 // keep the factor (both dummies), drop the leading x1.
@@ -1310,6 +1322,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![
                     TestTarget::Marginal { term: 1 },
@@ -1383,6 +1396,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -1402,6 +1416,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![
                     TestTarget::Marginal { term: 2 },
@@ -1483,6 +1498,7 @@ mod tests {
             residual_dists: vec![ResidualDist::HighKurtosis],
             residual_df: 8.0,
             sampled_factor_proportions: true,
+            truth_start: true,
             lme: Some(LmeScenarioPerturbations {
                 random_effect_dist: ResidualDist::Normal,
                 random_effect_df: 5.0,
@@ -1493,6 +1509,10 @@ mod tests {
         assert!(
             s.scenario.sampled_factor_proportions,
             "sampled_factor_proportions must map through the adapter"
+        );
+        assert!(
+            s.scenario.truth_start,
+            "truth_start must map through the adapter"
         );
         let cluster = s.cluster.expect("cluster set for LME");
         assert_eq!(
@@ -1598,6 +1618,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -1615,6 +1636,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Joint { terms: vec![1, 2] }],
                 correction: CorrectionMethod::None,
@@ -1686,6 +1708,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -1702,6 +1725,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -1773,6 +1797,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -1789,6 +1814,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Contrast {
                     positive: 1,
@@ -1903,12 +1929,14 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             // No test formula → mirrors the real spec-builder contract, where
             // the adapter falls back to design_generation (term index 3 below).
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 // Target the interaction term (term index 3 in design_generation)
                 targets: vec![TestTarget::Marginal { term: 3 }],
@@ -1975,10 +2003,12 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -2125,10 +2155,12 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 2 }],
                 correction: CorrectionMethod::None,
@@ -2204,10 +2236,12 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
                 correction: CorrectionMethod::None,
@@ -2362,6 +2396,7 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: Some(DesignSpec {
                 terms: vec![
@@ -2378,6 +2413,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![
                     TestTarget::Marginal { term: 1 },

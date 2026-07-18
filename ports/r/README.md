@@ -137,7 +137,7 @@ See [examples/](examples/) (01–11) and the [R tutorial](https://docs.mcpower.a
 
 | Call | What it does |
 |---|---|
-| `MCPower$new("y ~ x1 + x2", family = "ols")` | Define the model (R formula; `family` ∈ `"ols"`/`"logit"`/`"lme"`) |
+| `MCPower$new("y ~ x1 + x2", family = "ols")` | Define the model (R formula; `family` ∈ `"ols"`/`"logit"`/`"probit"`/`"poisson"`/`"lme"`) |
 | `$set_effects("x1=0.5, x2=0.3")` | Standardised effect sizes |
 | `$set_variable_type("x1=binary, g=(factor,3)")` | Predictor distributions |
 | `$set_correlations("corr(x1, x2)=0.3")` | Correlations between predictors |

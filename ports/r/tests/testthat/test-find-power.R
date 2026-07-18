@@ -3,7 +3,7 @@ test_that("find_power runs end-to-end for OLS and returns a power >= 0.5", {
   # The low-level raw call uses no scenario noisiness, so power can be close to 1.0
   # for easy configs; a lower-bound floor is the meaningful assertion here.
   out <- mcpower:::build_contract_from_spec(
-    .ols_spec_json("y ~ x1", x1 = 0.5), "continuous", "ols", 0.0, "[]")
+    .ols_spec_json("y ~ x1", x1 = 0.5), "continuous", "canonical", "ols", 0.0, "[]")
   res <- mcpower:::find_power(out$contracts, sample_size = 200L, n_sims = 200L,
                                base_seed = 2137, progress = NULL)
   expect_true("scenarios" %in% names(res))
@@ -16,7 +16,7 @@ test_that("find_power runs end-to-end for OLS and returns a power >= 0.5", {
 
 test_that("seed f64 round-trips: same seed -> identical power", {
   cj <- mcpower:::build_contract_from_spec(.ols_spec_json("y ~ x1", x1 = 0.3),
-                                            "continuous", "ols", 0.0, "[]")$contracts
+                                            "continuous", "canonical", "ols", 0.0, "[]")$contracts
   a <- mcpower:::find_power(cj, 150L, 300L, 2137, NULL)$scenarios[["optimistic"]]
   b <- mcpower:::find_power(cj, 150L, 300L, 2137, NULL)$scenarios[["optimistic"]]
   expect_identical(a$power_uncorrected, b$power_uncorrected)  # determinism pinned
@@ -24,7 +24,7 @@ test_that("seed f64 round-trips: same seed -> identical power", {
 
 test_that("progress callback receives (current, total) reports reaching total", {
   cj <- mcpower:::build_contract_from_spec(.ols_spec_json("y ~ x1", x1 = 0.3),
-                                            "continuous", "ols", 0.0, "[]")$contracts
+                                            "continuous", "canonical", "ols", 0.0, "[]")$contracts
   seen <- list()
   cb <- function(current, total) {
     seen[[length(seen) + 1L]] <<- c(current = current, total = total)
@@ -69,7 +69,7 @@ test_that("progress callback spans a 2-scenario run (per-scenario events fire)",
 
 test_that("a pre-cancelled run surfaces the 'cancelled by user' error (cancel seam)", {
   cj <- mcpower:::build_contract_from_spec(.ols_spec_json("y ~ x1", x1 = 0.3),
-                                            "continuous", "ols", 0.0, "[]")$contracts
+                                            "continuous", "canonical", "ols", 0.0, "[]")$contracts
   # find_power_precancelled flips the CancellationToken before the engine runs;
   # the orchestrator returns OrchestratorError::Cancelled at its first
   # checkpoint and the bridge maps it to this exact message (mirrors the live
@@ -83,7 +83,7 @@ test_that("a pre-cancelled run surfaces the 'cancelled by user' error (cancel se
 test_that("find_sample_size grid converges within search bounds for large effect", {
   # G-A: add first_achieved convergence assertion — was key-presence only
   cj <- mcpower:::build_contract_from_spec(.ols_spec_json("y ~ x1", x1 = 0.5),
-                                            "continuous", "ols", 0.0, "[]")$contracts
+                                            "continuous", "canonical", "ols", 0.0, "[]")$contracts
   res <- mcpower:::find_sample_size(cj, target_power = 0.8, lo = 30L, hi = 120L,
             n_sims = 200L, base_seed = 2137, method = "grid", by = 30L,
             by_kind = "fixed", mode = "linear", tol_n = 1L, progress = NULL)

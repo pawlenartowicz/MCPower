@@ -85,3 +85,44 @@ def test_set_scenario_configs_accepts_lme_keys():
     # Must not raise
     m.set_scenario_configs({"optimistic": {"icc_noise_sd": 0.1}})
     assert m._scenario_configs["optimistic"]["icc_noise_sd"] == pytest.approx(0.1)
+
+
+def test_optimistic_preset_has_truth_start_true():
+    cfg = get_default_scenario_config()
+    assert cfg["optimistic"]["truth_start"] is True
+
+
+def test_set_scenario_configs_custom_scenario_does_not_inherit_truth_start():
+    """A brand-new custom scenario inherits every unset key from optimistic
+    EXCEPT truth_start, which stays False unless the user sets it explicitly."""
+    from mcpower import MCPower
+
+    m = MCPower("y ~ x1")
+    m.set_effects("x1=0.3")
+    m.set_scenario_configs({"my_case": {"heterogeneity": 0.5}})
+    cfg = m._scenario_configs["my_case"]
+    assert cfg["truth_start"] is False
+    # Confirms the exclusion is targeted, not a break in general inheritance:
+    # a key the user did not set still comes from optimistic.
+    assert (
+        cfg["heteroskedasticity_ratio"]
+        == get_default_scenario_config()["optimistic"]["heteroskedasticity_ratio"]
+    )
+
+
+def test_set_scenario_configs_custom_scenario_honours_explicit_truth_start():
+    from mcpower import MCPower
+
+    m = MCPower("y ~ x1")
+    m.set_effects("x1=0.3")
+    m.set_scenario_configs({"my_case": {"heterogeneity": 0.5, "truth_start": True}})
+    assert m._scenario_configs["my_case"]["truth_start"] is True
+
+
+def test_set_scenario_configs_updating_preset_preserves_its_truth_start():
+    from mcpower import MCPower
+
+    m = MCPower("y ~ x1")
+    m.set_effects("x1=0.3")
+    m.set_scenario_configs({"optimistic": {"heterogeneity": 0.1}})
+    assert m._scenario_configs["optimistic"]["truth_start"] is True

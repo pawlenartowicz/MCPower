@@ -190,6 +190,42 @@ model.set_cluster("clinic", ICC=0.10, n_clusters=40, cluster_level_vars=["treatm
 
 See [[concepts/mixed-effects#clustered-logistic-glmm|Clustered logistic (GLMM)]].
 
+### Clustered probit and Poisson
+
+The same GLMM path covers `family="probit"` and `family="poisson"` — see
+[[concepts/supported-families|supported families]] for the full picture.
+Clustered Poisson has no latent-scale ICC, so its random intercept is sized by
+**raw variance** with `tau_squared` instead of `ICC`:
+
+```python
+# Clustered probit — same set_cluster call as logit
+model = MCPower("recovered = treatment + (1|clinic)", family="probit")
+model.set_baseline_probability(0.3)
+model.set_cluster("clinic", ICC=0.15, n_clusters=30)
+
+# Clustered Poisson — tau_squared in place of ICC
+model = MCPower("visits = treatment + (1|clinic)", family="poisson")
+model.set_baseline_rate(2.0)
+model.set_cluster("clinic", tau_squared=0.10, n_clusters=30)
+```
+
+### Estimation mode for clustered GLMMs
+
+A clustered binary/count GLMM (logit, probit, or Poisson) accepts two more
+`find_power`/`find_sample_size` arguments: `wald_se` (default `"rx"`, a fast
+Wald-SE shortcut; `"hessian"` is slower and slightly more conservative) and
+`agq` (default `1`, Laplace; an odd value up to 25 switches to adaptive
+quadrature for a single-grouping, ≤3-random-effects design):
+
+```python
+result = model.find_power(sample_size=300, target_test="treatment",
+                          wald_se="hessian", agq=5, verbose=False)
+```
+
+See [[concepts/simulation-settings#estimation-mode|Estimation mode]] for the full
+explanation of both controls, including AGQ's eligibility rules and what happens
+when a design falls outside them.
+
 ### Scenario stress-testing for mixed models
 
 Mixed models support three scenario knobs: `random_effect_dist` (normal / heavy_tailed / right_skewed), `random_effect_df`, and `icc_noise_sd`. Use them to probe how sensitive power is to non-Gaussian random effects or an uncertain ICC:

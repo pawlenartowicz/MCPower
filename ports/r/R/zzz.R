@@ -52,10 +52,11 @@
 }
 
 # Canonical WaldSe variant names (engine-contract estimator.rs). No config
-# aliases — "hessian" (default) and "rx" (opt-in speed knob) are accepted.
-# Mirrors .correction_for_rust.
+# aliases — "hessian" (advanced opt-in) and "rx" (fastmode default) are
+# accepted. NULL falls back to the config `estimation.wald_se` default (the
+# cross-port home — no hardcoded per-port default). Mirrors .correction_for_rust.
 .wald_se_for_rust <- function(wald_se) {
-  if (is.null(wald_se)) return("hessian")
+  if (is.null(wald_se)) wald_se <- .config()$estimation$wald_se
   key <- gsub("[- ]", "_", tolower(wald_se))
   if (key %in% c("hessian", "rx")) return(key)
   stop(sprintf(

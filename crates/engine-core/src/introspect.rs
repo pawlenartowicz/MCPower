@@ -14,9 +14,9 @@ use crate::spec::{BatchResult, EstimatorSpec, SimulationSpec};
 use crate::workspace::SimWorkspace;
 use crate::EngineError;
 use glmm::consts::MAX_EXTRA_Q;
-use glmm::mcpower::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
-use glmm::mcpower::{glm_irls_fit, GlmScratch};
-use glmm::mcpower::{lme_fit, LmeScratch, LmeSuffStats};
+use glmm::loop_advanced::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
+use glmm::loop_advanced::{glm_irls_fit, GlmScratch};
+use glmm::loop_advanced::{lme_fit, LmeScratch, LmeSuffStats};
 
 /// Which observations to capture. Engine-core-local (orchestrator maps its
 /// `StageMask` onto this — engine-core never depends on orchestrator types).
@@ -294,40 +294,56 @@ pub fn fit_provided_data(
             )
         }
         EstimatorSpec::Glm if spec.cluster.is_some() => {
-            // Clustered-logistic (GLMM) path — mirrors the Mle general branch's
-            // structure (build workspace, build Z, fit, extract D̂). No σ² for
-            // the binomial family: D̂ = Λ̂Λ̂' directly; sigma_sq_hat = 1.0.
+            // Clustered-GLMM path — mirrors the Mle general branch's structure
+            // (build workspace, build Z, fit, extract D̂). No σ² for the
+            // fixed-dispersion families (binomial logit/probit, Poisson):
+            // D̂ = Λ̂Λ̂' directly; sigma_sq_hat = 1.0.
             let cluster = spec.cluster.as_ref().expect("guard ⇒ cluster");
             let slope_cols: Vec<usize> = spec
                 .cluster_slope_design_cols
                 .iter()
                 .map(|&c| c as usize)
                 .collect();
+            // Derive the family from the contract's outcome + link — same helper
+            // the production find_power path uses (mixed_workspace::build_glmm_workspace),
+            // so an uploaded clustered probit/Poisson GLMM fits with the right
+            // family instead of silently falling back to logit.
             let model = crate::mixed_workspace::cluster_to_model_spec(
                 cluster,
-                spec.estimator,
-                spec.wald_se,
+                crate::mixed_workspace::glmm_family(spec.outcome_kind, spec.link),
             );
-            let mut glmm =
-                glmm::mcpower::GlmmWorkspace::for_cluster_spec(ncol, &model, nrow, &slope_cols);
-            glmm::mcpower::build_z(
+            // nagq threaded from the contract (1 = Laplace default; > 1 = AGQ) —
+            // mirrors mixed_workspace::build_glmm_workspace, so the upload/debug
+            // fit path honours AGQ exactly as the production find_power path does.
+            let mut glmm = glmm::loop_advanced::GlmmWorkspace::for_cluster_spec(
+                ncol,
+                &model,
+                nrow,
+                &slope_cols,
+                spec.nagq,
+            );
+            glmm::loop_advanced::build_z(
                 &mut glmm,
                 ws.x_full_f64.as_ref().subrows(0, nrow),
                 &ws.cluster_ids[..nrow],
                 &ws.extra_grouping_ids,
                 nrow,
             );
-            // Truth-start mirrors batch.rs Glm+cluster arm — change together.
-            let nt = glmm.theta_truth.len();
-            let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
-            tbuf[..nt].copy_from_slice(&glmm.theta_truth);
-            let f = glmm::mcpower::fit_glmm(
+            // Truth-start under the scenario's `truth_start` assumption: seed the
+            // optimizer at the DGP-truth θ (well-behaved estimation) or start
+            // blind. GLMM families fix dispersion at 1, so `truth_theta` seeds it
+            // as in the LME arm. NOT a speed knob — the MLE is start-sensitive.
+            // MIRRORS batch.rs's Glm+cluster arm; the hot loop and this debug path
+            // must derive the same hint — change together.
+            let theta = crate::mixed_workspace::truth_theta(cluster, true);
+            let start = spec.scenario.truth_start.then_some(&theta[..]);
+            let f = glmm::loop_advanced::fit_glmm(
                 &mut glmm,
                 ws.x_full_f64.as_ref().subrows(0, nrow),
                 &ws.y_full_f64[..nrow],
                 &ws.cluster_ids[..nrow],
                 &spec.target_indices,
-                Some(&tbuf[..nt]),
+                start,
                 &spec.effect_sizes,
                 nrow,
                 crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
@@ -337,7 +353,7 @@ pub fn fit_provided_data(
             // the Mle general branch's q_p > 1 block, with σ=1. primary_lambda
             // refreshes glmm.lam; for q_p == 1 re_corr is empty (inner loop vacuous).
             let q = glmm.groupings.primary_q;
-            glmm::mcpower::primary_lambda(&glmm.params[..glmm.n_theta], q, &mut glmm.lam);
+            glmm::loop_advanced::primary_lambda(&glmm.params[..glmm.n_theta], q, &mut glmm.lam);
             let mut d = vec![0.0_f64; q * q];
             for i in 0..q {
                 for j in 0..q {
@@ -358,7 +374,7 @@ pub fn fit_provided_data(
             let mut cursor = q * (q + 1) / 2;
             for &qg in glmm.groupings.extra_q.iter() {
                 let mut lam_g = [0.0f64; MAX_EXTRA_Q * MAX_EXTRA_Q];
-                glmm::mcpower::primary_lambda(&glmm.params[cursor..], qg, &mut lam_g);
+                glmm::loop_advanced::primary_lambda(&glmm.params[cursor..], qg, &mut lam_g);
                 for dd in 0..qg {
                     let mut acc = 0.0;
                     // lam_g row-major q_g×q_g ⇒ D_g[dd,dd] = Σ_k Λ_g[dd,k]².
@@ -422,10 +438,15 @@ pub fn fit_provided_data(
                 irls_wx: &mut ws.irls_wx,
             };
             let fit = glm_irls_fit(
+                // Unclustered GLM family: Binary→logit/probit, Count→Poisson log
+                // (mirrors the GLMM site — see mixed_workspace::glmm_family).
+                crate::mixed_workspace::glmm_family(spec.outcome_kind, spec.link),
+                f64::NAN, // nb_theta: ignored outside NB family (glm.rs doc comment)
                 x_slice,
                 y_slice,
                 &spec.target_indices,
                 Some(&spec.effect_sizes),
+                None, // prior_w: MCPower has no prior-observation-weights feature
                 scratch,
             );
             let betas = fit.betas[..ncol].to_vec();
@@ -470,12 +491,9 @@ pub fn fit_provided_data(
                 .iter()
                 .map(|v| v.iter().map(|&c| c as usize).collect())
                 .collect();
-            let model = crate::mixed_workspace::cluster_to_model_spec(
-                cluster,
-                spec.estimator,
-                spec.wald_se,
-            );
-            let mut lmm = glmm::mcpower::LmmWorkspace::for_cluster_spec_ext(
+            let model =
+                crate::mixed_workspace::cluster_to_model_spec(cluster, glmm::Family::Gaussian);
+            let mut lmm = glmm::loop_advanced::LmmWorkspace::for_cluster_spec_ext(
                 ncol,
                 &model,
                 nrow,
@@ -488,15 +506,16 @@ pub fn fit_provided_data(
                 &ws.y_full_f64[..nrow],
                 cid_slice,
                 &ws.extra_grouping_ids,
+                None, // weights: MCPower has no prior-observation-weights feature
             );
-            // Truth-start (P1) — MIRRORS batch.rs's general branch; hot loop
-            // and debug path must derive the same hint; change together.
-            // Sized MAX_THETA (mirrors batch.rs) — crossed/nested-slope θ exceeds
-            // the old `1 + MAX_EXTRA_GROUPINGS` scalar-per-extra width.
-            let mut tbuf = [0.0_f64; glmm::consts::MAX_THETA];
-            let nt = lmm.theta_truth.len();
-            tbuf[..nt].copy_from_slice(&lmm.theta_truth);
-            let f = glmm::mcpower::fit_lmm(&mut lmm, &spec.target_indices, Some(&tbuf[..nt]));
+            // Truth-start under the scenario's `truth_start` assumption: seed the
+            // optimizer at the DGP-truth θ (well-behaved estimation) or start
+            // blind. NOT a speed knob — the MLE is start-sensitive. MIRRORS
+            // batch.rs's general branch; the hot loop and this debug path must
+            // derive the same hint — change together.
+            let theta = crate::mixed_workspace::truth_theta(cluster, true);
+            let start = spec.scenario.truth_start.then_some(&theta[..]);
+            let f = glmm::loop_advanced::fit_lmm(&mut lmm, &spec.target_indices, start);
             let sig = f.sigma_sq;
             let q = lmm.suff.groupings.primary_q;
             // Primary RE covariance D̂ = σ̂²·Λ̂Λ̂′ where Λ̂ is the row-major
@@ -505,7 +524,7 @@ pub fn fit_provided_data(
             // [τ̂₀², τ̂₁², …]; off-diagonals yield the correlation vector (vech
             // column-major, empty for q_p=1).
             let mut lam = vec![0.0_f64; q * q];
-            glmm::mcpower::primary_lambda(&lmm.theta, q, &mut lam);
+            glmm::loop_advanced::primary_lambda(&lmm.theta, q, &mut lam);
             let mut d = vec![0.0_f64; q * q];
             for i in 0..q {
                 for j in 0..q {
@@ -528,7 +547,7 @@ pub fn fit_provided_data(
             let mut cursor = q * (q + 1) / 2;
             for &qg in lmm.suff.groupings.extra_q.iter() {
                 let mut lam_g = [0.0f64; MAX_EXTRA_Q * MAX_EXTRA_Q];
-                glmm::mcpower::primary_lambda(&lmm.theta[cursor..], qg, &mut lam_g);
+                glmm::loop_advanced::primary_lambda(&lmm.theta[cursor..], qg, &mut lam_g);
                 for dd in 0..qg {
                     let mut acc = 0.0;
                     // lam_g row-major q_g×q_g ⇒ D_g[dd,dd] = Σ_k Λ_g[dd,k]².
@@ -846,8 +865,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
+            link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,
@@ -1248,10 +1269,12 @@ mod tests {
                     pinned: false,
                 },
                 heteroskedasticity_driver: None,
+                link: None,
             },
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 3 }],
                 correction: CorrectionMethod::None,
@@ -1532,8 +1555,10 @@ mod tests {
             residual_dist: ResidualDist::Normal,
             residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
+            link: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
             max_failed_fraction: 0.1,

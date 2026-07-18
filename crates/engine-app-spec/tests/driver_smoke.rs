@@ -92,8 +92,10 @@ fn sample_logit_spec_for_driver() -> AppSpec {
         scenarios: vec![],
         csv: None,
         baseline_probability: 0.3,
+        link: Default::default(),
         test_formula: None,
         outcome_options: None,
+        agq: 1,
     })
 }
 

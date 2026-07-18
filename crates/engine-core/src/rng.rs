@@ -140,8 +140,10 @@ impl SimRng {
 /// non-factor layout).
 pub const CLASS_XNORM: u32 = 1;
 /// Residual draws; column = slot. Slot layout is owned by data_gen's residual
-/// pass (Normal/Binary: slot 0 only; T/HighKurtosis: slot 0 = z, χ² normals in
-/// slots 1..; Right/LeftSkewed: χ² normals in slots 0.. — no z slot).
+/// pass (Normal, Binary-probit, and Count: slot 0 only, a single N(0,1);
+/// Binary-logit: slot 0 only, a single uniform compared against the logistic
+/// CDF, not a normal; T/HighKurtosis: slot 0 = z, χ² normals in slots 1..;
+/// Right/LeftSkewed: χ² normals in slots 0.. — no z slot).
 pub const CLASS_RESID: u32 = 2;
 
 /// Fill `out[i]` with the Philox word at (class, col, row = i): word
@@ -358,6 +360,61 @@ pub fn norm_inv_cdf_f32(u: f32) -> f32 {
         let t = (0.5 - a).max(NORM_INV_FLOOR);
         let q = (-2.0 * ln_f32(t)).sqrt();
         horner_f32(&NORM_INV_TAIL, q).copysign(v)
+    }
+}
+
+/// λ below which the Poisson quantile uses the exact cumulative-PMF walk; above
+/// it, the continuity-corrected normal approximation. At λ = 20 the normal
+/// approximation's skew is ~0.22, and the walk averages ~20 iterations — a
+/// balance between exactness and the per-row cost of a long walk at large λ.
+const POISSON_EXACT_MAX: f64 = 20.0;
+/// Safety bound on the PMF-walk length so a `z → +∞` draw (u → 1⁻) cannot loop
+/// unboundedly. Far beyond any reachable quantile (λ ≤ 20, |z| ≲ 6 ⇒ k ≲ 50).
+const POISSON_WALK_CAP: u32 = 200;
+
+/// Poisson(λ) inverse-CDF driven by a standard-normal draw `z`. Fixed-draw (no
+/// rejection): the per-row RNG budget is one N(0,1), preserving the
+/// prefix-stability invariant (`X_full[:N]` bit-identical across `max_n`).
+///
+/// Two regimes:
+/// - `λ ≤ POISSON_EXACT_MAX`: cumulative-PMF walk to the smallest `k` with
+///   `F(k) ≥ Φ(z)` — the exact Poisson quantile at the uniform `u = Φ(z)`.
+///   `p₀ = e^{-λ}`, `p_{k+1} = p_k · λ/(k+1)`; capped at `POISSON_WALK_CAP`.
+/// - `λ > POISSON_EXACT_MAX`: continuity-corrected normal approximation
+///   `k = ⌊λ + z·√λ + ½⌋` (= `round(λ + z√λ)` for the positive argument) —
+///   mean- and variance-consistent, but symmetric: it drops the Poisson's own
+///   right skew. Measured at λ=25: true `P(Y≥40) = 0.00344` vs 0.00187 from
+///   this arm (understated ~1.8×), and the returned quantile can jump by up to
+///   2 counts right at the λ=20 switch for a fixed `z`. Mean/variance being
+///   right keeps the β-power impact small, but a skew or goodness-of-fit check
+///   on λ>20 counts would fail against this arm.
+///
+/// `λ ≤ 0` (degenerate) returns 0. Reuses the owned `exp`/`phi` kernels so the
+/// counts are bit-identical across every port (reproducibility contract).
+/// No upper bound on `λ` is enforced here or by `validate()` on the Count
+/// linear predictor: at an unreachable-in-practice rate (`λ > 1e38`, requiring
+/// linear-predictor `η > ~709`) the caller's `exp_fill` overflows to `f32`
+/// infinity before this function ever sees `λ`, which then poisons IRLS into
+/// a reported non-convergence rather than a contract error.
+pub(crate) fn poisson_quantile(z: f64, lambda: f64) -> f64 {
+    // NaN-safe: `!(lambda > 0.0)` also catches NaN, `lambda <= 0.0` would not.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+    if !(lambda > 0.0) {
+        return 0.0;
+    }
+    if lambda <= POISSON_EXACT_MAX {
+        let u = crate::distributions::phi(z);
+        let mut p = glmm::simd_transcendental::exp_nonpos(-lambda); // e^{-λ}
+        let mut cdf = p;
+        let mut k = 0u32;
+        while cdf < u && k < POISSON_WALK_CAP {
+            k += 1;
+            p *= lambda / k as f64;
+            cdf += p;
+        }
+        k as f64
+    } else {
+        (lambda + z * lambda.sqrt() + 0.5).floor().max(0.0)
     }
 }
 
@@ -695,5 +752,78 @@ mod tests {
             let i = rng.next_categorical(&probs);
             assert!(i < probs.len(), "categorical index {i} out of range");
         }
+    }
+}
+
+#[cfg(test)]
+mod poisson_tests {
+    use super::oracle::phi_inv_ref;
+    use super::poisson_quantile;
+
+    /// Deterministic moment check: feed the exact standard-normal quantiles of a
+    /// fine uniform grid through `poisson_quantile`. The resulting counts are the
+    /// (grid-discretised) Poisson(λ) quantile function, so their mean → λ and
+    /// variance → λ. Covers both regimes: λ = 2, 8 (exact PMF walk) and λ = 50,
+    /// 200 (normal approximation).
+    #[test]
+    fn poisson_quantile_recovers_mean_and_variance() {
+        const N: usize = 20_000;
+        for &lambda in &[2.0_f64, 8.0, 50.0, 200.0] {
+            let mut sum = 0.0;
+            let mut sum_sq = 0.0;
+            for i in 0..N {
+                let u = (i as f64 + 0.5) / N as f64;
+                let z = phi_inv_ref(u);
+                let y = poisson_quantile(z, lambda);
+                sum += y;
+                sum_sq += y * y;
+            }
+            let mean = sum / N as f64;
+            let var = sum_sq / N as f64 - mean * mean;
+            // Tolerance scales with the sampling/discretisation error (~√λ-sized
+            // steps); a few percent of λ is comfortably tight for a moment check.
+            let tol = 0.05 * lambda.max(1.0);
+            assert!(
+                (mean - lambda).abs() < tol,
+                "λ={lambda}: mean {mean} off target by > {tol}"
+            );
+            assert!(
+                (var - lambda).abs() < tol.max(0.6 * lambda),
+                "λ={lambda}: var {var} off target by > tol"
+            );
+        }
+    }
+
+    /// The quantile is non-decreasing in the driving normal `z` (a valid inverse
+    /// CDF) and never negative, across both regimes.
+    #[test]
+    fn poisson_quantile_monotone_nonneg() {
+        for &lambda in &[1.0_f64, 8.0, 60.0] {
+            let mut prev = -1.0;
+            let mut z = -5.0;
+            while z <= 5.0 {
+                let y = poisson_quantile(z, lambda);
+                assert!(y >= 0.0, "λ={lambda}, z={z}: negative count {y}");
+                assert!(
+                    y >= prev,
+                    "λ={lambda}: not monotone at z={z} ({y} < {prev})"
+                );
+                prev = y;
+                z += 0.01;
+            }
+        }
+    }
+
+    /// Degenerate λ ≤ 0 is a point mass at 0; deep-left z gives 0, deep-right z
+    /// gives a large positive count (both regimes reachable).
+    #[test]
+    fn poisson_quantile_edges() {
+        assert_eq!(poisson_quantile(0.3, 0.0), 0.0);
+        assert_eq!(poisson_quantile(0.3, -1.0), 0.0);
+        // Deep-left tail floors at 0 for any positive λ.
+        assert_eq!(poisson_quantile(-6.0, 3.0), 0.0);
+        // Deep-right tail exceeds λ.
+        assert!(poisson_quantile(5.0, 8.0) > 8.0);
+        assert!(poisson_quantile(5.0, 100.0) > 100.0);
     }
 }

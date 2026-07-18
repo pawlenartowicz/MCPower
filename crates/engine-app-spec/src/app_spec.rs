@@ -11,12 +11,43 @@ fn wald_se_is_default(w: &WaldSe) -> bool {
     *w == WaldSe::default()
 }
 
+/// Link for a binary outcome. `Logit` (default) → canonical; `Probit` → the
+/// probit link (`Some(LinkKind::Probit)` on the contract). `#[serde(default)]`
+/// keeps pre-link specs deserialising as logit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BinaryLink {
+    #[default]
+    Logit,
+    Probit,
+}
+
+/// `#[serde(skip_serializing_if)]` predicate for `link`: omit the field when
+/// it equals the default (logit) so a pre-link spec round-trips unchanged.
+fn binary_link_is_default(l: &BinaryLink) -> bool {
+    *l == BinaryLink::default()
+}
+
+/// `fn` default for `agq`, used by `#[serde(default = "...")]` on `agq` fields
+/// so pre-AGQ specs deserialise with the same single-quadrature-point behavior
+/// they had before the knob existed.
+fn default_nagq_app() -> u8 {
+    1
+}
+
+/// `#[serde(skip_serializing_if)]` predicate for `agq`: omit the field when it
+/// equals the default so a pre-AGQ spec round-trips byte-identical.
+fn agq_is_default(n: &u8) -> bool {
+    *n == default_nagq_app()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "family", rename_all = "lowercase")]
 pub enum AppSpec {
     Linear(LinearSpec),
     Logit(LogitSpec),
     Mixed(MixedSpec),
+    Poisson(PoissonSpec),
 }
 
 impl AppSpec {
@@ -27,6 +58,7 @@ impl AppSpec {
             AppSpec::Linear(s) => s.target_power,
             AppSpec::Logit(s) => s.target_power,
             AppSpec::Mixed(s) => s.target_power,
+            AppSpec::Poisson(s) => s.target_power,
         }
     }
 
@@ -38,6 +70,7 @@ impl AppSpec {
             AppSpec::Linear(s) => s.correction,
             AppSpec::Logit(s) => s.correction,
             AppSpec::Mixed(s) => s.correction,
+            AppSpec::Poisson(s) => s.correction,
         };
         c != engine_contract::CorrectionMethod::None
     }
@@ -73,12 +106,60 @@ pub struct LogitSpec {
     /// converts this to the corresponding log-odds intercept passed to
     /// `BuilderLogitSpec`. Required — no meaningful default exists.
     pub baseline_probability: f64,
+    /// Link for the binary outcome. `Logit` (default) → canonical log-odds
+    /// link; `Probit` → the probit link. `#[serde(default)]` keeps pre-link
+    /// specs deserialising as logit; skip-serialize when default so those
+    /// wires stay byte-identical.
+    #[serde(default, skip_serializing_if = "binary_link_is_default")]
+    pub link: BinaryLink,
     /// Optional misspecified test model (see `LinearSpec.test_formula`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_formula: Option<String>,
     /// Outcome-level generation knobs; `None` = builder defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome_options: Option<OutcomeOptions>,
+    /// Adaptive Gauss-Hermite quadrature points for the GLM fit. `1` (default)
+    /// = Laplace approximation, matching pre-AGQ behavior.
+    #[serde(default = "default_nagq_app", skip_serializing_if = "agq_is_default")]
+    pub agq: u8,
+}
+
+/// GUI state for a Poisson-regression power run. Mirrors `LogitSpec`
+/// field-for-field, with `baseline_rate` (a log-link intercept) replacing
+/// `baseline_probability` and no `link` field — Poisson is always log link.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoissonSpec {
+    pub parsed_formula: ParsedFormula,
+    pub var_types: Vec<VarType>,
+    pub effects: Vec<EffectSize>,
+    pub correlations: Option<CorrelationMatrix>,
+    pub alpha: f64,
+    pub target_power: f64,
+    pub n_sims: u64,
+    pub seed: u64,
+    pub tests: TestSelection,
+    pub correction: CorrectionMethod,
+    /// Wald SE method; unclustered Poisson Glm ignores it (mirrors `LogitSpec.wald_se`).
+    #[serde(default, skip_serializing_if = "wald_se_is_default")]
+    pub wald_se: WaldSe,
+    /// Scenarios to fan out, mirroring `LogitSpec.scenarios`.
+    #[serde(default)]
+    pub scenarios: Vec<ScenarioInput>,
+    pub csv: Option<CsvData>,
+    /// Baseline (intercept) rate for the Poisson model. The assembler
+    /// converts this to the corresponding log intercept passed to
+    /// `BuilderLinearSpec`. Required — no meaningful default exists.
+    pub baseline_rate: f64,
+    /// Optional misspecified test model (see `LinearSpec.test_formula`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_formula: Option<String>,
+    /// Outcome-level generation knobs; `None` = builder defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_options: Option<OutcomeOptions>,
+    /// Adaptive Gauss-Hermite quadrature points for the GLM fit. `1` (default)
+    /// = Laplace approximation, matching pre-AGQ behavior.
+    #[serde(default = "default_nagq_app", skip_serializing_if = "agq_is_default")]
+    pub agq: u8,
 }
 
 /// Cluster dimension knob: the user fixes exactly one; the other is derived
@@ -138,7 +219,12 @@ pub struct AppSlopeTerm {
 /// Outcome distribution for a mixed model. Defaults to `Gaussian` (Continuous + Mle),
 /// keeping all existing mixed specs deserialising unchanged. `Binary` activates
 /// `OutcomeKind::Binary + EstimatorSpec::Glm`; `baseline_probability` becomes a
-/// log-odds intercept and ICC is scaled by π²/3 to the latent log-odds variance.
+/// log-odds (logit) or latent (probit) intercept per `link`, and ICC is scaled to
+/// the latent-scale variance — π²/3 for logit, ×1 for probit (latent residual
+/// variance is 1, not π²/3). `Poisson` activates `OutcomeKind::Count +
+/// EstimatorSpec::Glm`; `baseline_rate` becomes a log intercept and `tau_squared`
+/// is the RAW random-intercept variance (no ICC conversion — Poisson has no
+/// residual variance to scale against).
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MixedOutcome {
@@ -146,6 +232,12 @@ pub enum MixedOutcome {
     Gaussian,
     Binary {
         baseline_probability: f64,
+        #[serde(default, skip_serializing_if = "binary_link_is_default")]
+        link: BinaryLink,
+    },
+    Poisson {
+        baseline_rate: f64,
+        tau_squared: f64,
     },
 }
 
@@ -205,6 +297,10 @@ pub struct MixedSpec {
     /// Outcome-level generation knobs; `None` = builder defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome_options: Option<OutcomeOptions>,
+    /// Adaptive Gauss-Hermite quadrature points for the GLMM fit. `1` (default)
+    /// = Laplace approximation, matching pre-AGQ behavior.
+    #[serde(default = "default_nagq_app", skip_serializing_if = "agq_is_default")]
+    pub agq: u8,
 }
 
 /// GUI state for an OLS power run.

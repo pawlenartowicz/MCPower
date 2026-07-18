@@ -36,20 +36,22 @@ impl EstimatorSpec {
     }
 }
 
-/// Fixed-effect Wald-SE denominator selection for the clustered-binary GLMM.
-/// Additive contract field (serde default `Hessian`); no-op for OLS/LMM.
-/// `Hessian` is the lme4 `use.hessian = TRUE` default; `Rx` is the opt-in
-/// speed knob (glmer `use.hessian = FALSE`). See the design spec §2.
+/// Fixed-effect Wald-SE denominator selection for the clustered-binary/count
+/// GLMM. Additive contract field; no-op for OLS/LMM. `Rx` is the 1.1.0 default
+/// (fastmode: rx + Laplace is accurate enough for power analysis, where
+/// Monte-Carlo noise dominates); `Hessian` (lme4 `use.hessian = TRUE`) is the
+/// rigor opt-in. This default mirrors `configs/config.json` `estimation.wald_se`
+/// — the single home for the cross-port default; change both together.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WaldSe {
-    /// Per-fit FD-Hessian SE (glmer `use.hessian = TRUE`) — default, the lme4
-    /// "correct" denominator.
-    #[default]
+    /// Per-fit FD-Hessian SE (glmer `use.hessian = TRUE`) — the lme4 "correct"
+    /// denominator; the accurate/AGQ opt-in.
     Hessian,
-    /// RX/PLS Schur (glmer `use.hessian = FALSE`) — opt-in speed knob; faster
+    /// RX/PLS Schur (glmer `use.hessian = FALSE`) — the 1.1.0 default; faster
     /// but anticonservative for GLMM (assumes β–θ orthogonality, false under
-    /// IRLS weight coupling).
+    /// IRLS weight coupling), acceptable when MC noise dominates.
+    #[default]
     Rx,
 }
 
@@ -74,8 +76,8 @@ mod tests {
             "\"hessian\""
         );
         assert_eq!(serde_json::to_string(&WaldSe::Rx).unwrap(), "\"rx\"");
-        // default is hessian (lme4 use.hessian = TRUE)
-        assert_eq!(WaldSe::default(), WaldSe::Hessian);
+        // default flipped to rx at 1.1.0 (fastmode); mirrors config.json estimation.wald_se
+        assert_eq!(WaldSe::default(), WaldSe::Rx);
         // affects() is true only for clustered GLM
         assert!(WaldSe::Hessian.affects(EstimatorSpec::Glm, true));
         assert!(!WaldSe::Hessian.affects(EstimatorSpec::Glm, false)); // unclustered GLM

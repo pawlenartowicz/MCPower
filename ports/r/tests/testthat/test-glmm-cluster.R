@@ -13,6 +13,7 @@ test_that("logit+cluster: tau_squared == icc/(1-icc) * pi^2/3", {
     set_cluster("g", ICC = icc, n_clusters = 20L, cluster_size = 10L)
   enc <- mcpower:::.encode_outcome_and_clusters(
     family            = "logit",
+    link              = "canonical",
     estimator         = "glm",
     intercept         = -0.847,
     pending_clusters  = m$.__enclos_env__$private$pending_clusters
@@ -30,6 +31,7 @@ test_that("lme+cluster: tau_squared == icc/(1-icc) (no pi^2/3 factor)", {
     set_cluster("g", ICC = icc, n_clusters = 20L, cluster_size = 10L)
   enc <- mcpower:::.encode_outcome_and_clusters(
     family            = "lme",
+    link              = "canonical",
     estimator         = "mle",
     intercept         = 0.0,
     pending_clusters  = m$.__enclos_env__$private$pending_clusters
@@ -37,6 +39,27 @@ test_that("lme+cluster: tau_squared == icc/(1-icc) (no pi^2/3 factor)", {
   expected_tau <- icc / (1 - icc)
   parsed <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
   expect_equal(parsed[[1]]$tau_squared, expected_tau, tolerance = 1e-10)
+})
+
+# (2b) probit + cluster: tau_squared is the plain (unscaled) formula, no pi^2/3
+test_that("probit+cluster: tau_squared == icc/(1-icc) (no pi^2/3 factor)", {
+  icc <- 0.2
+  m <- MCPower$new("y ~ x1 + (1|g)", family = "probit")$
+    set_effects("x1=0.3")$
+    set_baseline_probability(0.3)$
+    set_cluster("g", ICC = icc, n_clusters = 20L, cluster_size = 10L)
+  enc <- mcpower:::.encode_outcome_and_clusters(
+    family            = "probit",
+    link              = "probit",
+    estimator         = "glm",
+    intercept         = -0.847,
+    pending_clusters  = m$.__enclos_env__$private$pending_clusters
+  )
+  expected_tau <- icc / (1 - icc)
+  parsed <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
+  expect_equal(parsed[[1]]$tau_squared, expected_tau, tolerance = 1e-10)
+  # Confirm the logit pi^2/3 factor was NOT applied.
+  expect_true(abs(parsed[[1]]$tau_squared - icc / (1 - icc) * (pi^2 / 3)) > 1e-6)
 })
 
 # (3) logit + two groupings: extra grouping also gets the latent-scale factor
@@ -51,6 +74,7 @@ test_that("logit + two set_cluster calls: extra grouping tau_squared also scaled
   pc$g2$n_clusters <- 15L
   enc <- mcpower:::.encode_outcome_and_clusters(
     family           = "logit",
+    link             = "canonical",
     estimator        = "glm",
     intercept        = -0.847,
     pending_clusters = pc

@@ -415,3 +415,35 @@ def test_cluster_level_vars_absent_when_empty():
         max_failed_simulations=m.max_failed_simulations,
     )
     assert "cluster_level_vars" not in payload
+
+
+def test_build_linear_spec_wald_se_default_reads_config():
+    """M10: ``build_linear_spec(wald_se=None)`` must resolve to the config
+    ``estimation.wald_se`` default, not a hardcoded literal — matches R's
+    ``.wald_se_for_rust(NULL)``, which reads the same config key. The two
+    golden-payload tests above call ``build_linear_spec`` directly (no
+    ``wald_se=``), so this pins the default they now get."""
+    from mcpower.config import get_estimation_defaults
+    from mcpower.spec.spec_builder import build_linear_spec
+
+    m = MCPower("y ~ x1 + (1|school)", family="lme")
+    m.set_effects("x1=0.3")
+    m.set_cluster("school", ICC=0.2, n_clusters=20)
+    m._apply()
+
+    payload = build_linear_spec(
+        m._registry,
+        ["optimistic"],
+        heteroskedasticity=m._heteroskedasticity,
+        residual_dist_name=m._residual_dist_name,
+        residual_pinned=m._residual_pinned,
+        alpha=m.alpha,
+        correction=None,
+        target_test=None,
+        test_formula=None,
+        pending_data=None,
+        equation=m.equation,
+        scenario_configs=m._scenario_configs,
+        max_failed_simulations=m.max_failed_simulations,
+    )
+    assert payload["wald_se"] == get_estimation_defaults()["wald_se"]

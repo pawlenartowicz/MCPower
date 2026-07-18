@@ -44,8 +44,10 @@ fn sample_logit_spec(baseline_probability: f64) -> AppSpec {
         scenarios: vec![],
         csv: None,
         baseline_probability,
+        link: Default::default(),
         test_formula: None,
         outcome_options: None,
+        agq: 1,
     })
 }
 

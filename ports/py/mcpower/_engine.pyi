@@ -39,6 +39,7 @@ def find_sample_size(
 def build_contract_from_spec(
     json: str,
     outcome_kind: str,
+    link: str,
     estimator: str,
     intercept: float,
     clusters_json: str,

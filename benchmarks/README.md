@@ -1,7 +1,7 @@
 # MCPower cross-port speed benchmark
 
 A single, JSON-driven benchmark that times **MCPower vs dedicated power tools
-vs DIY simulation loops**, in Python and R, across twenty-seven power-analysis
+vs DIY simulation loops**, in Python and R, across fifteen power-analysis
 designs. It answers two questions:
 
 1. **MCPower vs the alternatives, per language** — how much faster is
@@ -26,23 +26,23 @@ statistical validation see `mcpower/validation/`.
 ## The cases — `benchmark_cases.json`
 
 `benchmark_cases.json` is the single source of cases, read by both harnesses
-(`cases.py` / `load_cases` in `harness.R`). Thirty-three designs across four
+(`cases.py` / `load_cases` in `harness.R`). Fifteen designs across four
 families:
 
 | family | cases | shapes covered |
 |--------|-------|----------------|
-| `ols` (13)   | `ols_simple` … `anova_2x3` | 1–15 predictors, factors, interactions, correlated predictors, large n, 2×2 / 2×3 / one-way-4 ANOVA, ANCOVA |
-| `logit` (8)  | `glm_simple` … `glm_factor_inter` | the same shapes on the logit scale (baseline P(y=1)=0.3), plus rare events (0.05) |
-| `lme` (6)    | `lme_simple` … `lme_factor_inter` | random intercept, ICC=0.2, 20–100 clusters |
-| `glmm` (6)   | `glmm_simple` … `glmm_multislope` | random intercept + random slopes (LOSF 24/25) on the logit scale, ICC=0.2, 20–30 clusters |
+| `ols` (6)    | `ols_simple` … `anova_oneway4` | 1–5 predictors, correlated predictors, large n, 2×2 / one-way-4 ANOVA |
+| `logit` (3)  | `glm_simple` … `glm_rare` | the same shapes on the logit scale (baseline P(y=1)=0.3), plus rare events (0.05) |
+| `lme` (3)    | `lme_simple` … `lme_factor_inter` | random intercept, ICC=0.2, 20–100 clusters |
+| `glmm` (3)   | `glmm_simple` … `glmm_multislope` | random intercept + random slopes on the logit scale, ICC=0.2, 20–30 clusters |
 
 Each family carries its own default `n` grid and per-tier simulation counts
 (`defaults` block): OLS sweeps `n = 20..200` step 20, logit `50..500` step 50,
 LME / GLMM `100..1000` step 100 — several cases override the grid. MCPower runs
-10,000 sims per point; the loop and tool tiers run fewer (30–1,000, per the
-`n_sims` block) since they are far slower per sim. Each case names the
-dedicated tool that covers it (`tool`), or `null` when no tool covers the
-design (the cliff band).
+10,000 sims per point (1,000 for GLMM); the loop and tool tiers run fewer
+(30–500, per the `n_sims` block) since they are far slower per sim. Each case
+names the dedicated tool that covers it (`tool`), or `null` when no tool covers
+the design (the cliff band).
 
 ## Methods measured
 
@@ -54,7 +54,7 @@ Five recorded methods per case:
   shared draws. A different unit from the per-n rows (one row per case);
   combine.py reports it in its own grid-vs-grid table.
 - **`tool`** (R only; the Python harness prints a skip) — the dedicated tool
-  named by the case, used as its docs show: `simr` (LME), `Superpower`
+  named by the case, used as its docs show: `simr` (LME + GLMM), `Superpower`
   (ANOVA), `simglm` (OLS/GLM). Adapters in `tools_r.R`.
 - **`loop_best`** — hand-rolled DIY loop with precomputed critical values and
   a manual Wald decision, matching MCPower's decision rule (OLS *t*; GLM/LME/
@@ -92,7 +92,7 @@ Python (needs the workspace `.venv` active):
 
 ```bash
 source ../../.venv/bin/activate
-python harness.py --case all --out results/py.json          # all 33 cases
+python harness.py --case all --out results/py.json          # all 15 cases
 python harness.py --case ols_multi                          # one case
 python harness.py --case ols_multi --threads 1              # 1-thread variant
 python harness.py --case glm_multi --methods mcpower_find_power,loop_best
@@ -153,10 +153,10 @@ python power_agreement.py        # reads results/r.json
 
 The loop tiers also surface as `loop_best:jl` / `loop_naive:jl` series in the
 per-family aggregates and grid-search projection. Caveat: the per-family
-aggregate and the two plots restrict to each family's **tool-covered** cases,
-and **GLMM has no tool** — so Julia's GLMM loops (the family py lacks) appear
-only in the per-`(case, n)` table above and the 10,000-sim `find_sample_size`
-footer projection, not in the per-family aggregate table or either plot.
+aggregate and the two plots restrict to each family's **tool-covered** cases
+(GLMM is simr-covered like LME); a family with *no* tool-covered cases falls
+back to all its measured cases, labelled "no tool coverage" under the family
+group instead of the usual coverage count.
 
 Below the table: per-family geometric-mean aggregates normalized to
 `mcpower:py = 1` (each tool averaged over its own covered cases), a per-family
@@ -210,7 +210,7 @@ table, on a different scale). Each is a per-family log-y bar chart.
 
 | file | role |
 |------|------|
-| `benchmark_cases.json` | the 33 cases + per-family defaults (single source) |
+| `benchmark_cases.json` | the 15 cases + per-family defaults (single source) |
 | `cases.py`             | loads the cases, merges family defaults (Python) |
 | `harness.py`           | Python harness: timing runner, CLI |
 | `loops_py.py`          | Python DIY-loop baselines (naive + best), keyed by family |
