@@ -51,6 +51,8 @@ The test that carries the moderation hypothesis is the interaction coefficient `
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-04 -->
 ```python
 from mcpower import MCPower
@@ -67,6 +69,10 @@ model.set_effects("income=0.30, social_support=0.25, income:social_support=0.15"
 model.find_power(sample_size=200, target_test="income:social_support")
 ```
 <!-- /chunk:py:ols-04 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-04 -->
 ```r
@@ -85,5 +91,11 @@ invisible(model$find_power(sample_size = 200, target_test = "income:social_suppo
 ```
 <!-- /chunk:r:ols-04 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-04-setup.png|600|theme-light]]
 ![[assets/ols-04-setup-dark.png|600|theme-dark]]
+
+</details>

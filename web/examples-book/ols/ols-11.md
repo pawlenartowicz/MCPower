@@ -54,6 +54,8 @@ where `*` expands to `gender + experience_years + gender:experience_years`; the
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-11 -->
 ```python
 from mcpower import MCPower
@@ -70,6 +72,10 @@ model.set_variable_type("gender=binary")
 model.find_power(sample_size=300, target_test="gender:experience_years")
 ```
 <!-- /chunk:py:ols-11 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-11 -->
 ```r
@@ -88,6 +94,8 @@ invisible(model$find_power(sample_size = 300, target_test = "gender:experience_y
 ```
 <!-- /chunk:r:ols-11 -->
 
+</details>
+
 The headline number is the power for `gender:experience_years`. Interaction
 terms are expensive — detecting a moderation needs a markedly larger sample than
 either main effect, so expect the interaction row to trail `gender` and
@@ -95,5 +103,9 @@ either main effect, so expect the interaction row to trail `gender` and
 by side, or switch to `find_sample_size(...)` to find the N that lands the
 interaction at 80% power.
 
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-11-setup.png|600|theme-light]]
 ![[assets/ols-11-setup-dark.png|600|theme-dark]]
+
+</details>

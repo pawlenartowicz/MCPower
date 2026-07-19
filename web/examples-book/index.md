@@ -17,9 +17,9 @@ main guides cover that ground; this book is the recognition shortcut.
 
 - [[anova/index|ANOVA]] — factor designs, main effects and interactions, post-hoc contrasts.
 - [[ols/index|OLS / linear regression]] — continuous outcomes, the largest family.
-- [[glm/index|GLM]] — binary outcomes (logistic regression).
+- [[glm/index|GLM]] — binary outcomes (logistic, probit) and count outcomes (Poisson).
 - [[lmm/index|Linear mixed models]] — grouped / clustered continuous outcomes.
-- [[glmm/index|Generalised linear mixed models]] — grouped / clustered binary outcomes.
+- [[glmm/index|Generalised linear mixed models]] — grouped / clustered binary and count outcomes.
 
 Each example states the model as an MCPower formula, gives a copy-paste setup in
 both Python and R, and points you to the nearest neighbours if it isn't quite

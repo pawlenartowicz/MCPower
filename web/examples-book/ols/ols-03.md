@@ -54,6 +54,8 @@ additive continuous slopes.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-03 -->
 ```python
 from mcpower import MCPower
@@ -71,6 +73,10 @@ model.set_simulations(1600)
 model.find_power(sample_size=200, target_test="age, bmi, exercise_hours")
 ```
 <!-- /chunk:py:ols-03 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-03 -->
 ```r
@@ -90,5 +96,11 @@ invisible(model$find_power(sample_size = 200, target_test = "age, bmi, exercise_
 ```
 <!-- /chunk:r:ols-03 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-03-setup.png|600|theme-light]]
 ![[assets/ols-03-setup-dark.png|600|theme-dark]]
+
+</details>

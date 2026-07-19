@@ -54,6 +54,8 @@ regression on a single binary predictor: `remission ~ treatment`.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glm-02 -->
 ```python
 from mcpower import MCPower
@@ -73,6 +75,10 @@ model.set_baseline_probability(0.20)
 model.find_power(sample_size=200, target_test="treatment")
 ```
 <!-- /chunk:py:glm-02 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glm-02 -->
 ```r
@@ -94,5 +100,11 @@ invisible(model$find_power(sample_size = 200, target_test = "treatment"))
 ```
 <!-- /chunk:r:glm-02 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glm-02-setup.png|600|theme-light]]
 ![[assets/glm-02-setup-dark.png|600|theme-dark]]
+
+</details>

@@ -61,6 +61,8 @@ and power is reported for each contrast separately.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:lmm-09 -->
 ```python
 from mcpower import MCPower
@@ -93,6 +95,10 @@ model.set_cluster("sample", ICC=0.30, n_clusters=40)
 model.find_power(sample_size=200, target_test="condition[2], condition[3]")
 ```
 <!-- /chunk:py:lmm-09 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:lmm-09 -->
 ```r
@@ -127,5 +133,11 @@ invisible(model$find_power(sample_size = 200, target_test = "condition[2], condi
 ```
 <!-- /chunk:r:lmm-09 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/lmm-09-setup.png|600|theme-light]]
 ![[assets/lmm-09-setup-dark.png|600|theme-dark]]
+
+</details>

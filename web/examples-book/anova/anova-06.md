@@ -52,6 +52,8 @@ interaction, all read *net of* the continuous baseline and fit by OLS.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:anova-06 -->
 ```python
 from mcpower import MCPower
@@ -78,6 +80,10 @@ model.set_seed(2137)
 model.find_power(sample_size=160, target_test="treatment, sex")
 ```
 <!-- /chunk:py:anova-06 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:anova-06 -->
 ```r
@@ -106,5 +112,11 @@ invisible(model$find_power(sample_size = 160, target_test = "treatment, sex"))
 ```
 <!-- /chunk:r:anova-06 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/anova-06-setup.png|600|theme-light]]
 ![[assets/anova-06-setup-dark.png|600|theme-dark]]
+
+</details>

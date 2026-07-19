@@ -7,6 +7,11 @@ const VIEWPORT = { width: 1440, height: 900 }; // wide → two-pane layout activ
 
 const CONFIG_PANEL = 'div.flex.flex-col.gap-3\\.5.p-4';
 const FAMILY_LABEL = { regression: 'Regression', anova: 'ANOVA', mixed: 'Mixed effects' };
+// Harness-level outcomeKind (examples.mjs/config JSONs) → the app's outcome-toggle
+// button label (family.ts OUTCOME_KINDS). The four-way toggle replaced the old
+// binary-only 'Binary' button; 'binary' still means the logit link (the harness's
+// legacy name for what the app now calls 'Logit'), 'count' means the Poisson kind.
+const OUTCOME_BUTTON_LABEL = { continuous: 'Continuous', binary: 'Logit', probit: 'Probit', count: 'Poisson' };
 
 export async function bootContext({ colorScheme = 'light' } = {}) {
   const browser = await chromium.launch();
@@ -53,10 +58,12 @@ export async function driveToFamily(page, { entrypoint, outcomeKind }) {
   // Click the family radio: ANOVA/mixed hydrate on demand; clicking regression
   // (the default) is harmless and makes the step uniform.
   await page.getByRole('radio', { name: FAMILY_LABEL[entrypoint], exact: true }).click();
-  // Regression's binary outcome is a store-only toggle (not in FamilyConfig).
-  // Mixed's binary outcome rides in the seeded config.cluster.binaryOutcome.
-  if (entrypoint === 'regression' && outcomeKind === 'binary') {
-    await page.getByRole('button', { name: 'Binary', exact: true }).click();
+  // Regression's outcome kind is a store-only toggle (not in FamilyConfig) — it
+  // must be clicked after every reload. Mixed's outcome kind rides in the seeded
+  // config.cluster.outcomeKind/binaryOutcome and needs no click.
+  if (entrypoint === 'regression') {
+    const label = OUTCOME_BUTTON_LABEL[outcomeKind];
+    if (label) await page.getByRole('button', { name: label, exact: true }).click();
   }
   await page.locator(CONFIG_PANEL).waitFor({ state: 'visible' });
 }

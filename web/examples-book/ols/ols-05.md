@@ -58,6 +58,8 @@ benchmark (0.10).
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-05 -->
 ```python
 from mcpower import MCPower
@@ -75,6 +77,10 @@ model.set_seed(2137)
 model.find_power(sample_size=300, target_test="temperature:moisture:soil_ph")
 ```
 <!-- /chunk:py:ols-05 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-05 -->
 ```r
@@ -94,5 +100,11 @@ model$find_power(sample_size = 300, target_test = "temperature:moisture:soil_ph"
 ```
 <!-- /chunk:r:ols-05 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-05-setup.png|600|theme-light]]
 ![[assets/ols-05-setup-dark.png|600|theme-dark]]
+
+</details>

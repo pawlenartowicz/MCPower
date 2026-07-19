@@ -12,9 +12,55 @@ Every example page, in this order:
 5. `## Copy-paste setup` — Python then R, each in a paired chunk marker (below).
    No displayed output. These are setups, not transcripts. **This is the last
    section before the screenshot — copy-paste sits at the bottom of the page**,
-   after the prose a reader uses to confirm they're on the right page.
-6. Screenshot placeholders — `![[assets/<id>-setup-1.png|600]]` (named only;
-   backfilled later, §2.5).
+   after the prose a reader uses to confirm they're on the right page. Python,
+   R, and the screenshot each sit in their own `<details><summary>...</summary>`
+   accordion, **closed by default** (see "Accordion tail" below) — the page
+   defaults to recognition prose, not a wall of code.
+6. Screenshot embeds — the theme-swapping pair
+   `![[assets/<id>-setup.png|600|theme-light]]` /
+   `![[assets/<id>-setup-dark.png|600|theme-dark]]`, inside the screenshot
+   accordion.
+
+## Accordion tail (canonical — closed by default)
+
+Goldmark (Leyline's renderer, `html.WithUnsafe()` on) treats `<details>` as a
+raw-HTML block, so inner fenced code and `![[embed]]` render **only** with
+blank lines around the inner markdown. Canonical tail (verified against
+goldmark's raw-HTML-block handling — the blank lines are load-bearing, not
+cosmetic):
+
+```
+## Copy-paste setup
+
+<details><summary>Python setup</summary>
+
+<!-- chunk:py:<id> -->
+```python
+```
+<!-- /chunk:py:<id> -->
+
+</details>
+
+<details><summary>R setup</summary>
+
+<!-- chunk:r:<id> -->
+```r
+```
+<!-- /chunk:r:<id> -->
+
+</details>
+
+<details><summary>App setup screenshot</summary>
+
+![[assets/<id>-setup.png|600|theme-light]]
+![[assets/<id>-setup-dark.png|600|theme-dark]]
+
+</details>
+```
+
+`inject_chunks.py` still targets the `<!-- chunk:… -->` fences by regex; the
+surrounding `<details>` block is inert to it — injection fills the fence
+exactly the same whether or not it's wrapped.
 
 ## Realistic names + domain rotation
 

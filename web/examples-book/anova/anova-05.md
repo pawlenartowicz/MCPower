@@ -58,6 +58,8 @@ interaction.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:anova-05 -->
 ```python
 from mcpower import MCPower
@@ -88,6 +90,10 @@ model.set_seed(2137)
 model.find_power(sample_size=320, target_test="watering:nitrogen:light")
 ```
 <!-- /chunk:py:anova-05 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:anova-05 -->
 ```r
@@ -120,5 +126,11 @@ invisible(model$find_power(sample_size = 320, target_test = "watering:nitrogen:l
 ```
 <!-- /chunk:r:anova-05 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/anova-05-setup.png|600|theme-light]]
 ![[assets/anova-05-setup-dark.png|600|theme-dark]]
+
+</details>

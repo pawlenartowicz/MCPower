@@ -59,6 +59,8 @@ moderation hypothesis is the interaction coefficient `dose:age`.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-16 -->
 ```python
 from mcpower import MCPower
@@ -79,6 +81,10 @@ model.set_effects("dose=0.30, age=0.25, dose:age=0.15, baseline_severity=0.25")
 model.find_power(sample_size=220, target_test="dose:age")
 ```
 <!-- /chunk:py:ols-16 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-16 -->
 ```r
@@ -101,5 +107,11 @@ invisible(model$find_power(sample_size = 220, target_test = "dose:age"))
 ```
 <!-- /chunk:r:ols-16 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-16-setup.png|600|theme-light]]
 ![[assets/ols-16-setup-dark.png|600|theme-dark]]
+
+</details>

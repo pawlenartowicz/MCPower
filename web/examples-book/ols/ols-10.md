@@ -61,6 +61,8 @@ that survives adjustment for `experience_years`.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-10 -->
 ```python
 from mcpower import MCPower
@@ -82,6 +84,10 @@ model.set_effects("union_member=0.50, experience_years=0.25")
 model.find_power(sample_size=120, target_test="all", verbose=False)
 ```
 <!-- /chunk:py:ols-10 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-10 -->
 ```r
@@ -105,5 +111,11 @@ invisible(model$find_power(sample_size = 120, target_test = "all", verbose = FAL
 ```
 <!-- /chunk:r:ols-10 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-10-setup.png|600|theme-light]]
 ![[assets/ols-10-setup-dark.png|600|theme-dark]]
+
+</details>

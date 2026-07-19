@@ -52,6 +52,8 @@ likelihood (the MLE estimator for `family="lme"`).
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:lmm-05 -->
 ```python
 from mcpower import MCPower
@@ -74,6 +76,10 @@ model.set_cluster("clinic", ICC=0.10, n_clusters=40)
 model.find_power(sample_size=400, target_test="treatment")
 ```
 <!-- /chunk:py:lmm-05 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:lmm-05 -->
 ```r
@@ -98,5 +104,11 @@ invisible(model$find_power(sample_size = 400, target_test = "treatment"))
 ```
 <!-- /chunk:r:lmm-05 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/lmm-05-setup.png|600|theme-light]]
 ![[assets/lmm-05-setup-dark.png|600|theme-dark]]
+
+</details>

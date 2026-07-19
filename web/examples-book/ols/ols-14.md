@@ -54,6 +54,8 @@ non-reference habitat's slope vs the reference habitat's slope).
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-14 -->
 ```python
 from mcpower import MCPower
@@ -89,6 +91,10 @@ model.set_effects(
 model.find_power(sample_size=200, target_test="habitat[2]:rainfall, habitat[3]:rainfall")
 ```
 <!-- /chunk:py:ols-14 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-14 -->
 ```r
@@ -129,5 +135,11 @@ invisible(model$find_power(
 ```
 <!-- /chunk:r:ols-14 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-14-setup.png|600|theme-light]]
 ![[assets/ols-14-setup-dark.png|600|theme-dark]]
+
+</details>

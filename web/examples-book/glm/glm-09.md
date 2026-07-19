@@ -51,6 +51,8 @@ in every region).
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glm-09 -->
 ```python
 from mcpower import MCPower
@@ -78,6 +80,10 @@ model.set_baseline_probability(0.30)
 model.find_power(sample_size=250, target_test="experience_years")
 ```
 <!-- /chunk:py:glm-09 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glm-09 -->
 ```r
@@ -107,5 +113,11 @@ invisible(model$find_power(sample_size = 250, target_test = "experience_years"))
 ```
 <!-- /chunk:r:glm-09 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glm-09-setup.png|600|theme-light]]
 ![[assets/glm-09-setup-dark.png|600|theme-dark]]
+
+</details>

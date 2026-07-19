@@ -66,6 +66,8 @@ the interaction term `policy_group:period`, fitted as a logistic mixed model (GL
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glmm-03 -->
 ```python
 from mcpower import MCPower
@@ -106,6 +108,10 @@ model.set_cluster("individual", ICC=0.20, n_clusters=40)
 model.find_power(sample_size=240, target_test="policy_group:period")
 ```
 <!-- /chunk:py:glmm-03 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glmm-03 -->
 ```r
@@ -148,5 +154,11 @@ invisible(model$find_power(sample_size = 240, target_test = "policy_group:period
 ```
 <!-- /chunk:r:glmm-03 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glmm-03-setup.png|600|theme-light]]
 ![[assets/glmm-03-setup-dark.png|600|theme-dark]]
+
+</details>

@@ -57,6 +57,8 @@ directly.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-06 -->
 ```python
 from mcpower import MCPower
@@ -77,6 +79,10 @@ model.set_effects("nitrogen=0.40, nitrogen:water=0.25")
 model.find_power(sample_size=200, target_test="nitrogen:water")
 ```
 <!-- /chunk:py:ols-06 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-06 -->
 ```r
@@ -99,5 +105,11 @@ model$find_power(sample_size = 200, target_test = "nitrogen:water")
 ```
 <!-- /chunk:r:ols-06 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-06-setup.png|600|theme-light]]
 ![[assets/ols-06-setup-dark.png|600|theme-dark]]
+
+</details>

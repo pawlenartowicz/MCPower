@@ -56,6 +56,8 @@ rate, set with `set_baseline_probability`, which fixes the intercept.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glm-04 -->
 ```python
 from mcpower import MCPower
@@ -89,6 +91,10 @@ model.set_correlations("corr(years_education, age)=0.3")
 model.find_power(sample_size=400, target_test="years_education")
 ```
 <!-- /chunk:py:glm-04 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glm-04 -->
 ```r
@@ -124,5 +130,11 @@ model$find_power(sample_size = 400, target_test = "years_education")
 ```
 <!-- /chunk:r:glm-04 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glm-04-setup.png|600|theme-light]]
 ![[assets/glm-04-setup-dark.png|600|theme-dark]]
+
+</details>

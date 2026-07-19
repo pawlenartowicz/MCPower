@@ -49,6 +49,8 @@ effect plus a continuous control, fit by OLS.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-08 -->
 ```python
 from mcpower import MCPower
@@ -71,6 +73,10 @@ model.set_variable_type("treatment=binary")
 model.find_power(sample_size=120, target_test="treatment")
 ```
 <!-- /chunk:py:ols-08 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-08 -->
 ```r
@@ -95,5 +101,11 @@ invisible(model$find_power(sample_size = 120, target_test = "treatment"))
 ```
 <!-- /chunk:r:ols-08 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-08-setup.png|600|theme-light]]
 ![[assets/ols-08-setup-dark.png|600|theme-dark]]
+
+</details>

@@ -71,6 +71,8 @@ and a random slope of temperature per site:
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glmm-04 -->
 ```python
 from mcpower import MCPower
@@ -105,6 +107,10 @@ model.set_cluster("site", ICC=0.10, n_clusters=40,
 model.find_power(sample_size=400, target_test="temperature")
 ```
 <!-- /chunk:py:glmm-04 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glmm-04 -->
 ```r
@@ -144,5 +150,11 @@ invisible(model$find_power(sample_size = 400, target_test = "temperature"))
 ```
 <!-- /chunk:r:glmm-04 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glmm-04-setup.png|600|theme-light]]
 ![[assets/glmm-04-setup-dark.png|600|theme-dark]]
+
+</details>

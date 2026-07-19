@@ -62,6 +62,8 @@ mixed-model fit.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:lmm-02 -->
 ```python
 # NOTE: Reframed from a 2-occasion (pre/post) design to a 5-occasion repeated-
@@ -103,6 +105,10 @@ model.set_seed(2137)
 model.find_power(sample_size=300, target_test="treatment:week")
 ```
 <!-- /chunk:py:lmm-02 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:lmm-02 -->
 ```r
@@ -146,5 +152,11 @@ invisible(model$find_power(sample_size = 300, target_test = "treatment:week"))
 ```
 <!-- /chunk:r:lmm-02 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/lmm-02-setup.png|600|theme-light]]
 ![[assets/lmm-02-setup-dark.png|600|theme-dark]]
+
+</details>

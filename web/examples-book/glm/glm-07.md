@@ -62,6 +62,8 @@ are two-level factors; the test of interest is the interaction term
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glm-07 -->
 ```python
 from mcpower import MCPower
@@ -93,6 +95,10 @@ model.set_seed(2137)
 model.find_power(sample_size=400, target_test="gender:urban")
 ```
 <!-- /chunk:py:glm-07 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glm-07 -->
 ```r
@@ -126,5 +132,11 @@ invisible(model$find_power(sample_size = 400, target_test = "gender:urban"))
 ```
 <!-- /chunk:r:glm-07 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glm-07-setup.png|600|theme-light]]
 ![[assets/glm-07-setup-dark.png|600|theme-dark]]
+
+</details>

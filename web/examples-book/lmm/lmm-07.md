@@ -68,6 +68,8 @@ intercept and its own treatment slope:
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:lmm-07 -->
 ```python
 from mcpower import MCPower
@@ -107,6 +109,10 @@ model.set_cluster(
 model.find_power(sample_size=300, target_test="treatment")
 ```
 <!-- /chunk:py:lmm-07 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:lmm-07 -->
 ```r
@@ -148,5 +154,11 @@ invisible(model$find_power(sample_size = 300, target_test = "treatment"))
 ```
 <!-- /chunk:r:lmm-07 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/lmm-07-setup.png|600|theme-light]]
 ![[assets/lmm-07-setup-dark.png|600|theme-dark]]
+
+</details>

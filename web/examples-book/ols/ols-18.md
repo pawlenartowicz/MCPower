@@ -54,6 +54,8 @@ interactions — and the reported power is the power to detect that single trend
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-18 -->
 ```python
 from mcpower import MCPower
@@ -71,6 +73,10 @@ model.set_effects("dose_level=0.25")
 model.find_power(sample_size=150, target_test="dose_level")
 ```
 <!-- /chunk:py:ols-18 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-18 -->
 ```r
@@ -90,5 +96,11 @@ invisible(model$find_power(sample_size = 150, target_test = "dose_level"))
 ```
 <!-- /chunk:r:ols-18 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-18-setup.png|600|theme-light]]
 ![[assets/ols-18-setup-dark.png|600|theme-dark]]
+
+</details>

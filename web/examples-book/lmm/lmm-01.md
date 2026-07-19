@@ -50,6 +50,8 @@ model with a random intercept per patient:
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:lmm-01 -->
 ```python
 from mcpower import MCPower
@@ -73,6 +75,10 @@ model.set_cluster("patient", ICC=0.30, n_clusters=40)
 model.find_power(sample_size=200, target_test="phase")
 ```
 <!-- /chunk:py:lmm-01 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:lmm-01 -->
 ```r
@@ -98,5 +104,11 @@ invisible(model$find_power(sample_size = 200, target_test = "phase"))
 ```
 <!-- /chunk:r:lmm-01 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/lmm-01-setup.png|600|theme-light]]
 ![[assets/lmm-01-setup-dark.png|600|theme-dark]]
+
+</details>

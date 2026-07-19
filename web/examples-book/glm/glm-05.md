@@ -54,6 +54,8 @@ coefficient `biomarker_level:age`.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glm-05 -->
 ```python
 from mcpower import MCPower
@@ -79,6 +81,10 @@ model.set_effects("biomarker_level=0.30, age=0.25, biomarker_level:age=0.15")
 model.find_power(sample_size=300, target_test="biomarker_level:age")
 ```
 <!-- /chunk:py:glm-05 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glm-05 -->
 ```r
@@ -106,5 +112,11 @@ invisible(model$find_power(sample_size = 300, target_test = "biomarker_level:age
 ```
 <!-- /chunk:r:glm-05 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glm-05-setup.png|600|theme-light]]
 ![[assets/glm-05-setup-dark.png|600|theme-dark]]
+
+</details>

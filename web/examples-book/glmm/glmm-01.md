@@ -60,6 +60,8 @@ logistic model: `infection ~ treatment + (1 | hospital)`.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glmm-01 -->
 ```python
 from mcpower import MCPower
@@ -90,6 +92,10 @@ model.set_cluster("hospital", ICC=0.05, n_clusters=30)
 model.find_power(sample_size=300, target_test="treatment")
 ```
 <!-- /chunk:py:glmm-01 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glmm-01 -->
 ```r
@@ -122,5 +128,11 @@ invisible(model$find_power(sample_size = 300, target_test = "treatment"))
 ```
 <!-- /chunk:r:glmm-01 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glmm-01-setup.png|600|theme-light]]
 ![[assets/glmm-01-setup-dark.png|600|theme-dark]]
+
+</details>

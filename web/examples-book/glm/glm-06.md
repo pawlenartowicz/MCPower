@@ -57,6 +57,8 @@ interest is the interaction term `treatment:biomarker_level`.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glm-06 -->
 ```python
 from mcpower import MCPower
@@ -91,6 +93,10 @@ model.set_seed(2137)
 model.find_power(sample_size=300, target_test="treatment:biomarker_level")
 ```
 <!-- /chunk:py:glm-06 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glm-06 -->
 ```r
@@ -127,5 +133,11 @@ invisible(model$find_power(sample_size = 300, target_test = "treatment:biomarker
 ```
 <!-- /chunk:r:glm-06 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glm-06-setup.png|600|theme-light]]
 ![[assets/glm-06-setup-dark.png|600|theme-dark]]
+
+</details>

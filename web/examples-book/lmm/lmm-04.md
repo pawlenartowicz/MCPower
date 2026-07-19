@@ -70,6 +70,8 @@ estimator).
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:lmm-04 -->
 ```python
 from mcpower import MCPower
@@ -114,6 +116,10 @@ model.set_seed(2137)
 model.find_power(sample_size=480, target_test="fertilizer:week")
 ```
 <!-- /chunk:py:lmm-04 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:lmm-04 -->
 ```r
@@ -160,5 +166,11 @@ invisible(model$find_power(sample_size = 480, target_test = "fertilizer:week"))
 ```
 <!-- /chunk:r:lmm-04 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/lmm-04-setup.png|600|theme-light]]
 ![[assets/lmm-04-setup-dark.png|600|theme-dark]]
+
+</details>

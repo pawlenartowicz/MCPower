@@ -59,6 +59,8 @@ test of interest is the interaction term `treatment:baseline_bp`.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-09 -->
 ```python
 from mcpower import MCPower
@@ -84,6 +86,10 @@ model.set_seed(2137)
 model.find_power(sample_size=180, target_test="treatment:baseline_bp")
 ```
 <!-- /chunk:py:ols-09 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-09 -->
 ```r
@@ -111,5 +117,11 @@ invisible(model$find_power(sample_size = 180, target_test = "treatment:baseline_
 ```
 <!-- /chunk:r:ols-09 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-09-setup.png|600|theme-light]]
 ![[assets/ols-09-setup-dark.png|600|theme-dark]]
+
+</details>

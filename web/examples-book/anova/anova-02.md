@@ -57,6 +57,8 @@ drug_a vs drug_b), with a family-wise correction shared across the set.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:anova-02 -->
 ```python
 from mcpower import MCPower
@@ -84,6 +86,10 @@ model.find_power(
 )
 ```
 <!-- /chunk:py:anova-02 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:anova-02 -->
 ```r
@@ -113,5 +119,11 @@ invisible(model$find_power(
 ```
 <!-- /chunk:r:anova-02 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/anova-02-setup.png|600|theme-light]]
 ![[assets/anova-02-setup-dark.png|600|theme-dark]]
+
+</details>

@@ -59,6 +59,8 @@ is the chance that F-test reaches significance, not the power of any one contras
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:anova-01 -->
 ```python
 # NOTE: the omnibus F-test cannot be requested on its own — the engine requires
@@ -86,6 +88,10 @@ model.set_effects("fertilizer[2]=0.5, fertilizer[3]=0.5")
 model.find_power(sample_size=120, target_test="all")
 ```
 <!-- /chunk:py:anova-01 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:anova-01 -->
 ```r
@@ -115,5 +121,11 @@ invisible(model$find_power(sample_size = 120, target_test = "all"))
 ```
 <!-- /chunk:r:anova-01 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/anova-01-setup.png|600|theme-light]]
 ![[assets/anova-01-setup-dark.png|600|theme-dark]]
+
+</details>

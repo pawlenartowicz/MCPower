@@ -34,7 +34,8 @@ AUTHORING CONVENTIONS (load-bearing, follow verbatim):
 - Effect sizes are FABRICATED-PLAUSIBLE on the benchmark scale, never a study's raw numbers.
 - Page order (see scripts/PAGE_ANATOMY.md): title+formula -> ## Variations (with the twins block)
   -> ## Not this setup? -> ## If you'd rather have… -> ## Copy-paste setup (Python then R, at the
-  BOTTOM) -> screenshot placeholder.
+  BOTTOM) -> screenshot embed. Python setup, R setup, and the screenshot each sit in their own
+  closed-by-default <details><summary>...</summary> accordion (see PAGE_ANATOMY.md's Accordion tail).
 `
 
 const EXPRESSIBILITY = `

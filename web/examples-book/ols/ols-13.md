@@ -52,6 +52,8 @@ drives the partial coefficient's power down relative to an unadjusted look.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-13 -->
 ```python
 from mcpower import MCPower
@@ -76,6 +78,10 @@ model.set_correlations(
 model.find_power(sample_size=200, target_test="years_education")
 ```
 <!-- /chunk:py:ols-13 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-13 -->
 ```r
@@ -102,5 +108,11 @@ model$find_power(sample_size = 200, target_test = "years_education")
 ```
 <!-- /chunk:r:ols-13 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-13-setup.png|600|theme-light]]
 ![[assets/ols-13-setup-dark.png|600|theme-dark]]
+
+</details>

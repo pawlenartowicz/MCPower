@@ -55,6 +55,8 @@ variable whose own association you also want enough power to detect.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-02 -->
 ```python
 from mcpower import MCPower
@@ -74,6 +76,10 @@ model.set_effects("rainfall=0.25, soil_nitrogen=0.10")
 model.find_power(sample_size=200, target_test="rainfall, soil_nitrogen")
 ```
 <!-- /chunk:py:ols-02 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-02 -->
 ```r
@@ -95,5 +101,11 @@ invisible(model$find_power(sample_size = 200, target_test = "rainfall, soil_nitr
 ```
 <!-- /chunk:r:ols-02 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-02-setup.png|600|theme-light]]
 ![[assets/ols-02-setup-dark.png|600|theme-dark]]
+
+</details>

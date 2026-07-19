@@ -55,6 +55,8 @@ maximum likelihood (the `lme` family).
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:lmm-06 -->
 ```python
 from mcpower import MCPower
@@ -84,6 +86,10 @@ model.set_cluster("clinic", ICC=0.10, n_clusters=30)
 model.find_power(sample_size=300, target_test="treatment")
 ```
 <!-- /chunk:py:lmm-06 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:lmm-06 -->
 ```r
@@ -115,5 +121,11 @@ invisible(model$find_power(sample_size = 300, target_test = "treatment"))
 ```
 <!-- /chunk:r:lmm-06 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/lmm-06-setup.png|600|theme-light]]
 ![[assets/lmm-06-setup-dark.png|600|theme-dark]]
+
+</details>

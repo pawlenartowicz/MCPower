@@ -56,6 +56,8 @@ reported for each.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:anova-04 -->
 ```python
 from mcpower import MCPower
@@ -90,6 +92,10 @@ model.set_seed(2137)
 model.find_power(sample_size=240, target_test="sector[2]:gender[2]")
 ```
 <!-- /chunk:py:anova-04 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:anova-04 -->
 ```r
@@ -128,5 +134,11 @@ invisible(model$find_power(sample_size = 240, target_test = "sector[2]:gender[2]
 ```
 <!-- /chunk:r:anova-04 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/anova-04-setup.png|600|theme-light]]
 ![[assets/anova-04-setup-dark.png|600|theme-dark]]
+
+</details>

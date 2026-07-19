@@ -46,6 +46,8 @@ t-test, written here as a regression on a single binary predictor:
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:ols-07 -->
 ```python
 from mcpower import MCPower
@@ -62,6 +64,10 @@ model.set_effects("treatment=0.50")
 model.find_power(sample_size=120, target_test="treatment")
 ```
 <!-- /chunk:py:ols-07 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:ols-07 -->
 ```r
@@ -80,5 +86,11 @@ invisible(model$find_power(sample_size = 120, target_test = "treatment"))
 ```
 <!-- /chunk:r:ols-07 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/ols-07-setup.png|600|theme-light]]
 ![[assets/ols-07-setup-dark.png|600|theme-dark]]
+
+</details>

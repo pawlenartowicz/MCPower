@@ -63,6 +63,8 @@ intercept per patient:
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glmm-02 -->
 ```python
 from mcpower import MCPower
@@ -95,6 +97,10 @@ model.set_cluster("patient", ICC=0.10, n_clusters=50)
 model.find_power(sample_size=300, target_test="month, treatment")
 ```
 <!-- /chunk:py:glmm-02 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glmm-02 -->
 ```r
@@ -129,5 +135,11 @@ invisible(model$find_power(sample_size = 300, target_test = "month, treatment"))
 ```
 <!-- /chunk:r:glmm-02 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glmm-02-setup.png|600|theme-light]]
 ![[assets/glmm-02-setup-dark.png|600|theme-dark]]
+
+</details>

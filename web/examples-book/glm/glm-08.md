@@ -68,6 +68,8 @@ benchmark (0.10) on the log-odds scale.
 
 ## Copy-paste setup
 
+<details><summary>Python setup</summary>
+
 <!-- chunk:py:glm-08 -->
 ```python
 from mcpower import MCPower
@@ -98,6 +100,10 @@ model.set_baseline_probability(0.3)
 model.find_power(sample_size=600, target_test="light:moisture:temperature")
 ```
 <!-- /chunk:py:glm-08 -->
+
+</details>
+
+<details><summary>R setup</summary>
 
 <!-- chunk:r:glm-08 -->
 ```r
@@ -130,5 +136,11 @@ invisible(model$find_power(sample_size = 600, target_test = "light:moisture:temp
 ```
 <!-- /chunk:r:glm-08 -->
 
+</details>
+
+<details><summary>App setup screenshot</summary>
+
 ![[assets/glm-08-setup.png|600|theme-light]]
 ![[assets/glm-08-setup-dark.png|600|theme-dark]]
+
+</details>
