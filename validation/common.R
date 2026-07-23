@@ -49,6 +49,27 @@ build_model <- function(case) {
   m
 }
 
+# Build a PUBLIC MCPower (not MCPowerDebug) from a CROSS_CASES entry — the
+# crossing gate drives find_sample_size, a public orchestrator entry point, so
+# it goes through the shipped MCPower surface. Shared verbatim by the golden
+# producer (validation_crossing.rmd) and the fast gate (regression.R): the
+# family MUST come from cc so the coarse run and the frozen dense golden fit the
+# SAME model. Defined once here — a second copy is how cross_glm/cross_lme once
+# drifted (golden frozen as OLS while the gate ran logit/lme). cc carries
+# $formula/$family/$effects and optional $baseline_probability/$cluster.
+build_cross_model <- function(cc) {
+  m <- MCPower$new(cc$formula, family = cc$family)
+  m$set_effects(cc$effects)
+  if (!is.null(cc$baseline_probability)) m$set_baseline_probability(cc$baseline_probability)
+  if (!is.null(cc$cluster)) {
+    cl <- cc$cluster
+    m$set_cluster(cl$var, ICC = cl$ICC,
+                  n_clusters = cl$n_clusters %||% NULL,
+                  cluster_size = cl$cluster_size %||% NULL)
+  }
+  m
+}
+
 # ---- M2/M3/M4 model builders (lifted from validation_MLE_solving.rmd) -------
 # These builders are shared by the campaign (.rmd) and data_generation.r so
 # both drive M2/M3/M4 cases through the same MCPowerDebug setup path.

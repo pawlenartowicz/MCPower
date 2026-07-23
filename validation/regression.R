@@ -73,19 +73,8 @@ local({
   TO_SIZE       <- 300L
   N_SIMS_COARSE <- 1600L
   SEED_COARSE   <- 2138L
-
-  build_cross_model <- function(cc) {
-    m <- MCPower$new(cc$formula)
-    m$set_effects(cc$effects)
-    if (!is.null(cc$baseline_probability)) m$set_baseline_probability(cc$baseline_probability)
-    if (!is.null(cc$cluster)) {
-      cl <- cc$cluster
-      m$set_cluster(cl$var, ICC = cl$ICC,
-                    n_clusters = cl$n_clusters %||% NULL,
-                    cluster_size = cl$cluster_size %||% NULL)
-    }
-    m
-  }
+  # build_cross_model lives in common.R — shared with validation_crossing.rmd so
+  # the coarse gate and the dense golden producer can never diverge on family.
 
   for (cc in CROSS_CASES) {
     gpath <- file.path("data", paste0(cc$label, ".golden.rds"))

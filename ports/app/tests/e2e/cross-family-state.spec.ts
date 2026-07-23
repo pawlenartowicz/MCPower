@@ -60,17 +60,17 @@ test('cross-family state is isolated per family and survives switching', async (
 
   // Per-family configs are isolated across the three real families
   // (regression / anova / mixed). Logistic is NOT a separate family — it is the
-  // Binary outcome toggle inside Regression, sharing the same config object — so
+  // Logit outcome toggle inside Regression, sharing the same config object — so
   // isolation here is exercised across Regression ↔ Mixed, plus the persistence
   // of the (global) outcome toggle + baseline across a family round-trip.
   const formula = page.getByPlaceholder(/Write your formula/i);
 
-  // --- Step 1: on Regression, set a formula + flip to Binary + a baseline ---
+  // --- Step 1: on Regression, set a formula + flip to Logit + a baseline ---
   await formula.fill('y ~ x1');
   await page.waitForTimeout(300);
   await expect(formula).toHaveValue('y ~ x1');
 
-  await page.getByRole('button', { name: 'Binary' }).click();
+  await page.getByRole('button', { name: 'Logit' }).click();
   await page.getByLabel(/Baseline probability/i).fill('0.4');
 
   // --- Step 2: switch to Mixed → its own (empty) formula, isolated from Regression ---
@@ -79,12 +79,14 @@ test('cross-family state is isolated per family and survives switching', async (
   await formula.fill('y ~ x2 + (1|school)');
   await page.waitForTimeout(300);
 
-  // --- Step 3: back to Regression → formula, outcome (Binary) and baseline preserved ---
+  // --- Step 3: back to Regression → formula, outcome (Logit) and baseline preserved ---
   await page.getByRole('radio', { name: 'Regression' }).click();
   await expect(formula).toHaveValue('y ~ x1');
   await expect(page.getByLabel(/Baseline probability/i)).toHaveValue('0.4');
 
   // --- Step 4: forward to Mixed → its formula is restored ---
+  // The commit-time normalizer in FormulaInput settles `(1|school)` to the spaced
+  // `(1 | school)` for legibility, so the restored value carries the spaced pipe.
   await page.getByRole('radio', { name: 'Mixed effects' }).click();
-  await expect(formula).toHaveValue('y ~ x2 + (1|school)');
+  await expect(formula).toHaveValue('y ~ x2 + (1 | school)');
 });

@@ -42,7 +42,7 @@ pub(crate) const EPS_RANK: f64 = 1e-12;
 
 /// Process-wide BOBYQA objective-eval counters — bench diagnostics only
 /// (`bin/throughput.rs` reads before/after deltas around a row's warm-up run
-/// to report evals/fit). Fed once per LMM/GLMM fit at the `fit_lmm`/`fit_glmm`
+/// to report evals/fit). Fed once per LMM/GLMM fit at the `fit_on`
 /// call sites below; relaxed atomics, one add per multi-millisecond fit, so
 /// the hot loop is unaffected and results cannot move.
 pub mod optim_diag {
@@ -206,6 +206,13 @@ fn run_batch_impl(
     mut stat_capture: Option<&mut Vec<f64>>, // (n_sims, n_targets) row-major; sequential only
 ) -> Result<BatchResult, EngineError> {
     // ---------------- 1. Validation ----------------
+    // The mixed arms' grid-sequential θ̂ warm-start carries the previous grid
+    // point's θ̂ forward, which is only meaningful walking ascending N. Nothing
+    // else in the batch depends on the order, so this pins the carry's premise.
+    debug_assert!(
+        sample_sizes.windows(2).all(|w| w[0] <= w[1]),
+        "sample_sizes must be ascending — the mixed θ̂ warm-start carry assumes it"
+    );
     // exhaustiveness guard: adding a new EstimatorSpec variant forces a compile error here.
     match spec.estimator {
         EstimatorSpec::Ols | EstimatorSpec::Glm | EstimatorSpec::Mle => {}
@@ -529,10 +536,22 @@ fn run_batch_impl(
         // change together.
         ws.lme_joint_rhs
             .resize(n_predictors_total.max(n_targets), 0.0);
-        ws.lmm = crate::mixed_workspace::build_lmm_workspace(spec, max_n, n_predictors_total);
-        // Mutually exclusive with lmm: build_lmm_workspace requires Mle,
-        // build_glmm_workspace requires Glm+cluster (returns None otherwise).
-        ws.glmm = crate::mixed_workspace::build_glmm_workspace(spec, max_n, n_predictors_total);
+        // One `fit_on` workspace + ids per grid point; `None` for OLS /
+        // unclustered GLM. Bound before the assignment so the `&ws.*` id borrows
+        // end before `ws.mixed*` is written. Mirrors the rayon init below —
+        // change together.
+        let mixed_built = crate::mixed_workspace::build_mixed_workspaces(
+            spec,
+            sample_sizes,
+            n_predictors_total,
+            &ws.cluster_ids,
+            &ws.extra_grouping_ids,
+        );
+        if let Some((mixed, mixed_ids, mixed_opts)) = mixed_built {
+            ws.mixed = mixed;
+            ws.mixed_ids = mixed_ids;
+            ws.mixed_opts = mixed_opts;
+        }
         let zipped = unc_per_sim
             .into_iter()
             .zip(cor_per_sim)
@@ -643,17 +662,20 @@ fn run_batch_impl(
                         // sequential site above, change together.
                         ws.lme_joint_rhs
                             .resize(n_predictors_total.max(n_targets), 0.0);
-                        ws.lmm = crate::mixed_workspace::build_lmm_workspace(
+                        // Per-grid-point `fit_on` workspaces — mirrors the
+                        // sequential site above, change together.
+                        let mixed_built = crate::mixed_workspace::build_mixed_workspaces(
                             spec,
-                            max_n,
+                            sample_sizes,
                             n_predictors_total,
+                            &ws.cluster_ids,
+                            &ws.extra_grouping_ids,
                         );
-                        // Mutually exclusive with lmm (see sequential site).
-                        ws.glmm = crate::mixed_workspace::build_glmm_workspace(
-                            spec,
-                            max_n,
-                            n_predictors_total,
-                        );
+                        if let Some((mixed, mixed_ids, mixed_opts)) = mixed_built {
+                            ws.mixed = mixed;
+                            ws.mixed_ids = mixed_ids;
+                            ws.mixed_opts = mixed_opts;
+                        }
                         ws
                     },
                     |ws,
@@ -1191,19 +1213,27 @@ fn run_one_sim(
         }
         EstimatorSpec::Mle => {
             // No cross-N reuse: cluster_ids depend on N because
-            // cluster_size = N/n_clusters changes, so the
-            // suff-stats accumulator is rebuilt per (sim, N).
-            // Posthoc is rejected at batch entry above.
-            use faer::reborrow::IntoConst;
+            // cluster_size = N/n_clusters changes, so each grid point has its own
+            // `fit_on` workspace (`ws.mixed[n_idx]`). Posthoc is rejected at batch
+            // entry above. Both the general and the (former scalar-intercept)
+            // degenerate LMM now route through one `fit_on` — the retired scalar
+            // Brent path is gone (Brent → BOBYQA; a deliberate numeric move on the
+            // scalar-intercept case, handled in a later verification task).
+            let cluster = spec.cluster.as_ref().expect("Mle requires ClusterSpec");
+            // Grid-sequential warm-start: no carry into the first grid point of this
+            // sim. Reset per sim so nothing crosses sims (work-stolen order is
+            // non-deterministic — the carry is safe only walked in ascending N by the
+            // single worker owning this sim; see batch.rs:149).
+            ws.has_prev = false;
             for (n_idx, &n) in sample_sizes.iter().enumerate() {
                 let n_usize = n as usize;
+                let p = n_predictors_total;
 
                 // Update exclusion flags BEFORE the fit — mirrors the GLM arm's
-                // placement and gating. MLE rebuilds suff-stats from scratch per
-                // (sim, N), so recount from 0..n_usize on every grid point; the
-                // flags always reflect the exact N rows used.
-                // min_count == 0 ⇒ feature disabled — flags stay zero from the
-                // per-sim reset.
+                // placement and gating. MLE rebuilds per (sim, N), so recount from
+                // 0..n_usize on every grid point; the flags always reflect the exact
+                // N rows used. min_count == 0 ⇒ feature disabled — flags stay zero
+                // from the per-sim reset.
                 if n_factors > 0 && spec.factor_min_level_count > 0 {
                     ws.factor_prefix_counts.fill(0);
                     update_factor_exclusions(
@@ -1221,88 +1251,34 @@ fn run_one_sim(
                 let any_excluded = ws.factor_excluded_flags.iter().any(|&c| c != 0);
                 let needs_reduced_fit = any_excluded || test_reduces;
 
-                // Exclusion scratch — round-scope locals, cold path (mirrors
-                // the GLM arm). Zero-alloc until an excluded round fires.
+                // Reduced-model scratch — round-scope locals, cold path (mirrors the
+                // GLM arm). Zero-alloc until an excluded / test_formula round fires.
                 let mut excl_kept_cols: Vec<u32> = Vec::new();
                 let mut excl_col_remap: Vec<i32> = Vec::new();
                 let mut excl_targets: Vec<u32> = Vec::new();
-                // excl_target_slots: maps position in excl_targets back to
-                // position in spec.target_indices (for scatter-back gather).
+                // excl_target_slots: maps position in excl_targets back to position
+                // in spec.target_indices (for scatter-back gather).
                 let mut excl_target_slots: Vec<usize> = Vec::new();
-                // excl_x: reduced design matrix (n_usize × p_red); sized on first use.
-                // f32 to match the data plane (copied from x_full, fed to f32 fits).
-                let mut excl_x = faer::Mat::<f64>::zeros(0, 0);
-                // General-path cold-path workspace (exclusion rounds rebuild
-                // reduced-p suff stats; cold path only — mirrors red_lme_*).
-                // Stays `None` on the hot/Brent paths; the cold general branch
-                // overwrites it before the LmeFitView borrows it.
+                // Cold-path one-shot reduced-spec workspace; must outlive the `view`
+                // borrow taken from it below. Stays `None` on the hot path (the
+                // `None` init is overwritten before read on the cold path only).
                 #[allow(unused_assignments)]
-                let mut excl_lmm: Option<Box<glmm::loop_advanced::LmmWorkspace>> = None;
+                let mut red_ws: Option<glmm::loop_advanced::FitWorkspace> = None;
 
                 // p_red: reduced predictor count — n_predictors_total on the hot path.
                 let p_red: usize;
-
-                // Reduced suff-stats buffers — cold-path allocations only on the
-                // excluded branch. Declared here so they stay alive for the borrow
-                // taken by LmeSuffStats and LmeScratch below.
-                // (Cold path; mirrors the GLM arm's excl_x allocation.)
-                let mut red_lme_xtx;
-                let mut red_lme_xty;
-                let mut red_lme_yty;
-                let mut red_lme_sum_xc;
-                // Reduced-scratch p-sized output buffers; subslices of workspace
-                // on the hot path, local vecs on the cold path.
-                let mut red_lme_xtvix;
-                let mut red_lme_xtviy;
-                let mut red_lme_xtvix_factor;
-                let mut red_lme_betas;
-                let mut red_lme_var_diag;
-                let mut red_lme_t_sq;
-                let mut red_lme_u_scratch;
-                let mut red_lme_joint_sigma_t_chol;
-                let mut red_lme_joint_rhs;
-                let mut red_lme_joint_k_inv;
-
                 if !needs_reduced_fit {
-                    p_red = n_predictors_total;
-                    // Hot path: point the reduced aliases at the workspace buffers
-                    // (same as the pre-exclusion code, just renamed for uniformity).
-                    // These are not used — the hot path builds LmeScratch directly
-                    // from workspace fields below.
-                    // Suppress unused-variable lints with a unit assignment.
-                    red_lme_xtx = faer::Mat::<f64>::zeros(0, 0);
-                    red_lme_xty = Vec::<f64>::new();
-                    red_lme_yty = 0.0f64;
-                    red_lme_sum_xc = faer::Mat::<f64>::zeros(0, 0);
-                    red_lme_xtvix = faer::Mat::<f64>::zeros(0, 0);
-                    red_lme_xtviy = Vec::<f64>::new();
-                    red_lme_xtvix_factor = faer::Mat::<f64>::zeros(0, 0);
-                    red_lme_betas = Vec::<f64>::new();
-                    red_lme_var_diag = Vec::<f64>::new();
-                    red_lme_t_sq = Vec::<f64>::new();
-                    red_lme_u_scratch = Vec::<f64>::new();
-                    red_lme_joint_sigma_t_chol = faer::Mat::<f64>::zeros(0, 0);
-                    red_lme_joint_rhs = Vec::<f64>::new();
-                    red_lme_joint_k_inv = faer::Mat::<f64>::zeros(0, 0);
+                    p_red = p;
                 } else {
-                    // --- reduced model: copy kept columns into excl_x,
-                    // rebuild suff-stats, build remapped targets ---
-                    // (cold path — mirrors the GLM arm; comments cite GLM arm by name)
-                    excl_col_remap.resize(n_predictors_total, -1);
+                    // Cold path: build the exclusion remap (mirrors the GLM arm).
+                    excl_col_remap.resize(p, -1);
                     p_red = build_exclusion_remap(
                         spec,
                         &ws.factor_excluded_flags,
                         &mut excl_kept_cols,
                         &mut excl_col_remap,
                     );
-                    // Copy kept columns of x_full into excl_x (mirrors GLM arm).
-                    excl_x = faer::Mat::<f64>::zeros(n_usize, p_red);
-                    for (rj, &cj) in excl_kept_cols.iter().enumerate() {
-                        for i in 0..n_usize {
-                            excl_x[(i, rj)] = ws.x_full_f64[(i, cj as usize)];
-                        }
-                    }
-                    // Remap targets; dropped targets will carry NaN in the gather below.
+                    // Remap targets; dropped targets carry NaN in the gather below.
                     for (slot, &ti) in spec.target_indices.iter().enumerate() {
                         let r = excl_col_remap[ti as usize];
                         if r >= 0 {
@@ -1310,332 +1286,154 @@ fn run_one_sim(
                             excl_target_slots.push(slot);
                         }
                     }
-
-                    // Allocate reduced suff-stat + scratch buffers (cold path).
-                    // Cluster-indexed buffers (sum_yc, cluster_sizes, v_diag_inv) are
-                    // reused from the workspace — their dimension is max_n_clusters,
-                    // independent of P. Only predictor-indexed buffers change size.
-                    // Cold-path locals are fresh allocations rather than submatrix_mut/
-                    // slice views into the workspace — no borrow obstacle prevents it,
-                    // but uniform ownership avoids split-borrow lifetime gymnastics.
-                    let max_k = ws.lme_sum_yc.len();
-                    red_lme_xtx = faer::Mat::<f64>::zeros(p_red, p_red);
-                    red_lme_xty = vec![0.0; p_red];
-                    red_lme_yty = 0.0;
-                    red_lme_sum_xc = faer::Mat::<f64>::zeros(p_red, max_k);
-                    // Scratch buffers: xtvix/xtviy/xtvix_factor sized p_red×p_red.
-                    red_lme_xtvix = faer::Mat::<f64>::zeros(p_red, p_red);
-                    red_lme_xtviy = vec![0.0; p_red];
-                    red_lme_xtvix_factor = faer::Mat::<f64>::zeros(p_red, p_red);
-                    red_lme_betas = vec![0.0; p_red];
-                    red_lme_var_diag = vec![0.0; p_red];
-                    red_lme_t_sq = vec![0.0; p_red];
-                    red_lme_u_scratch = vec![0.0; p_red];
-                    // Joint Wald scratch: p_red × p_red.
-                    red_lme_joint_sigma_t_chol = faer::Mat::<f64>::zeros(p_red, p_red);
-                    red_lme_joint_rhs = vec![0.0; p_red];
-                    // joint_k_inv starts as zeros; joint_wald_chi_sq self-initializes
-                    // the identity before solving (see lme.rs step 2 comment).
-                    red_lme_joint_k_inv = faer::Mat::<f64>::zeros(p_red, p_red);
                 }
 
-                // Per (sim, N) reset + suff-stats build.
-                // Hot path: build from the full design (ws.x_full).
-                // Cold path (needs_reduced_fit): build from excl_x (reduced columns).
-                // Cluster structure is preserved in both cases — only predictor
-                // COLUMNS shrink; rows and cluster_ids are untouched.
-                // Brent-path suff-stats build — skipped on the general lmm
-                // path, which builds its own multi-grouping suff via
-                // ws.lmm.suff and never touches the lme_* buffers.
-                let n_clusters = if ws.lmm.is_none() {
-                    ws.reset_lme_suff_stats();
-                    {
-                        let (x_to_fit, suff_xtx, suff_xty, suff_yty, suff_sum_xc) =
-                            if !needs_reduced_fit {
-                                (
-                                    ws.x_full_f64.as_ref().subrows(0, n_usize),
-                                    ws.lme_xtx.as_mut(),
-                                    ws.lme_xty.as_mut_slice(),
-                                    &mut ws.lme_yty,
-                                    ws.lme_sum_xc.as_mut(),
-                                )
-                            } else {
-                                (
-                                    excl_x.as_ref(),
-                                    red_lme_xtx.as_mut(),
-                                    red_lme_xty.as_mut_slice(),
-                                    &mut red_lme_yty,
-                                    red_lme_sum_xc.as_mut(),
-                                )
-                            };
-                        let mut suff = glmm::loop_advanced::LmeSuffStats {
-                            xtx: suff_xtx,
-                            xty: suff_xty,
-                            yty: suff_yty,
-                            sum_xc: suff_sum_xc,
-                            sum_yc: &mut ws.lme_sum_yc,
-                            cluster_sizes: &mut ws.lme_cluster_sizes,
-                            n_clusters_seen: &mut ws.lme_n_clusters_seen,
-                            // The reduced/cold arm fits p_red ≤ P columns, so the
-                            // workspace panel (PANEL_ROWS·P) is large enough for
-                            // either arm.
-                            panel_x: &mut ws.panel_x,
-                            panel_y: &mut ws.panel_y,
-                        };
-                        let y_slice = &ws.y_full_f64[..n_usize];
-                        let cid_slice = &ws.cluster_ids[..n_usize];
-                        suff.add_rows(x_to_fit, y_slice, cid_slice);
-                    }
-                    // Snapshot the cluster count seen by suff-stats
-                    // before the scratch borrow lifts the field.
-                    ws.lme_n_clusters_seen
-                } else {
-                    0 // unused on the general path
-                };
-
-                // Truth start (spec/design-derived; see the lme_fit doc
-                // comment): the realised per-sim τ² — including the L5 ICC
-                // jitter — is in ws.tau_squared_design, and residuals are
-                // unit-variance by construction, so θ_true = √τ²_design
-                // exactly. Read before the scratch borrow lifts the field.
-                let theta_start = Some(ws.tau_squared_design.max(0.0).sqrt());
-
-                // Build LmeScratch via inline reborrow — mirrors
-                // build_lme_scratch in lme.rs::tests.
-                // Hot path: borrow workspace P-sized buffers directly.
-                // Cold path: borrow the reduced p_red-sized local buffers.
-                //
-                // `lmm_pc` captures per-component bitmask from the general lmm
-                // path (LmmFit.pinned_components); Brent path encodes bit 0 from
-                // boundary_hit; OLS/Glm leave the pre-zeroed 0. Written to
-                // pc[n_idx] at the common write-site below.
-                let mut lmm_pc = 0u64;
-                let (targets_fit, fit) = if ws.lmm.is_some() {
-                    // ---- general lmm path (non-degenerate ClusterSpec) ----
-                    // Field-disjoint borrows: `lmm` lives behind ws.lmm; the
-                    // id/data buffers are sibling fields.
-                    let y_slice = &ws.y_full_f64[..n_usize];
-                    let cid_slice = &ws.cluster_ids[..n_usize];
+                let (targets_fit, view): (&[u32], glmm::loop_advanced::FitView) =
                     if !needs_reduced_fit {
-                        let lmm = ws.lmm.as_deref_mut().expect("checked is_some");
-                        lmm.suff.reset();
-                        lmm.suff.add_rows_multi(
-                            ws.x_full_f64.as_ref().subrows(0, n_usize),
-                            y_slice,
-                            cid_slice,
-                            &ws.extra_grouping_ids,
-                            None, // weights: MCPower has no prior-observation-weights feature
-                        );
-                        // Truth-start under the scenario's `truth_start` assumption:
-                        // seed the optimizer at the DGP-truth θ (well-behaved
+                        // `fit_on` takes row-major x[i·p + j]; `x_full_f64` is
+                        // column-major faer, so materialize this draw's design into
+                        // the row-major scratch first (a per-draw n×p copy — a
+                        // settled decision).
+                        for i in 0..n_usize {
+                            for j in 0..p {
+                                ws.x_rowmajor[i * p + j] = ws.x_full_f64[(i, j)];
+                            }
+                        }
+                        // Truth start under the scenario's `truth_start` assumption:
+                        // seed the optimizer at the DGP-truth [β | θ] (well-behaved
                         // estimation) or start blind. NOT a speed knob — the MLE is
                         // start-sensitive, so warm vs cold can converge to different
-                        // optima; that is the assumption's whole point. MIRRORS
-                        // introspect::fit_provided_data's general arm — hot loop and
-                        // debug path must derive the same hint; change together.
-                        let cluster = spec.cluster.as_ref().expect("lmm ⇒ cluster");
-                        let theta = crate::mixed_workspace::truth_theta(cluster, true);
-                        let start = spec.scenario.truth_start.then_some(&theta[..]);
-                        let f = glmm::loop_advanced::fit_lmm(lmm, &spec.target_indices, start);
-                        optim_diag::record_fit(f.n_eval, f.converged, f.boundary_hit == 1);
-                        lmm_pc = f.pinned_components; // general lmm arm: full bitmask
-                        let lmm = ws.lmm.as_deref().expect("checked is_some");
-                        (
-                            &spec.target_indices[..],
-                            glmm::loop_advanced::LmeFitView {
-                                betas: &lmm.fit.betas,
-                                var_diag: &lmm.fit.var_diag,
-                                t_sq: &lmm.fit.t_sq,
-                                factor: lmm.fit.factor.as_ref(),
-                                sigma_sq: f.sigma_sq,
-                                // Scalar τ̂² is not meaningful for a general
-                                // multi-component fit and is unused on this hot
-                                // path (only introspect's scalar Mle branch
-                                // reads it).
-                                tau_sq_hat: f64::NAN,
-                                converged: f.converged,
-                                boundary_hit: f.boundary_hit,
-                                n_iter: 0, // not a Brent fit
-                                n_evals: f.n_eval as u32,
-                                joint_t_sq: f.joint_t_sq,
-                            },
-                        )
+                        // optima; that is the assumption's whole point. LMM ignores
+                        // the β start (start-independent in β); it threads only θ.
+                        // MIRRORS introspect::fit_provided_data's general arm — hot
+                        // loop and debug path must derive the same hint; change
+                        // together. (introspect fits one dataset, no grid, so
+                        // `has_prev` is never set there — the mirror holds for the
+                        // first-point/cold/truth start only.)
+                        //
+                        // Grid-sequential warm start: after the first converged grid
+                        // point, override θ with the carried θ̂ (same population θ, so
+                        // θ̂(N_{k-1}) is near-optimal for N_k). fit_on→fit_lmm threads
+                        // the FULL θ̂ vech, each component clamped to THETA_TRUTH_FLOOR
+                        // = 0.01 (lmm.rs) — the diagonal Cholesky entries warm-start
+                        // faithfully; off-diagonal entries are floored at 0.01, so a
+                        // negative/sub-floor correlation start cannot be expressed
+                        // (NOT diagonal-only, and NOT cold-at-0 for off-diagonals).
+                        // β stays as this site builds it (LMM ignores it anyway).
+                        let theta = if ws.has_prev {
+                            ws.theta_carry.clone()
+                        } else {
+                            crate::mixed_workspace::truth_theta(cluster, true)
+                        };
+                        let start =
+                            (ws.has_prev || spec.scenario.truth_start).then(|| glmm::StartValues {
+                                beta: spec.effect_sizes.clone(),
+                                theta,
+                            });
+                        let view = glmm::loop_advanced::fit_on(
+                            &mut ws.mixed[n_idx],
+                            &ws.x_rowmajor[..n_usize * p],
+                            &ws.y_full_f64[..n_usize],
+                            &ws.mixed_ids[n_idx],
+                            start.as_ref(),
+                            &ws.mixed_opts,
+                        );
+                        (&spec.target_indices[..], view)
                     } else {
-                        // Cold path: reduced design → fresh reduced-p lmm
-                        // workspace (cold-path alloc, mirrors red_lme_*).
-                        // Intercept-only layout: the reduced model excludes target columns;
-                        // slope col indices from the full design don't map to p_red (Task 5+).
-                        let cluster = spec.cluster.as_ref().expect("lmm ⇒ cluster");
+                        // Cold path: build a one-shot reduced-spec `FitWorkspace` and
+                        // `fit_on` it — a per-fit allocation, same cost profile as the
+                        // retired reduced fit. The reduced design keeps every row
+                        // (only columns shrink), so the RE level ids are unchanged —
+                        // reuse this grid point's ids.
+                        let ids = &ws.mixed_ids[n_idx];
+                        // Reduced row-major design (n × p_red) — copy the kept columns.
+                        let mut red_x = vec![0.0f64; n_usize * p_red];
+                        for i in 0..n_usize {
+                            for (rj, &cj) in excl_kept_cols.iter().enumerate() {
+                                red_x[i * p_red + rj] = ws.x_full_f64[(i, cj as usize)];
+                            }
+                        }
+                        // Strip every random slope (primary + extras) so q_g = 1
+                        // everywhere: a random slope may reference a fixed column the
+                        // reduced design no longer carries, and the reduced columns
+                        // don't map to the full-design slope cols.
+                        // Slopes are stripped anyway (see below), so the design-column
+                        // args are irrelevant here — pass empty.
                         let mut model = crate::mixed_workspace::cluster_to_model_spec(
                             cluster,
                             glmm::Family::Gaussian,
+                            &[],
+                            &[],
                         );
-                        // The reduced-p exclusion fit drops random slopes (primary via
-                        // the `&[]` slope_cols below; extras here) — the full-design
-                        // slope columns don't map to p_red. Stripping the extra slopes
-                        // keeps q_g = 1 so the scalar tail (not the blocked path) runs.
-                        // `re` is always `Some` (cluster_to_model_spec is mixed-only).
-                        for grp in &mut model.re.as_mut().expect("mixed model").extra_groupings {
-                            grp.slopes.clear();
+                        if let Some(re) = model.re.as_mut() {
+                            re.slopes.clear();
+                            for g in &mut re.extra_groupings {
+                                g.slopes.clear();
+                            }
                         }
-                        excl_lmm = Some(Box::new(
-                            glmm::loop_advanced::LmmWorkspace::for_cluster_spec(
-                                p_red,
-                                &model,
-                                n_usize,
-                                &[],
-                            ),
-                        ));
-                        let lmm = excl_lmm.as_deref_mut().expect("just set");
-                        lmm.suff.add_rows_multi(
-                            excl_x.as_ref(),
-                            y_slice,
-                            cid_slice,
-                            &ws.extra_grouping_ids,
-                            None, // weights: MCPower has no prior-observation-weights feature
-                        );
-                        // Truth-start under the scenario's `truth_start` assumption
-                        // — mirrors the hot branch + introspect; change together.
-                        // The exclusion fit drops all random slopes (q_g = 1 per
-                        // grouping), so the θ must too: `include_slopes = false`
-                        // yields one intercept scalar τ per grouping.
+                        // Its OWN FitOptions — target_indices is the reduced set
+                        // (differs from the hot workspace's frozen opts). wald_se is
+                        // inert for a Gaussian LMM; mirror the batch opts anyway.
+                        let opts_red = glmm::FitOptions {
+                            target_indices: excl_targets.clone(),
+                            wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
+                            nagq: spec.nagq,
+                            ..Default::default()
+                        };
+                        // The exclusion fit drops all random slopes, so its θ warm
+                        // start must too: `include_slopes = false` yields one intercept
+                        // scalar τ per grouping. β is ignored by the LMM arm.
                         let theta = crate::mixed_workspace::truth_theta(cluster, false);
-                        let start = spec.scenario.truth_start.then_some(&theta[..]);
-                        let f = glmm::loop_advanced::fit_lmm(lmm, &excl_targets, start);
-                        optim_diag::record_fit(f.n_eval, f.converged, f.boundary_hit == 1);
-                        lmm_pc = f.pinned_components; // general lmm arm: full bitmask
-                        let lmm = excl_lmm.as_deref().expect("just set");
-                        (
-                            &excl_targets[..],
-                            glmm::loop_advanced::LmeFitView {
-                                betas: &lmm.fit.betas,
-                                var_diag: &lmm.fit.var_diag,
-                                t_sq: &lmm.fit.t_sq,
-                                factor: lmm.fit.factor.as_ref(),
-                                sigma_sq: f.sigma_sq,
-                                // See the hot-path note above — scalar τ̂² unused
-                                // for a general multi-component fit.
-                                tau_sq_hat: f64::NAN,
-                                converged: f.converged,
-                                boundary_hit: f.boundary_hit,
-                                n_iter: 0,
-                                n_evals: f.n_eval as u32,
-                                joint_t_sq: f.joint_t_sq,
-                            },
-                        )
-                    }
-                } else if !needs_reduced_fit {
-                    let scratch = glmm::loop_advanced::LmeScratch {
-                        xtx: ws.lme_xtx.as_ref(),
-                        xty: &ws.lme_xty,
-                        yty: ws.lme_yty,
-                        ols_scratch: OlsScratch {
-                            fit_betas: &mut ws.fit_betas,
-                            fit_var_diag: &mut ws.fit_var_diag,
-                            fit_t_sq: &mut ws.fit_t_sq,
-                            fit_u_scratch: &mut ws.fit_u_scratch,
-                            fit_factor: ws.fit_factor.as_mut(),
-                            fit_rhs: ws.fit_rhs.as_mut(),
-                        },
-                        sum_xc: ws.lme_sum_xc.as_mut().into_const(),
-                        sum_yc: &ws.lme_sum_yc,
-                        cluster_sizes: &ws.lme_cluster_sizes,
-                        n_clusters,
-                        n_rows: n,
-                        xtvix: ws.lme_xtvix.as_mut(),
-                        xtviy: &mut ws.lme_xtviy,
-                        xtvix_factor: ws.lme_xtvix_factor.as_mut(),
-                        v_diag_inv: &mut ws.lme_v_diag_inv,
-                        betas: &mut ws.lme_betas,
-                        var_diag: &mut ws.lme_var_diag,
-                        t_sq: &mut ws.lme_t_sq,
-                        u_scratch: &mut ws.lme_u_scratch,
-                        sigma_sq: 0.0,
-                        brent_log_a: &mut ws.lme_brent_log_a,
-                        brent_log_b: &mut ws.lme_brent_log_b,
-                        brent_log_c: &mut ws.lme_brent_log_c,
-                        brent_fa: &mut ws.lme_brent_fa,
-                        brent_fb: &mut ws.lme_brent_fb,
-                        brent_fc: &mut ws.lme_brent_fc,
-                        joint_sigma_t_chol: ws.lme_joint_sigma_t_chol.as_mut(),
-                        joint_rhs: &mut ws.lme_joint_rhs,
-                        joint_k_inv: ws.lme_joint_k_inv.as_mut(),
+                        let beta: Vec<f64> = excl_kept_cols
+                            .iter()
+                            .map(|&cj| spec.effect_sizes[cj as usize])
+                            .collect();
+                        let start = spec
+                            .scenario
+                            .truth_start
+                            .then_some(glmm::StartValues { beta, theta });
+                        let sized = glmm::loop_advanced::spec_sized_from_ids_pub(&model, ids);
+                        red_ws = Some(glmm::loop_advanced::build_workspace(
+                            &sized, n_usize, p_red, &opts_red,
+                        ));
+                        let view = glmm::loop_advanced::fit_on(
+                            red_ws.as_mut().expect("just set"),
+                            &red_x,
+                            &ws.y_full_f64[..n_usize],
+                            ids,
+                            start.as_ref(),
+                            &opts_red,
+                        );
+                        (&excl_targets[..], view)
                     };
-                    let x_slice = ws.x_full_f64.as_ref().subrows(0, n_usize);
-                    let y_slice = &ws.y_full_f64[..n_usize];
-                    let cid_slice = &ws.cluster_ids[..n_usize];
-                    let f = glmm::loop_advanced::lme_fit(
-                        x_slice,
-                        y_slice,
-                        cid_slice,
-                        &spec.target_indices,
-                        theta_start,
-                        scratch,
-                    );
-                    (&spec.target_indices[..], f)
-                } else {
-                    // Cold path: reduced design. The ols_scratch fields are required
-                    // by the struct but unused by lme_fit today (τ̂≈0 path uses
-                    // profiled_deviance, not fit_suff_stats_t_sq). Views are sized
-                    // p_red to satisfy the struct; no other invariant is load-bearing.
-                    let scratch = glmm::loop_advanced::LmeScratch {
-                        xtx: red_lme_xtx.as_ref(),
-                        xty: &red_lme_xty,
-                        yty: red_lme_yty,
-                        ols_scratch: OlsScratch {
-                            fit_betas: &mut ws.fit_betas[..p_red],
-                            fit_var_diag: &mut ws.fit_var_diag[..p_red],
-                            fit_t_sq: &mut ws.fit_t_sq[..p_red],
-                            fit_u_scratch: &mut ws.fit_u_scratch[..p_red],
-                            fit_factor: ws.fit_factor.as_mut().submatrix_mut(0, 0, p_red, p_red),
-                            fit_rhs: ws.fit_rhs.as_mut().subrows_mut(0, n_usize.max(p_red)),
-                        },
-                        sum_xc: red_lme_sum_xc.as_ref(),
-                        sum_yc: &ws.lme_sum_yc,
-                        cluster_sizes: &ws.lme_cluster_sizes,
-                        n_clusters,
-                        n_rows: n,
-                        xtvix: red_lme_xtvix.as_mut(),
-                        xtviy: &mut red_lme_xtviy,
-                        xtvix_factor: red_lme_xtvix_factor.as_mut(),
-                        v_diag_inv: &mut ws.lme_v_diag_inv,
-                        betas: &mut red_lme_betas,
-                        var_diag: &mut red_lme_var_diag,
-                        t_sq: &mut red_lme_t_sq,
-                        u_scratch: &mut red_lme_u_scratch,
-                        sigma_sq: 0.0,
-                        brent_log_a: &mut ws.lme_brent_log_a,
-                        brent_log_b: &mut ws.lme_brent_log_b,
-                        brent_log_c: &mut ws.lme_brent_log_c,
-                        brent_fa: &mut ws.lme_brent_fa,
-                        brent_fb: &mut ws.lme_brent_fb,
-                        brent_fc: &mut ws.lme_brent_fc,
-                        joint_sigma_t_chol: red_lme_joint_sigma_t_chol.as_mut(),
-                        joint_rhs: &mut red_lme_joint_rhs,
-                        joint_k_inv: red_lme_joint_k_inv.as_mut(),
-                    };
-                    let y_slice = &ws.y_full_f64[..n_usize];
-                    let cid_slice = &ws.cluster_ids[..n_usize];
-                    let f = glmm::loop_advanced::lme_fit(
-                        excl_x.as_ref(),
-                        y_slice,
-                        cid_slice,
-                        &excl_targets,
-                        theta_start,
-                        scratch,
-                    );
-                    (&excl_targets[..], f)
-                };
+                optim_diag::record_fit(view.n_eval(), view.converged(), view.boundary_hit() == 1);
 
-                conv[n_idx] = u8::from(fit.converged);
-                bh[n_idx] = fit.boundary_hit;
-                // Brent path (ws.lmm.is_none()): derive bit 0 from boundary_hit.
-                // General lmm path: lmm_pc was set from LmmFit.pinned_components above.
-                pc[n_idx] = if ws.lmm.is_none() {
-                    u64::from(fit.boundary_hit == 1)
-                } else {
-                    lmm_pc
-                };
+                let converged = view.converged();
+                let joint_t_sq = view.joint_t_sq();
+                // Predictor-indexed (module-header invariant): hot path length p,
+                // cold path length p_red.
+                let t_sq = view.t_sq();
+
+                // Grid-sequential warm-start update — HOT path only (the reduced/
+                // exclusion cold fit strips slopes → a different n_theta, so its θ̂
+                // must never seed the full-RE next point). A diverged θ̂ is noise —
+                // keep the last good carry. A Sparse-routed `Prebuilt` view exposes
+                // no θ̂ (`view.theta()` is `&[]`); skip so the carry keeps its last
+                // good value rather than being cleared to empty.
+                if !needs_reduced_fit && converged {
+                    let th = view.theta();
+                    if !th.is_empty() {
+                        ws.theta_carry.clear();
+                        ws.theta_carry.extend_from_slice(th);
+                        ws.has_prev = true;
+                    }
+                }
+
+                conv[n_idx] = u8::from(converged);
+                bh[n_idx] = view.boundary_hit();
+                // Per-component boundary bitmask straight off the fit (BOBYQA on
+                // both the general and the former scalar-intercept path now).
+                pc[n_idx] = view.pinned_components();
                 // LME overall_crit is INFINITY (hardwired — critvals.rs §Mle),
                 // so overall is always 0. No df adjustment needed.
                 //
@@ -1652,13 +1450,11 @@ fn run_one_sim(
                     overall[n_idx] = 0;
                 }
 
-                // Joint Wald-χ² significance. Per-N
-                // crit value lives at `crit.joint_t_crit_sq[n_idx]`.
-                // The LME joint Wald-χ² test lies outside
-                // the family-wise correction set, so
-                // `joint_cor == joint_unc` for LME designs.
-                // Under exclusion the joint test runs over the reduced target set
-                // (excluded targets are untestable by definition).
+                // Joint Wald-χ² significance. Per-N crit value lives at
+                // `crit.joint_t_crit_sq[n_idx]`. The LME joint Wald-χ² test lies
+                // outside the family-wise correction set, so `joint_cor == joint_unc`
+                // for LME designs. Under exclusion the joint test runs over the
+                // reduced target set (excluded targets are untestable by definition).
                 let k_red = targets_fit.len(); // spec.target_indices.len() hot, excl_targets.len() cold
                 let joint_crit = if !needs_reduced_fit {
                     crit.joint_t_crit_sq[n_idx]
@@ -1671,8 +1467,12 @@ fn run_one_sim(
                     // cache key cannot express it. Explicit recompute stays.
                     crate::critvals::chi2_ppf(1.0 - spec.crit_values.alpha, k_red as f64)
                 };
-                let joint_sig =
-                    fit.converged && fit.joint_t_sq.is_finite() && fit.joint_t_sq > joint_crit;
+                // A `Solver::Sparse`-routed design (extra-grouping random slopes)
+                // yields a `Prebuilt` FitView whose `joint_t_sq` is NaN — a
+                // deliberate degradation: do NOT reconstruct the joint Wald. NaN
+                // fails the `> joint_crit` comparison (NaN compares false), so it
+                // falls through to a non-significant joint decision.
+                let joint_sig = converged && joint_t_sq.is_finite() && joint_t_sq > joint_crit;
                 joint_unc_slice[n_idx] = u8::from(joint_sig);
                 joint_cor_slice[n_idx] = u8::from(joint_sig);
 
@@ -1682,22 +1482,22 @@ fn run_one_sim(
                 unc_slice.fill(0);
                 let t_crit_unc = crit.t_crit_sq_uncorrected[n_idx];
                 // PREDICTOR-indexed gather (module-header invariant).
-                // Hot path: fit.t_sq is indexed by original predictor position (0..P);
+                // Hot path: t_sq is indexed by original predictor position (0..P);
                 //   gather via spec.target_indices.
-                // Cold path: fit.t_sq is indexed by reduced predictor position (0..p_red);
+                // Cold path: t_sq is indexed by reduced predictor position (0..p_red);
                 //   gather via excl_col_remap[ti] (PREDICTOR-indexed, reduced).
                 // Dropped slots → NaN (never significant).
-                if fit.converged {
+                if converged {
                     for (j, &ti) in spec.target_indices.iter().enumerate() {
-                        let t_sq = if !needs_reduced_fit {
-                            fit.t_sq[ti as usize]
+                        let tj = if !needs_reduced_fit {
+                            t_sq[ti as usize]
                         } else {
                             match excl_col_remap[ti as usize] {
-                                r if r >= 0 => fit.t_sq[r as usize],
+                                r if r >= 0 => t_sq[r as usize],
                                 _ => f64::NAN,
                             }
                         };
-                        if !t_sq.is_nan() && t_sq > t_crit_unc {
+                        if !tj.is_nan() && tj > t_crit_unc {
                             unc_slice[j] = 1;
                         }
                     }
@@ -1708,13 +1508,13 @@ fn run_one_sim(
                 if n_idx == 0 {
                     if let Some(row) = stat_sink.as_deref_mut() {
                         row.fill(f64::NAN);
-                        if fit.converged {
+                        if converged {
                             for (j, &ti) in spec.target_indices.iter().enumerate() {
                                 row[j] = if !needs_reduced_fit {
-                                    fit.t_sq[ti as usize]
+                                    t_sq[ti as usize]
                                 } else {
                                     match excl_col_remap[ti as usize] {
-                                        r if r >= 0 => fit.t_sq[r as usize],
+                                        r if r >= 0 => t_sq[r as usize],
                                         _ => f64::NAN,
                                     }
                                 };
@@ -1723,7 +1523,7 @@ fn run_one_sim(
                     }
                 }
                 let cor_slice = &mut cor[row_start..row_end];
-                if fit.converged {
+                if converged {
                     // Build full-width (n_targets) t² buffer for apply_correction,
                     // NaN at dropped target slots. Mirrors the GLM arm's all_t_sq pattern.
                     let n_t = spec.target_indices.len();
@@ -1732,12 +1532,12 @@ fn run_one_sim(
                     if !needs_reduced_fit {
                         // Hot path: gather PREDICTOR-indexed t_sq into target-compact buffer.
                         for (k, &ti) in spec.target_indices.iter().enumerate() {
-                            all_t_sq[k] = fit.t_sq[ti as usize];
+                            all_t_sq[k] = t_sq[ti as usize];
                         }
                     } else {
                         // Cold path: scatter remapped values; dropped slots stay NaN.
                         for (k, &slot) in excl_target_slots.iter().enumerate() {
-                            all_t_sq[slot] = fit.t_sq[targets_fit[k] as usize];
+                            all_t_sq[slot] = t_sq[targets_fit[k] as usize];
                         }
                     }
                     apply_correction(
@@ -1767,6 +1567,10 @@ fn run_one_sim(
             // linear predictor on the logit scale).
             // No per-sim accumulator → no Logit-side reset needed.
             // Posthoc is rejected at batch entry above.
+            // Grid-sequential warm-start: reset the θ̂ carry per sim (mixed GLMM
+            // sub-path only; the plain-logistic path never touches it). Ascending-N
+            // walk by the single owning worker keeps the carry deterministic.
+            ws.has_prev = false;
             for (n_idx, &n) in sample_sizes.iter().enumerate() {
                 let n_usize = n as usize;
                 let x_slice = ws.x_full_f64.as_ref().subrows(0, n_usize);
@@ -1778,28 +1582,22 @@ fn run_one_sim(
                 // mirrors the LME *general* arm's writeback exactly (z²-vs-crit +
                 // multiplicity correction + joint Wald) and `continue`s past the
                 // plain-logistic attempt loop below.
-                if ws.glmm.is_some() {
+                if let Some(cluster) = &spec.cluster {
                     // `test_formula` reduced fit (Phase 2): fit only the FIXED
-                    // columns in `spec.fit_columns`. The GLMM workspace was sized
-                    // to p_red in `build_glmm_workspace`, so the reduced X / β-start
-                    // / targets below match its β-dimension. Z is unchanged — build_z
-                    // still reads the full `x_full` (the random structure is
-                    // generation-side). `fit_targets` maps full→reduced positions in
-                    // `target_indices` order, so the output slots are untouched. When
-                    // `test_reduces` is false the buffers are empty and the full spec
-                    // slices feed the fit, byte-for-byte the prior behaviour.
-                    let (excl_x, reduced_beta, reduced_targets): (
-                        faer::Mat<f64>,
-                        Vec<f64>,
-                        Vec<u32>,
-                    ) = if test_reduces {
-                        let p_red = spec.fit_columns.len();
-                        let mut xr = faer::Mat::<f64>::zeros(n_usize, p_red);
-                        for (rc, &fc) in spec.fit_columns.iter().enumerate() {
-                            for i in 0..n_usize {
-                                xr[(i, rc)] = ws.x_full_f64[(i, fc as usize)];
-                            }
-                        }
+                    // columns in `spec.fit_columns`. `ws.mixed[n_idx]` was sized to
+                    // p_red in `build_mixed_workspaces` (its `p` matches the reduced
+                    // fit), so the reduced X / β-start / targets below match its
+                    // β-dimension. Z is rebuilt internally by `fit_on` from the ids.
+                    // `fit_targets` maps full→reduced positions in `target_indices`
+                    // order, so the output slots are untouched. When `test_reduces`
+                    // is false the buffers are empty and the full spec slices feed
+                    // the fit, byte-for-byte the prior behaviour.
+                    let p_fit = if test_reduces {
+                        spec.fit_columns.len()
+                    } else {
+                        n_predictors_total
+                    };
+                    let (reduced_beta, reduced_targets): (Vec<f64>, Vec<u32>) = if test_reduces {
                         let beta = spec
                             .fit_columns
                             .iter()
@@ -1816,14 +1614,9 @@ fn run_one_sim(
                                     as u32
                             })
                             .collect();
-                        (xr, beta, targets)
+                        (beta, targets)
                     } else {
-                        (faer::Mat::<f64>::zeros(0, 0), Vec::new(), Vec::new())
-                    };
-                    let fit_x = if test_reduces {
-                        excl_x.as_ref().subrows(0, n_usize)
-                    } else {
-                        ws.x_full_f64.as_ref().subrows(0, n_usize)
+                        (Vec::new(), Vec::new())
                     };
                     let fit_targets: &[u32] = if test_reduces {
                         &reduced_targets
@@ -1835,65 +1628,133 @@ fn run_one_sim(
                     } else {
                         &spec.effect_sizes
                     };
-
-                    // build_z borrows ws.glmm (&mut) disjoint from
-                    // ws.x_full/cluster_ids/extra_grouping_ids (&) — direct field
-                    // access lets NLL prove the storage is disjoint.
-                    // build_z is only needed by the dense (crossed/nested) GLMM
-                    // path; the no-extras blocked path reconstructs mᵢ per row from
-                    // x + Λ_p, so building the dense n×k Z would be dead work.
-                    {
-                        let glmm = ws.glmm.as_deref_mut().expect("is_some");
-                        if !glmm.groupings.extra_offsets.is_empty() {
-                            glmm::loop_advanced::build_z(
-                                glmm,
-                                ws.x_full_f64.as_ref().subrows(0, n_usize),
-                                &ws.cluster_ids[..n_usize],
-                                &ws.extra_grouping_ids,
-                                n_usize,
-                            );
+                    // `fit_on` takes row-major x[i·p + j]; `x_full_f64` is
+                    // column-major faer, so materialize this draw's (possibly
+                    // reduced) design into a row-major buffer first. The reduced
+                    // path uses a local buffer; the full path the shared scratch.
+                    let reduced_x: Vec<f64>;
+                    let x_fit: &[f64] = if test_reduces {
+                        let mut xr = vec![0.0f64; n_usize * p_fit];
+                        for i in 0..n_usize {
+                            for (rc, &fc) in spec.fit_columns.iter().enumerate() {
+                                xr[i * p_fit + rc] = ws.x_full_f64[(i, fc as usize)];
+                            }
                         }
-                    }
-                    // Truth-start under the scenario's `truth_start` assumption:
-                    // seed the optimizer at the DGP-truth θ (well-behaved
-                    // estimation) or start blind. The GLMM RE covariance is built
-                    // from the same tau_squared/variance/corr the generator used, and
-                    // GLMM families fix dispersion at 1, so `truth_theta` seeds it the
-                    // same way as the LME arms. NOT a speed knob — the MLE is
-                    // start-sensitive; warm vs cold can settle in different optima.
-                    // Mirrors introspect::fit_provided_data's clustered-GLMM arm —
-                    // change together.
-                    let cluster = spec.cluster.as_ref().expect("glmm ⇒ cluster");
-                    let theta = crate::mixed_workspace::truth_theta(cluster, true);
-                    let start = spec.scenario.truth_start.then_some(&theta[..]);
-                    let f = {
-                        let glmm = ws.glmm.as_deref_mut().expect("is_some");
-                        glmm::loop_advanced::fit_glmm(
-                            glmm,
-                            fit_x,
-                            &ws.y_full_f64[..n_usize],
-                            &ws.cluster_ids[..n_usize],
-                            fit_targets,
-                            start,
-                            fit_beta,
-                            n_usize,
-                            crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
-                        )
+                        reduced_x = xr;
+                        &reduced_x
+                    } else {
+                        for i in 0..n_usize {
+                            for j in 0..p_fit {
+                                ws.x_rowmajor[i * p_fit + j] = ws.x_full_f64[(i, j)];
+                            }
+                        }
+                        &ws.x_rowmajor[..n_usize * p_fit]
                     };
 
-                    optim_diag::record_fit(f.n_eval, f.converged, f.boundary_hit == 1);
-                    conv[n_idx] = u8::from(f.converged);
-                    bh[n_idx] = f.boundary_hit;
-                    pc[n_idx] = f.pinned_components;
-                    tau_hat[n_idx] = f.tau_squared_hat;
+                    // Truth-start under the scenario's `truth_start` assumption: seed
+                    // the optimizer at the DGP-truth [β | θ] (well-behaved estimation)
+                    // or start blind. The GLMM RE covariance is built from the same
+                    // tau_squared/variance/corr the generator used, and GLMM families
+                    // fix dispersion at 1, so `truth_theta` seeds θ the same way as the
+                    // LME arms. NOT a speed knob — the MLE is start-sensitive; warm vs
+                    // cold can settle in different optima. Mirrors
+                    // introspect::fit_provided_data's clustered-GLMM arm — change
+                    // together.
+                    let theta = crate::mixed_workspace::truth_theta(cluster, true);
+                    // β warm start is unconditional (mirrors the retired `fit_glmm`,
+                    // which took β separately from the θ-only start); θ must equal the
+                    // kernel's blind start when `truth_start` is off — glmm's None-θ
+                    // path seeds every entry to `glmm::THETA0`, and passing that
+                    // constant explicitly reproduces it bit-for-bit (a Some-θ start
+                    // clamps `THETA0.max(THETA_TRUTH_FLOOR)`, and THETA0 is the larger).
+                    // Grid-sequential warm start: after the first converged grid
+                    // point of this sim, seed θ from the carried θ̂ (same population
+                    // θ). Safe on both the full and test_formula-reduced GLMM fits —
+                    // the RE design Z stays full under test_formula (only fixed
+                    // columns shrink), so n_theta is invariant across a sim's grid,
+                    // and test_reduces is spec-constant so no point mixes shapes.
+                    // fit_on→fit_glmm threads the FULL θ̂ vech, each component clamped
+                    // to THETA_TRUTH_FLOOR = 0.01 (glmm/mod.rs) — diagonals warm-start
+                    // faithfully, off-diagonals are floored at 0.01 (not zeroed).
+                    let start_theta = if ws.has_prev {
+                        ws.theta_carry.clone()
+                    } else if spec.scenario.truth_start {
+                        theta
+                    } else {
+                        vec![glmm::THETA0; theta.len()]
+                    };
+                    let start = Some(glmm::StartValues {
+                        beta: fit_beta.to_vec(),
+                        theta: start_theta,
+                    });
+
+                    // Non-reduced uses the frozen batch opts (target_indices =
+                    // spec.target_indices); the reduced fit needs the reduced target
+                    // set, so it presents its own opts (target_indices is not frozen
+                    // by `fit_on` — only nagq/weights/offset/parallel_inner are, which
+                    // match `..Default::default()` + spec.nagq here).
+                    let opts_red;
+                    let opts_ref: &glmm::FitOptions = if test_reduces {
+                        opts_red = glmm::FitOptions {
+                            target_indices: reduced_targets.clone(),
+                            wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
+                            nagq: spec.nagq,
+                            ..Default::default()
+                        };
+                        &opts_red
+                    } else {
+                        &ws.mixed_opts
+                    };
+
+                    let view = glmm::loop_advanced::fit_on(
+                        &mut ws.mixed[n_idx],
+                        x_fit,
+                        y_slice,
+                        &ws.mixed_ids[n_idx],
+                        start.as_ref(),
+                        opts_ref,
+                    );
+
+                    optim_diag::record_fit(
+                        view.n_eval(),
+                        view.converged(),
+                        view.boundary_hit() == 1,
+                    );
+                    let converged = view.converged();
+                    let joint_t_sq = view.joint_t_sq();
+                    // Predictor-indexed, fitted width (p_red under test_formula, else
+                    // full p). A `Solver::Sparse`-routed GLMM (extra-grouping random
+                    // slopes) returns a `Prebuilt` FitView whose `t_sq`/`var_diag` are
+                    // Wald reconstructions off β̂/se and whose `joint_t_sq` degrades to
+                    // NaN — a deliberate degradation handled at the joint decision below.
+                    let t_sq = view.t_sq();
+
+                    // Grid-sequential warm-start update: keep only a converged θ̂. The
+                    // Sparse `Prebuilt` route exposes no θ̂ (`view.theta()` is `&[]`) —
+                    // skip so the carry keeps its last good value rather than emptying.
+                    if converged {
+                        let th = view.theta();
+                        if !th.is_empty() {
+                            ws.theta_carry.clear();
+                            ws.theta_carry.extend_from_slice(th);
+                            ws.has_prev = true;
+                        }
+                    }
+
+                    conv[n_idx] = u8::from(converged);
+                    bh[n_idx] = view.boundary_hit();
+                    pc[n_idx] = view.pinned_components();
+                    // Random-intercept variance D̂[0][0] (the dense GLMM read); the
+                    // Sparse `Prebuilt` route reports `Fit.dispersion` here instead.
+                    tau_hat[n_idx] = view.dispersion();
                     // Overall: GLMM emits 0 (mirrors the LME arm — no per-sim LRT
-                    // is computed by fit_glmm).
+                    // is computed for a mixed fit).
                     if let Some(ref mut overall) = overall_slice.as_deref_mut() {
                         overall[n_idx] = 0;
                     }
 
                     // Joint Wald-χ² significance — identical rule to the LME arm
-                    // (`f.joint_t_sq > χ²(k, 1−α)`, outside the FW-correction set so
+                    // (`joint_t_sq > χ²(k, 1−α)`, outside the FW-correction set so
                     // joint_cor == joint_unc). The χ² crit is computed here via
                     // chi2_ppf because the shared table only populates
                     // joint_t_crit_sq for Mle (NaN for Glm) — same formula the LME
@@ -1904,24 +1765,26 @@ fn run_one_sim(
                     } else {
                         crate::critvals::chi2_ppf(1.0 - spec.crit_values.alpha, k as f64)
                     };
-                    let joint_sig =
-                        f.converged && f.joint_t_sq.is_finite() && f.joint_t_sq > joint_crit;
+                    // A NaN `joint_t_sq` (the Sparse `Prebuilt` degradation) fails the
+                    // `> joint_crit` comparison (NaN compares false), so it falls
+                    // through to a non-significant joint decision — do NOT reconstruct
+                    // the joint Wald.
+                    let joint_sig = converged && joint_t_sq.is_finite() && joint_t_sq > joint_crit;
                     joint_unc_slice[n_idx] = u8::from(joint_sig);
                     joint_cor_slice[n_idx] = u8::from(joint_sig);
 
                     // Per-target uncorrected significance — PREDICTOR-indexed gather.
-                    // `glmm.t_sq` has the FITTED width (p_red under test_formula,
-                    // else full p); `fit_targets[j]` is target j's position in that
-                    // fitted design (identity when not reducing). Output slot j stays
-                    // in `spec.target_indices` order. No factor exclusion in clustered
+                    // `t_sq` has the FITTED width (p_red under test_formula, else full
+                    // p); `fit_targets[j]` is target j's position in that fitted design
+                    // (identity when not reducing). Output slot j stays in
+                    // `spec.target_indices` order. No factor exclusion in clustered
                     // specs, so the only reduction is test_formula's.
                     let row_start = n_idx * main_row;
                     let row_end = row_start + main_row;
                     let unc_slice = &mut unc[row_start..row_end];
                     unc_slice.fill(0);
                     let t_crit_unc = crit.t_crit_sq_uncorrected[n_idx];
-                    if f.converged {
-                        let t_sq = &ws.glmm.as_deref().expect("is_some").t_sq;
+                    if converged {
                         for (j, &ti) in fit_targets.iter().enumerate() {
                             let v = t_sq[ti as usize];
                             if !v.is_nan() && v > t_crit_unc {
@@ -1934,8 +1797,7 @@ fn run_one_sim(
                     if n_idx == 0 {
                         if let Some(row) = stat_sink.as_deref_mut() {
                             row.fill(f64::NAN);
-                            if f.converged {
-                                let t_sq = &ws.glmm.as_deref().expect("is_some").t_sq;
+                            if converged {
                                 for (j, &ti) in fit_targets.iter().enumerate() {
                                     row[j] = t_sq[ti as usize];
                                 }
@@ -1945,16 +1807,12 @@ fn run_one_sim(
                     // Corrected significance — full-width t² buffer fed to
                     // apply_correction (mirrors the LME/GLM arms' all_t_sq pattern).
                     let cor_slice = &mut cor[row_start..row_end];
-                    if f.converged {
+                    if converged {
                         let n_t = fit_targets.len();
-                        {
-                            let t_sq = &ws.glmm.as_deref().expect("is_some").t_sq;
-                            let all_t_sq = &mut ws.compact_t_sq_scratch[..n_t];
-                            for (k, &ti) in fit_targets.iter().enumerate() {
-                                all_t_sq[k] = t_sq[ti as usize];
-                            }
-                        }
                         let all_t_sq = &mut ws.compact_t_sq_scratch[..n_t];
+                        for (k, &ti) in fit_targets.iter().enumerate() {
+                            all_t_sq[k] = t_sq[ti as usize];
+                        }
                         apply_correction(
                             spec.correction_method,
                             all_t_sq,
@@ -2118,6 +1976,7 @@ fn run_one_sim(
                         targets_fit,
                         beta_start,
                         None, // prior_w: MCPower has no prior-observation-weights feature
+                        None, // offset: no offset feature — byte-identical to the offset-free fit
                         scratch,
                     );
 

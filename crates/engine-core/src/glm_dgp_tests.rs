@@ -139,6 +139,7 @@ fn glm_converges_on_separable_signal() {
         &targets,
         None,
         None, // prior_w: MCPower has no prior-observation-weights feature
+        None, // offset: no offset feature — byte-identical to the offset-free fit
         glm_scratch(&mut ws),
     );
     assert!(fit.converged, "IRLS should converge on well-behaved data");
@@ -187,6 +188,7 @@ fn glm_truth_start_matches_cold_fixpoint() {
         &targets,
         None,
         None, // prior_w: MCPower has no prior-observation-weights feature
+        None, // offset: no offset feature — byte-identical to the offset-free fit
         glm_scratch(&mut ws),
     );
     assert!(cold.converged, "cold fit must converge");
@@ -204,6 +206,7 @@ fn glm_truth_start_matches_cold_fixpoint() {
         &targets,
         Some(&spec.effect_sizes),
         None, // prior_w: MCPower has no prior-observation-weights feature
+        None, // offset: no offset feature — byte-identical to the offset-free fit
         glm_scratch(&mut ws),
     );
     assert!(warm.converged, "warm fit must converge");
@@ -283,6 +286,7 @@ fn glm_fit_warm_path_bounded_alloc() {
         &targets,
         Some(&spec.effect_sizes),
         None, // prior_w: MCPower has no prior-observation-weights feature
+        None, // offset: no offset feature — byte-identical to the offset-free fit
         glm_scratch(&mut ws),
     );
     assert!(warm.converged, "bench fixture must converge");
@@ -299,6 +303,7 @@ fn glm_fit_warm_path_bounded_alloc() {
             &targets,
             Some(&spec.effect_sizes),
             None, // prior_w: MCPower has no prior-observation-weights feature
+            None, // offset: no offset feature — byte-identical to the offset-free fit
             glm_scratch(&mut ws),
         );
     }
@@ -338,6 +343,7 @@ fn glm_wald_z_sq_direction_and_ballpark() {
         &targets,
         None,
         None, // prior_w: MCPower has no prior-observation-weights feature
+        None, // offset: no offset feature — byte-identical to the offset-free fit
         glm_scratch(&mut ws),
     );
     assert!(fit.converged, "IRLS should converge on well-behaved data");

@@ -3,13 +3,13 @@ import { test, expect } from '@playwright/test';
 test('logit find-power happy path renders bars and table baseline', async ({ page }) => {
   await page.goto('/');
 
-  // There is no separate "Logistic" family. Logistic regression is the Binary
+  // There is no separate "Logistic" family. Logistic regression is the Logit
   // outcome of the Regression family: land on Regression (default) and flip the
-  // outcome toggle to Binary (role="group" aria-label="Outcome type"). The
+  // outcome toggle to Logit (role="group" aria-label="Outcome type"). The
   // StatusBar adapter then builds an AppSpec::Logit. Click before entering the
-  // formula so the only "Binary" button on the page is the outcome toggle (the
+  // formula so the only "Logit" button on the page is the outcome toggle (the
   // per-variable type toggles appear only once predictors exist).
-  await page.getByRole('button', { name: 'Binary' }).click();
+  await page.getByRole('button', { name: 'Logit' }).click();
 
   const formula = page.getByPlaceholder(/Write your formula/i);
   await formula.fill('y ~ x1 + x2');

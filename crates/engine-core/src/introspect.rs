@@ -13,10 +13,8 @@ use crate::rng::pcg_mix64;
 use crate::spec::{BatchResult, EstimatorSpec, SimulationSpec};
 use crate::workspace::SimWorkspace;
 use crate::EngineError;
-use glmm::consts::MAX_EXTRA_Q;
 use glmm::loop_advanced::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
 use glmm::loop_advanced::{glm_irls_fit, GlmScratch};
-use glmm::loop_advanced::{lme_fit, LmeScratch, LmeSuffStats};
 
 /// Which observations to capture. Engine-core-local (orchestrator maps its
 /// `StageMask` onto this — engine-core never depends on orchestrator types).
@@ -161,9 +159,10 @@ fn capture_sim0_data(
 /// The data is injected into the same `SimWorkspace` buffers the hot loop fills
 /// by generation, then dispatched through the *identical* kernel each
 /// `run_one_sim` arm uses — OLS (`OlsSuffStats::add_rows` →
-/// `fit_suff_stats_t_sq`), GLM (`glm_irls_fit`), or MLE
-/// (`LmeSuffStats::add_rows` → `lme_fit`) — so this is the shipped solver, not a
-/// parallel impl (proven by the orchestrator bit-equivalence tests).
+/// `fit_suff_stats_t_sq`), unclustered GLM (`glm_irls_fit`), or the mixed arms
+/// (clustered GLMM / LMM) via `build_workspace` + `fit_on` — so this is the
+/// shipped solver, not a parallel impl (proven by the orchestrator
+/// bit-equivalence tests).
 ///
 /// `design` is column-major `nrow * ncol` (the shape `capture_sim0_data`
 /// emits). All three estimator arms are wired; `df_resid` is OLS-only-meaningful
@@ -294,124 +293,102 @@ pub fn fit_provided_data(
             )
         }
         EstimatorSpec::Glm if spec.cluster.is_some() => {
-            // Clustered-GLMM path — mirrors the Mle general branch's structure
-            // (build workspace, build Z, fit, extract D̂). No σ² for the
-            // fixed-dispersion families (binomial logit/probit, Poisson):
-            // D̂ = Λ̂Λ̂' directly; sigma_sq_hat = 1.0.
+            // Clustered-GLMM path — one-shot `build_workspace` + `fit_on`, mirroring
+            // batch.rs's Glm+cluster arm (same kernel, same start). `into_fit` then
+            // surfaces the RE (co)variance: D̂ = σ̂²·Λ̂Λ̂' with σ̂² ≡ 1 for the
+            // fixed-dispersion families (binomial logit/probit, Poisson).
             let cluster = spec.cluster.as_ref().expect("guard ⇒ cluster");
-            let slope_cols: Vec<usize> = spec
-                .cluster_slope_design_cols
-                .iter()
-                .map(|&c| c as usize)
-                .collect();
-            // Derive the family from the contract's outcome + link — same helper
-            // the production find_power path uses (mixed_workspace::build_glmm_workspace),
-            // so an uploaded clustered probit/Poisson GLMM fits with the right
-            // family instead of silently falling back to logit.
+            // Derive the family from the contract's outcome + link — the same helper
+            // build_mixed_workspaces uses, so an uploaded clustered probit/Poisson
+            // GLMM fits with the right family instead of falling back to logit.
+            let family = crate::mixed_workspace::glmm_family(spec.outcome_kind, spec.link);
             let model = crate::mixed_workspace::cluster_to_model_spec(
                 cluster,
-                crate::mixed_workspace::glmm_family(spec.outcome_kind, spec.link),
+                family,
+                &spec.cluster_slope_design_cols,
+                &spec.extra_slope_cols,
             );
-            // nagq threaded from the contract (1 = Laplace default; > 1 = AGQ) —
-            // mirrors mixed_workspace::build_glmm_workspace, so the upload/debug
-            // fit path honours AGQ exactly as the production find_power path does.
-            let mut glmm = glmm::loop_advanced::GlmmWorkspace::for_cluster_spec(
+            // One `fit_on` workspace at this single N (introspect fits one dataset,
+            // not a grid). build_mixed_workspaces builds the sized spec, per-point
+            // ids, and the frozen opts (target_indices/wald_se/nagq) exactly as the
+            // production find_power path does.
+            // Introspect always fits FULL width: it fills and reads full-width x
+            // (`x_rowmajor[..nrow*ncol]`, `betas()[..ncol]`). But
+            // build_mixed_workspaces sizes p to `fit_columns.len()` for a reduced GLM
+            // fit, which would mismatch full-width x → wrong fit or panic. Clearing
+            // fit_columns on a local copy forces the full-width (`_ => n_predictors`)
+            // sizing, matching the pre-migration GLMM introspect.
+            let mut full_spec = spec.clone();
+            full_spec.fit_columns.clear();
+            let (mut mixed, ids, opts) = crate::mixed_workspace::build_mixed_workspaces(
+                &full_spec,
+                &[nrow as u32],
                 ncol,
-                &model,
-                nrow,
-                &slope_cols,
-                spec.nagq,
-            );
-            glmm::loop_advanced::build_z(
-                &mut glmm,
-                ws.x_full_f64.as_ref().subrows(0, nrow),
-                &ws.cluster_ids[..nrow],
+                &ws.cluster_ids,
                 &ws.extra_grouping_ids,
-                nrow,
-            );
+            )
+            .expect("Glm+cluster ⇒ build_mixed_workspaces is Some");
+            // `fit_on` takes row-major x[i·p + j]; x_full_f64 is column-major faer.
+            for i in 0..nrow {
+                for j in 0..ncol {
+                    ws.x_rowmajor[i * ncol + j] = ws.x_full_f64[(i, j)];
+                }
+            }
             // Truth-start under the scenario's `truth_start` assumption: seed the
-            // optimizer at the DGP-truth θ (well-behaved estimation) or start
-            // blind. GLMM families fix dispersion at 1, so `truth_theta` seeds it
-            // as in the LME arm. NOT a speed knob — the MLE is start-sensitive.
-            // MIRRORS batch.rs's Glm+cluster arm; the hot loop and this debug path
-            // must derive the same hint — change together.
+            // optimizer at the DGP-truth [β | θ] (well-behaved estimation) or start
+            // blind. β is warm unconditionally (mirrors the retired `fit_glmm`, which
+            // took β separately); when `truth_start` is off, θ must equal glmm's
+            // blind None-θ seed (every entry THETA0 = 1.0) — passing it explicitly
+            // reproduces that bit-for-bit. NOT a speed knob — the MLE is
+            // start-sensitive. MIRRORS batch.rs's Glm+cluster arm — change together.
             let theta = crate::mixed_workspace::truth_theta(cluster, true);
-            let start = spec.scenario.truth_start.then_some(&theta[..]);
-            let f = glmm::loop_advanced::fit_glmm(
-                &mut glmm,
-                ws.x_full_f64.as_ref().subrows(0, nrow),
+            let start_theta = if spec.scenario.truth_start {
+                theta
+            } else {
+                vec![1.0; theta.len()]
+            };
+            let start = glmm::StartValues {
+                beta: spec.effect_sizes.clone(),
+                theta: start_theta,
+            };
+            let view = glmm::loop_advanced::fit_on(
+                &mut mixed[0],
+                &ws.x_rowmajor[..nrow * ncol],
                 &ws.y_full_f64[..nrow],
-                &ws.cluster_ids[..nrow],
-                &spec.target_indices,
-                start,
-                &spec.effect_sizes,
-                nrow,
-                crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
+                &ids[0],
+                Some(&start),
+                &opts,
             );
-            // D̂ = Λ̂Λ̂' (no σ² — binomial dispersion fixed at 1). Diagonal
-            // entries are RE variances; off-diagonals yield re_corr. Mirrors
-            // the Mle general branch's q_p > 1 block, with σ=1. primary_lambda
-            // refreshes glmm.lam; for q_p == 1 re_corr is empty (inner loop vacuous).
-            let q = glmm.groupings.primary_q;
-            glmm::loop_advanced::primary_lambda(&glmm.params[..glmm.n_theta], q, &mut glmm.lam);
-            let mut d = vec![0.0_f64; q * q];
-            for i in 0..q {
-                for j in 0..q {
-                    let mut acc = 0.0;
-                    for kk in 0..q {
-                        acc += glmm.lam[i * q + kk] * glmm.lam[j * q + kk];
-                    }
-                    d[i * q + j] = acc;
-                }
-            }
-            // Primary diagonal variances, then each extra factor's full q_g
-            // diagonal of D_g = Λ_gΛ_g′ (σ²=1, binomial) via a θ cursor walk in
-            // declaration order — NOT one scalar per extra. The old
-            // `params[base+e]` indexing silently assumed q_g==1. Order [primary
-            // diag, extras in declaration order] mirrors generation.rs
-            // n_variance_components and lmm.rs diagonal_theta — change together.
-            let mut variance_components: Vec<f64> = (0..q).map(|dd| d[dd * q + dd]).collect();
-            let mut cursor = q * (q + 1) / 2;
-            for &qg in glmm.groupings.extra_q.iter() {
-                let mut lam_g = [0.0f64; MAX_EXTRA_Q * MAX_EXTRA_Q];
-                glmm::loop_advanced::primary_lambda(&glmm.params[cursor..], qg, &mut lam_g);
-                for dd in 0..qg {
-                    let mut acc = 0.0;
-                    // lam_g row-major q_g×q_g ⇒ D_g[dd,dd] = Σ_k Λ_g[dd,k]².
-                    for kk in 0..qg {
-                        acc += lam_g[dd * qg + kk] * lam_g[dd * qg + kk];
-                    }
-                    variance_components.push(acc); // D_g[dd,dd] (σ²=1)
-                }
-                cursor += qg * (qg + 1) / 2;
-            }
-            // re_corr: primary off-diagonals vech column-major (empty when q_p == 1).
-            let mut re_corr = Vec::with_capacity(q * (q - 1) / 2);
-            for c in 0..q {
-                for r in (c + 1)..q {
-                    let den = (d[r * q + r] * d[c * q + c]).sqrt();
-                    re_corr.push(if den > 0.0 { d[r * q + c] / den } else { 0.0 });
-                }
-            }
-            let betas = glmm.betas[..ncol].to_vec();
+            let converged = view.converged();
+            let betas = view.betas()[..ncol].to_vec();
+            // var_diag / t_sq are PREDICTOR-indexed for the mixed arms.
             let se = spec
                 .target_indices
                 .iter()
-                .map(|&t| glmm.var_diag[t as usize].sqrt())
+                .map(|&t| view.var_diag()[t as usize].sqrt())
                 .collect();
             let statistic = spec
                 .target_indices
                 .iter()
-                .map(|&t| glmm.t_sq[t as usize].sqrt())
+                .map(|&t| view.t_sq()[t as usize].sqrt())
                 .collect();
-            // sigma_sq_hat = 1.0 (binomial dispersion is fixed; no scale parameter).
+            // `into_fit` consumes the view; read the accessors above first.
+            let fit = view.into_fit(
+                &ws.x_rowmajor[..nrow * ncol],
+                &ws.y_full_f64[..nrow],
+                nrow,
+                ncol,
+                &model,
+                &opts,
+            );
+            let (variance_components, re_corr) = unpack_varcorr(&fit);
             (
                 betas,
                 se,
                 statistic,
-                f.converged,
+                converged,
                 variance_components,
-                1.0,
+                fit.dispersion, // ≡ 1.0 for binomial/Poisson (dispersion fixed)
                 re_corr,
             )
         }
@@ -447,6 +424,7 @@ pub fn fit_provided_data(
                 &spec.target_indices,
                 Some(&spec.effect_sizes),
                 None, // prior_w: MCPower has no prior-observation-weights feature
+                None, // offset: no offset feature — byte-identical to the offset-free fit
                 scratch,
             );
             let betas = fit.betas[..ncol].to_vec();
@@ -464,246 +442,90 @@ pub fn fit_provided_data(
                 vec![],
             )
         }
-        EstimatorSpec::Mle
-            if spec.cluster.as_ref().is_some_and(|c| {
-                !c.extra_groupings.is_empty() || !spec.cluster_slope_design_cols.is_empty()
-            }) =>
-        {
-            // This guard mirrors build_lmm_workspace's dispatch (lmm.rs): slopes
-            // OR extra groupings ⇒ general lmm path — change together.
-            // General (multi-grouping) path. Extra-grouping membership is
-            // layout-derived: rows are a layout prefix (true for
-            // engine-generated data by construction; arbitrary uploaded
-            // bytes inherit the documented assumption). ws.extra_grouping_ids
-            // is already laid out (length nrow) by the ctor (Task 4) from
-            // the same extra_level_of_row functions — reuse it (mirrors the
-            // hot path) rather than rebuilding; add_rows_multi slices each
-            // by nrow. Provided cluster_ids drive the primary as on the
-            // Brent path.
-            let cluster = spec.cluster.as_ref().expect("guard ⇒ cluster");
-            let slope_cols: Vec<usize> = spec
-                .cluster_slope_design_cols
+        EstimatorSpec::Mle => {
+            // Clustered LMM — one-shot `build_workspace` + `fit_on`, mirroring
+            // batch.rs's single Mle arm. Both the intercept-only (former Brent
+            // scalar) and the general (slopes / extra groupings) cases route
+            // through the same `fit_on` (BOBYQA) now — the scalar Brent path is
+            // retired (a deliberate Brent → BOBYQA numeric move on the
+            // intercept-only case). Extra-grouping / slope layout is carried by
+            // ws.cluster_ids + ws.extra_grouping_ids (laid out by the ctor from the
+            // same layout functions as the hot path); build_mixed_workspaces slices
+            // them by N. `into_fit` surfaces D̂ = σ̂²·Λ̂Λ̂' per grouping.
+            let cluster = spec.cluster.as_ref().expect("Mle requires ClusterSpec");
+            let model = crate::mixed_workspace::cluster_to_model_spec(
+                cluster,
+                glmm::Family::Gaussian,
+                &spec.cluster_slope_design_cols,
+                &spec.extra_slope_cols,
+            );
+            let (mut mixed, ids, opts) = crate::mixed_workspace::build_mixed_workspaces(
+                spec,
+                &[nrow as u32],
+                ncol,
+                &ws.cluster_ids,
+                &ws.extra_grouping_ids,
+            )
+            .expect("Mle ⇒ build_mixed_workspaces is Some");
+            // `fit_on` takes row-major x[i·p + j]; x_full_f64 is column-major faer.
+            for i in 0..nrow {
+                for j in 0..ncol {
+                    ws.x_rowmajor[i * ncol + j] = ws.x_full_f64[(i, j)];
+                }
+            }
+            // Truth-start under the scenario's `truth_start` assumption: seed the
+            // optimizer at the DGP-truth θ (well-behaved estimation) or start blind
+            // (None ⇒ glmm's blind θ). LMM is start-independent in β; it threads only
+            // θ. NOT a speed knob — the MLE is start-sensitive. MIRRORS batch.rs's
+            // Mle arm; the hot loop and this debug path must derive the same hint —
+            // change together.
+            let theta = crate::mixed_workspace::truth_theta(cluster, true);
+            let start = spec.scenario.truth_start.then(|| glmm::StartValues {
+                beta: spec.effect_sizes.clone(),
+                theta,
+            });
+            let view = glmm::loop_advanced::fit_on(
+                &mut mixed[0],
+                &ws.x_rowmajor[..nrow * ncol],
+                &ws.y_full_f64[..nrow],
+                &ids[0],
+                start.as_ref(),
+                &opts,
+            );
+            let converged = view.converged();
+            let betas = view.betas()[..ncol].to_vec();
+            // var_diag / t_sq are PREDICTOR-indexed for the mixed arms: extract by
+            // spec.target_indices, NOT by target rank.
+            let se = spec
+                .target_indices
                 .iter()
-                .map(|&c| c as usize)
+                .map(|&t| view.var_diag()[t as usize].sqrt())
                 .collect();
-            let extra_slope_cols: Vec<Vec<usize>> = spec
-                .extra_slope_cols
+            let statistic = spec
+                .target_indices
                 .iter()
-                .map(|v| v.iter().map(|&c| c as usize).collect())
+                .map(|&t| view.t_sq()[t as usize].sqrt())
                 .collect();
-            let model =
-                crate::mixed_workspace::cluster_to_model_spec(cluster, glmm::Family::Gaussian);
-            let mut lmm = glmm::loop_advanced::LmmWorkspace::for_cluster_spec_ext(
+            // `into_fit` consumes the view; read the accessors above first. It also
+            // covers the sparse route (Prebuilt holds a full Fit — varcorr/dispersion
+            // read fine; only joint_t_sq/theta degrade, which introspect never reads).
+            let fit = view.into_fit(
+                &ws.x_rowmajor[..nrow * ncol],
+                &ws.y_full_f64[..nrow],
+                nrow,
                 ncol,
                 &model,
-                nrow,
-                &slope_cols,
-                &extra_slope_cols,
+                &opts,
             );
-            let cid_slice = &ws.cluster_ids[..nrow];
-            lmm.suff.add_rows_multi(
-                ws.x_full_f64.as_ref().subrows(0, nrow),
-                &ws.y_full_f64[..nrow],
-                cid_slice,
-                &ws.extra_grouping_ids,
-                None, // weights: MCPower has no prior-observation-weights feature
-            );
-            // Truth-start under the scenario's `truth_start` assumption: seed the
-            // optimizer at the DGP-truth θ (well-behaved estimation) or start
-            // blind. NOT a speed knob — the MLE is start-sensitive. MIRRORS
-            // batch.rs's general branch; the hot loop and this debug path must
-            // derive the same hint — change together.
-            let theta = crate::mixed_workspace::truth_theta(cluster, true);
-            let start = spec.scenario.truth_start.then_some(&theta[..]);
-            let f = glmm::loop_advanced::fit_lmm(&mut lmm, &spec.target_indices, start);
-            let sig = f.sigma_sq;
-            let q = lmm.suff.groupings.primary_q;
-            // Primary RE covariance D̂ = σ̂²·Λ̂Λ̂′ where Λ̂ is the row-major
-            // lower-triangular primary Cholesky factor (q_p=1 ⇒ Λ̂=[θ̂₀], the
-            // scalar τ̂²=θ̂₀²·σ̂²). Diagonals of D̂ are the RE variances
-            // [τ̂₀², τ̂₁², …]; off-diagonals yield the correlation vector (vech
-            // column-major, empty for q_p=1).
-            let mut lam = vec![0.0_f64; q * q];
-            glmm::loop_advanced::primary_lambda(&lmm.theta, q, &mut lam);
-            let mut d = vec![0.0_f64; q * q];
-            for i in 0..q {
-                for j in 0..q {
-                    let mut acc = 0.0;
-                    for k in 0..q {
-                        acc += lam[i * q + k] * lam[j * q + k];
-                    }
-                    d[i * q + j] = sig * acc;
-                }
-            }
-            // Each extra factor contributes its full q_g diagonal of
-            // D_g = σ̂²·Λ_gΛ_g′, not a single scalar — mirrors the primary
-            // above. Walk a θ cursor in declaration order (start past the
-            // primary vech block, advance q_g(q_g+1)/2 per factor); the old
-            // `theta[base+e]` indexing (and the q_p==1 `theta.iter()` map)
-            // silently assumed q_g==1. Order [primary diag, extras in
-            // declaration order] mirrors generation.rs n_variance_components
-            // and lmm.rs diagonal_theta — change together.
-            let mut variance_components: Vec<f64> = (0..q).map(|dd| d[dd * q + dd]).collect();
-            let mut cursor = q * (q + 1) / 2;
-            for &qg in lmm.suff.groupings.extra_q.iter() {
-                let mut lam_g = [0.0f64; MAX_EXTRA_Q * MAX_EXTRA_Q];
-                glmm::loop_advanced::primary_lambda(&lmm.theta[cursor..], qg, &mut lam_g);
-                for dd in 0..qg {
-                    let mut acc = 0.0;
-                    // lam_g row-major q_g×q_g ⇒ D_g[dd,dd] = Σ_k Λ_g[dd,k]².
-                    for kk in 0..qg {
-                        acc += lam_g[dd * qg + kk] * lam_g[dd * qg + kk];
-                    }
-                    variance_components.push(sig * acc); // D_g[dd,dd] = σ̂² · Σ_k Λ_g[dd,k]²
-                }
-                cursor += qg * (qg + 1) / 2;
-            }
-            // re_corr = primary off-diagonals vech column-major: corr(r, c) for
-            // c < r (empty when q_p == 1 — inner loop vacuous).
-            let mut re_corr = Vec::with_capacity(q * (q - 1) / 2);
-            for c in 0..q {
-                for r in (c + 1)..q {
-                    let den = (d[r * q + r] * d[c * q + c]).sqrt();
-                    re_corr.push(if den > 0.0 { d[r * q + c] / den } else { 0.0 });
-                }
-            }
-            let betas = lmm.fit.betas[..ncol].to_vec();
-            let se = spec
-                .target_indices
-                .iter()
-                .map(|&t| lmm.fit.var_diag[t as usize].sqrt())
-                .collect();
-            let statistic = spec
-                .target_indices
-                .iter()
-                .map(|&t| lmm.fit.t_sq[t as usize].sqrt())
-                .collect();
+            let (variance_components, re_corr) = unpack_varcorr(&fit);
             (
                 betas,
                 se,
                 statistic,
-                f.converged,
+                converged,
                 variance_components,
-                sig,
+                fit.dispersion, // σ̂² (NaN on a degenerate LMM fit — varcorr is then empty too)
                 re_corr,
-            )
-        }
-        EstimatorSpec::Mle => {
-            // Mirrors run_one_sim's MLE arm. Build per-cluster suff-stats,
-            // then lme_fit. var_diag / t_sq are PREDICTOR-indexed: extract by
-            // spec.target_indices, NOT by target rank.
-            use faer::reborrow::IntoConst;
-            ws.reset_lme_suff_stats();
-            {
-                let mut suff = LmeSuffStats {
-                    xtx: ws.lme_xtx.as_mut(),
-                    xty: &mut ws.lme_xty,
-                    yty: &mut ws.lme_yty,
-                    sum_xc: ws.lme_sum_xc.as_mut(),
-                    sum_yc: &mut ws.lme_sum_yc,
-                    cluster_sizes: &mut ws.lme_cluster_sizes,
-                    n_clusters_seen: &mut ws.lme_n_clusters_seen,
-                    panel_x: &mut ws.panel_x,
-                    panel_y: &mut ws.panel_y,
-                };
-                let x_slice = ws.x_full_f64.as_ref().subrows(0, nrow);
-                let y_slice = &ws.y_full_f64[..nrow];
-                let cid_slice = &ws.cluster_ids[..nrow];
-                suff.add_rows(x_slice, y_slice, cid_slice);
-            }
-            let n_clusters = ws.lme_n_clusters_seen;
-            let scratch = LmeScratch {
-                xtx: ws.lme_xtx.as_ref(),
-                xty: &ws.lme_xty,
-                yty: ws.lme_yty,
-                ols_scratch: OlsScratch {
-                    fit_betas: &mut ws.fit_betas,
-                    fit_var_diag: &mut ws.fit_var_diag,
-                    fit_t_sq: &mut ws.fit_t_sq,
-                    fit_u_scratch: &mut ws.fit_u_scratch,
-                    fit_factor: ws.fit_factor.as_mut(),
-                    fit_rhs: ws.fit_rhs.as_mut(),
-                },
-                sum_xc: ws.lme_sum_xc.as_mut().into_const(),
-                sum_yc: &ws.lme_sum_yc,
-                cluster_sizes: &ws.lme_cluster_sizes,
-                n_clusters,
-                n_rows: nrow as u32,
-                xtvix: ws.lme_xtvix.as_mut(),
-                xtviy: &mut ws.lme_xtviy,
-                xtvix_factor: ws.lme_xtvix_factor.as_mut(),
-                v_diag_inv: &mut ws.lme_v_diag_inv,
-                betas: &mut ws.lme_betas,
-                var_diag: &mut ws.lme_var_diag,
-                t_sq: &mut ws.lme_t_sq,
-                u_scratch: &mut ws.lme_u_scratch,
-                sigma_sq: 0.0,
-                brent_log_a: &mut ws.lme_brent_log_a,
-                brent_log_b: &mut ws.lme_brent_log_b,
-                brent_log_c: &mut ws.lme_brent_log_c,
-                brent_fa: &mut ws.lme_brent_fa,
-                brent_fb: &mut ws.lme_brent_fb,
-                brent_fc: &mut ws.lme_brent_fc,
-                joint_sigma_t_chol: ws.lme_joint_sigma_t_chol.as_mut(),
-                joint_rhs: &mut ws.lme_joint_rhs,
-                joint_k_inv: ws.lme_joint_k_inv.as_mut(),
-            };
-            let x_slice = ws.x_full_f64.as_ref().subrows(0, nrow);
-            let y_slice = &ws.y_full_f64[..nrow];
-            let cid_slice = &ws.cluster_ids[..nrow];
-            // Truth start from the spec's BASE τ² (mirrors the hot loop,
-            // which starts at the per-block √τ²_block). Provided bytes
-            // carry no block identity, so the L5 ICC-jitter perturbation
-            // cannot be reproduced here: under that knob the refit reaches
-            // the same minimum within Brent tolerance rather than
-            // bit-identically; for every non-jittered scenario the two
-            // starts are equal and load_data ≡ hot-loop stays bit-exact.
-            let theta_start = Some(
-                spec.cluster
-                    .as_ref()
-                    .map(|c| c.tau_squared)
-                    .unwrap_or(0.0)
-                    .max(0.0)
-                    .sqrt(),
-            );
-            let fit = lme_fit(
-                x_slice,
-                y_slice,
-                cid_slice,
-                &spec.target_indices,
-                theta_start,
-                scratch,
-            );
-            let betas = fit.betas[..ncol].to_vec();
-            let se = spec
-                .target_indices
-                .iter()
-                .map(|&ti| fit.var_diag[ti as usize].sqrt())
-                .collect();
-            let statistic = spec
-                .target_indices
-                .iter()
-                .map(|&ti| fit.t_sq[ti as usize].sqrt())
-                .collect();
-            // Surface τ̂² (primary random-intercept variance, index 0) and σ̂²
-            // for the random-intercept-only path, matching the general-MLE and
-            // GLMM branches. Empty / NaN on a non-finite (failed) fit so hosts
-            // detect the absence the same way they do for OLS. No off-diagonals
-            // exist for a scalar random intercept ⇒ re_corr stays empty.
-            let (variance_components, sigma_sq_hat) =
-                if fit.tau_sq_hat.is_finite() && fit.sigma_sq.is_finite() {
-                    (vec![fit.tau_sq_hat], fit.sigma_sq)
-                } else {
-                    (vec![], f64::NAN)
-                };
-            (
-                betas,
-                se,
-                statistic,
-                fit.converged,
-                variance_components,
-                sigma_sq_hat,
-                vec![],
             )
         }
     };
@@ -735,6 +557,47 @@ pub fn fit_provided_data(
         sigma_sq_hat,
         re_corr,
     })
+}
+
+/// Unpack a mixed-model `Fit`'s RE (co)variance into introspect's
+/// `(variance_components, re_corr)`. `fit.varcorr` holds one vech-packed
+/// COLUMN-MAJOR LOWER-TRIANGULAR block D̂ = σ̂²·Λ̂Λ̂' per grouping (primary, then
+/// extras in declaration order). For a q×q block the diagonal (j,j) sits at vech
+/// index `j·q − j(j−1)/2` and off-diagonal (r,c) with c < r at
+/// `c·q − c(c−1)/2 + (r−c)`.
+///
+/// `variance_components` = every block's diagonal in declaration order (order
+/// [primary diag, extras…] mirrors generation.rs `n_variance_components`);
+/// `re_corr` = the PRIMARY block's off-diagonals as correlations, vech
+/// column-major (empty when q_p == 1). Both are empty on a degenerate fit
+/// (`fit.varcorr` is empty when the LMM/GLMM fit has no finite endpoint).
+fn unpack_varcorr(fit: &glmm::Fit) -> (Vec<f64>, Vec<f64>) {
+    // Block length L = q(q+1)/2 ⇒ q = (√(8L+1) − 1)/2.
+    let vech_q = |len: usize| -> usize { (((8 * len + 1) as f64).sqrt() as usize - 1) / 2 };
+    // vech index of diagonal (j,j) in a column-major lower-tri q×q block. The
+    // triangular offset is written `(j·j − j)/2` (equal to j(j−1)/2 but computed
+    // so `j == 0` never underflows the usize `j − 1`).
+    let diag_idx = |j: usize, q: usize| j * q - (j * j - j) / 2;
+    let mut variance_components = Vec::new();
+    for block in &fit.varcorr {
+        let q = vech_q(block.len());
+        for j in 0..q {
+            variance_components.push(block[diag_idx(j, q)]);
+        }
+    }
+    let mut re_corr = Vec::new();
+    if let Some(block) = fit.varcorr.first() {
+        let q = vech_q(block.len());
+        let diag = |j: usize| block[diag_idx(j, q)];
+        for c in 0..q {
+            for r in (c + 1)..q {
+                let den = (diag(r) * diag(c)).sqrt();
+                let off = block[diag_idx(c, q) + (r - c)];
+                re_corr.push(if den > 0.0 { off / den } else { 0.0 });
+            }
+        }
+    }
+    (variance_components, re_corr)
 }
 
 /// n_targets = marginals + contrasts (matches `BatchResult` target ordering).

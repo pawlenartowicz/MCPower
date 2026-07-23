@@ -211,7 +211,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "engine-contract"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "glmm",
  "serde",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "bobyqa",
  "engine-contract",
@@ -238,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "engine-orchestrator"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "engine-r"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "engine-spec-builder"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -592,9 +592,9 @@ dependencies = [
 
 [[package]]
 name = "glmm"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da8c7ff77c782804b0a9e91c9d6e51a2ec990a11023721c4a69919a42f6e37ff"
+checksum = "46852a3c6aebdfac919fb1a8449e32a5df4dc20c57deb828f9ea7fb873622984"
 dependencies = [
  "bobyqa",
  "faer",

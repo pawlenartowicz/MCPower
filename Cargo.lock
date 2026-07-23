@@ -1150,7 +1150,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine-app-spec"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "engine-contract"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "glmm",
@@ -1177,7 +1177,7 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "approx",
  "bobyqa",
@@ -1198,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "engine-orchestrator"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "approx",
  "engine-contract",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "engine-py"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1230,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "engine-r"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "engine-spec-builder"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1257,7 +1257,7 @@ dependencies = [
 
 [[package]]
 name = "engine-wasm"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "engine-app-spec",
  "engine-contract",
@@ -2058,9 +2058,9 @@ dependencies = [
 
 [[package]]
 name = "glmm"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da8c7ff77c782804b0a9e91c9d6e51a2ec990a11023721c4a69919a42f6e37ff"
+checksum = "46852a3c6aebdfac919fb1a8449e32a5df4dc20c57deb828f9ea7fb873622984"
 dependencies = [
  "bobyqa",
  "faer",

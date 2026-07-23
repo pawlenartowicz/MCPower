@@ -312,7 +312,10 @@ fn cases() -> Vec<Case> {
     glm_rare.effect_sizes[1] = 0.45;
     glm_rare.effect_sizes[2] = 0.45;
 
-    // Brent + profiled deviance, 20 clusters: x1=x2=0.15.
+    // Degenerate single-intercept LMM (no slopes, no extra groupings), 20
+    // clusters: x1=x2=0.15. This shape used to take a scalar Brent search on the
+    // profiled deviance; that path is retired, so it now routes through `fit_on`
+    // (BOBYQA) like every other clustered Mle spec.
     let mut lme_multi = lme_spec(5, 20);
     lme_multi.effect_sizes[1] = 0.15;
     lme_multi.effect_sizes[2] = 0.15;
@@ -440,14 +443,17 @@ fn cases() -> Vec<Case> {
     };
 
     // --- M4 GLMM crossed/nested rows — the GLMM mirror of the M2 lmm rows.
-    // Non-empty `extra_groupings` routes these through the DENSE PIRLS path
-    // (`pirls_solve`, k = total RE dims), which the blocked intercept/slope rows
-    // never touch — these are the only grid rows profiling that kernel. Extra
-    // τ² mirror the lmm rows on the latent scale (×π²/3): 0.15→0.49 crossed,
-    // 0.10→0.33 nested, 0.08→0.26 second extra. Primary stays at 8 clusters so
-    // dense-vs-blocked is comparable across the M4 rows; n_sims is small —
-    // the dense fit is O(n·k²) per PIRLS pass (k=14/24/30 here). No multislope
-    // row: too slow for the grid at current dense-path cost.
+    // Non-empty `extra_groupings` with intercept-only extras: `classify_design`
+    // picks `Solver::NoZ`, and glmm's `structured_extras_eligible` holds
+    // (primary_q 1 + nested_per_parent 2 ≤ MAX_PRIMARY_Q), so per-eval deviance
+    // takes the PACKED structured-extras kernel — `build_packed_m` +
+    // `pirls_solve_blocked_extras`. The dense `apply_lambda` + `pirls_solve`
+    // fallback needs a slope-bearing or over-cap extra to fire; no row here
+    // reaches it, so it has no bench coverage. Extra τ² mirror the lmm rows on
+    // the latent scale (×π²/3): 0.15→0.49 crossed, 0.10→0.33 nested, 0.08→0.26
+    // second extra. Primary stays at 8 clusters so the rows stay comparable to
+    // each other; n_sims is small because total RE dims run 14/24/30 here. No
+    // multislope row: too slow for the grid at current cost.
     let glmm_crossed = {
         let mut s = glmm_spec(1, 0.3, 8, 0.822);
         s.effect_sizes[1] = 0.30;

@@ -662,7 +662,10 @@ CROSS_CASES <- list(
        formula = "y ~ x1 + x2", effects = "x1=0.40, x2=0.25",
        family = "ols", cluster = NULL),
   list(label = "cross_glm",
-       formula = "y ~ x1 + x2", effects = "x1=0.50, x2=0.35",
+       # x2=0.45 (not 0.35): under the logit link this standardized effect crosses
+       # ~n=200, inside [20,300]; at 0.35 it crossed ~331, out of range. The old
+       # 0.50/0.35 pair was tuned when this case silently ran as OLS (x2 crossed 70).
+       formula = "y ~ x1 + x2", effects = "x1=0.50, x2=0.45",
        family = "logit", baseline_probability = 0.3, cluster = NULL),
   list(label = "cross_lme",
        formula = "y ~ x1 + (1|grp)", effects = "x1=0.45",

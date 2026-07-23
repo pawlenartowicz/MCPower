@@ -73,7 +73,7 @@ fn mc_path_exit_gate_glm() {
 }
 
 /// GLMM end-to-end: a clustered-logit contract (Glm + random intercept) routes
-/// through `fit_glmm` (Task 6) and surfaces `EstimatorExtras::Glm` with a valid
+/// through `fit_on` and surfaces `EstimatorExtras::Glm` with a valid
 /// `singular_fit_rate` and a finite `tau_squared_hat_mean` (the engine half of
 /// the Laplace-bias warning). Guards the batch.rs dispatch + the
 /// `from_batch` Glm aggregation wiring.

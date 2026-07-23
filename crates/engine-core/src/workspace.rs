@@ -163,7 +163,7 @@ pub struct SimWorkspace {
     /// because `Cholesky` consumes the matrix it reads from.
     pub suff_xtx_work: Mat<f64>,
     /// Column-major f64 panel (`PANEL_ROWS × P`, leading dim = the current
-    /// panel's rows) — `OlsSuffStats`/`LmeSuffStats::add_rows` widen f32 design
+    /// panel's rows) — `OlsSuffStats::add_rows` widens f32 design
     /// rows here panel-by-panel before the GEMM accumulate. Allocated once;
     /// warm path stays zero-alloc.
     pub panel_x: Vec<f64>,
@@ -213,67 +213,15 @@ pub struct SimWorkspace {
     /// Per-iteration W∘X scratch (column-major, stride n); needs `len ≥ n·p`.
     pub irls_wx: Vec<f64>,
 
-    // ------------------------------------------------------------------
-    // LME suff-stats — rebuilt per (sim, N) by `lme_add_rows`.
-    // The first three slots are numerically equal to the OLS X'X / X'y / y'y
-    // and are aliased into a nested OlsScratch on the `boundary_hit = 1` path.
-    // ------------------------------------------------------------------
-    /// `P × P` accumulator for X'X (lower triangle only — fix2 invariant).
-    pub lme_xtx: Mat<f64>,
-    /// Length-P X'y accumulator.
-    pub lme_xty: Vec<f64>,
-    /// Scalar y'y.
-    pub lme_yty: f64,
-    /// `P × max_n_clusters` per-cluster sum of X rows.
-    pub lme_sum_xc: Mat<f64>,
-    /// Length-`max_n_clusters` per-cluster sum of y rows.
-    pub lme_sum_yc: Vec<f64>,
-    /// Length-`max_n_clusters` per-cluster row counts (u32 — capped at `u32::MAX`).
-    pub lme_cluster_sizes: Vec<u32>,
-    /// Current cluster count seen (≤ max_n_clusters at all times).
-    pub lme_n_clusters_seen: u32,
-    /// `P × P` working buffer for the Cholesky factor of `X' V(θ)⁻¹ X`.
-    pub lme_xtvix: Mat<f64>,
-    /// Length-P RHS `X' V(θ)⁻¹ y`.
-    pub lme_xtviy: Vec<f64>,
-    /// Cached Cholesky L of `lme_xtvix` at θ̂ (for var_diag forward-solve).
-    pub lme_xtvix_factor: Mat<f64>,
-    /// Length-`max_n_clusters` per-cluster `(1 + θ²·n_c)⁻¹`.
-    pub lme_v_diag_inv: Vec<f64>,
-    /// Length-P β̂(θ̂).
-    pub lme_betas: Vec<f64>,
-    /// Length-P per-target Var(β̂_j).
-    pub lme_var_diag: Vec<f64>,
-    /// Length-P per-target β̂_j² / Var(β̂_j).
-    pub lme_t_sq: Vec<f64>,
     /// Length-P forward-solve scratch (same role as `fit_u_scratch`).
-    /// Also borrowed by the OLS contrast path as the forward-solve scratch
+    /// Borrowed by the OLS contrast path as the forward-solve scratch
     /// for `ols_contrast_t_sq` (L · u = c, length P ≥ n_predictors).
     pub lme_u_scratch: Vec<f64>,
-    /// Brent scalar state (one per call; lives in workspace so no per-call alloc).
-    pub lme_brent_log_a: f64,
-    pub lme_brent_log_b: f64,
-    pub lme_brent_log_c: f64,
-    pub lme_brent_fa: f64,
-    pub lme_brent_fb: f64,
-    pub lme_brent_fc: f64,
-    // ------------------------------------------------------------------
-    // Joint Wald-χ² scratch. Sized at construction to worst-case P; reused per sim.
-    // ------------------------------------------------------------------
-    /// `P × P` scratch; top-left k×k holds the Cholesky factor L_T of Σ_T
-    /// where Σ_T is the k×k principal submatrix of K⁻¹ = (X'V⁻¹X)⁻¹ gathered
-    /// by `target_indices`. Overwritten per call.
-    pub lme_joint_sigma_t_chol: Mat<f64>,
-    /// Length-`P` RHS for the joint solve. On entry: β̂_T copied in. On exit:
-    /// x = Σ_T⁻¹ β̂_T (only the first k slots are touched).
-    /// Also borrowed by the OLS path as a staging scratch for the combined
+    /// Length-`≥ P` staging scratch borrowed by the OLS path for the combined
     /// marginal + contrast t² array, which can exceed P (full pairwise
     /// contrast sets) — `run_batch_impl` grows it to max(P, n_targets) right
-    /// after construction; LME consumers only take `[..P]` views.
+    /// after construction.
     pub lme_joint_rhs: Vec<f64>,
-    /// `P × P` scratch. Starts as `I_p` (refilled by `reset_lme_suff_stats`
-    /// per sim) and is overwritten in-place to `K⁻¹` by `chol.solve_in_place`.
-    pub lme_joint_k_inv: Mat<f64>,
     /// Length-`max_n_clusters` per-cluster random-effect draws (`τ · N(0,1)`)
     /// — written by `data_gen.rs` step 1, read in step 4.
     pub cluster_u_draws: Vec<f32>,
@@ -300,15 +248,38 @@ pub struct SimWorkspace {
     /// grouping). Mirrors `tau_squared_design`; both are set together by
     /// `populate_design` — change together.
     pub extra_tau_sq_design: Vec<f64>,
-    /// General-path solver workspace — Some iff the spec dispatches to the
-    /// lmm path (estimator Mle + non-degenerate ClusterSpec). Built by the
-    /// batch/introspect construction sites via `lmm::build_lmm_workspace`
-    /// (the ctor doesn't know the estimator). Boxed: the tail/zx buffers are
-    /// large relative to the rest of the workspace.
-    pub lmm: Option<Box<glmm::loop_advanced::LmmWorkspace>>,
-    /// GLMM solver workspace — `Some` for Glm + cluster specs (built at the batch
-    /// entry, like `lmm`). `None` for OLS / plain logistic / LME paths.
-    pub glmm: Option<Box<glmm::loop_advanced::GlmmWorkspace>>,
+    /// Mixed-model solver workspaces, one per sample-size grid point (indexed by
+    /// `n_idx`). Empty for OLS / unclustered GLM. Built at the batch/introspect
+    /// construction sites via `mixed_workspace::build_mixed_workspaces` (the ctor
+    /// doesn't know the estimator or the grid). Per grid point rather than one at
+    /// `max_n` because `fit_on` pins the primary cluster count at build — see that
+    /// builder's doc for why `FixedSize` designs force it.
+    pub mixed: Vec<glmm::loop_advanced::FitWorkspace>,
+    /// RE level ids per grid point, parallel to `mixed` — the `fit_on` companion
+    /// to `(x, y)`. Materialized once at batch entry because `cluster_ids` /
+    /// `extra_grouping_ids` are structural and invariant across sims.
+    pub mixed_ids: Vec<glmm::GroupIds>,
+    /// The frozen `fit_on` options for `mixed`. `fit_on` asserts nagq /
+    /// weights-presence / offset-presence / parallel_inner match the build, so
+    /// every hot-path call presents exactly this value.
+    pub mixed_opts: glmm::FitOptions,
+    /// Row-major `n × p` f64 design scratch for `fit_on`, capacity
+    /// `max_n · n_predictors`. The kernels take row-major `x[i·p + j]` while
+    /// `x_full_f64` is column-major faer, so the mixed arms materialize the draw
+    /// here first (the retired `add_rows_multi` seam took the column-major view
+    /// directly and needed no copy).
+    pub x_rowmajor: Vec<f64>,
+    /// Grid-sequential θ̂ warm-start carry: the previous (smaller-N) grid point's
+    /// converged θ̂ vech, reused as the next point's `StartValues.theta`. Sized to
+    /// the hot-path `n_theta` (full RE structure, invariant across a sim's grid);
+    /// empty for OLS / unclustered GLM. Fed/updated only on the hot mixed-model
+    /// fit — see the carry sites in `batch.rs`.
+    pub theta_carry: Vec<f64>,
+    /// Whether `theta_carry` holds a converged θ̂ from an earlier grid point of the
+    /// CURRENT sim. Reset to `false` at the top of each sim's mixed-path grid walk,
+    /// so no carry ever crosses sims (a cross-sim accumulator was rejected for
+    /// determinism — see batch.rs:149). First grid point of every sim has it false.
+    pub has_prev: bool,
 }
 
 impl SimWorkspace {
@@ -397,36 +368,8 @@ impl SimWorkspace {
             irls_l: Mat::<f64>::zeros(n_predictors, n_predictors),
             irls_wx: vec![0.0; max_n * n_predictors],
 
-            lme_xtx: Mat::<f64>::zeros(n_predictors, n_predictors),
-            lme_xty: vec![0.0; n_predictors],
-            lme_yty: 0.0,
-            lme_sum_xc: Mat::<f64>::zeros(n_predictors, max_n_clusters.max(1)),
-            lme_sum_yc: vec![0.0; max_n_clusters.max(1)],
-            lme_cluster_sizes: vec![0u32; max_n_clusters.max(1)],
-            lme_n_clusters_seen: 0,
-            lme_xtvix: Mat::<f64>::zeros(n_predictors, n_predictors),
-            lme_xtviy: vec![0.0; n_predictors],
-            lme_xtvix_factor: Mat::<f64>::zeros(n_predictors, n_predictors),
-            lme_v_diag_inv: vec![0.0; max_n_clusters.max(1)],
-            lme_betas: vec![0.0; n_predictors],
-            lme_var_diag: vec![0.0; n_predictors],
-            lme_t_sq: vec![0.0; n_predictors],
             lme_u_scratch: vec![0.0; n_predictors],
-            lme_brent_log_a: 0.0,
-            lme_brent_log_b: 0.0,
-            lme_brent_log_c: 0.0,
-            lme_brent_fa: 0.0,
-            lme_brent_fb: 0.0,
-            lme_brent_fc: 0.0,
-            lme_joint_sigma_t_chol: Mat::<f64>::zeros(n_predictors, n_predictors),
             lme_joint_rhs: vec![0.0; n_predictors],
-            lme_joint_k_inv: {
-                let mut m = Mat::<f64>::zeros(n_predictors, n_predictors);
-                for i in 0..n_predictors {
-                    m[(i, i)] = 1.0;
-                }
-                m
-            },
             cluster_u_draws: vec![0.0f32; max_n_clusters],
             cluster_slope_u_draws: match cluster {
                 Some(c) if !c.slopes.is_empty() => vec![0.0f32; max_n_clusters * c.slopes.len()],
@@ -460,8 +403,21 @@ impl SimWorkspace {
                 })
                 .collect(),
             extra_tau_sq_design: vec![0.0; n_extras],
-            lmm: None,
-            glmm: None,
+            // Populated at the batch/introspect entry, which knows the estimator
+            // and the sample-size grid; left empty for OLS / unclustered GLM.
+            mixed: Vec::new(),
+            mixed_ids: Vec::new(),
+            mixed_opts: glmm::FitOptions::default(),
+            x_rowmajor: vec![0.0f64; max_n * n_predictors],
+            // Sized to the hot-path n_theta so the per-fit update is a capacity-
+            // reusing refill (no warm-path realloc). `truth_theta(.., true)` is the
+            // authority on that length (full RE structure, incl. slopes); empty for
+            // OLS / unclustered GLM, whose fits expose no θ̂.
+            theta_carry: match cluster {
+                Some(c) => vec![0.0; crate::mixed_workspace::truth_theta(c, true).len()],
+                None => Vec::new(),
+            },
+            has_prev: false,
         }
     }
 
@@ -479,44 +435,6 @@ impl SimWorkspace {
         self.suff_yty = 0.0;
         self.suff_sum_y = 0.0;
         self.suff_n_rows = 0;
-    }
-
-    /// Reset the LME sufficient-statistics accumulator to "no rows seen".
-    /// Zeros the lower triangle of `lme_xtx`, all of `lme_xty`, `lme_yty`,
-    /// `lme_sum_xc` (entire buffer), `lme_sum_yc`, `lme_cluster_sizes`, and
-    /// resets `lme_n_clusters_seen = 0`.
-    /// Brent state and per-θ scratch are **not** zeroed here — they are
-    /// overwritten on every `profiled_deviance` call.
-    pub fn reset_lme_suff_stats(&mut self) {
-        let p = self.lme_xty.len();
-        let k = self.lme_sum_yc.len();
-        for j in 0..p {
-            for i in j..p {
-                self.lme_xtx[(i, j)] = 0.0;
-            }
-            self.lme_xty[j] = 0.0;
-            for c in 0..k {
-                self.lme_sum_xc[(j, c)] = 0.0;
-            }
-        }
-        for v in self.lme_sum_yc.iter_mut() {
-            *v = 0.0;
-        }
-        for v in self.lme_cluster_sizes.iter_mut() {
-            *v = 0;
-        }
-        self.lme_yty = 0.0;
-        self.lme_n_clusters_seen = 0;
-
-        // Refill identity into the joint K⁻¹ scratch (consumed in-place by
-        // chol.solve_in_place — see `lme.rs` joint Wald-χ² block).
-        // `lme_joint_sigma_t_chol` and `lme_joint_rhs` are fully overwritten
-        // per call so they need no reset.
-        for j in 0..p {
-            for i in 0..p {
-                self.lme_joint_k_inv[(i, j)] = if i == j { 1.0 } else { 0.0 };
-            }
-        }
     }
 }
 
@@ -592,38 +510,9 @@ mod tests {
         assert_eq!(ws.irls_l.ncols(), 5);
         assert_eq!(ws.irls_wx.len(), 100 * 5);
 
-        // LME scratch.
-        assert_eq!(ws.lme_xtx.nrows(), 5);
-        assert_eq!(ws.lme_xtx.ncols(), 5);
-        assert_eq!(ws.lme_xty.len(), 5);
-        assert_eq!(ws.lme_yty, 0.0);
-        assert_eq!(ws.lme_sum_xc.nrows(), 5);
-        assert_eq!(ws.lme_sum_xc.ncols(), 20);
-        assert_eq!(ws.lme_sum_yc.len(), 20);
-        assert_eq!(ws.lme_cluster_sizes.len(), 20);
-        assert_eq!(ws.lme_n_clusters_seen, 0);
-        assert_eq!(ws.lme_xtvix.nrows(), 5);
-        assert_eq!(ws.lme_xtvix.ncols(), 5);
-        assert_eq!(ws.lme_xtviy.len(), 5);
-        assert_eq!(ws.lme_xtvix_factor.nrows(), 5);
-        assert_eq!(ws.lme_xtvix_factor.ncols(), 5);
-        assert_eq!(ws.lme_v_diag_inv.len(), 20);
-        assert_eq!(ws.lme_betas.len(), 5);
-        assert_eq!(ws.lme_var_diag.len(), 5);
-        assert_eq!(ws.lme_t_sq.len(), 5);
+        // LME scratch retained for the OLS path.
         assert_eq!(ws.lme_u_scratch.len(), 5);
-        assert_eq!(ws.lme_joint_sigma_t_chol.nrows(), 5);
-        assert_eq!(ws.lme_joint_sigma_t_chol.ncols(), 5);
         assert_eq!(ws.lme_joint_rhs.len(), 5);
-        assert_eq!(ws.lme_joint_k_inv.nrows(), 5);
-        assert_eq!(ws.lme_joint_k_inv.ncols(), 5);
-        // joint_k_inv starts as identity.
-        for i in 0..5 {
-            for j in 0..5 {
-                let expected = if i == j { 1.0 } else { 0.0 };
-                assert_eq!(ws.lme_joint_k_inv[(i, j)], expected);
-            }
-        }
         assert_eq!(ws.cluster_u_draws.len(), 20);
         assert_eq!(ws.cluster_ids.len(), 100);
         // Interleaved layout: cluster_ids[i] == i % 20.
@@ -648,72 +537,6 @@ mod tests {
         assert_eq!(ws_block.cluster_ids[99], 19); // 99 / 5
                                                   // Buffer is sized to max_n / cluster_size = 100 / 5 = 20.
         assert_eq!(ws_block.cluster_u_draws.len(), 20);
-    }
-
-    #[test]
-    fn reset_lme_suff_stats_zeros_state() {
-        let mut ws = SimWorkspace::new(
-            100,
-            5,
-            3,
-            2,
-            Some(&engine_contract::ClusterSpec::intercept_only(
-                ClusterSizing::FixedClusters { n_clusters: 20 },
-                0.25,
-            )),
-        );
-        // Poke non-zero values into every field that reset should clear.
-        for j in 0..5 {
-            for i in j..5 {
-                ws.lme_xtx[(i, j)] = 1.0;
-            }
-            ws.lme_xty[j] = 2.0;
-            for c in 0..20 {
-                ws.lme_sum_xc[(j, c)] = 3.0;
-            }
-        }
-        for v in ws.lme_sum_yc.iter_mut() {
-            *v = 4.0;
-        }
-        for v in ws.lme_cluster_sizes.iter_mut() {
-            *v = 5;
-        }
-        ws.lme_yty = 6.0;
-        ws.lme_n_clusters_seen = 7;
-        // Poke non-identity into joint K⁻¹ to confirm reset restores identity.
-        for j in 0..5 {
-            for i in 0..5 {
-                ws.lme_joint_k_inv[(i, j)] = 99.0;
-            }
-        }
-
-        ws.reset_lme_suff_stats();
-
-        // Assert all are zero / reset.
-        for j in 0..5 {
-            for i in j..5 {
-                assert_eq!(ws.lme_xtx[(i, j)], 0.0);
-            }
-            assert_eq!(ws.lme_xty[j], 0.0);
-            for c in 0..20 {
-                assert_eq!(ws.lme_sum_xc[(j, c)], 0.0);
-            }
-        }
-        for v in &ws.lme_sum_yc {
-            assert_eq!(*v, 0.0);
-        }
-        for v in &ws.lme_cluster_sizes {
-            assert_eq!(*v, 0);
-        }
-        assert_eq!(ws.lme_yty, 0.0);
-        assert_eq!(ws.lme_n_clusters_seen, 0);
-        // joint_k_inv must be refilled to identity by the reset.
-        for j in 0..5 {
-            for i in 0..5 {
-                let expected = if i == j { 1.0 } else { 0.0 };
-                assert_eq!(ws.lme_joint_k_inv[(i, j)], expected);
-            }
-        }
     }
 
     /// DGEN-12: `reset_suff_stats` zeroes the OLS sufficient-statistics
@@ -744,8 +567,8 @@ mod tests {
         ws.suff_n_rows = 11;
 
         // Poke LME + IRLS fields that reset_suff_stats must NOT touch.
-        ws.lme_yty = 42.0;
-        ws.lme_n_clusters_seen = 5;
+        ws.lme_u_scratch[0] = 42.0;
+        ws.lme_joint_rhs[1] = 43.0;
         ws.irls_betas[0] = 99.0;
         ws.irls_t_sq[2] = 88.0;
 
@@ -764,11 +587,11 @@ mod tests {
 
         // LME + IRLS untouched.
         assert_eq!(
-            ws.lme_yty, 42.0,
+            ws.lme_u_scratch[0], 42.0,
             "reset_suff_stats must not touch LME fields"
         );
         assert_eq!(
-            ws.lme_n_clusters_seen, 5,
+            ws.lme_joint_rhs[1], 43.0,
             "reset_suff_stats must not touch LME fields"
         );
         assert_eq!(

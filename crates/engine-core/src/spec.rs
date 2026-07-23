@@ -162,7 +162,7 @@ pub struct ScenarioPerturbations {
     /// Scenario assumption about the fitter's starting values, not a speed knob:
     /// `true` seeds the mixed-model optimizer at the DGP-truth θ (asserting
     /// well-behaved estimation); `false` starts blind, as a real analyst would.
-    /// Read at the `fit_lmm`/`fit_glmm` call sites (batch + introspect) to decide
+    /// Read at the `fit_on` call sites (batch + introspect) to decide
     /// warm vs cold start. Deliberately NOT part of `is_optimistic()` — it
     /// changes only the optimizer's start, not the per-sim data, so it is
     /// orthogonal to the fast-path predicate. Additive serde-stable field: absent
