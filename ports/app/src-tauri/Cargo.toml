@@ -1,6 +1,6 @@
 [package]
 name = "mcpower-app"
-version = "1.0.3"
+version.workspace = true
 description = "MCPower desktop application (Tauri + Svelte)"
 edition.workspace = true
 rust-version.workspace = true
