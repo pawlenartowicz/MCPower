@@ -1873,20 +1873,16 @@ fn run_one_sim(
                 for attempt in 0..2u8 {
                     let any_excluded = ws.factor_excluded_flags.iter().any(|&c| c != 0);
                     let needs_reduced_fit = any_excluded || test_reduces;
-                    let p_red: usize;
-                    let targets_fit: &[u32];
-
-                    if !needs_reduced_fit {
-                        p_red = n_predictors_total;
+                    let (p_red, targets_fit): (usize, &[u32]) = if !needs_reduced_fit {
                         excl_target_slots.clear();
                         // Full-model path: target slots are identity (slot j ↔ index j).
                         for j in 0..spec.target_indices.len() {
                             excl_target_slots.push(j);
                         }
-                        targets_fit = &spec.target_indices;
+                        (n_predictors_total, &spec.target_indices)
                     } else {
                         excl_col_remap.resize(n_predictors_total, -1);
-                        p_red = build_exclusion_remap(
+                        let p_red = build_exclusion_remap(
                             spec,
                             &ws.factor_excluded_flags,
                             &mut excl_kept_cols,
@@ -1919,7 +1915,7 @@ fn run_one_sim(
                                 excl_target_slots.push(slot);
                             }
                         }
-                        targets_fit = &excl_targets;
+                        (p_red, &excl_targets)
                     };
 
                     let x_fit: faer::MatRef<f64> = if !needs_reduced_fit {
