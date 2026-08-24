@@ -37,9 +37,6 @@ use crate::spec::{
 use crate::workspace::{ReducedCritEntry, SimWorkspace};
 use glmm::loop_advanced::{fit_suff_stats_t_sq, ols_contrast_t_sq, OlsScratch, OlsSuffStats};
 
-/// Rank-deficiency epsilon for the Cholesky pivot ratio (min|L_diag|/max|L_diag|).
-pub(crate) const EPS_RANK: f64 = 1e-12;
-
 /// Process-wide BOBYQA objective-eval counters — bench diagnostics only
 /// (`bin/throughput.rs` reads before/after deltas around a row's warm-up run
 /// to report evals/fit). Fed once per LMM/GLMM fit at the `fit_on`
@@ -962,7 +959,6 @@ fn run_one_sim(
                         ws.suff_sum_y,
                         ws.suff_n_rows,
                         &spec.target_indices,
-                        EPS_RANK,
                         ws.suff_xtx_work.as_mut(),
                         scratch,
                     )
@@ -1004,7 +1000,6 @@ fn run_one_sim(
                         ws.suff_sum_y,
                         ws.suff_n_rows,
                         &excl_targets,
-                        EPS_RANK,
                         // The p_red×p_red top-left submatrix view satisfies the exact-size
                         // requirement (fit_suff_stats_t_sq asserts its xtx_work is p×p).
                         ws.suff_xtx_work.as_mut().submatrix_mut(0, 0, p_red, p_red),
@@ -1392,23 +1387,25 @@ fn run_one_sim(
                             .scenario
                             .truth_start
                             .then_some(glmm::StartValues { beta, theta });
-                        let sized = glmm::loop_advanced::spec_sized_from_ids_pub(&model, ids);
+                        let (sized, sized_ids, perm) =
+                            glmm::loop_advanced::spec_sized_from_ids_pub(&model, ids);
                         red_ws = Some(glmm::loop_advanced::build_workspace(
-                            &sized, n_usize, p_red, &opts_red,
+                            &sized, perm, n_usize, p_red, &opts_red,
                         ));
                         let view = glmm::loop_advanced::fit_on(
                             red_ws.as_mut().expect("just set"),
                             &red_x,
                             &ws.y_full_f64[..n_usize],
-                            ids,
+                            &sized_ids,
                             start.as_ref(),
                             &opts_red,
                         );
                         (&excl_targets[..], view)
                     };
-                optim_diag::record_fit(view.n_eval(), view.converged(), view.boundary_hit() == 1);
+                let diag = view.diagnostics();
+                optim_diag::record_fit(view.n_eval(), diag.converged, diag.boundary_hit == 1);
 
-                let converged = view.converged();
+                let converged = diag.converged;
                 let joint_t_sq = view.joint_t_sq();
                 // Predictor-indexed (module-header invariant): hot path length p,
                 // cold path length p_red.
@@ -1430,10 +1427,10 @@ fn run_one_sim(
                 }
 
                 conv[n_idx] = u8::from(converged);
-                bh[n_idx] = view.boundary_hit();
+                bh[n_idx] = diag.boundary_hit;
                 // Per-component boundary bitmask straight off the fit (BOBYQA on
                 // both the general and the former scalar-intercept path now).
-                pc[n_idx] = view.pinned_components();
+                pc[n_idx] = diag.pinned_components;
                 // LME overall_crit is INFINITY (hardwired — critvals.rs §Mle),
                 // so overall is always 0. No df adjustment needed.
                 //
@@ -1715,12 +1712,9 @@ fn run_one_sim(
                         opts_ref,
                     );
 
-                    optim_diag::record_fit(
-                        view.n_eval(),
-                        view.converged(),
-                        view.boundary_hit() == 1,
-                    );
-                    let converged = view.converged();
+                    let diag = view.diagnostics();
+                    optim_diag::record_fit(view.n_eval(), diag.converged, diag.boundary_hit == 1);
+                    let converged = diag.converged;
                     let joint_t_sq = view.joint_t_sq();
                     // Predictor-indexed, fitted width (p_red under test_formula, else
                     // full p). A `Solver::Sparse`-routed GLMM (extra-grouping random
@@ -1742,8 +1736,8 @@ fn run_one_sim(
                     }
 
                     conv[n_idx] = u8::from(converged);
-                    bh[n_idx] = view.boundary_hit();
-                    pc[n_idx] = view.pinned_components();
+                    bh[n_idx] = diag.boundary_hit;
+                    pc[n_idx] = diag.pinned_components;
                     // Random-intercept variance D̂[0][0] (the dense GLMM read); the
                     // Sparse `Prebuilt` route reports `Fit.dispersion` here instead.
                     tau_hat[n_idx] = view.dispersion();

@@ -6,7 +6,6 @@
 
 use crate::batch::run_batch_st;
 use crate::batch::run_batch_st_capture;
-use crate::batch::EPS_RANK;
 use crate::critvals::CritValueTable;
 use crate::data_gen::generate_sim_data;
 use crate::rng::pcg_mix64;
@@ -273,7 +272,6 @@ pub fn fit_provided_data(
                 ws.suff_sum_y,
                 ws.suff_n_rows,
                 &spec.target_indices,
-                EPS_RANK,
                 ws.suff_xtx_work.as_mut(),
                 scratch,
             );
@@ -376,6 +374,7 @@ pub fn fit_provided_data(
             let fit = view.into_fit(
                 &ws.x_rowmajor[..nrow * ncol],
                 &ws.y_full_f64[..nrow],
+                &ids[0],
                 nrow,
                 ncol,
                 &model,
@@ -512,6 +511,7 @@ pub fn fit_provided_data(
             let fit = view.into_fit(
                 &ws.x_rowmajor[..nrow * ncol],
                 &ws.y_full_f64[..nrow],
+                &ids[0],
                 nrow,
                 ncol,
                 &model,

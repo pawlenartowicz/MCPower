@@ -17,7 +17,7 @@ engine-contract = { path = "../engine-contract" }
 # loop_advanced = the unstable scratch-explicit hot-path surface. The 0.1.x line
 # is parity-stable, so patches inside it are accepted unpinned; a 0.2+ bump moves
 # the GLMM goldens and must be deliberate and reviewed.
-glmm = { version = "0.1.2", default-features = false, features = ["loop_advanced"] }
+glmm = { version = "0.3", default-features = false, features = ["loop_advanced"] }
 rayon        = "1.10"
 serde        = { version = "1", features = ["derive"] }
 # Used only by bin/throughput.rs (baseline JSON read/write); already in the

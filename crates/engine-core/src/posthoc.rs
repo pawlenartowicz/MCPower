@@ -216,7 +216,6 @@ mod tests {
             ws.suff_sum_y,
             ws.suff_n_rows,
             &[2, 3],
-            1e-12,
             ws.suff_xtx_work.as_mut(),
             scratch,
         );
@@ -348,7 +347,6 @@ mod tests {
             ws.suff_sum_y,
             ws.suff_n_rows,
             &[2, 3],
-            1e-12,
             ws.suff_xtx_work.as_mut(),
             OlsScratch {
                 fit_betas: &mut ws.fit_betas,
@@ -479,7 +477,6 @@ mod tests {
             ws.suff_sum_y,
             ws.suff_n_rows,
             &[1, 2],
-            1e-12,
             ws.suff_xtx_work.as_mut(),
             scratch,
         );
@@ -573,7 +570,6 @@ mod tests {
             ws.suff_sum_y,
             ws.suff_n_rows,
             &[2, 3],
-            1e-12,
             ws.suff_xtx_work.as_mut(),
             OlsScratch {
                 fit_betas: &mut ws.fit_betas,

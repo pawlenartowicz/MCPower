@@ -382,6 +382,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2785d76fcc832c5978731a1ab9566232bcc41941150d607e048b7c2f3667a53"
 
 [[package]]
+name = "bobyqa"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29652fc14c962e886cb95080521404983d791286b465baf11ee6decb2842b490"
+
+[[package]]
 name = "borsh"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1180,7 +1186,7 @@ name = "engine-core"
 version = "1.1.1"
 dependencies = [
  "approx",
- "bobyqa",
+ "bobyqa 0.1.1",
  "dhat",
  "engine-contract",
  "faer",
@@ -2058,11 +2064,11 @@ dependencies = [
 
 [[package]]
 name = "glmm"
-version = "0.1.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46852a3c6aebdfac919fb1a8449e32a5df4dc20c57deb828f9ea7fb873622984"
+checksum = "a5790e9f7784c69295f511f232c8c6d3885cd8e13f8a17461c244ff9fe524636"
 dependencies = [
- "bobyqa",
+ "bobyqa 0.3.0",
  "faer",
  "pulp",
 ]

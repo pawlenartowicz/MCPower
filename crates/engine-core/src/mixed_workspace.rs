@@ -264,9 +264,11 @@ pub fn build_mixed_workspaces(
         // `build_workspace` requires a spec whose RE level counts already match
         // the data; reuse glmm's own normalizer instead of reimplementing the
         // crossed/nested count derivation.
-        let sized = glmm::loop_advanced::spec_sized_from_ids_pub(&model, &ids);
-        workspaces.push(glmm::loop_advanced::build_workspace(&sized, n, p, &opts));
-        ids_per_point.push(ids);
+        let (sized, sized_ids, perm) = glmm::loop_advanced::spec_sized_from_ids_pub(&model, &ids);
+        workspaces.push(glmm::loop_advanced::build_workspace(
+            &sized, perm, n, p, &opts,
+        ));
+        ids_per_point.push(sized_ids.into_owned());
     }
     Some((workspaces, ids_per_point, opts))
 }
