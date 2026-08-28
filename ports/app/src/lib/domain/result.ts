@@ -114,6 +114,9 @@ export interface SampleSizeResult {
   fitted_overall?: CrossingFit | null;
   /** Cluster size atom (1 = unclustered). Absent in older payloads. */
   cluster_atom?: number;
+  /** Divisor between total N and the unit the search ran in (1 = observations).
+   *  Absent in older payloads. Hosts derive the unit columns as N / divisor. */
+  unit_divisor?: number;
   /** Warnings emitted by the grid search (e.g. non-monotone power curves, preflight notices). */
   grid_warnings?: string[];
   /** Per-grid-point sparse-exclusion counts: outer index = grid point, inner = factor. Absent in older payloads. */

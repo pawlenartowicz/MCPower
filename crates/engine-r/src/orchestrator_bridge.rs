@@ -223,6 +223,9 @@ fn host_value_to_robj(hv: &HostValue) -> Robj {
 /// * `by_kind`           — `"fixed"` (step) or `"auto"` (point count); default `"fixed"`.
 /// * `mode`              — `"linear"` or `"log"` (default `"linear"`).
 /// * `tol_n`             — accepted for API compatibility; unused.
+/// * `unit`              — host-facing unit bounds/results are expressed in
+///   (`"observations"` | `"clusters"` | `"cluster_size"`, default
+///   `"observations"` — divisor 1, byte-identical to the unit-less path).
 /// * `progress`          — an R callback `(current, total)`, or `NULL` for
 ///   silent. Events are delivered on the R main thread; Ctrl-C / Escape cancels
 ///   the run (see `progress.rs`).
@@ -246,6 +249,7 @@ pub fn find_sample_size(
     by_kind: Option<&str>,
     mode: Option<&str>,
     tol_n: Option<i32>,
+    unit: Option<&str>,
     progress: Robj,
 ) -> Result<List> {
     let _ = tol_n; // bisection-only; retained for FFI signature stability.
@@ -256,14 +260,23 @@ pub fn find_sample_size(
     // Decode to plain Rust types before the background thread starts — no Robj
     // may cross the thread boundary (`Robj` is `!Send`).
     let contracts = decode_contracts(contracts)?;
+
+    let unit = engine_orchestrator::SampleSizeUnit::parse(unit.unwrap_or("observations"))
+        .map_err(orchestrator_err)?;
+    let divisor =
+        engine_orchestrator::resolve_unit_divisor(&contracts, unit).map_err(orchestrator_err)?;
+    let ((lo, hi), method) =
+        engine_orchestrator::bounds_to_rows((lo as usize, hi as usize), method, divisor);
+
     let cancel = engine_orchestrator::CancellationToken::new();
     let result = run_engine(progress, &cancel, |sink, cancel| {
         engine_orchestrator::find_sample_size(
             &contracts,
             target_power,
-            (lo as usize, hi as usize),
+            (lo, hi),
             n_sims as usize,
             method,
+            divisor,
             base_seed as u64,
             Some(sink),
             cancel,

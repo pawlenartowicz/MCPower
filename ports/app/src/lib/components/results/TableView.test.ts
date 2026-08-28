@@ -355,3 +355,46 @@ describe('TableView — multi-scenario find-power layout (B4)', () => {
     expect(() => getByText('95% CI')).toThrow();
   });
 });
+
+describe('TableView — find-sample-size unit column', () => {
+  // Mixed spec searched in clusters: the engine reports divisor 8, so every
+  // required-N row also shows the same crossing counted in clusters.
+  const mixedSpec = {
+    ...baseSpec,
+    family: 'mixed' as const,
+    cluster_name: 'subject',
+    icc: 0.2,
+    cluster_dim: { kind: 'cluster_size' as const, value: 8 },
+    sample_size_unit: 'clusters' as const,
+  };
+
+  function unitTab(divisor: number) {
+    const tab = makeSampleSizeTab([80, 160]);
+    (tab.result as SampleSizeResult).unit_divisor = divisor;
+    return { ...tab, spec: mixedSpec } as RunTab;
+  }
+
+  it('shows the unit column before Required N, with N / divisor', () => {
+    const { getByTestId, getByText } = render(TableView, { props: { tab: unitTab(8) } });
+    expect(getByText('Required subject clusters')).toBeTruthy();
+    const headers = [...getByTestId('sample-size-table').querySelectorAll('thead th')].map(
+      (th) => th.textContent?.trim(),
+    );
+    expect(headers.slice(0, 3)).toEqual(['Effect', 'Required subject clusters', 'Required N']);
+    // first_achieved 80 / 160 → 10 / 20 clusters, alongside the N cells.
+    const firstRow = [
+      ...getByTestId('sample-size-table').querySelectorAll('tbody tr')[0]!.querySelectorAll('td'),
+    ].map((td) => td.textContent?.trim());
+    // 4th cell is the CI column (single-scenario), still counted in N.
+    expect(firstRow.slice(0, 3)).toEqual(['a', '10', '80']);
+  });
+
+  it('omits the unit column when the search ran in observations', () => {
+    const { getByTestId, queryByText } = render(TableView, { props: { tab: unitTab(1) } });
+    expect(queryByText('Required subject clusters')).toBeNull();
+    const headers = [...getByTestId('sample-size-table').querySelectorAll('thead th')].map(
+      (th) => th.textContent?.trim(),
+    );
+    expect(headers.slice(0, 2)).toEqual(['Effect', 'Required N']);
+  });
+});

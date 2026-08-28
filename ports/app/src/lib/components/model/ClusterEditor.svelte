@@ -17,6 +17,7 @@
   import { parsedFormulaStore, toClusterTerms } from '$lib/stores/parsed-formula.svelte';
   import { LIMITS } from '$lib/configs/app-config';
   import { EXTRA_GROUPING_DEFAULTS, SLOPE_DEFAULTS, mixedOutcomeKind } from '$lib/domain/family';
+  import { boundToObservations } from '$lib/domain/unit-label';
 
   // input floor = engine hard floor; 'reliable'/'recommended' are advisory.
   const MIN_OBS_PER_CLUSTER = LIMITS.min_rows_per_cluster;           // 2 (was hardcoded 5, mislabeled "hard minimum")
@@ -127,22 +128,38 @@
     });
   });
 
-  // Derived obs/cluster against the Find-power sample size, for the warning.
-  const derivedClusterSize = $derived.by(() => {
+  // Derived obs/cluster for the warning. Both run cards are always rendered and
+  // either can be run next, so under a fixed cluster count the check covers the
+  // worst (smallest) case across the Find-power n and the low end of the
+  // sample-size search, and names which card produced it.
+  const derivedClusterSize = $derived.by<{ size: number; source: string } | null>(() => {
     if (!cfg.cluster) return null;
-    if (cfg.cluster.dimKind === 'cluster_size') return cfg.cluster.clusterSize;
+    // A fixed size is the obs/cluster outright — neither run card can move it.
+    if (cfg.cluster.dimKind === 'cluster_size') {
+      return { size: cfg.cluster.clusterSize, source: '' };
+    }
     // No meaningful obs/cluster until the user has entered at least 1 cluster.
     if (cfg.cluster.nClusters < 1) return null;
-    const n = cfg.findPower?.n ?? 0;
-    return Math.floor(n / cfg.cluster.nClusters);
+    const nClusters = cfg.cluster.nClusters;
+    const searchLow = boundToObservations(
+      cfg.findSampleSize?.unit ?? 'observations',
+      cfg.findSampleSize?.from ?? 0,
+      nClusters,
+    );
+    const candidates = [
+      { size: Math.floor((cfg.findPower?.n ?? 0) / nClusters), source: ` at n=${cfg.findPower?.n ?? 0}` },
+      { size: Math.floor(searchLow / nClusters), source: ' at the low end of the sample-size search' },
+    ];
+    return candidates[0]!.size <= candidates[1]!.size ? candidates[0]! : candidates[1]!;
   });
 
   const sizeWarning = $derived.by(() => {
-    const s = derivedClusterSize;
-    if (s == null) return null;
-    if (s < MIN_OBS_PER_CLUSTER) return { tone: 'error', msg: `~${s} obs/cluster — below the engine hard minimum of ${MIN_OBS_PER_CLUSTER}; the engine will fail.` };
-    if (s < RELIABLE_OBS_PER_CLUSTER) return { tone: 'warn', msg: `~${s} obs/cluster — below the reliable threshold of ${RELIABLE_OBS_PER_CLUSTER}; estimates may be unreliable.` };
-    if (s < RECOMMENDED_OBS_PER_CLUSTER) return { tone: 'warn', msg: `~${s} obs/cluster — below the recommended ${RECOMMENDED_OBS_PER_CLUSTER}; estimates may be unstable.` };
+    const d = derivedClusterSize;
+    if (d == null) return null;
+    const { size: s, source } = d;
+    if (s < MIN_OBS_PER_CLUSTER) return { tone: 'error', msg: `~${s} obs/cluster${source} — below the engine hard minimum of ${MIN_OBS_PER_CLUSTER}; the engine will fail.` };
+    if (s < RELIABLE_OBS_PER_CLUSTER) return { tone: 'warn', msg: `~${s} obs/cluster${source} — below the reliable threshold of ${RELIABLE_OBS_PER_CLUSTER}; estimates may be unreliable.` };
+    if (s < RECOMMENDED_OBS_PER_CLUSTER) return { tone: 'warn', msg: `~${s} obs/cluster${source} — below the recommended ${RECOMMENDED_OBS_PER_CLUSTER}; estimates may be unstable.` };
     return null;
   });
 </script>
@@ -221,6 +238,11 @@
               : 'bg-muted text-muted-foreground hover:bg-muted/70'} disabled:cursor-not-allowed disabled:opacity-50"
             onclick={() => { if (cfg.cluster) cfg.cluster.dimKind = 'cluster_size'; }}
           >by cluster size</button>
+          <span class="text-xs text-muted-foreground">
+            {#if cfg.cluster.dimKind === 'n_clusters'}clusters:{:else}obs per <span
+                class="font-mono">{primary.cluster}</span
+              >:{/if}
+          </span>
           {#if cfg.cluster.dimKind === 'n_clusters'}
             <NumberInput
               id="cluster-n"
@@ -285,7 +307,11 @@
                 }}
               />
             {/if}
-            <span class="text-xs text-muted-foreground">{extra.relation === 'nested' ? 'n per parent' : 'n clusters'}</span>
+            <span class="text-xs text-muted-foreground">
+              {#if extra.relation === 'nested'}n per <span class="font-mono"
+                  >{extraTerms[i]?.parent ?? 'parent'}</span
+                >{:else}n clusters{/if}
+            </span>
             <NumberInput
               class="h-7 w-24 shrink-0"
               step={1}

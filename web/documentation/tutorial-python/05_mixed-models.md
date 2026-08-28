@@ -141,7 +141,15 @@ model.set_cluster("participant", ICC=0.30, n_clusters=60,
                   cluster_level_vars=["group"])
 ```
 
-See [[concepts/mixed-effects#repeated-measures|Repeated measures]] for the within- vs between-participant power discussion.
+`find_sample_size` can search directly in trials-per-participant instead of converting to measurements — pass `unit="cluster_size"` and the `from_size`/`to_size` range is read in trials, with `n_clusters` (here 60) as the divisor:
+
+```python
+# 60 participants fixed — search trials per participant directly
+result = model.find_sample_size(target_test="condition", unit="cluster_size",
+                                 from_size=20, to_size=200, by=20, verbose=False)
+```
+
+See [[concepts/mixed-effects#repeated-measures|Repeated measures]] for the within- vs between-participant power discussion, and [[concepts/required-sample-size#search-in-cluster-units|Search in cluster units]] for the unit options.
 
 ### Cluster-level predictors
 

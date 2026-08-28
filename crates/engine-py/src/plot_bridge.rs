@@ -290,6 +290,7 @@ pub fn power_plot_set_json(
         title: None,
         show_ci,
         target_power_line,
+        x_divisor: 1,
     };
     Ok(power_plot_set(&out, &opts))
 }
@@ -319,6 +320,7 @@ pub fn sample_size_plot_set_json(
         return Err(PyValueError::new_err("result has zero scenarios"));
     }
     let mut out: Vec<PlotScenario> = Vec::with_capacity(scenarios.len());
+    let mut x_divisor: usize = 1;
     for item in scenarios.iter() {
         let d = item
             .cast::<PyDict>()
@@ -327,12 +329,21 @@ pub fn sample_size_plot_set_json(
             .get_item("label")?
             .ok_or_else(|| PyValueError::new_err("scenario dict missing `label`"))?
             .extract()?;
+        // `unit_divisor` is the same across every scenario (the orchestrator
+        // rejects a mismatch before this dict is built) — read it once, off
+        // the first scenario that carries it.
+        if x_divisor == 1 {
+            if let Some(obj) = d.get_item("unit_divisor")? {
+                x_divisor = obj.extract()?;
+            }
+        }
         out.push(plot_scenario_from_sample_size_dict(label, d)?);
     }
     let opts = PlotOptions {
         title: None,
         show_ci,
         target_power_line,
+        x_divisor,
     };
     Ok(sample_size_plot_set(&out, &opts))
 }

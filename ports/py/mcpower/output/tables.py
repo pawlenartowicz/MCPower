@@ -15,6 +15,26 @@ def _sim_fallback(key: str) -> float:
     return get_simulation_defaults()[key]
 
 
+def unit_display_label(meta: Dict[str, Any]) -> Optional[str]:
+    """Label for the sample-size unit: the table's unit column header, the
+    curve's x-axis title, and the printed-summary unit line all come from this
+    one function, so the wording never drifts between the three.
+
+    `None` when the search ran in observations (``meta["unit"]`` unset or
+    ``"observations"`` — divisor 1, nothing to label). ``meta["unit_cluster_name"]``
+    is the primary grouping variable's name when known (falls back to
+    "participant")."""
+    unit = meta.get("unit")
+    if not unit or unit == "observations":
+        return None
+    cluster = meta.get("unit_cluster_name") or "participant"
+    if unit == "clusters":
+        return f"Number of {cluster}"
+    if unit == "cluster_size":
+        return f"Observations per {cluster}"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Pure display helpers (no engine / no I/O)
 # ---------------------------------------------------------------------------
@@ -59,8 +79,9 @@ def _search_ceiling(inner) -> "int | None":
     return max(ss) if ss else None
 
 
-def _required_n_headline(inner, pos) -> Tuple[str, Optional[int]]:
-    """The headline display string and numeric value for one required-N cell.
+def _required_n_headline_for(inner, pos, unit_divisor: int) -> Tuple[str, Optional[int]]:
+    """As `_required_n_headline`, but the value is expressed in
+    `unit_divisor`'s unit (1 = N, unchanged).
 
     Returns (display_str, numeric_or_None) following the model-based crossing
     fallback chain:
@@ -70,6 +91,11 @@ def _required_n_headline(inner, pos) -> Tuple[str, Optional[int]]:
       non_monotone → first_achieved fallback       — grid value or ≥ ceiling
       missing fit  → first_achieved fallback       — older payload, silent
 
+    The `fitted` status reads the engine's `n_achievable_unit` twin; every
+    other status divides the N-valued number directly — exact by
+    construction (the divisor divides every grid/bound N, see
+    `engine_orchestrator::result_host`), and a no-op when `unit_divisor == 1`.
+
     Callers wanting only the display string use fmt_required_n; callers needing
     the numeric (footer max, header N≥) use this directly."""
     # int keys from the engine; the `fitted` dict is keyed by position int.
@@ -77,20 +103,34 @@ def _required_n_headline(inner, pos) -> Tuple[str, Optional[int]]:
     if f is not None:
         status = f.get("status")
         if status == "fitted":
-            return str(f["n_achievable"]), f["n_achievable"]
+            n = f["n_achievable_unit"] if unit_divisor > 1 else f["n_achievable"]
+            return str(n), n
         if status == "at_or_below_min":
-            return f"≤ {f['n_min']}", f["n_min"]
+            n_min = f["n_min"] // unit_divisor
+            return f"≤ {n_min}", n_min
         if status == "not_reached":
             ceiling = _search_ceiling(inner)
-            return (f"≥ {ceiling}" if ceiling is not None else "—"), None
+            if ceiling is None:
+                return "—", None
+            return f"≥ {ceiling // unit_divisor}", None
         # non_monotone: fall through to first_achieved below (grid value shown)
 
     # Fallback: first_achieved (also covers non_monotone and missing fitted).
-    v = inner["first_achieved"].get(pos)
+    key = "first_achieved_unit" if unit_divisor > 1 else "first_achieved"
+    v = inner[key].get(pos)
     if v is not None:
         return str(v), v
     ceiling = _search_ceiling(inner)
-    return (f"≥ {ceiling}" if ceiling is not None else "—"), None
+    if ceiling is None:
+        return "—", None
+    return f"≥ {ceiling // unit_divisor}", None
+
+
+def _required_n_headline(inner, pos) -> Tuple[str, Optional[int]]:
+    """The headline display string and numeric value for one required-N cell,
+    in N (observations). See `_required_n_headline_for` for the unit-aware
+    form."""
+    return _required_n_headline_for(inner, pos, 1)
 
 
 def fmt_required_n(inner, pos) -> str:
@@ -543,11 +583,11 @@ def _overall_label(inner: Dict[str, Any]) -> str:
     return _overall_label_by_estimator(est)
 
 
-def _overall_required_n_headline(inner: Dict[str, Any]) -> Tuple[str, Optional[int]]:
-    """Headline display + numeric for the overall-test required-N cell — the same
-    model-based crossing fallback chain as `_required_n_headline`, but for the
-    single `fitted_overall` CrossingFit (no `pos`) with `first_overall_achieved`
-    as the grid-empirical fallback. Callers gate the row on presence first."""
+def _overall_required_n_headline_for(
+    inner: Dict[str, Any], unit_divisor: int
+) -> Tuple[str, Optional[int]]:
+    """As `_overall_required_n_headline`, but in `unit_divisor`'s unit (1 = N,
+    unchanged) — the same unit handling as `_required_n_headline_for`."""
     fo = inner.get("fitted_overall") or {}
     f = fo.get(0)
     if f is None:
@@ -555,18 +595,35 @@ def _overall_required_n_headline(inner: Dict[str, Any]) -> Tuple[str, Optional[i
     if f is not None:
         status = f.get("status")
         if status == "fitted":
-            return str(f["n_achievable"]), f["n_achievable"]
+            n = f["n_achievable_unit"] if unit_divisor > 1 else f["n_achievable"]
+            return str(n), n
         if status == "at_or_below_min":
-            return f"≤ {f['n_min']}", f["n_min"]
+            n_min = f["n_min"] // unit_divisor
+            return f"≤ {n_min}", n_min
         if status == "not_reached":
             ceiling = _search_ceiling(inner)
-            return (f"≥ {ceiling}" if ceiling is not None else "—"), None
+            if ceiling is None:
+                return "—", None
+            return f"≥ {ceiling // unit_divisor}", None
         # non_monotone: fall through to first_overall_achieved
-    v = inner.get("first_overall_achieved")
+    key = "first_overall_achieved_unit" if unit_divisor > 1 else "first_overall_achieved"
+    v = inner.get(key)
     if v is not None:
         return str(v), v
     ceiling = _search_ceiling(inner)
-    return (f"≥ {ceiling}" if ceiling is not None else "—"), None
+    if ceiling is None:
+        return "—", None
+    return f"≥ {ceiling // unit_divisor}", None
+
+
+def _overall_required_n_headline(inner: Dict[str, Any]) -> Tuple[str, Optional[int]]:
+    """Headline display + numeric for the overall-test required-N cell — the same
+    model-based crossing fallback chain as `_required_n_headline`, but for the
+    single `fitted_overall` CrossingFit (no `pos`) with `first_overall_achieved`
+    as the grid-empirical fallback. Callers gate the row on presence first.
+    In N (observations); see `_overall_required_n_headline_for` for the
+    unit-aware form."""
+    return _overall_required_n_headline_for(inner, 1)
 
 
 def _has_overall_required_n(inner: Dict[str, Any]) -> bool:
@@ -734,30 +791,73 @@ def _render_sample_size_short(result: Dict[str, Any], meta: Dict[str, Any], cfg:
     if len(scenarios) > 1:
         head += "\nscenarios: " + ", ".join(nm for nm, _ in scenarios)
 
+    # Unit column: only when the search ran in a cluster unit (divisor > 1,
+    # same guaranteed-shared divisor across scenarios the orchestrator
+    # already checked). `unit_col` is the display header; `None` leaves the
+    # table at the divisor-1 shape (byte-identical to before this feature).
+    unit_divisor = inner0.get("unit_divisor", 1)
+    unit_label = unit_display_label(meta) if unit_divisor > 1 else None
+    if unit_label:
+        head += f"\nunit: {unit_label}"
+
     # Overall (omnibus) required-N row first, mirroring the find_power short form
     # and the long-form report. Estimator label from meta (the sample-size host
     # dict carries no top-level estimator).
     overall_label = _overall_label_by_estimator(meta.get("estimator") or "ols")
     table = []
     if len(scenarios) == 1:
-        columns = [(cols["test"], "l"), (cols["required_n"], "r")]
-        if _has_overall_required_n(inner0):
-            table.append(("row", [overall_label, _overall_required_n_headline(inner0)[0]]))
-        for row in rows:
-            if row["kind"] == "factor_header":
-                table.append(("span", f"{row['label']}  (baseline: {row['baseline']})")); continue
-            label = ("  " if row["kind"] == "factor_level" else "") + row["label"]
-            table.append(("row", [label, fmt_required_n(inner0, row["pos"])]))
+        if unit_label:
+            columns = [(cols["test"], "l"), (unit_label, "r"), (cols["required_n"], "r")]
+            if _has_overall_required_n(inner0):
+                table.append(("row", [overall_label,
+                                       _overall_required_n_headline_for(inner0, unit_divisor)[0],
+                                       _overall_required_n_headline(inner0)[0]]))
+            for row in rows:
+                if row["kind"] == "factor_header":
+                    table.append(("span", f"{row['label']}  (baseline: {row['baseline']})")); continue
+                label = ("  " if row["kind"] == "factor_level" else "") + row["label"]
+                table.append(("row", [label,
+                                       _required_n_headline_for(inner0, row["pos"], unit_divisor)[0],
+                                       fmt_required_n(inner0, row["pos"])]))
+        else:
+            columns = [(cols["test"], "l"), (cols["required_n"], "r")]
+            if _has_overall_required_n(inner0):
+                table.append(("row", [overall_label, _overall_required_n_headline(inner0)[0]]))
+            for row in rows:
+                if row["kind"] == "factor_header":
+                    table.append(("span", f"{row['label']}  (baseline: {row['baseline']})")); continue
+                label = ("  " if row["kind"] == "factor_level" else "") + row["label"]
+                table.append(("row", [label, fmt_required_n(inner0, row["pos"])]))
     else:
         names = [nm for nm, _ in scenarios]
-        columns = [(cols["test"], "l")] + [(nm, "r") for nm in names]
-        if any(_has_overall_required_n(s) for _, s in scenarios):
-            table.append(("row", [overall_label] + [_overall_required_n_headline(s)[0] for _, s in scenarios]))
-        for row in rows:
-            if row["kind"] == "factor_header":
-                table.append(("span", f"{row['label']}  (baseline: {row['baseline']})")); continue
-            label = ("  " if row["kind"] == "factor_level" else "") + row["label"]
-            table.append(("row", [label] + [fmt_required_n(s, row["pos"]) for _, s in scenarios]))
+        if unit_label:
+            columns = [(cols["test"], "l")] + [
+                col for nm in names for col in ((f"{nm} ({unit_label})", "r"), (f"{nm} (N)", "r"))
+            ]
+            if any(_has_overall_required_n(s) for _, s in scenarios):
+                cells = [overall_label]
+                for _, s in scenarios:
+                    cells += [_overall_required_n_headline_for(s, unit_divisor)[0],
+                              _overall_required_n_headline(s)[0]]
+                table.append(("row", cells))
+            for row in rows:
+                if row["kind"] == "factor_header":
+                    table.append(("span", f"{row['label']}  (baseline: {row['baseline']})")); continue
+                label = ("  " if row["kind"] == "factor_level" else "") + row["label"]
+                cells = [label]
+                for _, s in scenarios:
+                    cells += [_required_n_headline_for(s, row["pos"], unit_divisor)[0],
+                              fmt_required_n(s, row["pos"])]
+                table.append(("row", cells))
+        else:
+            columns = [(cols["test"], "l")] + [(nm, "r") for nm in names]
+            if any(_has_overall_required_n(s) for _, s in scenarios):
+                table.append(("row", [overall_label] + [_overall_required_n_headline(s)[0] for _, s in scenarios]))
+            for row in rows:
+                if row["kind"] == "factor_header":
+                    table.append(("span", f"{row['label']}  (baseline: {row['baseline']})")); continue
+                label = ("  " if row["kind"] == "factor_level" else "") + row["label"]
+                table.append(("row", [label] + [fmt_required_n(s, row["pos"]) for _, s in scenarios]))
     footers = []
     # Collect non_monotone warnings across scenarios (label → max_violation).
     non_monotone_items: List[Tuple[str, float]] = []

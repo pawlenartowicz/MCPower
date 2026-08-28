@@ -22,6 +22,7 @@ import { startRun } from '$lib/run/run';
 import { runStore } from '$lib/stores/run.svelte';
 import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
 import { SELECTABLE_FAMILIES } from '$lib/domain/family';
+import { unitNoun } from '$lib/domain/unit-label';
 import { SIMULATION } from '$lib/configs/app-config';
 
 // collapsed (mobile only): hide the scenarios toggle on scroll-down, like the family
@@ -34,9 +35,15 @@ const summary = $derived.by(() => {
 });
 
 const sampleSize = $derived.by(() => {
-  const s = familyStore.byFamily[familyStore.active].findSampleSize;
+  const cfg = familyStore.byFamily[familyStore.active];
+  const s = cfg.findSampleSize;
   const byLabel = s.by === 'auto' ? 'auto' : String(s.by);
-  return `sample size | from ${s.from} to ${s.to} by ${byLabel}`;
+  // The bounds are in the chosen unit, so the summary names it (observations
+  // stays bare — it is the unit the line has always meant).
+  const unit = s.unit ?? 'observations';
+  const noun =
+    cfg.cluster && unit !== 'observations' ? ` ${unitNoun(unit, cfg.cluster.clusterName)}` : '';
+  return `sample size | from ${s.from} to ${s.to}${noun} by ${byLabel}`;
 });
 
 const isWired = $derived(SELECTABLE_FAMILIES.includes(familyStore.active));

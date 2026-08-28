@@ -12,6 +12,18 @@ MCPower finds the required N by evaluating power on a **grid** of candidate samp
 
 You set the range with `from`/`to`; `by="auto"` (the default) places about 12 points between them, or pass `by=<n>` for a fixed step. Defaults are `from=30`, `to=200`. Because the grid points are chosen up front — never adjusted in response to observed power — the search is fully reproducible run to run, and that is also what lets the browser split the work across CPU cores and recombine it. A grid that's too coarse near your target widens the reported interval; refine it by lowering `by` or adding simulations.
 
+## Search in cluster units
+
+For a mixed-effects design, `find_sample_size` can search in a unit other than raw observations. Pass `unit="observations"` (the default, unchanged), `unit="clusters"`, or `unit="cluster_size"`.
+
+- **`observations`** — `from`/`to`/`by` are total N, exactly as above.
+- **`clusters`** — `from`/`to`/`by` are the number of primary clusters (for example, participants). This needs a fixed cluster size (`cluster_size` passed to `set_cluster`); the divisor is that cluster size.
+- **`cluster_size`** — `from`/`to`/`by` are observations per primary cluster, counted across every extra grouping (crossed items, nested sessions, and so on). This needs a fixed number of clusters (`n_clusters` passed to `set_cluster`); the divisor is that cluster count.
+
+The search itself is unchanged — MCPower still walks a grid of N and snaps every point to a whole number of clusters. The unit only changes how you set the range and how the answer is read back: with 20 subjects crossed with 12 items, a `by=1` step in trials-per-subject snaps to 12 trials (the design's atom, 240, divided by 20 subjects), and the usual grid warning fires the same way it would in N.
+
+The result always reports both numbers side by side — the unit value and the raw N behind it — so switching units never hides the sample size you'd actually need to recruit.
+
 ## The model-based crossing
 
 Simulated power at each grid point carries Monte-Carlo noise, so the raw "first N that hit 80%" can land a whole grid step early or late on the strength of a lucky draw. Instead, MCPower fits a non-decreasing curve (an **isotonic fit**) through the simulated power values across the *whole* grid and reports the N where that curve crosses the target. The fit uses every grid point, so the headline is more stable than any single point — and it can land *between* grid points, which is why a search "from 30 to 300 by 30" can answer **84**.

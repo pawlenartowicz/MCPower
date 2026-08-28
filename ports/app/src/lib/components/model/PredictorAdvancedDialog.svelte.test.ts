@@ -3,9 +3,10 @@
 // wire): Default → undefined (inherit each scenario), Exact → false, Sampled → true.
 // Dialog content is portaled to <body>, so queries go through `screen`.
 import { render, screen, fireEvent } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
-import PredictorAdvancedDialog from './PredictorAdvancedDialog.svelte';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { VariableRow } from '$lib/domain/family';
+import { familyStore } from '$lib/stores/family.svelte';
+import PredictorAdvancedDialog from './PredictorAdvancedDialog.svelte';
 
 function factorRow(over: Partial<VariableRow> = {}): VariableRow {
   return {
@@ -78,5 +79,50 @@ describe('PredictorAdvancedDialog factor shares tri-state', () => {
     for (const id of ['shares-default', 'shares-exact', 'shares-sampled']) {
       expect((screen.getByTestId(id) as HTMLButtonElement).disabled).toBe(true);
     }
+  });
+});
+
+describe('PredictorAdvancedDialog small-cell warning', () => {
+  // Both run cards are always rendered, so the check quotes the smaller of the
+  // Find-power n and the sample-size low bound, and names which one it used.
+  beforeEach(() => familyStore.resetAll());
+
+  const warnings = async () => {
+    await screen.findAllByTestId('small-cell-warning');
+    return screen
+      .getAllByTestId('small-cell-warning')
+      .map((el) => el.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+  };
+
+  it('uses the sample-size low bound when it is the smaller of the two', async () => {
+    const cfg = familyStore.byFamily.regression;
+    cfg.findPower.n = 300; // 100 obs per level — no warning on its own
+    cfg.findSampleSize.from = 30; // 10 obs per level
+    render(PredictorAdvancedDialog, { props: { variable: factorRow(), open: true } });
+    const msgs = await warnings();
+    expect(msgs).toHaveLength(3);
+    expect(msgs[0]).toContain('~10 obs in [1] at the low end of the sample-size search');
+  });
+
+  it('uses the Find-power n when it is the smaller of the two', async () => {
+    const cfg = familyStore.byFamily.regression;
+    cfg.findPower.n = 30;
+    cfg.findSampleSize.from = 1000;
+    render(PredictorAdvancedDialog, { props: { variable: factorRow(), open: true } });
+    const msgs = await warnings();
+    expect(msgs[0]).toContain('~10 obs in [1] at n=30');
+  });
+
+  it('converts a clustered sample-size bound to observations first', async () => {
+    familyStore.active = 'mixed';
+    const cfg = familyStore.byFamily.mixed;
+    cfg.cluster!.dimKind = 'n_clusters';
+    cfg.cluster!.nClusters = 20;
+    cfg.findPower.n = 300;
+    cfg.findSampleSize.unit = 'cluster_size';
+    cfg.findSampleSize.from = 2; // 2 per cluster × 20 clusters = 40 observations
+    render(PredictorAdvancedDialog, { props: { variable: factorRow(), open: true } });
+    const msgs = await warnings();
+    expect(msgs[0]).toContain('~13 obs in [1] at the low end of the sample-size search');
   });
 });

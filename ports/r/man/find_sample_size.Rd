@@ -16,6 +16,7 @@ find_sample_size(
   by_kind,
   mode,
   tol_n,
+  unit,
   progress
 )
 }
@@ -30,6 +31,9 @@ find_sample_size(
 \item \code{by_kind}           — \code{"fixed"} (step) or \code{"auto"} (point count); default \code{"fixed"}.
 \item \code{mode}              — \code{"linear"} or \code{"log"} (default \code{"linear"}).
 \item \code{tol_n}             — accepted for API compatibility; unused.
+\item \code{unit}              — host-facing unit bounds/results are expressed in
+(\code{"observations"} | \code{"clusters"} | \code{"cluster_size"}, default
+\code{"observations"} — divisor 1, byte-identical to the unit-less path).
 \item \code{progress}          — an R callback \verb{(current, total)}, or \code{NULL} for
 silent. Events are delivered on the R main thread; Ctrl-C / Escape cancels
 the run (see \code{progress.rs}).

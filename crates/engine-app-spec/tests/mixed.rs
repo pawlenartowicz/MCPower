@@ -43,6 +43,7 @@ fn minimal_mixed(cluster_dim: ClusterDim) -> MixedSpec {
         slopes: vec![],
         outcome: MixedOutcome::Gaussian,
         agq: 1,
+        sample_size_unit: Default::default(),
     }
 }
 
@@ -352,4 +353,109 @@ fn assemble_mixed_matches_golden_projection() {
     let contracts = assemble_spec(&spec).unwrap();
     let summary = build_summary_mixed(&contracts);
     insta::assert_json_snapshot!(summary);
+}
+
+// ── sample-size unit ──────────────────────────────────────────────────────────
+
+use engine_app_spec::app_spec::SampleSizeUnit;
+
+#[test]
+fn sample_size_unit_defaults_to_observations_and_omits_from_the_wire() {
+    let spec = AppSpec::Mixed(minimal_mixed(ClusterDim::NClusters { value: 20 }));
+    let json = serde_json::to_string(&spec).unwrap();
+    assert!(
+        !json.contains("sample_size_unit"),
+        "the default unit must not reach the wire: {json}"
+    );
+    // A spec written before the knob existed still deserialises, as observations.
+    let back: AppSpec = serde_json::from_str(&json).unwrap();
+    match back {
+        AppSpec::Mixed(m) => assert_eq!(m.sample_size_unit, SampleSizeUnit::Observations),
+        other => panic!("expected Mixed, got {other:?}"),
+    }
+}
+
+#[test]
+fn sample_size_unit_roundtrips_through_the_ts_string_keys() {
+    for (unit, key) in [
+        (SampleSizeUnit::Clusters, "clusters"),
+        (SampleSizeUnit::ClusterSize, "cluster_size"),
+    ] {
+        let mut m = minimal_mixed(ClusterDim::NClusters { value: 20 });
+        m.sample_size_unit = unit;
+        let json = serde_json::to_string(&AppSpec::Mixed(m)).unwrap();
+        assert!(
+            json.contains(&format!("\"sample_size_unit\":\"{key}\"")),
+            "expected key {key} in {json}"
+        );
+        match serde_json::from_str::<AppSpec>(&json).unwrap() {
+            AppSpec::Mixed(back) => assert_eq!(back.sample_size_unit, unit),
+            other => panic!("expected Mixed, got {other:?}"),
+        }
+    }
+}
+
+/// Bounds in clusters are multiplied into rows before the search runs: cluster
+/// size 8, bounds 10..50 clusters step 5 → grid N 80..400 step 40, and the
+/// result carries the divisor so hosts can label the unit column.
+#[test]
+fn run_find_sample_size_in_clusters_scales_bounds_and_reports_the_divisor() {
+    let mut m = minimal_mixed_with_effect(ClusterDim::ClusterSize { value: 8 });
+    m.sample_size_unit = SampleSizeUnit::Clusters;
+    let spec = AppSpec::Mixed(m);
+    let cancel = CancellationToken::new();
+    let method = SampleSizeMethod::Grid {
+        by: ByValue::Fixed(5),
+        mode: GridMode::Linear,
+    };
+    let res = run_find_sample_size(&spec, (10, 50), method, &NullEmitter, &cancel)
+        .expect("clusters unit on a FixedSize primary is supported");
+    let (_, ss) = &res.scenarios[0];
+    assert_eq!(ss.unit_divisor, 8);
+    let ns: Vec<usize> = ss.grid_or_trace.iter().map(|p| p.n).collect();
+    assert_eq!(ns.first().copied(), Some(80), "grid starts at 10 × 8 rows");
+    assert_eq!(ns.last().copied(), Some(400), "grid ends at 50 × 8 rows");
+    assert!(
+        ns.windows(2).all(|w| w[1] - w[0] == 40),
+        "step 5 clusters = 40 rows: {ns:?}"
+    );
+}
+
+/// WASM twin of the test above — the single-core path resolves and applies the
+/// same divisor, or worker results and the merged result disagree on the unit.
+#[test]
+fn run_single_core_find_sample_size_in_clusters_scales_bounds_and_reports_the_divisor() {
+    let mut m = minimal_mixed_with_effect(ClusterDim::ClusterSize { value: 8 });
+    m.sample_size_unit = SampleSizeUnit::Clusters;
+    let spec = AppSpec::Mixed(m);
+    let cancel = CancellationToken::new();
+    let method = SampleSizeMethod::Grid {
+        by: ByValue::Fixed(5),
+        mode: GridMode::Linear,
+    };
+    let res =
+        run_single_core_find_sample_size(&spec, (10, 50), method, 20, 2137, &NullEmitter, &cancel)
+            .expect("clusters unit on the single-core path is supported");
+    let (_, ss) = &res.scenarios[0];
+    assert_eq!(ss.unit_divisor, 8);
+    let ns: Vec<usize> = ss.grid_or_trace.iter().map(|p| p.n).collect();
+    assert_eq!(ns.first().copied(), Some(80));
+    assert_eq!(ns.last().copied(), Some(400));
+}
+
+/// A unit the primary's sizing regime cannot express is an orchestrator error,
+/// surfaced to the app as a fixable cluster-setup problem rather than a crash.
+#[test]
+fn run_find_sample_size_rejects_a_unit_the_regime_cannot_express() {
+    let mut m = minimal_mixed_with_effect(ClusterDim::ClusterSize { value: 8 });
+    m.sample_size_unit = SampleSizeUnit::ClusterSize; // needs a fixed cluster COUNT
+    let spec = AppSpec::Mixed(m);
+    let cancel = CancellationToken::new();
+    let method = SampleSizeMethod::Grid {
+        by: ByValue::Fixed(5),
+        mode: GridMode::Linear,
+    };
+    let err = run_find_sample_size(&spec, (10, 50), method, &NullEmitter, &cancel)
+        .expect_err("cluster_size unit under FixedSize must fail");
+    assert_eq!(err.host_kind(), "cluster_setup", "got: {err}");
 }

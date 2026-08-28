@@ -43,12 +43,55 @@ const FACET_COLUMNS: u64 = 3;
 const POWER_FACET_THRESHOLD: usize = 4;
 
 /// Knobs shared by every plot emitter; `Default` = no title, no CI band, no
-/// target-power rule.
-#[derive(Debug, Clone, Default)]
+/// target-power rule, x in observations.
+#[derive(Debug, Clone)]
 pub struct PlotOptions {
     pub title: Option<String>,
     pub show_ci: bool,
     pub target_power_line: Option<f64>,
+    /// Sample-size unit divisor for the curve x-axis (`SampleSizeResult
+    /// .unit_divisor`). 1 = today's spec, x field `n` titled "Sample size (N)"
+    /// / "N". `> 1` switches the x field to `n_unit = n / x_divisor` and emits
+    /// **no** x title — the host owns the unit's wording ("Participants",
+    /// "Observations per participant") and sets `encoding.x.title` itself.
+    /// The row keeps `n` too, so a host can still read N off a point. Only the
+    /// sample-size curves read it; power-at-N ignores it.
+    pub x_divisor: usize,
+}
+
+impl Default for PlotOptions {
+    fn default() -> Self {
+        Self {
+            title: None,
+            show_ci: false,
+            target_power_line: None,
+            x_divisor: 1,
+        }
+    }
+}
+
+/// x-axis encoding for the sample-size curves: `n` with the given title at
+/// divisor 1, else `n_unit` with no title (host-labelled). The CI band layer
+/// must use the same title as the line layer or Vega concatenates them.
+fn x_encoding(opts: &PlotOptions, title_at_n: &str) -> Value {
+    if opts.x_divisor > 1 {
+        json!({ "field": "n_unit", "type": "quantitative" })
+    } else {
+        json!({ "field": "n", "type": "quantitative", "title": title_at_n })
+    }
+}
+
+/// Add the `n_unit = n / x_divisor` row field the unit x-axis reads. Only
+/// when the divisor is above 1, so the divisor-1 spec stays byte-identical to
+/// the unit-less one. Integer division — every grid N is a multiple of the
+/// divisor, see `sample_size_result_to_host`.
+fn add_n_unit_rows(rows: &mut [Value], opts: &PlotOptions) {
+    if opts.x_divisor > 1 {
+        for r in rows.iter_mut() {
+            let n = r["n"].as_u64().unwrap_or(0);
+            r["n_unit"] = json!(n / opts.x_divisor as u64);
+        }
+    }
 }
 
 /// One grid point — or the single point of a find_power result — as the plot
@@ -368,8 +411,10 @@ pub fn sample_size_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) ->
         }
     }
 
+    add_n_unit_rows(&mut rows, opts);
+
     let mut line_enc = json!({
-        "x": { "field": "n",     "type": "quantitative", "title": "Sample size (N)" },
+        "x": x_encoding(opts, "Sample size (N)"),
         "y": {
             "field": "power", "type": "quantitative",
             "title": "Power", "scale": { "domain": [0, 1] },
@@ -396,7 +441,7 @@ pub fn sample_size_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) ->
         // Match the line layer's axis titles on the shared n/power scales so the
         // co-scaled band field doesn't get concatenated into "Power, ci_lo".
         let band_enc = json!({
-            "x":      { "field": "n",     "type": "quantitative", "title": "Sample size (N)" },
+            "x":      x_encoding(opts, "Sample size (N)"),
             "y":      { "field": "ci_lo", "type": "quantitative", "title": "Power" },
             "y2":     { "field": "ci_hi" },
             "detail": { "field": "series", "type": "nominal" },
@@ -492,8 +537,10 @@ pub fn joint_detection_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions
         }
     }
 
+    add_n_unit_rows(&mut rows, opts);
+
     let line_encoding = json!({
-        "x": { "field": "n", "type": "quantitative", "title": "N" },
+        "x": x_encoding(opts, "N"),
         "y": { "field": "p", "type": "quantitative", "title": "P(detect >= k)", "scale": { "domain": [0, 1] } },
         "color": { "field": "series", "type": "nominal", "title": "Joint detection" },
     });
@@ -598,8 +645,10 @@ pub fn exactly_k_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> S
         }
     }
 
+    add_n_unit_rows(&mut rows, opts);
+
     let line_encoding = json!({
-        "x": { "field": "n", "type": "quantitative", "title": "N" },
+        "x": x_encoding(opts, "N"),
         "y": { "field": "p", "type": "quantitative", "title": "P(exactly k)", "scale": { "domain": [0, 1] } },
         "color": { "field": "series", "type": "nominal", "title": "Joint detection" },
     });
@@ -708,6 +757,7 @@ pub fn sample_size_plot_set(
             title: None,
             show_ci: false,
             target_power_line: opts.target_power_line,
+            x_divisor: opts.x_divisor,
         };
         blocks.push((
             "at_least_k".to_string(),
@@ -895,6 +945,7 @@ mod joint_curve_tests {
             title: None,
             show_ci: false,
             target_power_line: Some(0.8),
+            x_divisor: 1,
         };
         let spec = joint_detection_curve_spec(&scenarios, &opts);
         let v: serde_json::Value = serde_json::from_str(&spec).expect("valid JSON");
@@ -927,6 +978,7 @@ mod joint_curve_tests {
             title: None,
             show_ci: false,
             target_power_line: Some(0.8),
+            x_divisor: 1,
         };
         let spec = joint_detection_curve_spec(&scenarios, &opts);
         let v: serde_json::Value = serde_json::from_str(&spec).expect("valid JSON");
@@ -1001,6 +1053,91 @@ mod sample_size_curve_tests {
         // engine-token domain would no longer match the data and lines would lose
         // their colour. Vega derives the domain from the (relabelled) data.
         assert!(line["encoding"]["color"]["scale"].is_null());
+    }
+
+    /// `x_divisor > 1`: x field is `n_unit = n / divisor` with no title (the
+    /// host labels the unit); the CI band layer switches with it; `n` stays
+    /// on the row. `x_divisor == 1` is byte-identical to the default.
+    #[test]
+    fn curve_x_divisor_switches_x_field_and_drops_title() {
+        let scenarios = vec![PlotScenario {
+            label: "s".into(),
+            points: vec![curve_pt(80, vec![0.3]), curve_pt(160, vec![0.6])],
+        }];
+        let unit = PlotOptions {
+            show_ci: true,
+            x_divisor: 8,
+            ..Default::default()
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&sample_size_curve_spec(&scenarios, &unit)).unwrap();
+        for layer in [&v["layer"][0], &v["layer"][1]] {
+            assert_eq!(layer["encoding"]["x"]["field"], json!("n_unit"));
+            assert!(layer["encoding"]["x"]["title"].is_null());
+        }
+        let rows = v["data"]["values"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["n"], json!(80));
+        assert_eq!(rows[0]["n_unit"], json!(10));
+        assert_eq!(rows[1]["n_unit"], json!(20));
+
+        let one = PlotOptions {
+            show_ci: true,
+            x_divisor: 1,
+            ..Default::default()
+        };
+        let plain = PlotOptions {
+            show_ci: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            sample_size_curve_spec(&scenarios, &one),
+            sample_size_curve_spec(&scenarios, &plain)
+        );
+        let v: serde_json::Value =
+            serde_json::from_str(&sample_size_curve_spec(&scenarios, &one)).unwrap();
+        assert_eq!(v["layer"][0]["encoding"]["x"]["field"], json!("n"));
+        assert_eq!(
+            v["layer"][0]["encoding"]["x"]["title"],
+            json!("Sample size (N)")
+        );
+        assert!(v["data"]["values"][0]["n_unit"].is_null());
+    }
+
+    /// The joint / exactly-k curves follow the same x_divisor switch, and
+    /// `sample_size_plot_set` threads it into their options.
+    #[test]
+    fn joint_curves_follow_x_divisor_through_plot_set() {
+        let pt = |n: usize| PlotPoint {
+            n,
+            target_indices: vec![1, 2],
+            contrast_pairs: vec![],
+            power: vec![0.5, 0.6],
+            ci: vec![Ci { lo: 0.4, hi: 0.6 }, Ci { lo: 0.5, hi: 0.7 }],
+            histogram: vec![10, 50, 40],
+            overall_power: None,
+            overall_ci: None,
+        };
+        let scenarios = vec![PlotScenario {
+            label: "s".into(),
+            points: vec![pt(80), pt(160)],
+        }];
+        let opts = PlotOptions {
+            x_divisor: 8,
+            ..Default::default()
+        };
+        let blocks = sample_size_plot_set(&scenarios, &opts);
+        for key in ["at_least_k", "exactly_k"] {
+            let spec = &blocks.iter().find(|(k, _)| k == key).unwrap().1;
+            let v: serde_json::Value = serde_json::from_str(spec).unwrap();
+            assert_eq!(
+                v["layer"][0]["encoding"]["x"]["field"],
+                json!("n_unit"),
+                "{key}"
+            );
+            assert!(v["layer"][0]["encoding"]["x"]["title"].is_null(), "{key}");
+            assert_eq!(v["data"]["values"][0]["n_unit"], json!(10), "{key}");
+        }
     }
 }
 

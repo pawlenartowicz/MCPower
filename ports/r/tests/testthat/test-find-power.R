@@ -86,7 +86,8 @@ test_that("find_sample_size grid converges within search bounds for large effect
                                             "continuous", "canonical", "ols", 0.0, "[]")$contracts
   res <- mcpower:::find_sample_size(cj, target_power = 0.8, lo = 30L, hi = 120L,
             n_sims = 200L, base_seed = 2137, method = "grid", by = 30L,
-            by_kind = "fixed", mode = "linear", tol_n = 1L, progress = NULL)
+            by_kind = "fixed", mode = "linear", tol_n = 1L, unit = "observations",
+            progress = NULL)
   opt <- res$scenarios[["optimistic"]]
   expect_true(opt$n_sample_sizes >= 2)
   expect_equal(length(opt$sample_sizes), opt$n_sample_sizes)
@@ -220,13 +221,6 @@ test_that("tukey is now accepted (guard removed)", {
 test_that("set_parallel tombstone", {
   expect_error(MCPower$new("y ~ x1")$set_parallel(4),
     "mcpower has no set_parallel — parallelism is automatic and controlled by mcpower::set_n_threads(n).",
-    fixed = TRUE)
-})
-
-test_that("find_sample_size on cluster_size-only LME errors", {
-  m <- MCPower$new("y ~ x1 + (1|g)", family = "lme")$set_effects("x1=0.5")$set_cluster("g", ICC = 0.1, cluster_size = 20)
-  expect_error(m$find_sample_size(progress_callback = FALSE),
-    "find_sample_size with cluster_size-only LME specs is not yet supported; pass n_clusters to set_cluster",
     fixed = TRUE)
 })
 

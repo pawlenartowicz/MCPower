@@ -65,8 +65,18 @@ A clustered design is pinned by total N plus either the **number of clusters** o
 
 `n_clusters` (Regime A, "fixed clusters"): the cluster count is constant across any sample size you test; each cluster gets `N / n_clusters` observations, so clusters grow as N grows. `cluster_size` (Regime B, "fixed size"): every cluster has exactly `cluster_size` observations; the number of clusters is `N / cluster_size`, which grows as N grows. The two params are mutually exclusive — pass exactly one.
 
-> [!important] N is the number of measurements, not the number of participants
-> In a repeated-measures design the cluster is the **participant** and total N counts *measurements*: `N = participants × trials-per-participant`. With 60 participants on 100 trials each, set `n=6000` (not `n=60`). See [Repeated measures](#repeated-measures) for the full walk-through.
+> [!note] Search in participants or trials directly
+> `find_power` always takes total N. `find_sample_size` doesn't have to — pass `unit="clusters"` or `unit="cluster_size"` to search in whichever quantity you actually plan, and skip the manual conversion. See [[concepts/required-sample-size#search-in-cluster-units|Search in cluster units]].
+>
+> ```python
+> # Regime A — 60 participants fixed, search trials per participant
+> model.set_cluster("participant", ICC=0.20, n_clusters=60)
+> model.find_sample_size(target_test="x", unit="cluster_size", from_size=20, to_size=200)
+>
+> # Regime B — 20 trials per participant fixed, search the number of participants
+> model.set_cluster("participant", ICC=0.20, cluster_size=20)
+> model.find_sample_size(target_test="x", unit="clusters", from_size=20, to_size=200)
+> ```
 
 ```python
 # Regime A — 30 schools, cluster size scales with N
@@ -132,7 +142,7 @@ model$set_cluster("site", ICC = 0.20, n_clusters = 30,
 
 A **repeated-measures** (within-subjects) design — each participant measured many times across trials, time points, or conditions — is an ordinary clustered design with the **participant as the cluster**. Name it in the formula as `(1|participant)`; the random intercept gives each person a stable baseline, so the fixed-effect test respects the fact that one person's measurements are not independent.
 
-The sample size is counted in **measurements, not participants**: `N = participants × trials-per-participant`. Sixty participants on 100 trials each is `n=6000` — the participant count is `n_clusters` and the trials per participant is `cluster_size`, the two [sizing regimes](#cluster-sizing-regimes). Setting `n=60` instead models one measurement per person and throws away the repeated-measures advantage. Here the ICC reads as the **correlation between two measurements from the same participant**: high ICC means the repeated trials are partly redundant, low ICC means each trial adds nearly independent information (reaction-time and questionnaire designs commonly sit around 0.2–0.5).
+`find_power` counts the sample size in **measurements, not participants**: `N = participants × trials-per-participant`. Sixty participants on 100 trials each is `n=6000` — the participant count is `n_clusters` and the trials per participant is `cluster_size`, the two [sizing regimes](#cluster-sizing-regimes). `find_sample_size` can search in participants or trials directly instead — pass `unit="clusters"` (with `cluster_size` fixed) or `unit="cluster_size"` (with `n_clusters` fixed); see [[concepts/required-sample-size#search-in-cluster-units|Search in cluster units]]. Here the ICC reads as the **correlation between two measurements from the same participant**: high ICC means the repeated trials are partly redundant, low ICC means each trial adds nearly independent information (reaction-time and questionnaire designs commonly sit around 0.2–0.5).
 
 Whether extra trials buy power depends on **where the predictor varies**:
 

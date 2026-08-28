@@ -15,7 +15,7 @@ fn find_sample_size_rejects_empty_scenarios() {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
-    assert!(find_sample_size(&[], 0.8, (50, 200), 25, method, 0, None, &cancel).is_err());
+    assert!(find_sample_size(&[], 0.8, (50, 200), 25, method, 1, 0, None, &cancel).is_err());
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn single_core_find_sample_size_rejects_empty_scenarios() {
         mode: GridMode::Linear,
     };
     assert!(
-        single_core_find_sample_size(&[], 0.8, (50, 200), 25, method, 0, None, &cancel).is_err()
+        single_core_find_sample_size(&[], 0.8, (50, 200), 25, method, 1, 0, None, &cancel).is_err()
     );
 }
 
@@ -42,7 +42,7 @@ fn find_sample_size_cancellation_short_circuits() {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
-    let r = find_sample_size(&contracts, 0.8, (50, 200), 25, method, 0, None, &cancel);
+    let r = find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 0, None, &cancel);
     assert!(matches!(
         r,
         Err(engine_orchestrator::OrchestratorError::Cancelled { .. })
@@ -58,7 +58,8 @@ fn single_core_find_sample_size_cancellation_short_circuits() {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
-    let r = single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 0, None, &cancel);
+    let r =
+        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 0, None, &cancel);
     assert!(matches!(
         r,
         Err(engine_orchestrator::OrchestratorError::Cancelled { .. })
@@ -74,7 +75,7 @@ fn grid_method_returns_one_pr_per_grid_point() {
         mode: GridMode::Linear,
     };
     let r =
-        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 13, None, &cancel).expect("ok");
+        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel).expect("ok");
     assert_eq!(r.scenarios.len(), 1);
     let ssr = &r.scenarios[0].1;
     assert_eq!(ssr.grid_or_trace.len(), 4); // 50, 100, 150, 200
@@ -97,8 +98,18 @@ fn grid_first_achieved_none_when_target_unreachable() {
     // few sims the measured rate can reach 100% whenever every sim happens to be
     // significant, spuriously "achieving" the target — that knife-edge made the
     // old n_sims=10 version flip None→Some on any RNG reshuffle.
-    let r =
-        find_sample_size(&contracts, 0.999, (30, 60), 400, method, 0, None, &cancel).expect("ok");
+    let r = find_sample_size(
+        &contracts,
+        0.999,
+        (30, 60),
+        400,
+        method,
+        1,
+        0,
+        None,
+        &cancel,
+    )
+    .expect("ok");
     let ssr = &r.scenarios[0].1;
     assert_eq!(ssr.first_achieved, vec![None]);
 }
@@ -123,10 +134,34 @@ fn find_sample_size_is_deterministic_across_thread_counts() {
     };
 
     let r1 = pool1
-        .install(|| find_sample_size(&contracts, 0.8, (50, 200), 64, method, 2137, None, &cancel))
+        .install(|| {
+            find_sample_size(
+                &contracts,
+                0.8,
+                (50, 200),
+                64,
+                method,
+                1,
+                2137,
+                None,
+                &cancel,
+            )
+        })
         .unwrap();
     let r_auto = pool_auto
-        .install(|| find_sample_size(&contracts, 0.8, (50, 200), 64, method, 2137, None, &cancel))
+        .install(|| {
+            find_sample_size(
+                &contracts,
+                0.8,
+                (50, 200),
+                64,
+                method,
+                1,
+                2137,
+                None,
+                &cancel,
+            )
+        })
         .unwrap();
 
     // Vacuous-green guards: verify output is well-formed and non-degenerate.
@@ -160,9 +195,9 @@ fn single_core_find_sample_size_matches_find_sample_size_shape() {
     };
 
     let mc =
-        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 13, None, &cancel).expect("ok");
+        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel).expect("ok");
     let sc =
-        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 13, None, &cancel)
+        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel)
             .expect("ok");
 
     assert_eq!(mc.scenarios.len(), sc.scenarios.len());
@@ -202,8 +237,18 @@ fn fitted_shapes_and_in_grid_consistency() {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
-    let r =
-        find_sample_size(&contracts, 0.8, (50, 200), 200, method, 13, None, &cancel).expect("ok");
+    let r = find_sample_size(
+        &contracts,
+        0.8,
+        (50, 200),
+        200,
+        method,
+        1,
+        13,
+        None,
+        &cancel,
+    )
+    .expect("ok");
     let ssr = &r.scenarios[0].1;
     assert_eq!(ssr.fitted.len(), ssr.first_achieved.len());
     assert_eq!(ssr.fitted_joint.len(), ssr.first_joint_achieved.len());
@@ -248,9 +293,18 @@ fn merge_of_single_part_reproduces_fit_exactly() {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
-    let part =
-        single_core_find_sample_size(&contracts, 0.8, (50, 200), 200, method, 13, None, &cancel)
-            .expect("ok");
+    let part = single_core_find_sample_size(
+        &contracts,
+        0.8,
+        (50, 200),
+        200,
+        method,
+        1,
+        13,
+        None,
+        &cancel,
+    )
+    .expect("ok");
     let merged = merge_sample_size_results(std::slice::from_ref(&part)).expect("merge ok");
     let (p, m) = (&part.scenarios[0].1, &merged.scenarios[0].1);
     assert!(!p.fitted.is_empty(), "anti-vacuity: fit was computed");
@@ -297,6 +351,7 @@ fn grid_find_sample_size_progress_npoint_per_grid_point_and_zero_sentinel() {
         (50, 200),
         25,
         method,
+        1,
         13,
         Some(&mut sink),
         &cancel,
@@ -349,6 +404,7 @@ fn grid_progress_total_counts_fits_across_scenarios_and_grid() {
         (50, 200),
         25,
         method,
+        1,
         13,
         Some(&mut sink),
         &cancel,
@@ -382,6 +438,7 @@ fn grid_progress_total_counts_fits_across_scenarios_and_grid() {
         (50, 200),
         25,
         method,
+        1,
         13,
         Some(&mut st_sink),
         &cancel,
@@ -413,7 +470,7 @@ fn first_joint_achieved_shape_and_grid_point_membership() {
         mode: GridMode::Linear,
     };
     let result =
-        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 13, None, &cancel).expect("ok");
+        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel).expect("ok");
 
     let ssr = &result.scenarios[0].1;
     let n_targets = ssr.grid_or_trace[0].target_indices.len();
@@ -443,10 +500,10 @@ fn first_joint_achieved_shape_after_merge() {
     };
 
     let part1 =
-        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 13, None, &cancel)
+        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel)
             .expect("ok");
     let part2 =
-        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 99, None, &cancel)
+        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 99, None, &cancel)
             .expect("ok");
 
     let merged = merge_sample_size_results(&[part1, part2]).expect("merge ok");

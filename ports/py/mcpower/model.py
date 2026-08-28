@@ -2044,7 +2044,8 @@ class MCPower:
         return result
 
     def _report_meta(self, *, correction, posthoc_factors=None, effect_skeleton=None,
-                     baseline_prob_requested=None, min_cluster_size=None):
+                     baseline_prob_requested=None, min_cluster_size=None,
+                     unit=None, unit_cluster_name=None):
         """Label + header context the result object needs to render. The port
         owns labels (joined to the engine's integer target_indices).
 
@@ -2062,6 +2063,13 @@ class MCPower:
         (drives the live baseline-drift gate) and the smallest cluster size at
         the evaluated N (drives the persistent Laplace-bias line). Both None for
         OLS / non-binary / non-clustered runs. Consumed by diagnostic_warnings.
+
+        unit / unit_cluster_name: find_sample_size only. ``unit`` is the wire
+        value passed to the engine (``"observations"`` / ``"clusters"`` /
+        ``"cluster_size"``); ``unit_cluster_name`` is the primary grouping
+        variable's name, when known. Both feed
+        ``output.tables.unit_display_label`` — the single place the unit
+        wording is spelled out.
         """
         factors = {}
         for fname, info in getattr(self._registry, "_factors", {}).items():
@@ -2088,6 +2096,8 @@ class MCPower:
             "residual": self._residual_dist_name,
             "baseline_prob_requested": baseline_prob_requested,
             "min_cluster_size": min_cluster_size,
+            "unit": unit,
+            "unit_cluster_name": unit_cluster_name,
         }
         if posthoc_factors:
             meta["posthoc_factors"] = [
@@ -2111,6 +2121,7 @@ class MCPower:
         to_size: Optional[int] = None,
         by: Union[int, str, None] = None,
         mode: str = "linear",
+        unit: str = "observations",
         n_sims: Optional[int] = None,
         seed: Optional[int] = None,
         scenarios: Union[bool, List[str]] = False,
@@ -2142,6 +2153,33 @@ class MCPower:
         point a whole number of complete clusters (now supported for
         ``find_sample_size``). Bounds not already on the atom are raised/lowered
         to valid multiples and the adjustment is surfaced as a warning.
+
+        ``unit`` expresses ``from_size``/``to_size``/``by`` and the reported
+        sample sizes in something other than total observations N:
+
+        * ``"observations"`` (default) — N, unchanged.
+        * ``"clusters"`` — number of primary clusters (e.g. participants).
+          Requires the primary grouping to be sized with
+          ``set_cluster(..., cluster_size=...)`` (a fixed cluster size); the
+          divisor is that fixed size.
+        * ``"cluster_size"`` — observations per primary cluster, counted
+          across every extra grouping (crossed/nested) the design has.
+          Requires the primary grouping to be sized with
+          ``set_cluster(..., n_clusters=...)``; the divisor is that fixed
+          cluster count.
+
+        Bounds given in the unit are converted to N before the search runs,
+        and results carry both N and the unit value. The ``from_size`` /
+        ``to_size`` defaults (30 / 200) are not unit-aware: leaving them out
+        under ``unit != "observations"`` searches 30-200 of *that* unit, which
+        with a cluster size of 20 is 600-4000 observations. Pass them
+        explicitly whenever the unit is not observations. A mismatched regime
+        (e.g. ``unit="clusters"`` on a ``cluster_size``-sized design) or an
+        unclustered model with ``unit != "observations"`` raises
+        ``ValueError``. The engine still snaps every grid point to the cluster
+        atom in N, so a unit step can land on a wider one than requested — e.g.
+        20 subjects crossed with 12 items: a requested step of 1 trial per
+        subject snaps to 12 trials (the atom is 240 observations / 20 subjects).
 
         The power-vs-N curve uses common random numbers across sample sizes, so
         it is smooth and the reported N is stable from run to run.
@@ -2230,7 +2268,8 @@ class MCPower:
                 by_kind,
                 str(mode),
                 None,
-                progress_cb,
+                unit=str(unit),
+                progress=progress_cb,
             )
         result = unwrap_scenario_result(raw, names)
         # Post-batch: check failure threshold across all sample sizes / scenarios.
@@ -2251,7 +2290,10 @@ class MCPower:
                 _min_cs = int(_cs)
             else:
                 _nc = self._effective_n_clusters or _primary_cfg.get("n_clusters") or 1
-                _min_cs = int(from_size) // int(_nc)
+                # `from_size` is in the caller's unit: under unit="cluster_size" it
+                # already is the per-cluster count (the "clusters" unit cannot reach
+                # here — the engine rejects it for a fixed number of clusters).
+                _min_cs = int(from_size) if unit == "cluster_size" else int(from_size) // int(_nc)
             _scenario_extras = (
                 [s.get("estimator_extras", {}) for s in result["scenarios"].values()]
                 if "scenarios" in result
@@ -2265,10 +2307,14 @@ class MCPower:
         _baseline_req = (self._pending_baseline_probability
                          if self.outcome_kind == "binary" else None)
         wire_posthoc_factors = [r["factor"] for r in payload.get("posthoc_requests", [])]
+        _unit_cluster_name = (
+            next(iter(self._pending_clusters), None) if unit != "observations" else None
+        )
         result = make_sample_size_result(result, self._report_meta(
             correction=correction, posthoc_factors=wire_posthoc_factors,
             effect_skeleton=effect_skeleton,
-            baseline_prob_requested=_baseline_req, min_cluster_size=_min_cs))
+            baseline_prob_requested=_baseline_req, min_cluster_size=_min_cs,
+            unit=unit, unit_cluster_name=_unit_cluster_name))
         if verbose:
             print(result)
         if self._uploaded_data_mode == "strict" and self._uploaded_data_n > 0:

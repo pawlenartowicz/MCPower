@@ -6,6 +6,7 @@ import AnovaIcon from '$lib/icons/AnovaIcon.svelte';
 import LinearIcon from '$lib/icons/LinearIcon.svelte';
 import MixedIcon from '$lib/icons/MixedIcon.svelte';
 import { SIMULATION } from '$lib/configs/app-config';
+import type { SampleSizeUnit } from './unit-label';
 
 /**
  * UI entrypoints — task names, not engine solver names.
@@ -233,7 +234,9 @@ export interface FamilyConfig {
   reportOverall: boolean;
   contrasts: Array<{ positiveName: string; negativeName: string; enabled: boolean }>;
   findPower: { n: number };
-  findSampleSize: { from: number; to: number; by: number | 'auto' };
+  /** Sample-size search grid. `unit` is mixed-only (the primary grouping's
+   *  unit the bounds are expressed in); absent = 'observations'. */
+  findSampleSize: { from: number; to: number; by: number | 'auto'; unit?: SampleSizeUnit };
   advanced: AdvancedConfig;
   cluster?: ClusterConfig;
   baselineProbability?: number;
@@ -272,6 +275,7 @@ export function defaultFamilyConfig(family: Entrypoint): FamilyConfig {
       from: SIMULATION.sample_size_bounds.from,
       to: SIMULATION.sample_size_bounds.to,
       by: SIMULATION.sample_size_bounds.by,
+      unit: 'observations',
     },
     advanced: baseAdvanced(),
   };

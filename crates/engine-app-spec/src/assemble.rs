@@ -1749,6 +1749,7 @@ mod tests {
             slopes: vec![],
             outcome: MixedOutcome::Gaussian,
             agq: 1,
+            sample_size_unit: Default::default(),
         }
     }
 

@@ -7,8 +7,10 @@ from ..config import get_report_config
 from .tables import (
     build_rows, diagnostic_warnings, fmt_ci, fmt_pct, fmt_required_n,
     joint_distribution, main_power_tables, minimal_table, target_label_map,
+    unit_display_label,
     _has_overall_required_n, _overall_label, _overall_label_by_estimator,
-    _overall_required_n_headline, _required_n_headline, _scenarios,
+    _overall_required_n_headline, _overall_required_n_headline_for,
+    _required_n_headline, _required_n_headline_for, _scenarios,
     _search_ceiling, _text_cfg,
 )
 
@@ -102,6 +104,10 @@ class Report:
             lines.append(f"correction: {m['correction']}")
         if m.get("residual") and m["residual"] != "normal":
             lines.append(f"residual: {m['residual']}")
+        if self._kind == "find_sample_size" and scen.get("unit_divisor", 1) > 1:
+            unit_label = unit_display_label(m)
+            if unit_label:
+                lines.append(f"unit: {unit_label}")
         return "\n".join(lines)
 
     def _per_test_power(self, cfg) -> str:
@@ -172,12 +178,14 @@ class Report:
 
         columns = [(cols["test"], "l"), (cols["required_n"], "r"), (cols["ci"], "r")]
         overall_label = _overall_label_by_estimator(self._meta.get("estimator") or "ols")
+        unit_label = unit_display_label(self._meta)
         blocks = []
         for nm, scen in scenarios:
             fitted_map = scen.get("fitted") or {}
             if not fitted_map:
                 continue
             table = []
+            unit_divisor = scen.get("unit_divisor", 1)
             has_appr = False
             non_monotone_labels = []
             has_floor = False
@@ -260,6 +268,21 @@ class Report:
                     table.append(("row", [label, v, "—"]))
                     non_monotone_labels.append(label.strip())
 
+            scen_columns = columns
+            if unit_label and unit_divisor > 1:
+                # Unit column first, N second; the CI stays in N. Row order is
+                # [overall?] + one row per non-header target, so the unit cells
+                # can be rebuilt from the same sources without touching the
+                # per-status branches above.
+                unit_cells = []
+                if _has_overall_required_n(scen):
+                    unit_cells.append(_overall_required_n_headline_for(scen, unit_divisor)[0])
+                unit_cells += [_required_n_headline_for(scen, r["pos"], unit_divisor)[0]
+                               for r in rows if r["kind"] != "factor_header"]
+                it = iter(unit_cells)
+                table = [(kind, [cells[0], next(it)] + cells[1:]) if kind == "row" else (kind, cells)
+                         for kind, cells in table]
+                scen_columns = [columns[0], (unit_label, "r")] + columns[1:]
             caption = text["required_n_ci_caption"] + (f" — {nm}" if len(scenarios) > 1 else "")
             footnote = text["required_n_ci_footnote"]
             if has_appr:
@@ -270,7 +293,7 @@ class Report:
                 )
             if has_floor:
                 footnote += "  " + text["required_n_ci_footnote_floor"]
-            blocks.append(minimal_table(caption, columns, table) + "\n" + footnote)
+            blocks.append(minimal_table(caption, scen_columns, table) + "\n" + footnote)
         return "\n\n".join(blocks)
 
     def _estimator_extras(self, cfg) -> str:
@@ -304,7 +327,23 @@ class Report:
         overall_label = _overall_label_by_estimator(self._meta.get("estimator") or "ols")
         if len(scenarios) == 1:
             scen = scenarios[0][1]
+            unit_divisor = scen.get("unit_divisor", 1)
+            unit_label = unit_display_label(self._meta) if unit_divisor > 1 else None
             table = []
+            if unit_label:
+                if _has_overall_required_n(scen):
+                    table.append(("row", [overall_label,
+                                           _overall_required_n_headline_for(scen, unit_divisor)[0],
+                                           _overall_required_n_headline(scen)[0]]))
+                for r in rows:
+                    if r["kind"] == "factor_header":
+                        table.append(("span", f"{r['label']}  (baseline: {r['baseline']})")); continue
+                    label = ("  " if r["kind"] == "factor_level" else "") + r["label"]
+                    table.append(("row", [label,
+                                           _required_n_headline_for(scen, r["pos"], unit_divisor)[0],
+                                           fmt_required_n(scen, r["pos"])]))
+                return minimal_table(cfg["text"]["sample_size_caption"],
+                                     [(cols["test"], "l"), (unit_label, "r"), (cols["required_n"], "r")], table)
             if _has_overall_required_n(scen):
                 table.append(("row", [overall_label, _overall_required_n_headline(scen)[0]]))
             for r in rows:
@@ -315,16 +354,35 @@ class Report:
             return minimal_table(cfg["text"]["sample_size_caption"],
                                  [(cols["test"], "l"), (cols["required_n"], "r")], table)
         names = [nm for nm, _ in scenarios]
-        columns = [(cols["test"], "l")] + [(nm, "r") for nm in names]
+        unit_divisor = scenarios[0][1].get("unit_divisor", 1)
+        unit_label = unit_display_label(self._meta) if unit_divisor > 1 else None
+        if unit_label:
+            # Per scenario: unit column first, N column second ("<name> (N)").
+            columns = [(cols["test"], "l")]
+            for nm in names:
+                columns += [(nm, "r"), (f"{nm} (N)", "r")]
+            def scen_cells(fn_unit, fn_n):
+                out = []
+                for _, s in scenarios:
+                    out += [fn_unit(s), fn_n(s)]
+                return out
+        else:
+            columns = [(cols["test"], "l")] + [(nm, "r") for nm in names]
+            def scen_cells(fn_unit, fn_n):
+                return [fn_n(s) for _, s in scenarios]
         table = []
         if any(_has_overall_required_n(s) for _, s in scenarios):
-            cells = [overall_label] + [_overall_required_n_headline(s)[0] for _, s in scenarios]
+            cells = [overall_label] + scen_cells(
+                lambda s: _overall_required_n_headline_for(s, unit_divisor)[0],
+                lambda s: _overall_required_n_headline(s)[0])
             table.append(("row", cells))
         for r in rows:
             if r["kind"] == "factor_header":
                 table.append(("span", f"{r['label']}  (baseline: {r['baseline']})")); continue
             label = ("  " if r["kind"] == "factor_level" else "") + r["label"]
-            cells = [label] + [fmt_required_n(s, r["pos"]) for _, s in scenarios]
+            cells = [label] + scen_cells(
+                lambda s, pos=r["pos"]: _required_n_headline_for(s, pos, unit_divisor)[0],
+                lambda s, pos=r["pos"]: fmt_required_n(s, pos))
             table.append(("row", cells))
         return minimal_table(cfg["text"]["sample_size_caption"],
                              columns, table)
@@ -357,9 +415,13 @@ class Report:
         ceiling = _search_ceiling(scen)
         fitted_joint = scen.get("fitted_joint") or {}
         n_targets = len(fja)
-        table = []
-        for j in range(n_targets - 1, -1, -1):
-            k = j + 1
+        unit_divisor = scen.get("unit_divisor", 1)
+        unit_label = unit_display_label(self._meta) if unit_divisor > 1 else None
+
+        def cell_for(j, div):
+            # Every N here is a grid value or bound, so dividing by the unit
+            # divisor is exact; div == 1 is the plain N cell.
+            ceil_cell = f"≥ {ceiling // div}" if ceiling is not None else "—"
             # fitted_joint is keyed by int position j (parallel to first_joint_achieved).
             fj = fitted_joint.get(j)
             if fj is None:
@@ -368,26 +430,31 @@ class Report:
             if fj is not None:
                 status = fj.get("status")
                 if status == "fitted":
-                    cell = str(fj["n_achievable"])
-                elif status == "at_or_below_min":
-                    cell = f"≤ {fj['n_min']}"
-                elif status == "not_reached":
-                    cell = f"≥ {ceiling}" if ceiling is not None else "—"
-                else:
-                    # non_monotone: fall back to first_joint_achieved.
-                    n_req = fja.get(j)
-                    if n_req is None:
-                        n_req = fja.get(str(j))
-                    cell = str(n_req) if n_req is not None else (f"≥ {ceiling}" if ceiling is not None else "—")
+                    return str(fj["n_achievable"] // div)
+                if status == "at_or_below_min":
+                    return f"≤ {fj['n_min'] // div}"
+                if status == "not_reached":
+                    return ceil_cell
+            # non_monotone, or no fitted_joint (older payload): first_joint_achieved.
+            n_req = fja.get(j)
+            if n_req is None:
+                n_req = fja.get(str(j))
+            return str(n_req // div) if n_req is not None else ceil_cell
+
+        table = []
+        for j in range(n_targets - 1, -1, -1):
+            k = j + 1
+            label = f"≥ {k} of {n_targets} tests"
+            if unit_label:
+                table.append(("row", [label, cell_for(j, unit_divisor), cell_for(j, 1)]))
             else:
-                # No fitted_joint (older payload) — use first_joint_achieved.
-                n_req = fja.get(j)
-                if n_req is None:
-                    n_req = fja.get(str(j))
-                cell = str(n_req) if n_req is not None else (f"≥ {ceiling}" if ceiling is not None else "—")
-            table.append(("row", [f"≥ {k} of {n_targets} tests", cell]))
+                table.append(("row", [label, cell_for(j, 1)]))
+        columns = [("Joint target", "l")]
+        if unit_label:
+            columns.append((unit_label, "r"))
+        columns.append(("Required N", "r"))
         return minimal_table(f"Joint detection → required N (target {fmt_pct(target, tdec)})",
-                             [("Joint target", "l"), ("Required N", "r")], table)
+                             columns, table)
 
     def _robustness(self, cfg) -> str:
         scenarios = _scenarios(self._result)

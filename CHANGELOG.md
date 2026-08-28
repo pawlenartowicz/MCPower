@@ -5,6 +5,21 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each language
 port keeps its own version, so a version listed here may reach Python, R, the
 desktop app, and the web app on different dates.
 
+## [1.3.0] — 2026-08-28
+
+### Added
+- Python: `find_sample_size` takes a new `unit=` argument for mixed models —
+  `"clusters"` searches the number of participants (with a fixed cluster size)
+  and `"cluster_size"` searches observations per participant (with a fixed
+  number of clusters), instead of always converting to/from total N by hand.
+- R: `$find_sample_size(..., unit = "observations")` mirrors the Python option.
+- App: the mixed-family Find sample size card gets two unit chips
+  (observations, and either "clusters" or "per `<cluster>`" depending on which
+  cluster field is fixed), with an echo line restating the searched range in
+  the other unit.
+- Web: the browser app carries the same unit chips as the desktop app, since
+  both share the same UI.
+
 ## [1.1.2] — 2026-08-24
 
 ### Changed
@@ -78,6 +93,7 @@ Python, R, the desktop app, and the in-browser web app — from the same core.
 - Bring-your-own-data: seed the simulation from a pilot or previous study so it
   inherits real correlations and distributions.
 
+[1.3.0]: https://github.com/pawlenartowicz/mcpower/releases
 [1.1.2]: https://github.com/pawlenartowicz/mcpower/releases
 [1.1.1]: https://github.com/pawlenartowicz/mcpower/releases
 [1.1.0]: https://github.com/pawlenartowicz/mcpower/releases

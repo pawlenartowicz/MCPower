@@ -214,6 +214,7 @@ fn sample_size_result_survives_json_roundtrip_with_embedded_nan() {
         first_overall_achieved: None,
         fitted_overall: None,
         cluster_atom: 1,
+        unit_divisor: 1,
         target_power: 0.8,
         method: SampleSizeMethod::Grid {
             by: ByValue::Fixed(10),

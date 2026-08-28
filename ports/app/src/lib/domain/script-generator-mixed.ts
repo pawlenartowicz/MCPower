@@ -215,7 +215,23 @@ export function generateMixedScript(
   // wald_se is the GLMM SE knob and agq the adaptive-quadrature knob; both are
   // emitted only when non-default and only meaningful for a clustered GLMM outcome
   // — harmless (default, omitted) on the Gaussian LME path.
-  for (const line of buildFindCallLines(lang, mode, params, testsArg, correction, s.wald_se, s.agq))
+  // The sample-size unit reaches the ports as a string keyword; observations is
+  // the default on both sides, so only a cluster unit is written out.
+  const unit = s.sample_size_unit ?? 'observations';
+  const unitArg =
+    mode === 'find-sample-size' && unit !== 'observations'
+      ? `unit${language === 'r' ? ' = ' : '='}"${unit}"`
+      : undefined;
+  for (const line of buildFindCallLines(
+    lang,
+    mode,
+    params,
+    testsArg,
+    correction,
+    s.wald_se,
+    s.agq,
+    unitArg,
+  ))
     lines.push(line);
 
   return lines.join('\n') + '\n';

@@ -27,6 +27,7 @@ import type {
   TestSelection as WireTestSelection,
 } from './app-spec';
 import { correlatableVariables } from './correlations';
+import { derivedUnit, type SampleSizeUnit } from './unit-label';
 import { expandInteraction, expandMainEffect, factorLevels } from './effect-names';
 import { projectScenario } from './scenario-projection';
 import {
@@ -719,6 +720,13 @@ export function familyConfigToAppSpec(
     // EstimationSelect control, it does not clear the stored value, so a stale
     // agq > 1 from an earlier binary/count run must not leak onto a Gaussian wire.
     const agq = config.advanced.agq;
+    // The unit only holds while the cluster dimension that allows it is set;
+    // a stale persisted unit from the other dimension falls back to observations.
+    const storedUnit = config.findSampleSize.unit ?? 'observations';
+    const unit: SampleSizeUnit =
+      storedUnit !== 'observations' && storedUnit === derivedUnit(cl.dimKind)
+        ? storedUnit
+        : 'observations';
     const spec: AppSpec = {
       family: 'mixed',
       ...ok,
@@ -730,6 +738,9 @@ export function familyConfigToAppSpec(
       slopes,
       ...(outcome !== undefined ? { outcome } : {}),
       ...(mixedKind !== 'linear' && agq > 1 ? { agq } : {}),
+      // Sample-size unit: omitted when 'observations' (the Rust default) so an
+      // observations run's wire stays byte-identical to a pre-unit one.
+      ...(unit !== 'observations' ? { sample_size_unit: unit } : {}),
       ...(outcome_options ? { outcome_options } : {}),
     } satisfies { family: 'mixed' } & MixedSpec;
     return { spec, errors, warnings };

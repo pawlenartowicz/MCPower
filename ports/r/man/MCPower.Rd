@@ -321,6 +321,7 @@ OLS/LMM.}
   to_size = NULL,
   by = NULL,
   mode = "linear",
+  unit = "observations",
   n_sims = NULL,
   seed = NULL,
   scenarios = FALSE,
@@ -339,6 +340,28 @@ the design is eligible (a Binary or Count GLMM with a single grouping
 factor and at most 3 random effects per group) -- an ineligible or
 even/out-of-range value warns and runs at Laplace instead. No-op for
 OLS/LMM.}
+
+\item{\code{unit}}{Expresses \code{from_size}/\code{to_size}/\code{by} and the
+reported sample sizes in something other than total observations N:
+\code{"observations"} (default) leaves N unchanged; \code{"clusters"}
+is the number of primary clusters (e.g. participants) and requires the
+primary grouping to be sized with \code{set_cluster(..., cluster_size=)}
+(the divisor is that fixed size); \code{"cluster_size"} is observations
+per primary cluster, counted across every extra grouping the design
+has, and requires the primary grouping to be sized with
+\code{set_cluster(..., n_clusters=)} (the divisor is that fixed
+cluster count). Bounds given in the unit are converted to N before the
+search runs, and results carry both N and the unit value. The
+\code{from_size}/\code{to_size} defaults (30/200) are not unit-aware:
+leaving them out under \code{unit != "observations"} searches 30-200
+of that unit, which with a cluster size of 20 is 600-4000
+observations. Pass them explicitly whenever the unit is not
+observations. A mismatched regime or an unclustered model with
+\code{unit != "observations"} raises an error. The engine still snaps every grid
+point to the cluster atom in N, so a unit step can land on a wider one
+than requested -- e.g. 20 subjects crossed with 12 items: a requested
+step of 1 trial per subject snaps to 12 trials (the atom is 240
+observations / 20 subjects).}
 }
 \if{html}{\out{</div>}}
 }

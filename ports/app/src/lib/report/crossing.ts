@@ -6,6 +6,10 @@ import type { CrossingFit } from '$lib/domain/result';
 /**
  * Headline required-N cell from a CrossingFit, falling back to the grid-empirical value.
  *
+ * `divisor` (1 = total observations) restates every number in the sample-size
+ * unit the search ran in — the same cell text, counted in clusters or in
+ * observations per cluster.
+ *
  * Chain:
  *   fitted      → String(n_achievable)
  *   at_or_below_min → `≤ ${n_min}`
@@ -17,14 +21,16 @@ export function requiredNHeadline(
   fit: CrossingFit | undefined,
   gridN: number | null,
   ceiling: number,
+  divisor = 1,
 ): string {
-  if (!fit) return gridN == null ? `≥ ${ceiling}` : String(gridN);
+  const u = (n: number) => String(Math.round(n / divisor));
+  if (!fit) return gridN == null ? `≥ ${u(ceiling)}` : u(gridN);
   switch (fit.status) {
-    case 'fitted':       return String(fit.n_achievable);
-    case 'at_or_below_min': return `≤ ${fit.n_min}`;
-    case 'not_reached':  return `≥ ${ceiling}`;
+    case 'fitted':       return u(fit.n_achievable);
+    case 'at_or_below_min': return `≤ ${u(fit.n_min)}`;
+    case 'not_reached':  return `≥ ${u(ceiling)}`;
     // non_monotone: engine suppressed the model fit; fall back to grid value
-    case 'non_monotone': return gridN == null ? `≥ ${ceiling}` : String(gridN);
+    case 'non_monotone': return gridN == null ? `≥ ${u(ceiling)}` : u(gridN);
   }
 }
 

@@ -989,11 +989,32 @@ MCPower <- R6::R6Class(
     #'   factor and at most 3 random effects per group) -- an ineligible or
     #'   even/out-of-range value warns and runs at Laplace instead. No-op for
     #'   OLS/LMM.
+    #' @param unit Expresses \code{from_size}/\code{to_size}/\code{by} and the
+    #'   reported sample sizes in something other than total observations N:
+    #'   \code{"observations"} (default) leaves N unchanged; \code{"clusters"}
+    #'   is the number of primary clusters (e.g. participants) and requires the
+    #'   primary grouping to be sized with \code{set_cluster(..., cluster_size=)}
+    #'   (the divisor is that fixed size); \code{"cluster_size"} is observations
+    #'   per primary cluster, counted across every extra grouping the design
+    #'   has, and requires the primary grouping to be sized with
+    #'   \code{set_cluster(..., n_clusters=)} (the divisor is that fixed
+    #'   cluster count). Bounds given in the unit are converted to N before the
+    #'   search runs, and results carry both N and the unit value. The
+    #'   \code{from_size}/\code{to_size} defaults (30/200) are not unit-aware:
+    #'   leaving them out under \code{unit != "observations"} searches 30-200
+    #'   of that unit, which with a cluster size of 20 is 600-4000
+    #'   observations. Pass them explicitly whenever the unit is not
+    #'   observations. A mismatched regime or an unclustered model with
+    #'   \code{unit != "observations"} raises an error. The engine still snaps every grid
+    #'   point to the cluster atom in N, so a unit step can land on a wider one
+    #'   than requested -- e.g. 20 subjects crossed with 12 items: a requested
+    #'   step of 1 trial per subject snaps to 12 trials (the atom is 240
+    #'   observations / 20 subjects).
     find_sample_size = function(target_test = NULL, correction = NULL,
                                 wald_se = NULL, agq = NULL, test_formula = NULL,
                                 target_power = NULL,
                                 from_size = NULL, to_size = NULL, by = NULL,
-                                mode = "linear",
+                                mode = "linear", unit = "observations",
                                 n_sims = NULL, seed = NULL, scenarios = FALSE,
                                 progress_callback = TRUE, verbose = TRUE) {
       if (!private$applied) private$apply()
@@ -1006,9 +1027,6 @@ MCPower <- R6::R6Class(
       private$validate_correction_arg(correction)
       # Resolve wald_se / agq against config; warn-and-strip ineligible agq.
       est <- private$resolve_estimation(wald_se, agq)
-
-      # LME cluster_size-only guard (model.py _validate_lme_find_sample_size_cluster_size).
-      private$validate_lme_find_sample_size_cluster_size()
 
       names <- private$resolve_scenarios_arg(scenarios)
       n <- if (!is.null(n_sims)) as.integer(n_sims) else as.integer(self$n_simulations)
@@ -1058,6 +1076,7 @@ MCPower <- R6::R6Class(
         by_kind,
         as.character(mode),
         NULL,
+        as.character(unit),
         progress)
       raw <- .unwrap_scenario_result(raw, names)
       # Post-batch: check failure threshold (mirrors Python model.py find_sample_size).
@@ -1073,14 +1092,28 @@ MCPower <- R6::R6Class(
           min_cs <- as.integer(primary$cluster_size)
         } else {
           nc <- private$effective_n_clusters %||% primary$n_clusters %||% 1L
-          min_cs <- as.integer(from_size) %/% as.integer(nc)
+          # `from_size` is in the caller's unit: under unit="cluster_size" it
+          # already is the per-cluster count (the "clusters" unit cannot reach
+          # here — the engine rejects it for a fixed number of clusters).
+          min_cs <- if (identical(unit, "cluster_size")) {
+            as.integer(from_size)
+          } else {
+            as.integer(from_size) %/% as.integer(nc)
+          }
         }
       }
       baseline_req <- if (identical(self$outcome_kind, "binary"))
         private$pending_baseline_probability else NULL
+      unit_cluster_name <- if (!identical(unit, "observations") &&
+                                length(private$pending_clusters) > 0L) {
+        names(private$pending_clusters)[[1L]]
+      } else {
+        NULL
+      }
       meta <- private$.build_report_meta(correction, posthoc_factors = wire_posthoc_factors,
                                          baseline_prob_requested = baseline_req,
-                                         min_cluster_size = min_cs)
+                                         min_cluster_size = min_cs,
+                                         unit = unit, unit_cluster_name = unit_cluster_name)
       meta$target_power <- tp
       result <- .make_result(raw, meta, "find_sample_size")
       # Surface engine preflight warnings exactly once per distinct message.
@@ -1382,19 +1415,6 @@ MCPower <- R6::R6Class(
       list(wald_se = wald_se_wire, nagq = nagq)
     },
 
-    # cluster_size-only LME guard for find_sample_size (model.py _validate_lme_find_sample_size_cluster_size).
-    validate_lme_find_sample_size_cluster_size = function() {
-      if (length(private$pending_clusters) == 0L) return(invisible(NULL))
-      cfg <- private$pending_clusters[[1L]]
-      if (is.null(cfg$n_clusters)) {
-        stop(paste0(
-          "find_sample_size with cluster_size-only LME specs is ",
-          "not yet supported; pass n_clusters to set_cluster"),
-          call. = FALSE)
-      }
-      invisible(NULL)
-    },
-
     # model.py _resolve_scenarios_arg.
     resolve_scenarios_arg = function(scenarios) {
       configs <- private$scenario_configs
@@ -1443,7 +1463,8 @@ MCPower <- R6::R6Class(
     # effect_skeleton: parsed from private$skeleton_json (set by build_contract_bytes),
     # β-column aligned (intercept at 0); .build_rows renders names from it + factor levels.
     .build_report_meta = function(correction, posthoc_factors = character(0),
-                                  baseline_prob_requested = NULL, min_cluster_size = NULL) {
+                                  baseline_prob_requested = NULL, min_cluster_size = NULL,
+                                  unit = NULL, unit_cluster_name = NULL) {
       if (!private$applied) private$apply()
       reg <- private$registry
       factors <- list()
@@ -1482,7 +1503,14 @@ MCPower <- R6::R6Class(
         # size at the evaluated N (drives the persistent Laplace line). NULL for
         # OLS / non-binary / non-clustered. Mirrors Python _report_meta.
         baseline_prob_requested = baseline_prob_requested,
-        min_cluster_size = min_cluster_size
+        min_cluster_size = min_cluster_size,
+        # find_sample_size only: `unit` is the wire value passed to the engine
+        # ("observations" / "clusters" / "cluster_size"); `unit_cluster_name`
+        # is the primary grouping variable's name, when known. Both feed
+        # `.unit_display_label` — the single place the unit wording is spelled
+        # out. NULL for find_power. Mirrors Python _report_meta.
+        unit = unit,
+        unit_cluster_name = unit_cluster_name
       )
       # Build posthoc_factors: list of list(name=, levels=) in request order.
       if (length(posthoc_factors) > 0L) {

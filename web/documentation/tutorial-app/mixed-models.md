@@ -26,6 +26,9 @@ The grouping term unlocks the cluster panel: the **cluster name** (mirrored from
 > [!important] Repeated measures: N is measurements, not participants
 > For a repeated-measures design the cluster is the **participant** and the sample size counts **measurements** — `N = participants × trials-per-participant`. Sixty participants on 100 trials each is `n = 6000` with **number of clusters = 60**, not `n = 60`. See [[concepts/mixed-effects#repeated-measures|Repeated measures]].
 
+> [!note] Unit chips on Find sample size
+> The **Find sample size** card carries two unit chips on their own row under the from/to/step inputs, labelled *search in*: **observations**, and — depending on which cluster field you fixed — either **cluster number** (fixed cluster size) or **cluster size** (fixed number of clusters). Switching which field you fix resets the chip to observations. A line under the row echoes the same range in the other unit, so you can read both without converting by hand. See [[concepts/required-sample-size#search-in-cluster-units|Search in cluster units]].
+
 ## 4. Predictors
 
 Each fixed-effect predictor is one card: pick its type next to the name (continuous, binary, or factor), then set its standardised effect size in the same card — continuous **0.10 / 0.25 / 0.40**, binary or factor **0.20 / 0.50 / 0.80**. See [[concepts/variable-types|variable types]] and [[concepts/effect-sizes|effect sizes]].

@@ -18,7 +18,7 @@ pub mod progress;
 pub use app_spec::{
     AppSpec, BinaryLink, ClusterDim, CorrelationMatrix, CsvData, EffectSize, LinearSpec, LogitSpec,
     MixedOutcome, MixedSpec, NumericDistribution, OutcomeOptions, ParsedFormula, PoissonSpec,
-    TestSelection, VarType,
+    SampleSizeUnit, TestSelection, VarType,
 };
 // Re-export upload types so crate consumers can build CsvData without an
 // extra engine-spec-builder dependency.

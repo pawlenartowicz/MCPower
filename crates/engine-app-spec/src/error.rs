@@ -116,7 +116,11 @@ impl AdapterError {
                 | OE::ClusterGridSinglePoint { .. }
                 | OE::MixedClusterAtoms { .. }
                 | OE::ClusterSizeTooSmall { .. }
-                | OE::ClusterTooFewAtN { .. },
+                | OE::ClusterTooFewAtN { .. }
+                | OE::UnitRegimeMismatch { .. }
+                | OE::UnitOnUnclustered { .. }
+                | OE::UnitDivisorDiffersAcrossScenarios { .. }
+                | OE::UnknownUnit(_),
             ) => "cluster_setup",
             _ => "generic",
         }
@@ -145,6 +149,17 @@ mod host_kind_tests {
             }),
             AdapterError::Orchestrator(OE::MixedClusterAtoms { a: 4, b: 6 }),
             AdapterError::Orchestrator(OE::InvalidClusterAtom),
+            // Sample-size unit errors are fixable settings too (unit chip vs
+            // cluster dimension), so they share the cluster_setup card.
+            AdapterError::Orchestrator(OE::UnitRegimeMismatch {
+                unit: "clusters".into(),
+                regime: "fixed_clusters".into(),
+            }),
+            AdapterError::Orchestrator(OE::UnitOnUnclustered {
+                unit: "clusters".into(),
+            }),
+            AdapterError::Orchestrator(OE::UnitDivisorDiffersAcrossScenarios { a: 8, b: 10 }),
+            AdapterError::Orchestrator(OE::UnknownUnit("rows".into())),
         ];
         for e in &cases {
             assert_eq!(e.host_kind(), "cluster_setup", "{e}");

@@ -15,17 +15,14 @@ use crate::scenario_loop::for_each_scenario;
 use engine_contract::{ClusterSizing, ClusterSpec, SimulationContract};
 use engine_core::ProgressSink as EngineProgressSink;
 
-/// Resolve the shared cluster atom + grid floor + pre-grid warnings for a set
-/// of contracts. Returns `(atom, hard_min, warnings)`. `atom == 1, hard_min == 1`
-/// when no cluster is configured. Errors on the cluster guards that must fail
-/// (mixed atoms, FixedSize cluster_size below the floor).
-pub(crate) fn resolve_cluster_grid_params(
+/// The one primary `ClusterSpec` shared by every clustered contract in the
+/// call (`None` when no contract has a cluster). Contracts without a cluster
+/// are skipped. Errors with `MixedClusterAtoms` when two clustered contracts
+/// disagree on the atom — a single shared grid cannot be a multiple of both.
+/// Shared by the grid parameters below and `unit::resolve_unit_divisor`.
+pub(crate) fn shared_primary_cluster(
     contracts: &[SimulationContract],
-) -> Result<(usize, usize, Vec<String>), OrchestratorError> {
-    let cc = crate::config().limits;
-    let min_rows = cc.min_rows_per_cluster as usize;
-    let min_clusters = cc.min_clusters as usize;
-
+) -> Result<Option<&ClusterSpec>, OrchestratorError> {
     let mut cluster: Option<&ClusterSpec> = None;
     for c in contracts {
         if let Some(cs) = c.generation.cluster.as_ref() {
@@ -41,8 +38,21 @@ pub(crate) fn resolve_cluster_grid_params(
             }
         }
     }
+    Ok(cluster)
+}
 
-    let Some(cluster) = cluster else {
+/// Resolve the shared cluster atom + grid floor + pre-grid warnings for a set
+/// of contracts. Returns `(atom, hard_min, warnings)`. `atom == 1, hard_min == 1`
+/// when no cluster is configured. Errors on the cluster guards that must fail
+/// (mixed atoms, FixedSize cluster_size below the floor).
+pub(crate) fn resolve_cluster_grid_params(
+    contracts: &[SimulationContract],
+) -> Result<(usize, usize, Vec<String>), OrchestratorError> {
+    let cc = crate::config().limits;
+    let min_rows = cc.min_rows_per_cluster as usize;
+    let min_clusters = cc.min_clusters as usize;
+
+    let Some(cluster) = shared_primary_cluster(contracts)? else {
         return Ok((1, 1, Vec::new())); // unclustered
     };
     let sizing = &cluster.sizing;
@@ -76,6 +86,12 @@ pub(crate) fn resolve_cluster_grid_params(
 /// method), runs one `run_batch` per scenario across all grid points, and
 /// derives `first_achieved` / `first_joint_achieved` from the per-N results.
 ///
+/// `bounds` and `method` are in rows (total N). `unit_divisor` is the
+/// host-resolved sample-size unit (see `unit::resolve_unit_divisor`; 1 =
+/// observations) — the engine only echoes it into
+/// `SampleSizeResult.unit_divisor` so every host reads the unit from the
+/// result; the caller converts bounds with `unit::bounds_to_rows` first.
+///
 /// Dispatch twin: `single_core_find_sample_size` — any parameter or behaviour
 /// added here must land there too, or hosts diverge.
 ///
@@ -90,6 +106,7 @@ pub fn find_sample_size(
     bounds: (usize, usize),
     n_sims: usize,
     method: SampleSizeMethod,
+    unit_divisor: usize,
     base_seed: u64,
     mut progress: Option<&mut dyn ProgressSink>,
     cancel: &CancellationToken,
@@ -153,6 +170,7 @@ pub fn find_sample_size(
                 first_overall_achieved: d.first_overall_achieved,
                 fitted_overall: d.fitted_overall,
                 cluster_atom: atom,
+                unit_divisor,
                 target_power,
                 method,
                 grid_warnings: scenario_warnings,

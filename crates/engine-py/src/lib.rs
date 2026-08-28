@@ -82,10 +82,13 @@ fn find_power(
 
 /// Search for the sample size reaching `target_power` over `[lo, hi]` for every
 /// scenario in `contracts_bytes`. `method` + (`by`, `by_kind`, `mode`) select the
-/// `SampleSizeMethod`; `progress` is an optional `(current, total) -> bool` Python
-/// callable. Returns the sample-size-result dict (see `sample_size_result_to_pydict`).
+/// `SampleSizeMethod`; `unit` selects the host-facing unit bounds/results are
+/// expressed in (`"observations"` | `"clusters"` | `"cluster_size"`, default
+/// `"observations"` — divisor 1, byte-identical to the unit-less path).
+/// `progress` is an optional `(current, total) -> bool` Python callable.
+/// Returns the sample-size-result dict (see `sample_size_result_to_pydict`).
 #[pyfunction]
-#[pyo3(signature = (contracts_bytes, target_power, lo, hi, n_sims, base_seed, method, by=None, by_kind=None, mode=None, tol_n=None, progress=None))]
+#[pyo3(signature = (contracts_bytes, target_power, lo, hi, n_sims, base_seed, method, by=None, by_kind=None, mode=None, tol_n=None, unit=None, progress=None))]
 #[expect(
     clippy::too_many_arguments,
     reason = "PyO3 entry point; signature mirrors the Python keyword API"
@@ -103,6 +106,7 @@ fn find_sample_size(
     by_kind: Option<&str>,
     mode: Option<&str>,
     tol_n: Option<usize>,
+    unit: Option<&str>,
     progress: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     let contracts = decode_contracts(contracts_bytes)?;
@@ -113,6 +117,12 @@ fn find_sample_size(
     let method = engine_orchestrator::SampleSizeMethod::from_host_args(method, by, by_kind, mode)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
 
+    let unit = engine_orchestrator::SampleSizeUnit::parse(unit.unwrap_or("observations"))
+        .map_err(orchestrator_err_to_py)?;
+    let divisor = engine_orchestrator::resolve_unit_divisor(&contracts, unit)
+        .map_err(orchestrator_err_to_py)?;
+    let ((lo, hi), method) = engine_orchestrator::bounds_to_rows((lo, hi), method, divisor);
+
     // Panic boundary — see find_power (mirrors engine-r's run_engine).
     let outcome = py.detach(|| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -122,6 +132,7 @@ fn find_sample_size(
                 (lo, hi),
                 n_sims,
                 method,
+                divisor,
                 base_seed,
                 Some(&mut sink as &mut dyn engine_orchestrator::ProgressSink),
                 &cancel,
@@ -159,7 +170,11 @@ fn orchestrator_err_to_py(e: engine_orchestrator::OrchestratorError) -> PyErr {
         | E::ClusterGridSinglePoint { .. }
         | E::MixedClusterAtoms { .. }
         | E::ClusterSizeTooSmall { .. }
-        | E::ClusterTooFewAtN { .. }) => pyo3::exceptions::PyValueError::new_err(other.to_string()),
+        | E::ClusterTooFewAtN { .. }
+        | E::UnitRegimeMismatch { .. }
+        | E::UnitOnUnclustered { .. }
+        | E::UnitDivisorDiffersAcrossScenarios { .. }
+        | E::UnknownUnit(_)) => pyo3::exceptions::PyValueError::new_err(other.to_string()),
     }
 }
 

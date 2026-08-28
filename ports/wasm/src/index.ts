@@ -171,13 +171,29 @@ function teardownWorkers(workers: Worker[]): void {
   }
 }
 
+/** Divisor between total N and the caller's sample-size unit, mirroring
+ *  `resolve_unit_divisor` (engine-orchestrator `unit.rs`) — the driver runs the
+ *  search in observations, so the routing heuristic has to see the bound there
+ *  too or it under-provisions the pool by this factor. A regime mismatch reads
+ *  as 1; the driver rejects those runs anyway. */
+function unitDivisor(spec: AppSpec): number {
+  const s = spec as Record<string, unknown>;
+  if (s['family'] !== 'mixed') return 1;
+  const unit = s['sample_size_unit'];
+  if (unit !== 'clusters' && unit !== 'cluster_size') return 1;
+  const dim = s['cluster_dim'] as { kind?: string; value?: number } | undefined;
+  const fixedBy = unit === 'clusters' ? 'cluster_size' : 'n_clusters';
+  return dim?.kind === fixedBy ? Math.max(1, dim.value ?? 1) : 1;
+}
+
 /** Route a run to a worker count via the size-based heuristic (seeds.ts). `n`
- *  is the run's sample size (a sample-size grid passes its largest N). */
+ *  is the run's sample size in observations (a sample-size grid passes its
+ *  largest N). */
 function routedWorkers(spec: AppSpec, n: number, nSims: number, forced?: number): number {
   const scenarios = (spec as unknown as { scenarios?: unknown[] }).scenarios;
   return poolSize({
     caseClass: classifyCase(spec),
-    hasScenarios: Array.isArray(scenarios) && scenarios.length > 0,
+    scenarioCount: Array.isArray(scenarios) ? scenarios.length : 0,
     n,
     nSims,
     hardwareConcurrency: navigator.hardwareConcurrency,
@@ -320,7 +336,7 @@ export async function findSampleSize(
   emit({ kind: 'run_started', run_id: runId });
 
   const nSims = (spec as unknown as { n_sims: number }).n_sims;
-  const nWorkers = routedWorkers(spec, bounds[1], nSims, opts?.workers);
+  const nWorkers = routedWorkers(spec, bounds[1] * unitDivisor(spec), nSims, opts?.workers);
   const shares = splitSims(nSims, nWorkers);
   const seeds = workerSeeds(BigInt((spec as unknown as { seed: number | string }).seed), nWorkers);
 

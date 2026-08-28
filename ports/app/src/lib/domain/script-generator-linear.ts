@@ -75,7 +75,8 @@ export function buildConfigLines(
 /** The find_power / find_sample_size call block, shared by every family generator.
  *  Lines that restate a port default (bounds 30/200, by auto, correction none,
  *  wald_se rx, agq 1) are omitted. `waldSe` and `agq` are the find_* kwargs both
- *  ports expose for the clustered GLMM; omitted/undefined for families that lack them. */
+ *  ports expose for the clustered GLMM; omitted/undefined for families that lack them.
+ *  `unitArg` is the already-rendered sample-size-unit argument (mixed only). */
 export function buildFindCallLines(
   lang: Lang,
   mode: 'find-power' | 'find-sample-size',
@@ -84,6 +85,7 @@ export function buildFindCallLines(
   correction: string,
   waldSe?: string,
   agq?: number,
+  unitArg?: string,
 ): string[] {
   const lines: string[] = [];
   if (mode === 'find-power') {
@@ -106,6 +108,9 @@ export function buildFindCallLines(
   if (waldSe && waldSe !== 'rx') lines.push(`    wald_se="${waldSe}",`);
   // agq default is 1 (Laplace) → omit; emit only the adaptive-quadrature opt-in.
   if (agq && agq > 1) lines.push(`    agq=${agq},`);
+  // Already rendered in the caller's language (Python `unit="…"`, R `unit = "…"`);
+  // omitted for the default unit, observations.
+  if (unitArg) lines.push(`    ${unitArg},`);
   lines.push(')');
   return lines;
 }

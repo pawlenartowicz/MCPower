@@ -449,7 +449,7 @@ pub enum CrossingFit {
     NonMonotone { max_violation: f64 },
 }
 
-fn default_cluster_atom() -> usize {
+fn one() -> usize {
     1
 }
 
@@ -500,8 +500,17 @@ pub struct SampleSizeResult {
     /// Cluster atom the grid was built on (1 when unclustered). Merge needs
     /// it to recompute `n_achievable` from pooled counts. Additive
     /// (serde default = 1).
-    #[serde(default = "default_cluster_atom")]
+    #[serde(default = "one")]
     pub cluster_atom: usize,
+    /// Divisor between total N and the host's sample-size unit (1 =
+    /// observations; `cluster_size` for the `clusters` unit under FixedSize,
+    /// `n_clusters` for the `cluster_size` unit under FixedClusters — see
+    /// `unit::resolve_unit_divisor`). Every N field in this result stays in
+    /// rows; hosts divide by this to label in the unit. Carried in the result
+    /// so hosts that read the raw struct (Tauri/WASM) get it without a
+    /// second call. Additive (serde default = 1).
+    #[serde(default = "one")]
+    pub unit_divisor: usize,
     pub target_power: f64,
     pub method: SampleSizeMethod,
     /// Pre-run advisory warnings: cluster-aware grid construction (bounds
@@ -621,6 +630,14 @@ pub enum OrchestratorError {
     },
     #[error("cannot merge incompatible results: {0}")]
     IncompatibleMerge(String),
+    #[error("sample-size unit {unit:?} does not fit the {regime} cluster regime (clusters needs fixed_size, cluster_size needs fixed_clusters)")]
+    UnitRegimeMismatch { unit: String, regime: String },
+    #[error("sample-size unit {unit:?} needs a clustered model; this model has no cluster")]
+    UnitOnUnclustered { unit: String },
+    #[error("scenarios in this call disagree on the sample-size unit divisor ({a} vs {b}); the unit must mean the same thing in every scenario")]
+    UnitDivisorDiffersAcrossScenarios { a: usize, b: usize },
+    #[error("unknown sample-size unit {0:?}; expected observations, clusters or cluster_size")]
+    UnknownUnit(String),
 }
 
 #[cfg(test)]
@@ -769,6 +786,7 @@ mod result_counter_tests {
         assert!(ssr.fitted.is_empty());
         assert!(ssr.fitted_joint.is_empty());
         assert_eq!(ssr.cluster_atom, 1);
+        assert_eq!(ssr.unit_divisor, 1);
         // Overall crossing fields absent in a pre-overall payload default to None.
         assert_eq!(ssr.first_overall_achieved, None);
         assert_eq!(ssr.fitted_overall, None);
@@ -898,6 +916,7 @@ mod result_counter_tests {
                 ci_hi: Some(110.0),
             }),
             cluster_atom: 30,
+            unit_divisor: 6,
             target_power: 0.8,
             method: SampleSizeMethod::Grid {
                 by: ByValue::Auto { count: 12 },
@@ -908,6 +927,11 @@ mod result_counter_tests {
         let json = serde_json::to_string(&ssr).unwrap();
         let back: SampleSizeResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back, ssr);
+        assert_eq!(back.unit_divisor, 6);
+        // msgpack is the FFI wire encoding — the divisor must survive it too.
+        let bytes = rmp_serde::to_vec_named(&ssr).unwrap();
+        let back: SampleSizeResult = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(back.unit_divisor, 6);
     }
 
     #[test]

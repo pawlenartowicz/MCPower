@@ -140,13 +140,16 @@ find_power_precancelled <- function(contracts, sample_size, n_sims, base_seed) .
 #' * `by_kind`           — `"fixed"` (step) or `"auto"` (point count); default `"fixed"`.
 #' * `mode`              — `"linear"` or `"log"` (default `"linear"`).
 #' * `tol_n`             — accepted for API compatibility; unused.
+#' * `unit`              — host-facing unit bounds/results are expressed in
+#'   (`"observations"` | `"clusters"` | `"cluster_size"`, default
+#'   `"observations"` — divisor 1, byte-identical to the unit-less path).
 #' * `progress`          — an R callback `(current, total)`, or `NULL` for
 #'   silent. Events are delivered on the R main thread; Ctrl-C / Escape cancels
 #'   the run (see `progress.rs`).
 #'
 #' Returns a named list mirroring the Python dict shape:
 #' `list(scenarios = <named list>, comparison = list())`.
-find_sample_size <- function(contracts, target_power, lo, hi, n_sims, base_seed, method, by, by_kind, mode, tol_n, progress) .Call(wrap__find_sample_size, contracts, target_power, lo, hi, n_sims, base_seed, method, by, by_kind, mode, tol_n, progress)
+find_sample_size <- function(contracts, target_power, lo, hi, n_sims, base_seed, method, by, by_kind, mode, tol_n, unit, progress) .Call(wrap__find_sample_size, contracts, target_power, lo, hi, n_sims, base_seed, method, by, by_kind, mode, tol_n, unit, progress)
 
 #' Test-only seam for the internal-error path. Panics inside the engine
 #' boundary so testthat can assert the caught panic surfaces as an R error

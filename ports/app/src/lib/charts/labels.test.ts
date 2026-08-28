@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTargetLabelMap, relabelTargets } from './labels';
+import { buildTargetLabelMap, relabelTargets, setUnitAxisTitle } from './labels';
 
 describe('buildTargetLabelMap', () => {
   // Every map carries an `overall` entry for the sample-size curve's omnibus
@@ -102,5 +102,29 @@ describe('relabelTargets', () => {
     relabelTargets(spec, {});
     const values = (spec as { data: { values: RowArr } }).data.values;
     expect(values[0]!.target).toBe('target_1'); // unchanged
+  });
+});
+
+describe('setUnitAxisTitle', () => {
+  it('titles every n_unit x encoding, layers and facets alike', () => {
+    type XEnc = { encoding: { x: { field: string; title?: string } } };
+    const spec: { layer: XEnc[]; spec: { layer: XEnc[] } } = {
+      layer: [
+        { encoding: { x: { field: 'n_unit' } } },
+        { encoding: { x: { field: 'n_unit' } } },
+      ],
+      spec: { layer: [{ encoding: { x: { field: 'n_unit' } } }] },
+    };
+    setUnitAxisTitle(spec, 'Subject clusters');
+    expect(spec.layer.every((l) => l.encoding.x.title === 'Subject clusters')).toBe(true);
+    expect(spec.spec.layer[0]!.encoding.x.title).toBe('Subject clusters');
+  });
+
+  it('leaves a plain N axis alone', () => {
+    const spec: { encoding: { x: { field: string; title?: string } } } = {
+      encoding: { x: { field: 'n', title: 'Sample size (N)' } },
+    };
+    setUnitAxisTitle(spec, 'Subject clusters');
+    expect(spec.encoding.x.title).toBe('Sample size (N)');
   });
 });

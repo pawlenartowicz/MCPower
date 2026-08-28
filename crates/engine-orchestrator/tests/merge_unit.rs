@@ -172,6 +172,7 @@ fn ssr_grid(parts_per_n: Vec<PowerResult>) -> SampleSizeResult {
         first_overall_achieved: None,
         fitted_overall: None,
         cluster_atom: 1,
+        unit_divisor: 1,
         target_power: 0.8,
         method: SampleSizeMethod::Grid {
             by: ByValue::Fixed(100),
@@ -219,6 +220,29 @@ fn merge_sample_size_results_grid_pools_per_n() {
     // first_achieved recomputed from pooled corrected rates: target 0 first
     // crosses 0.8 at N=200 (162/200 = 0.81), target 1 never reaches 0.8.
     assert_eq!(r.first_achieved, vec![Some(200), None]);
+}
+
+#[test]
+fn merge_sample_size_results_carries_unit_divisor_and_rejects_mismatch() {
+    let mk = |n: usize| {
+        let mut pr = ols_pr(100, vec![50, 25], vec![50, 25], 100);
+        pr.n = n;
+        pr
+    };
+    let mut part_a = ssr_grid(vec![mk(80), mk(160)]);
+    let mut part_b = ssr_grid(vec![mk(80), mk(160)]);
+    part_a.unit_divisor = 8;
+    part_b.unit_divisor = 8;
+    let merged = merge_sample_size_results(&wrap_ssr(vec![part_a.clone(), part_b])).unwrap();
+    assert_eq!(merged.scenarios[0].1.unit_divisor, 8);
+
+    let mut part_c = ssr_grid(vec![mk(80), mk(160)]);
+    part_c.unit_divisor = 1;
+    let err = merge_sample_size_results(&wrap_ssr(vec![part_a, part_c])).unwrap_err();
+    assert!(
+        matches!(&err, OrchestratorError::IncompatibleMerge(m) if m.contains("unit_divisor")),
+        "{err}"
+    );
 }
 
 #[test]

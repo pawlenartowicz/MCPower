@@ -149,6 +149,7 @@ fn preflight_sample_size_names_min_inclusion_n() {
             by: ByValue::Auto { count: 10 },
             mode: GridMode::Linear,
         },
+        1,
         2137,
         None,
         &cancel,
@@ -176,6 +177,7 @@ fn preflight_sample_size_names_min_inclusion_n() {
             by: ByValue::Auto { count: 10 },
             mode: GridMode::Linear,
         },
+        1,
         2137,
         None,
         &cancel2,
@@ -206,6 +208,7 @@ fn preflight_sample_size_warns_when_factor_stays_sparse_across_whole_grid() {
             by: ByValue::Auto { count: 5 },
             mode: GridMode::Linear,
         },
+        1,
         2137,
         None,
         &cancel,
@@ -237,13 +240,14 @@ fn preflight_sample_size_twins_emit_identical_warnings() {
         (20, 200),
         50,
         method,
+        1,
         2137,
         None,
         &cancel,
     )
     .unwrap();
     let single =
-        single_core_find_sample_size(&[c], 0.8, (20, 200), 50, method, 2137, None, &cancel)
+        single_core_find_sample_size(&[c], 0.8, (20, 200), 50, method, 1, 2137, None, &cancel)
             .unwrap();
     let multi_warns = &multi.scenarios[0].1.grid_warnings;
     let single_warns = &single.scenarios[0].1.grid_warnings;

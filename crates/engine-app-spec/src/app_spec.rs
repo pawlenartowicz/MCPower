@@ -41,6 +41,27 @@ fn agq_is_default(n: &u8) -> bool {
     *n == default_nagq_app()
 }
 
+/// Unit the sample-size search bounds and results are expressed in for a
+/// clustered design. `Observations` (default) is total N — the unit-less
+/// behavior. `Clusters` counts primary clusters (requires a fixed cluster
+/// size); `ClusterSize` counts observations per primary cluster (requires a
+/// fixed cluster count). The driver converts this to the orchestrator's
+/// `SampleSizeUnit` and resolves the divisor from the assembled contracts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SampleSizeUnit {
+    #[default]
+    Observations,
+    Clusters,
+    ClusterSize,
+}
+
+/// `#[serde(skip_serializing_if)]` predicate for `sample_size_unit`: omit the
+/// field when it equals the default so a pre-unit spec round-trips unchanged.
+fn sample_size_unit_is_default(u: &SampleSizeUnit) -> bool {
+    *u == SampleSizeUnit::default()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "family", rename_all = "lowercase")]
 pub enum AppSpec {
@@ -301,6 +322,12 @@ pub struct MixedSpec {
     /// = Laplace approximation, matching pre-AGQ behavior.
     #[serde(default = "default_nagq_app", skip_serializing_if = "agq_is_default")]
     pub agq: u8,
+    /// Unit the find-sample-size bounds and results are expressed in.
+    /// `Observations` (default) leaves the search identical to the unit-less
+    /// path; the other two divide total N by the primary grouping's fixed
+    /// value. Only find-sample-size reads it — find-power takes one N.
+    #[serde(default, skip_serializing_if = "sample_size_unit_is_default")]
+    pub sample_size_unit: SampleSizeUnit,
 }
 
 /// GUI state for an OLS power run.

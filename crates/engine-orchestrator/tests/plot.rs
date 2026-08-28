@@ -204,6 +204,7 @@ fn power_at_n_single_with_ci_and_target_line_and_title() {
         title: Some("Power at N=120".into()),
         show_ci: true,
         target_power_line: Some(0.80),
+        x_divisor: 1,
     };
     insta::assert_json_snapshot!(parse(&power_at_n_spec(&single_scenario(), &opts)));
 }
@@ -216,6 +217,7 @@ fn curve_grid_with_ci_and_target_line() {
         title: Some("Power vs sample size".into()),
         show_ci: true,
         target_power_line: Some(0.80),
+        x_divisor: 1,
     };
     insta::assert_json_snapshot!(parse(&sample_size_curve_spec(&ssr_grid(), &opts)));
 }
@@ -246,6 +248,7 @@ fn curve_multi_scenario_faceted() {
         title: Some("Power vs sample size".into()),
         show_ci: true,
         target_power_line: Some(0.80),
+        x_divisor: 1,
     };
     insta::assert_json_snapshot!(parse(&sample_size_curve_spec(
         &multi_scenario_grid(),

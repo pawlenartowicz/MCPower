@@ -453,6 +453,7 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
         slopes: vec![],
         outcome: MixedOutcome::Gaussian,
         agq: 1,
+        sample_size_unit: Default::default(),
     });
 
     let recovered = get_effects_from_data(&spec).expect("get_effects_from_data succeeds for mixed");

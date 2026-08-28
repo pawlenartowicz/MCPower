@@ -7,13 +7,14 @@
 //!    projection; the two must stay in sync.
 
 use engine_orchestrator::{
-    find_power, find_sample_size, single_core_find_power, single_core_find_sample_size,
-    CancellationToken, PowerResult, SampleSizeMethod, SampleSizeResult, ScenarioResult,
+    bounds_to_rows, find_power, find_sample_size, resolve_unit_divisor, single_core_find_power,
+    single_core_find_sample_size, CancellationToken, PowerResult, SampleSizeMethod,
+    SampleSizeResult, ScenarioResult,
 };
 use engine_spec_builder::upload::standardize_continuous;
 
 use crate::{
-    app_spec::{ClusterDim, EffectSize, MixedOutcome, MixedSpec},
+    app_spec::{ClusterDim, EffectSize, MixedOutcome, MixedSpec, SampleSizeUnit},
     assemble::{assemble_spec, assemble_spec_with_skeleton},
     error::AdapterError,
     progress::{EmitterSink, ProgressEmitter},
@@ -72,6 +73,8 @@ pub fn run_find_sample_size(
         n_sims,
         target_power,
     } = run_inputs_of(spec);
+    let unit_divisor = resolve_unit_divisor(&contracts, unit_of(spec))?;
+    let (bounds, method) = bounds_to_rows(bounds, method, unit_divisor);
     let mut sink = EmitterSink::new(emitter);
     let mut result = find_sample_size(
         &contracts,
@@ -79,6 +82,7 @@ pub fn run_find_sample_size(
         bounds,
         n_sims,
         method,
+        unit_divisor,
         base_seed,
         Some(&mut sink),
         cancel,
@@ -125,6 +129,8 @@ pub fn run_single_core_find_sample_size(
 ) -> Result<ScenarioResult<SampleSizeResult>, AdapterError> {
     let (contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
     let target_power = run_inputs_of(spec).target_power;
+    let unit_divisor = resolve_unit_divisor(&contracts, unit_of(spec))?;
+    let (bounds, method) = bounds_to_rows(bounds, method, unit_divisor);
     let mut sink = EmitterSink::new(emitter);
     let mut result = single_core_find_sample_size(
         &contracts,
@@ -132,6 +138,7 @@ pub fn run_single_core_find_sample_size(
         bounds,
         n_sims,
         method,
+        unit_divisor,
         base_seed,
         Some(&mut sink),
         cancel,
@@ -159,6 +166,21 @@ fn attach_assemble_warnings<T>(
     }
     for (_, r) in scenarios {
         grid_warnings(r).extend(warnings.iter().cloned());
+    }
+}
+
+/// The spec's sample-size unit as the orchestrator's enum. Only the mixed
+/// family carries the knob; every other family is total observations, the
+/// divisor-1 path.
+fn unit_of(spec: &AppSpec) -> engine_orchestrator::SampleSizeUnit {
+    use engine_orchestrator::SampleSizeUnit as Engine;
+    match spec {
+        AppSpec::Mixed(m) => match m.sample_size_unit {
+            SampleSizeUnit::Observations => Engine::Observations,
+            SampleSizeUnit::Clusters => Engine::Clusters,
+            SampleSizeUnit::ClusterSize => Engine::ClusterSize,
+        },
+        _ => Engine::Observations,
     }
 }
 

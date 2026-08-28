@@ -212,3 +212,30 @@ describe('generateScript (mixed)', () => {
     expect(holm).toContain('correction="holm"');
   });
 });
+
+describe('generateScript (mixed) — sample-size unit', () => {
+  const bounds = { bounds: [10, 50] as [number, number], method: { Grid: { by: { Fixed: 5 }, mode: 'Linear' as const } } };
+
+  it('emits unit= for a clustered unit (Python)', () => {
+    const spec = { ...mixedSpec({ kind: 'cluster_size', value: 8 }), sample_size_unit: 'clusters' } as AppSpec;
+    const s = generateScript(spec, 'find-sample-size', bounds);
+    expect(s).toContain('unit="clusters"');
+  });
+
+  it('emits unit = for a clustered unit (R)', () => {
+    const spec = { ...mixedSpec({ kind: 'n_clusters', value: 20 }), sample_size_unit: 'cluster_size' } as AppSpec;
+    const s = generateMixedScript(spec, 'find-sample-size', bounds, 'r');
+    expect(s).toContain('unit = "cluster_size"');
+  });
+
+  it('omits unit for observations and for find_power', () => {
+    const observations = generateScript(mixedSpec({ kind: 'cluster_size', value: 8 }), 'find-sample-size', bounds);
+    expect(observations).not.toContain('unit=');
+    const power = generateScript(
+      { ...mixedSpec({ kind: 'cluster_size', value: 8 }), sample_size_unit: 'clusters' } as AppSpec,
+      'find-power',
+      { sample_size: 200 },
+    );
+    expect(power).not.toContain('unit=');
+  });
+});

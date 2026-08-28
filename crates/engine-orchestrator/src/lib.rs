@@ -19,6 +19,7 @@ pub mod result;
 pub mod result_host;
 mod scenario_loop;
 pub mod single_core;
+pub mod unit;
 
 pub use crate::cancel::CancellationToken;
 pub use crate::find_power::find_power;
@@ -32,6 +33,7 @@ pub use crate::result::{
 };
 pub use crate::result_host::{power_result_to_host, sample_size_result_to_host, HostValue};
 pub use crate::single_core::{single_core_find_power, single_core_find_sample_size};
+pub use crate::unit::{bounds_to_rows, resolve_unit_divisor, SampleSizeUnit};
 
 pub use engine_contract::{
     config, validate_config, BaselineScenarioRule, Benchmarks, ByStep, Config, Limits, NSims,

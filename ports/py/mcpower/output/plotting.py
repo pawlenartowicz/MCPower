@@ -237,6 +237,33 @@ def _walk_correction_title(node: Any, new_title: str) -> None:
         _walk_correction_title(value, new_title)
 
 
+def _set_unit_axis_titles(spec: Dict[str, Any], title: str) -> None:
+    """In place: set ``encoding.x.title`` on every N-axis layer the engine left
+    title-less. A sample-size curve spec with ``x_divisor > 1`` emits its x
+    field as ``n`` / ``n_unit`` with no title (the engine never emits text
+    tied to a host-chosen unit wording — see ``PlotOptions.x_divisor``); this
+    fills it in with the same wording the table header and printed summary
+    use. Walks every layer (including a faceted spec's ``spec.layer``), so the
+    line and CI-band layers both get it."""
+    _walk_unit_axis(spec, title)
+
+
+def _walk_unit_axis(node: Any, title: str) -> None:
+    if isinstance(node, list):
+        for child in node:
+            _walk_unit_axis(child, title)
+        return
+    if not isinstance(node, dict):
+        return
+    encoding = node.get("encoding")
+    if isinstance(encoding, dict):
+        x = encoding.get("x")
+        if isinstance(x, dict) and x.get("field") in ("n", "n_unit") and "title" not in x:
+            x["title"] = title
+    for value in node.values():
+        _walk_unit_axis(value, title)
+
+
 # ── Envelope building ────────────────────────────────────────────────────────
 
 def _build_envelope(result: Dict[str, Any], meta: Dict[str, Any], kind: str) -> Dict[str, Any]:
@@ -279,6 +306,10 @@ def _build_envelope(result: Dict[str, Any], meta: Dict[str, Any], kind: str) -> 
             entry["overall_ci"] = inner.get("overall_significant_ci")
         if kind == "find_sample_size":
             entry["histogram"] = inner.get("success_count_histogram_corrected", [])
+            # Same divisor across every scenario (the orchestrator rejects a
+            # mismatch before this dict is built) — the plot bridge reads it
+            # off whichever scenario carries it first.
+            entry["unit_divisor"] = inner.get("unit_divisor", 1)
         scenarios_out.append(entry)
 
     return {"scenarios": scenarios_out}
@@ -319,6 +350,13 @@ def _plot_blocks(
     correction_name: Optional[str] = meta.get("correction") if corr else None
     ci_color = CI_DEFAULT_COLOR
 
+    unit_label: Optional[str] = None
+    if kind == "find_sample_size":
+        divisor = max((s.get("unit_divisor", 1) for s in envelope["scenarios"]), default=1)
+        if divisor > 1:
+            from .tables import unit_display_label
+            unit_label = unit_display_label(meta)
+
     blocks: List[Tuple[str, Dict[str, Any]]] = []
     for key, spec_json in raw_blocks:
         spec = json.loads(spec_json)
@@ -328,6 +366,8 @@ def _plot_blocks(
         _style_ci_marks(spec, ci_color)
         if correction_name:
             _rewrite_correction_axis_title(spec, correction_name)
+        if unit_label:
+            _set_unit_axis_titles(spec, unit_label)
         blocks.append((key, spec))
     return blocks
 

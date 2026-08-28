@@ -107,6 +107,12 @@ struct ScenarioJson {
     /// back to a zero-width interval at the rate.
     #[serde(default)]
     overall_ci: Option<Vec<f64>>,
+    /// find_sample_size only: divisor between total N and the requested unit
+    /// (1 = observations, the same value on every scenario — the orchestrator
+    /// rejects a mismatch before this envelope is built). Older envelopes omit
+    /// this field.
+    #[serde(default)]
+    unit_divisor: Option<usize>,
 }
 
 fn parse_contrast_pairs(rows: &[Vec<u32>]) -> Vec<(u32, u32)> {
@@ -236,6 +242,7 @@ pub fn power_plot_set_json(
         title: None,
         show_ci,
         target_power_line,
+        x_divisor: 1,
     };
     let pairs = power_plot_set(&out, &opts);
     let names: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
@@ -271,13 +278,23 @@ pub fn sample_size_plot_set_json(
         return Err(Error::Other("envelope has zero scenarios".into()));
     }
     let mut out: Vec<PlotScenario> = Vec::with_capacity(envelope.scenarios.len());
+    let mut x_divisor: usize = 1;
     for sc in &envelope.scenarios {
+        // `unit_divisor` is the same across every scenario (the orchestrator
+        // rejects a mismatch before this envelope is built) — read it once, off
+        // the first scenario that carries it.
+        if x_divisor == 1 {
+            if let Some(d) = sc.unit_divisor {
+                x_divisor = d;
+            }
+        }
         out.push(plot_scenario_from_json(sc)?);
     }
     let opts = PlotOptions {
         title: None,
         show_ci,
         target_power_line,
+        x_divisor,
     };
     let pairs = sample_size_plot_set(&out, &opts);
     let names: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();

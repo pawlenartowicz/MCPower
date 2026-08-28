@@ -11,6 +11,8 @@ import { findPower, findSampleSize, cancelRun, onProgress, effectSkeleton } from
 import { historyStore } from './history.svelte';
 import { familyStore } from './family.svelte';
 import { toRunError, type AppError } from '$lib/errors/report';
+import { setUnitAxisTitle } from '$lib/charts/labels';
+import { unitAxisTitle } from '$lib/domain/unit-label';
 
 export type ResultTab = 'summary' | 'joint' | 'script' | 'export';
 
@@ -146,6 +148,27 @@ function createRunStore() {
     }
   }
 
+  /** Name the sample-size curve's x axis when the search ran in a cluster unit.
+   *  The engine leaves that title empty on purpose (it never sees the cluster's
+   *  name); the divisor it reports is what says the title is needed. */
+  function applyUnitAxisTitle(
+    descriptor: LastRunDescriptor,
+    inner: PowerResult | SampleSizeResult,
+    plots?: PlotSpecs,
+  ) {
+    if (descriptor.kind !== 'find-sample-size' || !plots) return;
+    const spec = descriptor.spec;
+    if (spec.family !== 'mixed') return;
+    const divisor = (inner as SampleSizeResult).unit_divisor ?? 1;
+    if (divisor <= 1) return;
+    const title = unitAxisTitle(spec.sample_size_unit ?? 'observations', spec.cluster_name);
+    for (const block of plots.blocks) {
+      const parsed: unknown = JSON.parse(block.spec);
+      setUnitAxisTitle(parsed, title);
+      block.spec = JSON.stringify(parsed);
+    }
+  }
+
   function pushTab(tab: Omit<RunTab, 'id'> & { id?: string }) {
     _tabCounter += 1;
     const id = tab.id ?? `tab-${_tabCounter}`;
@@ -196,6 +219,7 @@ function createRunStore() {
       const scenarios = result.scenarios;
       const inner = scenarios[0]?.[1];
       if (!inner) throw new Error('engine returned no scenarios');
+      applyUnitAxisTitle(descriptor, inner, plots);
       pushTab({
         ...extras,
         id: run_id,

@@ -72,6 +72,7 @@ fn ss_scenarios(labels: &[&str]) -> ScenarioResult<SampleSizeResult> {
                         first_overall_achieved: None,
                         fitted_overall: None,
                         cluster_atom: 1,
+                        unit_divisor: 1,
                         target_power: 0.8,
                         method,
                         grid_warnings: vec![],
@@ -222,4 +223,58 @@ fn corrected_flag_changes_curve_values_in_spec() {
         curve_u.contains("0.5"),
         "uncorrected curve must contain uncorrected power 0.5"
     );
+}
+
+// ── sample-size unit: x field switches to n_unit ───────────────────────────
+
+/// With a unit divisor the curve's x field becomes `n_unit` (= n / divisor) and
+/// the engine emits no x title — the host names the unit. The `n` field stays on
+/// every row so a host can still read total observations.
+#[test]
+fn sample_size_curve_uses_n_unit_when_the_result_carries_a_divisor() {
+    let mut result = ss_scenarios(&["default"]);
+    for (_, ss) in result.scenarios.iter_mut() {
+        ss.unit_divisor = 8;
+    }
+    let PlotSpecs { blocks } = sample_size_curve_specs(&result, 0.8, false);
+    let curve = blocks
+        .iter()
+        .find(|b| b.key == "curve")
+        .expect("curve block present");
+    let v: serde_json::Value = serde_json::from_str(&curve.spec).expect("valid JSON");
+    assert!(
+        curve.spec.contains("\"field\":\"n_unit\""),
+        "x field must be n_unit: {}",
+        curve.spec
+    );
+    assert!(
+        !curve.spec.contains("Sample size (N)"),
+        "the engine must leave the axis title to the host: {}",
+        curve.spec
+    );
+    // n / 8 for the two grid points (n = 80 and 160).
+    let values = v
+        .pointer("/layer/0/data/values")
+        .or_else(|| v.pointer("/data/values"))
+        .expect("curve data rows");
+    let units: Vec<i64> = values
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|row| row.get("n_unit").and_then(serde_json::Value::as_i64))
+        .collect();
+    assert!(
+        units.iter().all(|&u| u == 10 || u == 20),
+        "n_unit must be n / 8: {units:?}"
+    );
+}
+
+/// Divisor 1 (the default, observations) leaves the spec exactly as before.
+#[test]
+fn sample_size_curve_keeps_the_n_field_without_a_divisor() {
+    let result = ss_scenarios(&["default"]);
+    let PlotSpecs { blocks } = sample_size_curve_specs(&result, 0.8, false);
+    let curve = blocks.iter().find(|b| b.key == "curve").unwrap();
+    assert!(curve.spec.contains("\"field\":\"n\""), "{}", curve.spec);
+    assert!(!curve.spec.contains("n_unit"), "{}", curve.spec);
 }

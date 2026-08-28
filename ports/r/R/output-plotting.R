@@ -101,6 +101,30 @@ NULL
   node
 }
 
+# In place: set encoding.x.title on every N-axis layer the engine left
+# title-less. A sample-size curve spec with x_divisor > 1 emits its x field as
+# n / n_unit with no title (the engine never emits text tied to a host-chosen
+# unit wording); this fills it in with the same wording the table header and
+# printed summary use. Walks every layer (including a faceted spec's
+# spec.layer), so the line and CI-band layers both get it. Mirrors
+# plotting.py:_set_unit_axis_titles / _walk_unit_axis.
+.walk_unit_axis <- function(node, title) {
+  if (!is.list(node)) return(node)
+  enc <- node$encoding
+  if (is.list(enc)) {
+    x <- enc$x
+    if (is.list(x) && (identical(x$field, "n") || identical(x$field, "n_unit")) &&
+        is.null(x$title)) {
+      node$encoding$x$title <- title
+    }
+  }
+  # Single-bracket reassignment preserves NULL elements — see `.relabel_walk`.
+  for (nm in seq_along(node)) node[nm] <- list(.walk_unit_axis(node[[nm]], title))
+  node
+}
+
+.set_unit_axis_titles <- function(spec, title) .walk_unit_axis(spec, title)
+
 # Make errorbar CIs legible. The engine emits errorbar marks with no colour, so
 # they inherit the bar colour and vanish. Vega-Lite forbids `color` in
 # config.errorbar, so the contrasting colour is set per-mark — host-applied
@@ -181,6 +205,10 @@ NULL
         out$histogram <- lapply(inner$success_count_histogram_corrected,
                                 function(v) I(as.integer(v)))
       }
+      # Same divisor across every scenario (the orchestrator rejects a mismatch
+      # before this dict is built) — the plot bridge reads it off whichever
+      # scenario carries it first.
+      out$unit_divisor <- as.integer(inner$unit_divisor %||% 1L)
     }
     out
   })
@@ -242,6 +270,16 @@ CI_DEFAULT_COLOR <- "#333333"
   blocks <- vector("list", length(block_keys))
   names(blocks) <- block_keys
 
+  # Sample-size curve x-axis unit title: same guaranteed-shared divisor across
+  # scenarios the orchestrator already checked. NULL leaves specs unchanged
+  # (byte-identical to before this feature).
+  unit_label <- NULL
+  if (kind == "find_sample_size") {
+    scen <- .scenarios(result)
+    divisor <- max(vapply(scen, function(s) as.integer(s$unit_divisor %||% 1L), integer(1L)), 1L)
+    if (divisor > 1L) unit_label <- .unit_display_label(meta)
+  }
+
   for (k in block_keys) {
     spec_json <- as.character(raw_blocks[[k]])
     spec <- jsonlite::fromJSON(spec_json, simplifyVector = FALSE)
@@ -260,6 +298,10 @@ CI_DEFAULT_COLOR <- "#333333"
                     substr(correction_name, 2, nchar(correction_name)))
       new_title <- sprintf("Power (%s-corrected)", cap)
       spec <- .rewrite_correction_axis_title_walk(spec, new_title)
+    }
+
+    if (!is.null(unit_label)) {
+      spec <- .set_unit_axis_titles(spec, unit_label)
     }
 
     blocks[[k]] <- spec

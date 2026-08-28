@@ -8,8 +8,9 @@ use common::minimal_ols_contract;
 use engine_contract::{ClusterSizing, ClusterSpec, SimulationContract};
 use engine_orchestrator::grid::build_grid;
 use engine_orchestrator::{
-    find_power, find_sample_size, single_core_find_power, single_core_find_sample_size, ByValue,
-    CancellationToken, GridMode, SampleSizeMethod,
+    bounds_to_rows, find_power, find_sample_size, resolve_unit_divisor, sample_size_result_to_host,
+    single_core_find_power, single_core_find_sample_size, ByValue, CancellationToken, GridMode,
+    HostValue, SampleSizeMethod, SampleSizeUnit,
 };
 
 fn clustered_contract(sizing: ClusterSizing, tau: f64) -> SimulationContract {
@@ -36,6 +37,7 @@ fn fixed_clusters_grid_points_are_atom_multiples_and_warns() {
             by: ByValue::Auto { count: 12 },
             mode: GridMode::Linear,
         },
+        1,
         2137,
         None,
         &cancel,
@@ -65,6 +67,7 @@ fn fixed_size_cluster_below_floor_errors() {
             by: ByValue::Auto { count: 12 },
             mode: GridMode::Linear,
         },
+        1,
         2137,
         None,
         &cancel,
@@ -92,6 +95,7 @@ fn single_core_find_sample_size_rejects_cluster_size_too_small() {
             by: ByValue::Auto { count: 12 },
             mode: GridMode::Linear,
         },
+        1,
         2137,
         None,
         &cancel,
@@ -194,6 +198,7 @@ fn single_core_and_multicore_request_identical_grid() {
         (50, 200),
         30,
         method,
+        1,
         2137,
         None,
         &cancel,
@@ -205,6 +210,7 @@ fn single_core_and_multicore_request_identical_grid() {
         (50, 200),
         30,
         method,
+        1,
         2137,
         None,
         &cancel,
@@ -226,4 +232,61 @@ fn single_core_and_multicore_request_identical_grid() {
         multi_ns, single_ns,
         "multi-core and single-core must request the same grid N's"
     );
+}
+
+/// End-to-end unit path: FixedSize 8, bounds 10..50 clusters step 5 →
+/// grid N 80..400 step 40; the host map's `sample_sizes_unit` reads
+/// 10, 15, …, 50 while `sample_sizes` stays in rows. Both dispatch twins.
+#[test]
+fn fixed_size_clusters_unit_scales_bounds_and_relabels_host_columns() {
+    let c = clustered_contract(ClusterSizing::FixedSize { cluster_size: 8 }, 0.3);
+    let divisor = resolve_unit_divisor(std::slice::from_ref(&c), SampleSizeUnit::Clusters).unwrap();
+    assert_eq!(divisor, 8);
+    let (bounds, method) = bounds_to_rows(
+        (10, 50),
+        SampleSizeMethod::Grid {
+            by: ByValue::Fixed(5),
+            mode: GridMode::Linear,
+        },
+        divisor,
+    );
+    assert_eq!(bounds, (80, 400));
+    let cancel = CancellationToken::new();
+
+    let multi = find_sample_size(
+        std::slice::from_ref(&c),
+        0.8,
+        bounds,
+        30,
+        method,
+        divisor,
+        2137,
+        None,
+        &cancel,
+    )
+    .unwrap();
+    let single =
+        single_core_find_sample_size(&[c], 0.8, bounds, 30, method, divisor, 2137, None, &cancel)
+            .unwrap();
+
+    for res in [&multi, &single] {
+        let (label, ss) = &res.scenarios[0];
+        assert_eq!(ss.unit_divisor, 8);
+        let ns: Vec<usize> = ss.grid_or_trace.iter().map(|p| p.n).collect();
+        assert_eq!(ns, vec![80, 120, 160, 200, 240, 280, 320, 360, 400]);
+        let hv = sample_size_result_to_host(ss, label);
+        let HostValue::Map(pairs) = &hv else {
+            panic!("not a map")
+        };
+        let get = |k: &str| &pairs.iter().find(|(kk, _)| *kk == k).unwrap().1;
+        match get("sample_sizes_unit") {
+            HostValue::VecU64(v) => assert_eq!(v, &vec![10, 15, 20, 25, 30, 35, 40, 45, 50]),
+            other => panic!("sample_sizes_unit: {other:?}"),
+        }
+        match get("sample_sizes") {
+            HostValue::VecU64(v) => assert_eq!(v[0], 80),
+            other => panic!("sample_sizes: {other:?}"),
+        }
+        assert!(matches!(get("unit_divisor"), HostValue::Usize(8)));
+    }
 }

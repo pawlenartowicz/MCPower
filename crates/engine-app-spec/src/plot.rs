@@ -32,12 +32,16 @@ pub struct PlotSpecs {
     pub blocks: Vec<PlotBlock>,
 }
 
-fn opts(target_power: f64) -> PlotOptions {
+/// `x_divisor` is 1 for every find-power plot and for a find-sample-size run
+/// searched in observations; above 1 the curve's x field switches to `n_unit`
+/// and carries no axis title (the host names the unit).
+fn opts(target_power: f64, x_divisor: usize) -> PlotOptions {
     // Match Python's rich repr: CI bands + target-power reference line shown.
     PlotOptions {
         title: None,
         show_ci: true,
         target_power_line: Some(target_power),
+        x_divisor,
     }
 }
 
@@ -116,7 +120,7 @@ pub fn power_plot_specs(
     target_power: f64,
     corrected: bool,
 ) -> PlotSpecs {
-    let o = opts(target_power);
+    let o = opts(target_power, 1);
     let all: Vec<PlotScenario> = result
         .scenarios
         .iter()
@@ -139,7 +143,13 @@ pub fn sample_size_curve_specs(
     target_power: f64,
     corrected: bool,
 ) -> PlotSpecs {
-    let o = opts(target_power);
+    // Every scenario in one run shares the divisor (the orchestrator rejects a
+    // run whose scenarios disagree), so the first one speaks for all.
+    let x_divisor = result
+        .scenarios
+        .first()
+        .map_or(1, |(_, ssr)| ssr.unit_divisor.max(1));
+    let o = opts(target_power, x_divisor);
     let all: Vec<PlotScenario> = result
         .scenarios
         .iter()

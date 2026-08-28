@@ -13,6 +13,7 @@
   import { factorLevels } from '$lib/domain/effect-names';
   import { configPaneDialogStyle } from './dialog-position.svelte';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
+  import { boundToObservations } from '$lib/domain/unit-label';
   import type { ContinuousDistribution, VariableRow } from '$lib/domain/family';
 
   // Below this many expected observations in a level, warn that n may not
@@ -86,17 +87,39 @@
     return Math.round((p ?? 0) * 10000) / 100;
   }
 
-  // Small-cell check against the find-power sample size: weights are
-  // normalized, so a level's expected count is n·wᵢ/Σw.
-  const findPowerN = $derived(familyStore.byFamily[familyStore.active].findPower?.n ?? 0);
+  // Small-cell check: weights are normalized, so a level's expected count is
+  // n·wᵢ/Σw. Both run cards are always rendered, so the check uses the worst
+  // (smallest) observation count across the Find-power n and the low end of the
+  // sample-size search, and names which card produced it.
+  const cfg = $derived(familyStore.byFamily[familyStore.active]);
+  const checkedN = $derived.by(() => {
+    const findPowerN = cfg.findPower?.n ?? 0;
+    const cluster = cfg.family === 'mixed' ? (cfg.cluster ?? null) : null;
+    // The bound's unit is measured against the knob the Clusters card fixed;
+    // with no cluster the bound is already in observations and `fixed` is unused.
+    const fixed = cluster
+      ? cluster.dimKind === 'cluster_size'
+        ? cluster.clusterSize
+        : cluster.nClusters
+      : 0;
+    const searchLow = boundToObservations(
+      cfg.findSampleSize?.unit ?? 'observations',
+      cfg.findSampleSize?.from ?? 0,
+      fixed,
+    );
+    return findPowerN <= searchLow
+      ? { n: findPowerN, source: ` at n=${findPowerN}` }
+      : { n: searchLow, source: ' at the low end of the sample-size search' };
+  });
   const smallCells = $derived.by(() => {
-    if (variable.kind !== 'factor' || findPowerN <= 0) return [];
+    const n = checkedN.n;
+    if (variable.kind !== 'factor' || n <= 0) return [];
     const weights = variable.levelProportions ?? [];
     const sum = weights.reduce((a, b) => a + (Number.isFinite(b) && b > 0 ? b : 0), 0);
     if (sum <= 0) return [];
     const out: Array<{ label: string; expected: number }> = [];
     weights.forEach((w, i) => {
-      const expected = (findPowerN * (Number.isFinite(w) && w > 0 ? w : 0)) / sum;
+      const expected = (n * (Number.isFinite(w) && w > 0 ? w : 0)) / sum;
       if (expected < SMALL_CELL_MIN_OBS) out.push({ label: labels[i] ?? String(i + 1), expected });
     });
     return out;
@@ -242,7 +265,7 @@
         </div>
         {#each smallCells as cell (cell.label)}
           <p class="text-xs text-amber-700 dark:text-amber-500" data-testid="small-cell-warning">
-            ~{Math.round(cell.expected)} obs in [{cell.label}] at n={findPowerN} — make sure n is
+            ~{Math.round(cell.expected)} obs in [{cell.label}]{checkedN.source} — make sure n is
             enough to populate this level.
           </p>
         {/each}

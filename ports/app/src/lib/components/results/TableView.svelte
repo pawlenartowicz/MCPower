@@ -5,6 +5,7 @@
   import { REPORT_CONFIG } from '$lib/configs/report-config';
   import { buildRows, factorReferenceLabels, baselineContrastLabels } from '$lib/report/rows';
   import { requiredNHeadline, requiredNCI } from '$lib/report/crossing';
+  import { unitColumnHeader } from '$lib/domain/unit-label';
 
   interface Props { tab: RunTab; }
   const { tab }: Props = $props();
@@ -107,6 +108,16 @@
   function requiredNDisplay(pos: number): string {
     return requiredNHeadline(ssr?.fitted?.[pos], ssr?.first_achieved[pos] ?? null, ceilingN);
   }
+  // Same cell, counted in the unit the search ran in (divisor 1 = observations,
+  // and then the unit column is not shown at all).
+  function requiredUnitDisplay(pos: number): string {
+    return requiredNHeadline(
+      ssr?.fitted?.[pos],
+      ssr?.first_achieved[pos] ?? null,
+      ceilingN,
+      unitDivisor,
+    );
+  }
   function requiredNCIDisplay(pos: number): string {
     return requiredNCI(ssr?.fitted?.[pos], floorN, ceilingN);
   }
@@ -118,6 +129,17 @@
     if (fa.length === 0 || fa.some((n) => n == null)) return `≥ ${ceilingN}`;
     return String(Math.max(...(fa as number[])));
   });
+
+  // Sample-size unit: the engine reports the divisor it searched with, the spec
+  // names the unit, and the label helper spells it. Divisor 1 (observations)
+  // leaves the table exactly as it was — no extra column.
+  const unitDivisor = $derived(ssr?.unit_divisor ?? 1);
+  const unitHeader = $derived(
+    tab.spec.family === 'mixed'
+      ? unitColumnHeader(tab.spec.sample_size_unit ?? 'observations', tab.spec.cluster_name)
+      : '',
+  );
+  const showUnitColumn = $derived(!!ssr && unitDivisor > 1 && unitHeader !== '');
 
   // When the tab carries >1 scenario, the table switches to a per-scenario column layout with a Δ column;
   // single-scenario layout is unchanged.
@@ -302,6 +324,9 @@
       <thead>
         <tr class="border-b border-border text-left">
           <th class="py-1">Effect</th>
+          {#if showUnitColumn}
+            <th class="py-1 text-right">{unitHeader}</th>
+          {/if}
           <th class="py-1 text-right">Required N</th>
           {#if showSsrCI}
             <th class="py-1 text-right">95% CI</th>
@@ -316,6 +341,16 @@
         {#if ssr.fitted_overall != null || ssr.first_overall_achieved != null}
           <tr class="border-b border-border/50 font-medium">
             <td class="py-1">{overallLabel}</td>
+            {#if showUnitColumn}
+              <td class="py-1 text-right font-mono tabular-nums"
+                >{requiredNHeadline(
+                  ssr.fitted_overall ?? undefined,
+                  ssr.first_overall_achieved ?? null,
+                  ceilingN,
+                  unitDivisor,
+                )}</td
+              >
+            {/if}
             <td class="py-1 text-right font-mono tabular-nums"
               >{requiredNHeadline(ssr.fitted_overall ?? undefined, ssr.first_overall_achieved ?? null, ceilingN)}</td
             >
@@ -329,13 +364,21 @@
         {#each displayRows() as row (row.kind === 'factor_header' ? `hdr-${row.label}` : `${row.kind}-${row.pos ?? row.label}`)}
           {#if row.kind === 'factor_header'}
             <tr class="border-b border-border/30 bg-muted/30">
-              <td class="py-1 pl-0 text-xs font-semibold text-muted-foreground" colspan={showSsrCI ? 3 : 2}>
+              <td
+                class="py-1 pl-0 text-xs font-semibold text-muted-foreground"
+                colspan={(showSsrCI ? 3 : 2) + (showUnitColumn ? 1 : 0)}
+              >
                 {row.label}{row.baseline ? ` (baseline: ${row.baseline})` : ''}
               </td>
             </tr>
           {:else}
             <tr class="border-b border-border/50">
               <td class="py-1 {row.kind === 'factor_level' ? 'pl-4' : ''}">{row.label}</td>
+              {#if showUnitColumn}
+                <td class="py-1 text-right font-mono tabular-nums"
+                  >{requiredUnitDisplay(row.pos!)}</td
+                >
+              {/if}
               <td class="py-1 text-right font-mono tabular-nums">{requiredNDisplay(row.pos!)}</td>
               {#if showSsrCI}
                 <td class="py-1 text-right font-mono tabular-nums">{requiredNCIDisplay(row.pos!)}</td>

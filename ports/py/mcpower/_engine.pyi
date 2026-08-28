@@ -32,6 +32,7 @@ def find_sample_size(
     by_kind: str | None = None,
     mode: str | None = None,
     tol_n: int | None = None,
+    unit: str | None = None,
     progress: Callable[[int, int], bool] | None = None,
 ) -> dict[str, Any]: ...
 

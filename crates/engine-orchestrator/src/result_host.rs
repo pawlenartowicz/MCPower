@@ -140,6 +140,12 @@ pub fn power_result_to_host(pr: &PowerResult, label: &str) -> HostValue {
 /// neutral tree. The per-N fields become `Seq`s over `grid_or_trace`.
 pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostValue {
     let grid = &ssr.grid_or_trace;
+    // Sample-size unit: every N column gets a `*_unit` twin divided by the
+    // divisor (1 = observations, twins equal the N columns). Integer division
+    // is exact — every grid N is an atom multiple and the divisor divides the
+    // atom (atom = primary fixed value × Π extras).
+    let div = ssr.unit_divisor.max(1);
+    let in_unit = |n: usize| n / div;
     let first = grid.first();
     let n_sims = first.map(|pr| pr.n_sims as usize).unwrap_or(0);
     let n_targets = first.map(|pr| pr.target_indices.len()).unwrap_or(0);
@@ -197,11 +203,24 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
             HostValue::VecU64(grid.iter().map(|pr| pr.n as u64).collect()),
         ),
         (
+            "sample_sizes_unit",
+            HostValue::VecU64(grid.iter().map(|pr| in_unit(pr.n) as u64).collect()),
+        ),
+        (
             "first_achieved",
             HostValue::IndexMap(
                 ssr.first_achieved
                     .iter()
                     .map(|v| HostValue::OptUsize(*v))
+                    .collect(),
+            ),
+        ),
+        (
+            "first_achieved_unit",
+            HostValue::IndexMap(
+                ssr.first_achieved
+                    .iter()
+                    .map(|v| HostValue::OptUsize(v.map(in_unit)))
                     .collect(),
             ),
         ),
@@ -251,8 +270,21 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
             ),
         ),
         (
+            "first_joint_achieved_unit",
+            HostValue::IndexMap(
+                ssr.first_joint_achieved
+                    .iter()
+                    .map(|v| HostValue::OptUsize(v.map(in_unit)))
+                    .collect(),
+            ),
+        ),
+        (
             "first_overall_achieved",
             HostValue::OptUsize(ssr.first_overall_achieved),
+        ),
+        (
+            "first_overall_achieved_unit",
+            HostValue::OptUsize(ssr.first_overall_achieved.map(in_unit)),
         ),
         ("target_power", HostValue::F64(ssr.target_power)),
         ("scenario", HostValue::Str(label.to_string())),
@@ -266,11 +298,21 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
         ),
         (
             "fitted",
-            HostValue::IndexMap(ssr.fitted.iter().map(crossing_fit_to_host).collect()),
+            HostValue::IndexMap(
+                ssr.fitted
+                    .iter()
+                    .map(|cf| crossing_fit_to_host(cf, div))
+                    .collect(),
+            ),
         ),
         (
             "fitted_joint",
-            HostValue::IndexMap(ssr.fitted_joint.iter().map(crossing_fit_to_host).collect()),
+            HostValue::IndexMap(
+                ssr.fitted_joint
+                    .iter()
+                    .map(|cf| crossing_fit_to_host(cf, div))
+                    .collect(),
+            ),
         ),
         // Singular overall crossing surfaced as a 0-or-1-element IndexMap (no
         // null/optional-Map HostValue variant): empty `[]` when no overall test
@@ -281,17 +323,21 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
             HostValue::IndexMap(
                 ssr.fitted_overall
                     .iter()
-                    .map(crossing_fit_to_host)
+                    .map(|cf| crossing_fit_to_host(cf, div))
                     .collect(),
             ),
         ),
         ("cluster_atom", HostValue::Usize(ssr.cluster_atom)),
+        ("unit_divisor", HostValue::Usize(ssr.unit_divisor)),
     ])
 }
 
 /// Project one `CrossingFit` as a status-tagged map, mirroring the serde
 /// `status` tag so hosts read the same discriminator on both encodings.
-fn crossing_fit_to_host(cf: &CrossingFit) -> HostValue {
+/// `div` is the sample-size unit divisor: the `Fitted` arm adds
+/// `n_star_unit` / `n_achievable_unit` twins (`n_star` is a real-valued
+/// crossing, so its twin stays f64).
+fn crossing_fit_to_host(cf: &CrossingFit, div: usize) -> HostValue {
     match cf {
         CrossingFit::Fitted {
             n_star,
@@ -302,6 +348,8 @@ fn crossing_fit_to_host(cf: &CrossingFit) -> HostValue {
             ("status", HostValue::Str("fitted".into())),
             ("n_star", HostValue::F64(*n_star)),
             ("n_achievable", HostValue::Usize(*n_achievable)),
+            ("n_star_unit", HostValue::F64(*n_star / div as f64)),
+            ("n_achievable_unit", HostValue::Usize(*n_achievable / div)),
             ("ci_lo", HostValue::OptF64(*ci_lo)),
             ("ci_hi", HostValue::OptF64(*ci_hi)),
         ]),
@@ -487,6 +535,15 @@ mod tests {
         }
     }
 
+    /// Structural equality via the serde encoding (`HostValue` has no
+    /// `PartialEq`; the JSON form is what hosts see anyway).
+    fn same(a: &HostValue, b: &HostValue) {
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap()
+        );
+    }
+
     /// The ordered list of field keys in a `HostValue::Map`.
     fn keys(hv: &HostValue) -> Vec<&'static str> {
         match hv {
@@ -599,6 +656,7 @@ mod tests {
                 ci_hi: None,
             }),
             cluster_atom: 10,
+            unit_divisor: 1,
             target_power: 0.8,
             method: SampleSizeMethod::Grid {
                 by: ByValue::Fixed(50),
@@ -626,14 +684,18 @@ mod tests {
                 "ci_corrected",
                 "convergence_rate",
                 "sample_sizes",
+                "sample_sizes_unit",
                 "first_achieved",
+                "first_achieved_unit",
                 "success_count_histogram_uncorrected",
                 "success_count_histogram_corrected",
                 "grid_warnings",
                 "factor_exclusion_counts",
                 "factor_separation_counts",
                 "first_joint_achieved",
+                "first_joint_achieved_unit",
                 "first_overall_achieved",
+                "first_overall_achieved_unit",
                 "target_power",
                 "scenario",
                 "boundary_hit",
@@ -641,6 +703,7 @@ mod tests {
                 "fitted_joint",
                 "fitted_overall",
                 "cluster_atom",
+                "unit_divisor",
             ]
         );
         // 4 sims × 2 sample sizes, row-major interleave.
@@ -672,7 +735,15 @@ mod tests {
                 // Variant tag + per-variant fields, in declaration order.
                 assert_eq!(
                     keys(&items[0]),
-                    vec!["status", "n_star", "n_achievable", "ci_lo", "ci_hi"]
+                    vec![
+                        "status",
+                        "n_star",
+                        "n_achievable",
+                        "n_star_unit",
+                        "n_achievable_unit",
+                        "ci_lo",
+                        "ci_hi"
+                    ]
                 );
                 match field(&items[0], "status") {
                     HostValue::Str(s) => assert_eq!(s, "fitted"),
@@ -709,12 +780,108 @@ mod tests {
                 assert_eq!(items.len(), 1);
                 assert_eq!(
                     keys(&items[0]),
-                    vec!["status", "n_star", "n_achievable", "ci_lo", "ci_hi"]
+                    vec![
+                        "status",
+                        "n_star",
+                        "n_achievable",
+                        "n_star_unit",
+                        "n_achievable_unit",
+                        "ci_lo",
+                        "ci_hi"
+                    ]
                 );
             }
             other => panic!("fitted_overall not IndexMap: {other:?}"),
         }
         assert!(matches!(field(&hv, "cluster_atom"), HostValue::Usize(10)));
+    }
+
+    /// Divisor 1 (observations): every `*_unit` twin equals its N column, so
+    /// hosts can read the twins unconditionally.
+    #[test]
+    fn sample_size_host_unit_twins_equal_n_columns_at_divisor_one() {
+        let hv = sample_size_result_to_host(&sample_ssr(), "opt");
+        assert!(matches!(field(&hv, "unit_divisor"), HostValue::Usize(1)));
+        same(field(&hv, "sample_sizes"), field(&hv, "sample_sizes_unit"));
+        same(
+            field(&hv, "first_achieved"),
+            field(&hv, "first_achieved_unit"),
+        );
+        same(
+            field(&hv, "first_joint_achieved"),
+            field(&hv, "first_joint_achieved_unit"),
+        );
+        same(
+            field(&hv, "first_overall_achieved"),
+            field(&hv, "first_overall_achieved_unit"),
+        );
+        match field(&hv, "fitted") {
+            HostValue::IndexMap(items) => {
+                same(field(&items[0], "n_star"), field(&items[0], "n_star_unit"));
+                same(
+                    field(&items[0], "n_achievable"),
+                    field(&items[0], "n_achievable_unit"),
+                );
+            }
+            other => panic!("fitted not IndexMap: {other:?}"),
+        }
+    }
+
+    /// Divisor 10 (the fixture's atom): `*_unit` twins are the N columns
+    /// divided by 10; the N columns themselves are untouched.
+    #[test]
+    fn sample_size_host_unit_twins_divide_by_divisor() {
+        let mut ssr = sample_ssr();
+        ssr.unit_divisor = 10;
+        let hv = sample_size_result_to_host(&ssr, "opt");
+        assert!(matches!(field(&hv, "unit_divisor"), HostValue::Usize(10)));
+        match field(&hv, "sample_sizes") {
+            HostValue::VecU64(v) => assert_eq!(v, &vec![50, 100]),
+            other => panic!("sample_sizes not VecU64: {other:?}"),
+        }
+        match field(&hv, "sample_sizes_unit") {
+            HostValue::VecU64(v) => assert_eq!(v, &vec![5, 10]),
+            other => panic!("sample_sizes_unit not VecU64: {other:?}"),
+        }
+        match field(&hv, "first_achieved_unit") {
+            HostValue::IndexMap(items) => {
+                assert!(matches!(items[0], HostValue::OptUsize(Some(10))));
+                assert!(matches!(items[1], HostValue::OptUsize(None)));
+            }
+            other => panic!("first_achieved_unit not IndexMap: {other:?}"),
+        }
+        match field(&hv, "first_joint_achieved_unit") {
+            HostValue::IndexMap(items) => {
+                assert!(matches!(items[0], HostValue::OptUsize(Some(5))));
+            }
+            other => panic!("first_joint_achieved_unit not IndexMap: {other:?}"),
+        }
+        assert!(matches!(
+            field(&hv, "first_overall_achieved_unit"),
+            HostValue::OptUsize(Some(10))
+        ));
+        match field(&hv, "fitted") {
+            HostValue::IndexMap(items) => {
+                assert!(matches!(field(&items[0], "n_star"), HostValue::F64(v) if *v == 84.3));
+                assert!(
+                    matches!(field(&items[0], "n_star_unit"), HostValue::F64(v) if (*v - 8.43).abs() < 1e-12)
+                );
+                assert!(matches!(
+                    field(&items[0], "n_achievable_unit"),
+                    HostValue::Usize(9)
+                ));
+            }
+            other => panic!("fitted not IndexMap: {other:?}"),
+        }
+        match field(&hv, "fitted_overall") {
+            HostValue::IndexMap(items) => {
+                assert!(matches!(
+                    field(&items[0], "n_achievable_unit"),
+                    HostValue::Usize(10)
+                ));
+            }
+            other => panic!("fitted_overall not IndexMap: {other:?}"),
+        }
     }
 
     /// `estimator_extras_to_host` for the Mle arm must include

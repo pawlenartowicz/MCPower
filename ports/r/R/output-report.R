@@ -40,28 +40,36 @@
   as.integer(max(as.numeric(ss)))
 }
 
-# Headline display string + numeric value for one required-N cell: the
-# model-based crossing fallback chain (tables.py:_required_n_headline).
+# Headline display string + numeric value for one required-N cell, in
+# `unit_divisor`'s unit (1 = N, unchanged): the model-based crossing fallback
+# chain (tables.py:_required_n_headline_for).
 #   fitted          -> (str(n_achievable), n_achievable)
 #   at_or_below_min -> ("≤ n_min",         n_min)        used for footer max
 #   not_reached     -> ("≥ ceiling",       NULL)          above grid, no numeric
 #   non_monotone    -> first_achieved fallback (grid value or ≥ ceiling)
 #   missing fit     -> first_achieved fallback (older payload, silent)
+# The `fitted` status reads the engine's n_achievable_unit twin; every other
+# status divides the N-valued number directly -- exact by construction (the
+# divisor divides every grid/bound N) and a no-op when unit_divisor == 1.
 # Returns list(display=, numeric=).
-.required_n_headline <- function(inner, pos) {
+.required_n_headline_for <- function(inner, pos, unit_divisor = 1L) {
   # fitted is string-keyed by 0-based position index (IndexMap in Rust)
   key  <- as.character(pos - 1L)   # pos is 1-based (R); engine key is 0-based
   f    <- inner$fitted[[key]]
 
   if (!is.null(f)) {
     status <- f$status
-    if (identical(status, "fitted"))
-      return(list(display = as.character(f$n_achievable), numeric = as.integer(f$n_achievable)))
-    if (identical(status, "at_or_below_min"))
-      return(list(display = sprintf("≤ %d", f$n_min), numeric = as.integer(f$n_min)))
+    if (identical(status, "fitted")) {
+      n <- if (unit_divisor > 1L) f$n_achievable_unit else f$n_achievable
+      return(list(display = as.character(n), numeric = as.integer(n)))
+    }
+    if (identical(status, "at_or_below_min")) {
+      n_min <- as.integer(f$n_min) %/% unit_divisor
+      return(list(display = sprintf("≤ %d", n_min), numeric = n_min))
+    }
     if (identical(status, "not_reached")) {
       ceil <- .search_ceiling(inner)
-      return(list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil) else "—",
+      return(list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil %/% unit_divisor) else "—",
                   numeric = NULL))
     }
     # non_monotone: fall through to first_achieved
@@ -69,11 +77,31 @@
 
   # Fallback: first_achieved (also covers non_monotone and missing fitted).
   # first_achieved is also string-keyed 0-based.
-  v <- inner$first_achieved[[key]]
+  fa_key <- if (unit_divisor > 1L) "first_achieved_unit" else "first_achieved"
+  v <- inner[[fa_key]][[key]]
   if (!is.null(v) && !is.na(v))
     return(list(display = as.character(v), numeric = as.integer(v)))
   ceil <- .search_ceiling(inner)
-  list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil) else "—", numeric = NULL)
+  list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil %/% unit_divisor) else "—", numeric = NULL)
+}
+
+# Headline in N (observations). See .required_n_headline_for for the
+# unit-aware form.
+.required_n_headline <- function(inner, pos) .required_n_headline_for(inner, pos, 1L)
+
+# Label for the sample-size unit: the table's unit column header, the curve's
+# x-axis title, and the printed-summary unit line all come from this one
+# function, so the wording never drifts between the three. NULL when the
+# search ran in observations (meta$unit unset or "observations" -- divisor 1,
+# nothing to label). meta$unit_cluster_name is the primary grouping variable's
+# name when known (falls back to "participant"). Mirrors tables.py:unit_display_label.
+.unit_display_label <- function(meta) {
+  unit <- meta$unit
+  if (is.null(unit) || identical(unit, "observations")) return(NULL)
+  cluster <- meta$unit_cluster_name %||% "participant"
+  if (identical(unit, "clusters")) return(sprintf("Number of %s", cluster))
+  if (identical(unit, "cluster_size")) return(sprintf("Observations per %s", cluster))
+  NULL
 }
 
 # Required-N cell (short form): thin wrapper over .required_n_headline.
@@ -323,31 +351,43 @@
   .overall_label_by_estimator((inner$estimator_extras$estimator) %||% "ols")
 }
 
-# Headline display + numeric for the overall-test required-N cell: the same
-# model-based crossing fallback chain as .required_n_headline, on the single
-# fitted_overall CrossingFit (string-keyed "0", an IndexMap of length 0/1) with
-# first_overall_achieved (a scalar integer/NA) as the grid-empirical fallback.
-# Mirrors tables.py:_overall_required_n_headline. Returns list(display=, numeric=).
-.overall_required_n_headline <- function(inner) {
+# Headline display + numeric for the overall-test required-N cell, in
+# `unit_divisor`'s unit (1 = N, unchanged) -- the same unit handling as
+# .required_n_headline_for. Same model-based crossing fallback chain, on the
+# single fitted_overall CrossingFit (string-keyed "0", an IndexMap of length
+# 0/1) with first_overall_achieved (a scalar integer/NA) as the grid-empirical
+# fallback. Mirrors tables.py:_overall_required_n_headline_for.
+# Returns list(display=, numeric=).
+.overall_required_n_headline_for <- function(inner, unit_divisor = 1L) {
   f <- inner$fitted_overall[["0"]]
   if (!is.null(f)) {
     status <- f$status
-    if (identical(status, "fitted"))
-      return(list(display = as.character(f$n_achievable), numeric = as.integer(f$n_achievable)))
-    if (identical(status, "at_or_below_min"))
-      return(list(display = sprintf("≤ %d", f$n_min), numeric = as.integer(f$n_min)))
+    if (identical(status, "fitted")) {
+      n <- if (unit_divisor > 1L) f$n_achievable_unit else f$n_achievable
+      return(list(display = as.character(n), numeric = as.integer(n)))
+    }
+    if (identical(status, "at_or_below_min")) {
+      n_min <- as.integer(f$n_min) %/% unit_divisor
+      return(list(display = sprintf("≤ %d", n_min), numeric = n_min))
+    }
     if (identical(status, "not_reached")) {
       ceil <- .search_ceiling(inner)
-      return(list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil) else "—", numeric = NULL))
+      return(list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil %/% unit_divisor) else "—",
+                  numeric = NULL))
     }
     # non_monotone: fall through to first_overall_achieved
   }
-  v <- inner$first_overall_achieved
+  fo_key <- if (unit_divisor > 1L) "first_overall_achieved_unit" else "first_overall_achieved"
+  v <- inner[[fo_key]]
   if (!is.null(v) && !is.na(v))
     return(list(display = as.character(v), numeric = as.integer(v)))
   ceil <- .search_ceiling(inner)
-  list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil) else "—", numeric = NULL)
+  list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil %/% unit_divisor) else "—", numeric = NULL)
 }
+
+# Headline in N (observations); see .overall_required_n_headline_for for the
+# unit-aware form.
+.overall_required_n_headline <- function(inner) .overall_required_n_headline_for(inner, 1L)
 
 # TRUE when the sample-size result carried an overall test (fitted_overall
 # non-empty, or first_overall_achieved set). Mirrors tables.py:_has_overall_required_n.
@@ -621,33 +661,84 @@
   if (length(scen) > 1L)
     head <- paste0(head, "\nscenarios: ", paste(names(scen), collapse = ", "))
 
+  # Unit column: only when the search ran in a cluster unit (divisor > 1, the
+  # same guaranteed-shared divisor across scenarios the orchestrator already
+  # checked). unit_label is the display header; NULL leaves the table at the
+  # divisor-1 shape (byte-identical to before this feature).
+  unit_divisor <- inner0$unit_divisor %||% 1L
+  unit_label <- if (unit_divisor > 1L) .unit_display_label(meta) else NULL
+  if (!is.null(unit_label))
+    head <- paste0(head, sprintf("\nunit: %s", unit_label))
+
   # Overall (omnibus) required-N row first, mirroring the find_power short form
   # and the long-form report. Estimator label from meta (the sample-size host
   # dict carries no top-level estimator).
   overall_label <- .overall_label_by_estimator(meta$estimator %||% "ols")
   table <- list()
   if (length(scen) == 1L) {
-    columns <- list(list(header = cols$test, align = "l"),
-                    list(header = cols$required_n, align = "r"))
-    if (.has_overall_required_n(inner0))
-      table <- c(table, list(list(kind = "row",
-                   cells = c(overall_label, .overall_required_n_headline(inner0)$display))))
-    for (r in rows) {
-      if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
-      table <- c(table, list(list(kind = "row", cells = c(.indent_label(r), .req_n_cell(inner0, r$pos)))))
+    if (!is.null(unit_label)) {
+      columns <- list(list(header = cols$test, align = "l"),
+                      list(header = unit_label, align = "r"),
+                      list(header = cols$required_n, align = "r"))
+      if (.has_overall_required_n(inner0))
+        table <- c(table, list(list(kind = "row",
+                     cells = c(overall_label,
+                               .overall_required_n_headline_for(inner0, unit_divisor)$display,
+                               .overall_required_n_headline(inner0)$display))))
+      for (r in rows) {
+        if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
+        table <- c(table, list(list(kind = "row",
+                     cells = c(.indent_label(r),
+                               .required_n_headline_for(inner0, r$pos, unit_divisor)$display,
+                               .req_n_cell(inner0, r$pos)))))
+      }
+    } else {
+      columns <- list(list(header = cols$test, align = "l"),
+                      list(header = cols$required_n, align = "r"))
+      if (.has_overall_required_n(inner0))
+        table <- c(table, list(list(kind = "row",
+                     cells = c(overall_label, .overall_required_n_headline(inner0)$display))))
+      for (r in rows) {
+        if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
+        table <- c(table, list(list(kind = "row", cells = c(.indent_label(r), .req_n_cell(inner0, r$pos)))))
+      }
     }
   } else {
-    columns <- c(list(list(header = cols$test, align = "l")),
-                 lapply(names(scen), function(nm) list(header = nm, align = "r")))
-    if (any(vapply(scen, .has_overall_required_n, logical(1L)))) {
-      cells <- c(overall_label, vapply(scen, function(s) .overall_required_n_headline(s)$display,
-                                       character(1L)))
-      table <- c(table, list(list(kind = "row", cells = cells)))
-    }
-    for (r in rows) {
-      if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
-      cells <- c(.indent_label(r), vapply(scen, function(s) .req_n_cell(s, r$pos), character(1L)))
-      table <- c(table, list(list(kind = "row", cells = cells)))
+    if (!is.null(unit_label)) {
+      columns <- c(list(list(header = cols$test, align = "l")),
+                   unlist(lapply(names(scen), function(nm) list(
+                     list(header = sprintf("%s (%s)", nm, unit_label), align = "r"),
+                     list(header = sprintf("%s (N)", nm), align = "r"))), recursive = FALSE))
+      if (any(vapply(scen, .has_overall_required_n, logical(1L)))) {
+        cells <- overall_label
+        for (s in scen) {
+          cells <- c(cells, .overall_required_n_headline_for(s, unit_divisor)$display,
+                     .overall_required_n_headline(s)$display)
+        }
+        table <- c(table, list(list(kind = "row", cells = cells)))
+      }
+      for (r in rows) {
+        if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
+        cells <- .indent_label(r)
+        for (s in scen) {
+          cells <- c(cells, .required_n_headline_for(s, r$pos, unit_divisor)$display,
+                     .req_n_cell(s, r$pos))
+        }
+        table <- c(table, list(list(kind = "row", cells = cells)))
+      }
+    } else {
+      columns <- c(list(list(header = cols$test, align = "l")),
+                   lapply(names(scen), function(nm) list(header = nm, align = "r")))
+      if (any(vapply(scen, .has_overall_required_n, logical(1L)))) {
+        cells <- c(overall_label, vapply(scen, function(s) .overall_required_n_headline(s)$display,
+                                         character(1L)))
+        table <- c(table, list(list(kind = "row", cells = cells)))
+      }
+      for (r in rows) {
+        if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
+        cells <- c(.indent_label(r), vapply(scen, function(s) .req_n_cell(s, r$pos), character(1L)))
+        table <- c(table, list(list(kind = "row", cells = cells)))
+      }
     }
   }
 
@@ -745,6 +836,10 @@
     lines <- c(lines, sprintf("correction: %s", meta$correction))
   if (!is.null(meta$residual) && meta$residual != "normal")
     lines <- c(lines, sprintf("residual: %s", meta$residual))
+  if (identical(kind, "find_sample_size") && (inner0$unit_divisor %||% 1L) > 1L) {
+    ul <- .unit_display_label(meta)
+    if (!is.null(ul)) lines <- c(lines, sprintf("unit: %s", ul))
+  }
   paste(lines, collapse = "\n")
 }
 
@@ -769,7 +864,27 @@
   overall_label <- .overall_label_by_estimator(meta$estimator %||% "ols")
   if (length(scen) == 1L) {
     s <- scen[[1]]
+    unit_divisor <- s$unit_divisor %||% 1L
+    unit_label <- if (unit_divisor > 1L) .unit_display_label(meta) else NULL
     table <- list()
+    if (!is.null(unit_label)) {
+      if (.has_overall_required_n(s))
+        table <- c(table, list(list(kind = "row",
+                     cells = c(overall_label,
+                               .overall_required_n_headline_for(s, unit_divisor)$display,
+                               .overall_required_n_headline(s)$display))))
+      for (r in rows) {
+        if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
+        table <- c(table, list(list(kind = "row",
+                     cells = c(.indent_label(r),
+                               .required_n_headline_for(s, r$pos, unit_divisor)$display,
+                               .req_n_cell(s, r$pos)))))
+      }
+      return(.minimal_table(cfg$text$sample_size_caption,
+                            list(list(header = cols$test, align = "l"),
+                                 list(header = unit_label, align = "r"),
+                                 list(header = cols$required_n, align = "r")), table))
+    }
     if (.has_overall_required_n(s))
       table <- c(table, list(list(kind = "row",
                    cells = c(overall_label, .overall_required_n_headline(s)$display))))
@@ -781,17 +896,37 @@
                           list(list(header = cols$test, align = "l"),
                                list(header = cols$required_n, align = "r")), table))
   }
-  columns <- c(list(list(header = cols$test, align = "l")),
-               lapply(names(scen), function(nm) list(header = nm, align = "r")))
+  unit_divisor <- scen[[1]]$unit_divisor %||% 1L
+  unit_label <- if (unit_divisor > 1L) .unit_display_label(meta) else NULL
+  if (!is.null(unit_label)) {
+    # Per scenario: unit column first, N column second ("<name> (N)").
+    columns <- list(list(header = cols$test, align = "l"))
+    for (nm in names(scen)) {
+      columns <- c(columns, list(list(header = nm, align = "r"),
+                                 list(header = sprintf("%s (N)", nm), align = "r")))
+    }
+    scen_cells <- function(fn_unit, fn_n) {
+      cells <- character(0)
+      for (s in scen) cells <- c(cells, fn_unit(s), fn_n(s))
+      cells
+    }
+  } else {
+    columns <- c(list(list(header = cols$test, align = "l")),
+                 lapply(names(scen), function(nm) list(header = nm, align = "r")))
+    scen_cells <- function(fn_unit, fn_n) vapply(scen, fn_n, character(1L))
+  }
   table <- list()
   if (any(vapply(scen, .has_overall_required_n, logical(1L)))) {
-    cells <- c(overall_label, vapply(scen, function(s) .overall_required_n_headline(s)$display,
-                                     character(1L)))
+    cells <- c(overall_label, scen_cells(
+      function(s) .overall_required_n_headline_for(s, unit_divisor)$display,
+      function(s) .overall_required_n_headline(s)$display))
     table <- c(table, list(list(kind = "row", cells = cells)))
   }
   for (r in rows) {
     if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
-    cells <- c(.indent_label(r), vapply(scen, function(s) .req_n_cell(s, r$pos), character(1L)))
+    cells <- c(.indent_label(r), scen_cells(
+      function(s) .required_n_headline_for(s, r$pos, unit_divisor)$display,
+      function(s) .req_n_cell(s, r$pos)))
     table <- c(table, list(list(kind = "row", cells = cells)))
   }
   .minimal_table(cfg$text$sample_size_caption, columns, table)
@@ -851,11 +986,14 @@
   columns <- list(list(header = cols$test, align = "l"), list(header = cols$required_n, align = "r"),
                   list(header = cols$ci, align = "r"))
   overall_label <- .overall_label_by_estimator(meta$estimator %||% "ols")
+  unit_label <- .unit_display_label(meta)
   blocks <- character(0)
   for (nm in names(scen)) {
     s <- scen[[nm]]
     fitted_map <- s$fitted
     if (is.null(fitted_map) || length(fitted_map) == 0L) next
+    unit_divisor <- s$unit_divisor %||% 1L
+    use_unit <- !is.null(unit_label) && unit_divisor > 1L
     table <- list()
     has_appr <- FALSE; has_floor <- FALSE; non_mono_labels <- character(0)
     # Overall (omnibus) row first — same status dispatch as the per-target loop
@@ -930,6 +1068,28 @@
         non_mono_labels <- c(non_mono_labels, trimws(label))
       }
     }
+    scen_columns <- columns
+    if (use_unit) {
+      # Unit column first, N second; the CI stays in N. Row order is
+      # [overall?] + one row per non-header target, so the unit cells can be
+      # rebuilt from the same sources without touching the per-status
+      # branches above. Mirrors report.py:_required_n_ci_table.
+      unit_cells <- character(0)
+      if (.has_overall_required_n(s))
+        unit_cells <- c(unit_cells, .overall_required_n_headline_for(s, unit_divisor)$display)
+      for (r in rows) {
+        if (identical(r$kind, "factor_header")) next
+        unit_cells <- c(unit_cells, .required_n_headline_for(s, r$pos, unit_divisor)$display)
+      }
+      idx <- 0L
+      table <- lapply(table, function(row) {
+        if (!identical(row$kind, "row")) return(row)
+        idx <<- idx + 1L
+        row$cells <- c(row$cells[[1L]], unit_cells[[idx]], row$cells[-1L])
+        row
+      })
+      scen_columns <- c(columns[1L], list(list(header = unit_label, align = "r")), columns[-1L])
+    }
     caption <- txt$required_n_ci_caption
     if (length(scen) > 1L) caption <- sprintf("%s — %s", caption, nm)
     footnote <- txt$required_n_ci_footnote
@@ -938,7 +1098,7 @@
       footnote <- paste0(footnote, "  ", gsub("{labels}", paste(non_mono_labels, collapse = ", "),
                                               txt$required_n_ci_footnote_suppressed, fixed = TRUE))
     if (has_floor) footnote <- paste0(footnote, "  ", txt$required_n_ci_footnote_floor)
-    blocks <- c(blocks, paste0(.minimal_table(caption, columns, table), "\n", footnote))
+    blocks <- c(blocks, paste0(.minimal_table(caption, scen_columns, table), "\n", footnote))
   }
   paste(blocks, collapse = "\n\n")
 }
@@ -1017,29 +1177,39 @@
   ceil <- .search_ceiling(inner0)
   fj_map <- inner0$fitted_joint %||% list()
   n_targets <- length(fja)
-  fallback_cell <- function(jkey) {
+  unit_divisor <- inner0$unit_divisor %||% 1L
+  unit_label <- if (unit_divisor > 1L) .unit_display_label(meta) else NULL
+  # Every N here is a grid value or bound, so dividing by the unit divisor is
+  # exact; div == 1 is the plain N cell. Mirrors report.py:_joint_required_n_table.
+  cell_for <- function(jkey, div) {
+    ceil_cell <- if (!is.null(ceil)) sprintf("≥ %d", ceil %/% div) else "—"
+    fj <- fj_map[[jkey]]
+    if (!is.null(fj)) {
+      status <- fj$status
+      if (identical(status, "fitted")) return(as.character(as.integer(fj$n_achievable) %/% div))
+      if (identical(status, "at_or_below_min")) return(sprintf("≤ %d", as.integer(fj$n_min) %/% div))
+      if (identical(status, "not_reached")) return(ceil_cell)
+    }
     v <- fja[[jkey]]
-    if (!is.null(v) && !is.na(v)) as.character(v) else if (!is.null(ceil)) sprintf("≥ %d", ceil) else "—"
+    if (!is.null(v) && !is.na(v)) as.character(as.integer(v) %/% div) else ceil_cell
   }
   table <- list()
   for (j in (n_targets - 1L):0L) {
     k <- j + 1L
     jkey <- as.character(j)
-    fj <- fj_map[[jkey]]
-    if (!is.null(fj)) {
-      status <- fj$status
-      cell <- if (identical(status, "fitted")) as.character(fj$n_achievable)
-              else if (identical(status, "at_or_below_min")) sprintf("≤ %d", fj$n_min)
-              else if (identical(status, "not_reached")) (if (!is.null(ceil)) sprintf("≥ %d", ceil) else "—")
-              else fallback_cell(jkey)
+    label <- sprintf("≥ %d of %d tests", k, n_targets)
+    cells <- if (!is.null(unit_label)) {
+      c(label, cell_for(jkey, unit_divisor), cell_for(jkey, 1L))
     } else {
-      cell <- fallback_cell(jkey)
+      c(label, cell_for(jkey, 1L))
     }
-    table <- c(table, list(list(kind = "row", cells = c(sprintf("≥ %d of %d tests", k, n_targets), cell))))
+    table <- c(table, list(list(kind = "row", cells = cells)))
   }
+  columns <- list(list(header = "Joint target", align = "l"))
+  if (!is.null(unit_label)) columns <- c(columns, list(list(header = unit_label, align = "r")))
+  columns <- c(columns, list(list(header = "Required N", align = "r")))
   .minimal_table(sprintf("Joint detection → required N (target %s)", .fmt_pct(target, tdec)),
-                 list(list(header = "Joint target", align = "l"),
-                      list(header = "Required N", align = "r")), table)
+                 columns, table)
 }
 
 # Report._robustness — Δ power vs baseline table; tests as rows, non-baseline

@@ -84,3 +84,27 @@ function walk(node: unknown, map: Record<string, string>): void {
   }
   for (const value of Object.values(obj)) walk(value, map);
 }
+
+/**
+ * In-place: give every `n_unit` x encoding in the spec the host's axis title.
+ * The engine emits the curve's x field as `n_unit` (= N / unit divisor) and no
+ * title at all once a sample-size run used a cluster unit, because only the
+ * host knows what the cluster is called. Every layer must get the same title —
+ * Vega-Lite concatenates differing titles across layers — so this walks the
+ * whole tree (layers, faceted `spec.layer`, vconcat children).
+ */
+export function setUnitAxisTitle(spec: unknown, title: string): void {
+  walkX(spec, title);
+}
+
+function walkX(node: unknown, title: string): void {
+  if (Array.isArray(node)) {
+    for (const child of node) walkX(child, title);
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  const obj = node as Record<string, unknown>;
+  const x = (obj.encoding as { x?: Record<string, unknown> } | undefined)?.x;
+  if (x && x.field === 'n_unit') x.title = title;
+  for (const value of Object.values(obj)) walkX(value, title);
+}

@@ -277,6 +277,13 @@ pub fn merge_sample_size_results(
         .first()
         .map(|(_, r)| r.cluster_atom)
         .unwrap_or(1);
+    // Same head-value discipline for the sample-size unit divisor: it is a
+    // property of the shared spec, so every part must carry the same value.
+    let head_unit_divisor = parts[0]
+        .scenarios
+        .first()
+        .map(|(_, r)| r.unit_divisor)
+        .unwrap_or(1);
 
     let mut merged_scenarios = Vec::with_capacity(n_scenarios);
     for s_idx in 0..n_scenarios {
@@ -304,6 +311,12 @@ pub fn merge_sample_size_results(
                 return Err(OrchestratorError::IncompatibleMerge(format!(
                     "cluster_atom mismatch: {} vs {}",
                     r.cluster_atom, head_cluster_atom
+                )));
+            }
+            if r.unit_divisor != head_unit_divisor {
+                return Err(OrchestratorError::IncompatibleMerge(format!(
+                    "unit_divisor mismatch: {} vs {}",
+                    r.unit_divisor, head_unit_divisor
                 )));
             }
         }
@@ -364,6 +377,7 @@ pub fn merge_sample_size_results(
                 first_overall_achieved: d.first_overall_achieved,
                 fitted_overall: d.fitted_overall,
                 cluster_atom: head_cluster_atom,
+                unit_divisor: head_unit_divisor,
                 target_power: head_target_power,
                 method: head_method,
                 grid_warnings: head_grid_warnings,

@@ -1,5 +1,7 @@
 // TypeScript mirror of the Rust engine_app_spec::AppSpec wire shape; must stay serde-compatible with the Rust type.
 // INVARIANT: field names and union tags (family/kind/status/estimator) must match the Rust serde shape (snake_case) exactly.
+import type { SampleSizeUnit } from './unit-label';
+
 export type CorrectionMethod = 'none' | 'bonferroni' | 'holm' | 'benjamini_hochberg' | 'tukey_hsd';
 
 /** Mirrors `engine_spec_builder::input::UploadMode` (snake_case serde). */
@@ -224,6 +226,10 @@ export interface MixedSpec extends LinearSpec {
     /** Adaptive Gauss-Hermite quadrature points for the GLMM fit. Omitted when 1
      *  (Laplace; Rust `skip_serializing_if` on the default). */
     agq?: number;
+    /** Unit the find-sample-size bounds and results are expressed in. Omitted
+     *  when 'observations' (the Rust default), so an observations run's wire is
+     *  byte-identical to a pre-unit one. */
+    sample_size_unit?: SampleSizeUnit;
 }
 
 export interface AnovaFactor {

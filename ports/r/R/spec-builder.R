@@ -1238,9 +1238,18 @@ RVariableRegistry <- R6::R6Class(
     cfg <- pending_clusters[[grouping_var]]
     icc <- as.numeric(cfg$icc)
     n_clusters <- cfg$n_clusters
-    if (is.null(n_clusters)) {
-      stop(paste0("cluster_size-only LME specs need a runtime sample_size; ",
-                  "call find_power / find_sample_size or set n_clusters directly"))
+    cluster_size <- cfg$cluster_size
+    # Primary sizing: a fixed cluster count (FixedClusters) when n_clusters is
+    # set, else a fixed cluster size (FixedSize) — the engine grows the other
+    # dimension with the runtime sample size (find_power's N or
+    # find_sample_size's grid). Mirrors Python model.py _build_cluster_spec_dict.
+    if (!is.null(n_clusters)) {
+      sizing <- list(FixedClusters = list(n_clusters = as.integer(n_clusters)))
+    } else if (!is.null(cluster_size)) {
+      sizing <- list(FixedSize = list(cluster_size = as.integer(cluster_size)))
+    } else {
+      stop(paste0("cluster spec has neither n_clusters nor cluster_size; ",
+                  "call set_cluster with one of them"), call. = FALSE)
     }
     # Poisson (count) mixed: raw τ² the user supplied (Decision 8), no latent
     # ICC. Every other family: τ² = ICC/(1-ICC) × latent factor.
@@ -1252,7 +1261,7 @@ RVariableRegistry <- R6::R6Class(
       tau_squared <- tau_raw * tau_factor
     }
     cluster_spec <- list(
-      sizing      = list(FixedClusters = list(n_clusters = as.integer(n_clusters))),
+      sizing      = sizing,
       tau_squared = as.numeric(tau_squared)
     )
 
