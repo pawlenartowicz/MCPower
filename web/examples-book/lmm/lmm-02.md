@@ -35,6 +35,13 @@ mixed-model fit.
 - **Search for the N instead of fixing it.** Swap the `find_power` call for
   `find_sample_size(target_test="treatment:week", from_size=80, to_size=400, by=20)`
   to get the smallest N that reaches target power on the diff-in-diff term.
+- **Search for the number of visits instead.** With the 60 patients fixed, ask
+  how many weekly assessments each needs:
+  `find_sample_size(target_test="treatment:week", unit="cluster_size", from_size=5, to_size=20, by=1)`.
+  The range reads as visits per patient (5 is the floor), one step is 60 more
+  measurements, and the result reports the total N alongside it. The
+  diff-in-diff is a within-patient slope contrast, so it is one of the terms
+  that extra visits actually buy.
 - **Same design, other fields:**
   - `seedling_height ~ fertilizer * week + (1|seedling)` — one plant per fertilizer arm, measured weekly; test whether growth rates diverge (ecology).
   - `well_being ~ intervention * wave + (1|individual)` — one person per arm, assessed at several waves; test whether well-being trajectories differ (social science).

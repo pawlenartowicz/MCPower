@@ -1,12 +1,12 @@
 ---
-title: "Scenario Analysis for Power - Python"
+title: "Custom Scenarios for Sensitivity Analysis - Python"
 description: "Stress-test power assumptions in Python with MCPower: run optimistic, realistic, and doomer scenarios in one call to assess robustness of your sample size plan."
 ---
 # Custom scenarios
 
 Every power number rests on a set of assumptions — specific effect sizes, a
 well-behaved residual structure, predictors drawn from the distributions you
-specified. [[concepts/scenario-analysis|Scenario analysis]] asks a harder
+specified. [[concepts/sensitivity-analysis|Sensitivity analysis]] asks a harder
 question: *if those assumptions are optimistic, how much do we lose?*
 
 MCPower answers it by re-running your analysis under alternative configurations
@@ -21,9 +21,9 @@ calibrated to represent a plausible range of real-world conditions without
 requiring you to guess at parameter values:
 
 > [!note]
-> Scenario analysis works for [[04_logistic-regression|logistic models]] too —
+> Sensitivity analysis works for [[04_logistic-regression|logistic models]] too —
 > the same call with `family="logit"`. See
-> [[concepts/scenario-analysis|Scenario analysis]] for which knobs apply per
+> [[concepts/sensitivity-analysis|Sensitivity analysis]] for which knobs apply per
 > model family. Mixed models do not support scenarios yet.
 
 <!-- example:08-builtin -->
@@ -145,7 +145,7 @@ The available knobs are:
 Knob names are validated up front: an unknown or misspelled key raises a
 `ValueError` listing the valid keys, and arming the residual swap with a
 `high_kurtosis` or `right_skewed` pool entry requires `residual_df >= 3`. See
-[[concepts/scenario-analysis|Scenario analysis]] for every knob's full
+[[concepts/sensitivity-analysis|Sensitivity analysis]] for every knob's full
 semantics.
 
 After registering configs, pass a list of names to `scenarios` to choose which

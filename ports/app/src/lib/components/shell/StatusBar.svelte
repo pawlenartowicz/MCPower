@@ -169,13 +169,13 @@ function confirmReset() {
       <label
         class="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground"
         data-testid="scenarios-switcher"
-        title="Run alternate scenarios — edit the three sets in Settings · Scenarios"
+        title="Run sensitivity analysis — edit the three scenarios in Settings · Scenarios"
       >
         <Layers class="h-5 w-5" />
-        <span class="leading-tight">Robustness<br />scenarios</span>
+        <span class="leading-tight">Sensitivity<br />analysis</span>
         <Switch
           bind:checked={sharedPrefs.scenariosEnabled}
-          aria-label="Enable robustness scenarios"
+          aria-label="Enable sensitivity analysis"
         />
       </label>
     </div>

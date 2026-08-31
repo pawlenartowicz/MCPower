@@ -32,6 +32,12 @@ and power is reported for each contrast separately.
 - **Search for the N instead of fixing it.** Swap the `find_power` call for
   `find_sample_size(target_test="condition", from_size=80, to_size=400, by=20)`
   to get the smallest N that reaches target power on both contrasts.
+- **Search for the assays per sample instead.** With 40 biological samples on
+  the bench, the budget question is how many times to assay each one:
+  `find_sample_size(target_test="condition[2], condition[3]", unit="cluster_size", from_size=5, to_size=20, by=1)`.
+  The range reads as measurements per sample (5 is the floor) and each step of 1
+  adds 40 measurements in total. Condition varies within the sample, so repeating
+  the assay sharpens both contrasts.
 - **Same design, other fields:**
   - `systolic_bp ~ phase + (1|patient)` — one patient measured at several clinical phases; test whether BP differs across phases (clinical).
   - `well_being ~ period + (1|individual)` — one person assessed at several survey periods; test whether well-being differs across periods (social science).

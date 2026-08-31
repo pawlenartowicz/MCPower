@@ -20,6 +20,6 @@ Power is never a single number — it is the product of every modeling choice yo
 - **Variable types** — whether each predictor is continuous, binary, or a factor. See [[concepts/variable-types|variable types]].
 - **Multiple testing** — how many coefficients you test, and how you correct for it. See [[concepts/multiple-testing|multiple testing]].
 - **Clustering** — grouped or repeated-measures data and its intraclass correlation. See [[concepts/mixed-effects|mixed-effects models]].
-- **Robustness** — how sensitive your power is to all of the above. See [[concepts/scenario-analysis|scenario analysis]].
+- **Robustness** — how sensitive your power is to all of the above. See [[concepts/sensitivity-analysis|sensitivity analysis]].
 - **Model specification** — the model you *test*, not just the data you generate, decides what you can detect. See [[concepts/model-misspecification|model misspecification]].
 - **Required N** — how the sample-size answer itself is estimated, and what the curve and CI mean. See [[concepts/required-sample-size|how required N is estimated]].

@@ -29,6 +29,12 @@ likelihood (the MLE estimator for `family="lme"`).
 - **Solve for N instead.** Replace `find_power(sample_size=400, …)` with
   `find_sample_size(target_test="treatment", from_size=120, to_size=600, by=40)`
   to get the minimum N that reaches 80% power.
+- **Solve for the number of clinics.** A trial recruits clinics, not patients, so
+  search in that unit: fix the clinic size with
+  `set_cluster("clinic", ICC=0.10, cluster_size=10)` and pass
+  `find_sample_size(target_test="treatment", unit="clusters", from_size=20, to_size=90, by=5)`.
+  The from/to range now reads as a clinic count, and the result reports the total
+  N behind it.
 - **Same design, other fields:**
   - `biomass ~ treatment + (1|tank)` — one tank per treatment arm; test whether plant biomass differs across tanks (ecology).
   - `wage ~ training + (1|sector)` — one sector per arm; test whether a training programme shifts wages across sectors (social science).

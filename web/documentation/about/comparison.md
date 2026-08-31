@@ -22,7 +22,7 @@ has a binary outcome, clustered observations, or an interaction.
 | Correlated predictors | ✓ | — | — | — | — | — |
 | Non-normal / skewed predictors | ✓ | — | — | — | — | — |
 | Pilot data upload (CSV / dataframe) | ✓ | — | — | — | — | — |
-| Robustness test (scenarios) | ✓ | — | — | — | — | — |
+| Sensitivity analysis (scenarios) | ✓ | — | — | — | — | — |
 | Multiple-testing correction (FWER/FDR) | ✓ | partial | — | ✓ | — | — |
 | No-code GUI (browser + desktop) | ✓ | ✓ | — | — | — | ✓ |
 | Python package | ✓ | — | — | — | — | — |

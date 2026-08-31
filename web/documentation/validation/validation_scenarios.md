@@ -7,7 +7,7 @@ right_sidebar: body
 
 # What this report shows
 
-MCPower’s **scenario analysis** deliberately stresses a planned study:
+MCPower’s **sensitivity analysis** deliberately stresses a planned study:
 instead of simulating the idealised design you specified, each scenario
 *perturbs* it — slopes wobble between observations, residual variance
 trends with the predictors, correlations differ from the plan, predictor

@@ -94,13 +94,13 @@ The five valid names:
 
 There is no `df=` parameter on `set_residual_distribution`. The df for `high_kurtosis` is always scenario-supplied — set it via `set_scenario_configs({"your_scenario": {"residual_df": 5}})`. Calling `set_residual_distribution` with any name, including `"normal"`, **pins** the residual: scenario residual swaps leave it alone. The unpinned default — not calling `set_residual_distribution` at all — is the only state where swaps can fire.
 
-The conceptual point is that **type, distribution shape, and residual shape are all part of your design assumptions** — perturbing the unpinned ones is exactly what [[concepts/scenario-analysis|scenario analysis]] does. For the exact syntax in each port, see the tutorials.
+The conceptual point is that **type, distribution shape, and residual shape are all part of your design assumptions** — perturbing the unpinned ones is exactly what [[concepts/sensitivity-analysis|sensitivity analysis]] does. For the exact syntax in each port, see the tutorials.
 
 ## Residuals and heteroskedasticity
 
 **Heteroskedasticity** means the residual variance is not constant — the spread of the noise depends on a predictor instead of being the same everywhere. Linear models assume the opposite (constant variance), so this is an assumption violation worth stress-testing. The **driver** control names the continuous predictor whose value scales that variance; set it with `set_heteroskedasticity_driver(var)`, where `var` is a continuous predictor or the predicted value (the default).
 
-The driver only says *which* predictor governs the spread. *How much* the variance changes along it is the ratio λ, which comes from the active scenario, not the model — so heteroskedasticity is exercised through scenario analysis. The driver is restricted to continuous predictors and applies to linear models only.
+The driver only says *which* predictor governs the spread. *How much* the variance changes along it is the ratio λ, which comes from the active scenario, not the model — so heteroskedasticity is exercised through sensitivity analysis. The driver is restricted to continuous predictors and applies to linear models only.
 
 ```python
 model.set_heteroskedasticity_driver("x1")
@@ -110,4 +110,4 @@ model.set_heteroskedasticity_driver("x1")
 model$set_heteroskedasticity_driver("x1")
 ```
 
-See the heteroskedasticity section of [[concepts/scenario-analysis|scenario analysis]] for what λ means, the preset values, and how to set a known ratio.
+See the heteroskedasticity section of [[concepts/sensitivity-analysis|sensitivity analysis]] for what λ means, the preset values, and how to set a known ratio.

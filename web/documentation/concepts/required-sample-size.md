@@ -32,7 +32,7 @@ The headline is always an integer, rounded **up** — and for clustered designs,
 
 ## The 95% CI on required N
 
-The full report adds a **Required N & 95% CI** section. The interval reflects the Monte-Carlo uncertainty of the simulation (it is derived from the same Wilson intervals shown for power), so more simulations narrow it. A wide interval is information, not a malfunction: it means the power curve is flat near your target, and small changes in assumptions move the required N a lot — consider a finer grid, more simulations, or [[concepts/scenario-analysis|scenario analysis]].
+The full report adds a **Required N & 95% CI** section. The interval reflects the Monte-Carlo uncertainty of the simulation (it is derived from the same Wilson intervals shown for power), so more simulations narrow it. A wide interval is information, not a malfunction: it means the power curve is flat near your target, and small changes in assumptions move the required N a lot — consider a finer grid, more simulations, or [[concepts/sensitivity-analysis|sensitivity analysis]].
 
 ## Reading the result table
 

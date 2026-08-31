@@ -116,7 +116,7 @@ ceiling, and a required-sample-size search will report it as unreachable at any
 N. When that happens, ask whether per-study heterogeneity is the right
 assumption: for a tightly controlled, single-population, single-protocol study
 where the effect is plausibly homogeneous, set `heterogeneity = 0` in that
-scenario (see [[concepts/scenario-analysis|scenario analysis]]) rather than
+scenario (see [[concepts/sensitivity-analysis|sensitivity analysis]]) rather than
 chasing a sample size that cannot move the ceiling.
 
 ## Same seed, different parallelism — slightly different numbers

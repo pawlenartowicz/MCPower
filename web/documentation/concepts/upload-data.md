@@ -174,7 +174,7 @@ rows are identical copies of a few real observations.
 > Consider switching to distribution mapping (`partial` or `none`), which
 > generates fresh synthetic rows at any sample size.
 
-One [[concepts/scenario-analysis|scenario]] knob interacts with the choice of
+One [[concepts/sensitivity-analysis|scenario]] knob interacts with the choice of
 mechanism: `sampled_factor_proportions`. Under distribution mapping, factors from your
 data obey it as usual — their empirical proportions are the target, hit exactly
 (`false`) or with multinomial jitter (`true`). Under `strict` the knob has no

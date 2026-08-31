@@ -1,7 +1,7 @@
 """Four advanced mixed-model designs, one step beyond the basic random
 intercept of example 08: random slopes, nested groupings, a clustered logistic
 GLMM whose treatment is assigned at the cluster level, and random-effect
-scenario stress-testing. Each section is self-contained — build a model, ask
+sensitivity stress-testing. Each section is self-contained — build a model, ask
 for power. Run the whole file with: python 15_advanced_mixed_models.py"""
 
 from mcpower import MCPower
@@ -97,7 +97,7 @@ model.find_sample_size(
 
 
 # ===========================================================================
-# 4. Random-effect scenario stress-testing
+# 4. Random-effect sensitivity stress-testing
 # ===========================================================================
 # Mixed models add three scenario knobs on top of the OLS ones from example 10:
 #   random_effect_dist — normal / heavy_tailed / right_skewed random effects
@@ -105,7 +105,7 @@ model.find_sample_size(
 #   icc_noise_sd       — jitter on the ICC, for when it is only an educated guess
 # A brand-new scenario name inherits "optimistic" and overrides only these keys.
 
-print("\n\n>>> Random-effect scenario stress-test:")
+print("\n\n>>> Random-effect sensitivity stress-test:")
 model = MCPower("score = teaching_method + prior_gpa + (1|classroom)", family="lme")
 model.set_variable_type("teaching_method=binary")
 model.set_effects("teaching_method=0.4, prior_gpa=0.18")

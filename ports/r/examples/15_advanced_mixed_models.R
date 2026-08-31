@@ -102,7 +102,7 @@ invisible(model$find_sample_size(
 
 
 # ===========================================================================
-# 4. Random-effect scenario stress-testing
+# 4. Random-effect sensitivity stress-testing
 # ===========================================================================
 # Mixed models add three scenario knobs on top of the OLS ones from example 10:
 #   random_effect_dist — normal / heavy_tailed / right_skewed random effects
@@ -110,7 +110,7 @@ invisible(model$find_sample_size(
 #   icc_noise_sd       — jitter on the ICC, for when it is only an educated guess
 # A brand-new scenario name inherits "optimistic" and overrides only these keys.
 
-cat("\n\n>>> Random-effect scenario stress-test:\n")
+cat("\n\n>>> Random-effect sensitivity stress-test:\n")
 model <- MCPower$new("score ~ teaching_method + prior_gpa + (1|classroom)", family = "lme")
 model$set_variable_type("teaching_method=binary")
 model$set_effects("teaching_method=0.4, prior_gpa=0.18")

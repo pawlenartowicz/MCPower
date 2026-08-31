@@ -1,6 +1,6 @@
 ---
 title: "Regression power analysis - MCPower app"
-description: "Power & sample-size analysis for OLS and logistic regression in the MCPower app - formula, predictors, effect sizes, and robustness scenarios, step by step."
+description: "Power & sample-size analysis for OLS and logistic regression in the MCPower app - formula, predictors, effect sizes, and sensitivity analysis, step by step."
 ---
 # Regression power (app)
 
@@ -14,9 +14,9 @@ Enter the right-hand side of your model — e.g. `y = x1 + x2 + x1:x2`. Operator
 
 Each predictor is one card. Pick its type next to the name — **continuous**, **binary**, or **factor** (the type sets how it is simulated and how its effect size is read) — then set the standardised effect size to detect in the same card (larger effects need fewer observations). A factor with k levels expands into k − 1 indicator rows, one per non-reference level; each interaction term gets its own card. Benchmarks: continuous **0.10 / 0.25 / 0.40**, binary or factor **0.20 / 0.50 / 0.80** (small / medium / large) — prefer a value justified by prior evidence. See [[concepts/variable-types|variable types]] and [[concepts/effect-sizes|effect sizes]].
 
-## 3. Robustness scenarios
+## 3. Sensitivity analysis (scenarios)
 
-The **Robustness scenarios** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations: effects vary between studies, correlations fluctuate, distributions drift from normal), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/scenario-analysis|scenario analysis]].
+The **Sensitivity analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations: effects vary between studies, correlations fluctuate, distributions drift from normal), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/sensitivity-analysis|sensitivity analysis]].
 
 ## 4. Optional settings
 

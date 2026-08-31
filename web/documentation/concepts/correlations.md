@@ -84,4 +84,4 @@ MCPower validates every correlation you supply *before* any simulation runs, and
 
 Correlation is continuous-only by design. Binary predictors and factor predictors (3+ levels) are generated from their marginals, so naming either one in a correlation pair is rejected. When you need correlated categorical *and* continuous variables, simulate from [[concepts/upload-data|empirical data]], which preserves the joint structure of your dataset directly.
 
-Correlations below ~0.30 have negligible impact; above ~0.50 the sample-size increase becomes substantial. Use [[concepts/scenario-analysis|scenario analysis]] to see how a noisy or uncertain correlation structure moves your power.
+Correlations below ~0.30 have negligible impact; above ~0.50 the sample-size increase becomes substantial. Use [[concepts/sensitivity-analysis|sensitivity analysis]] to see how a noisy or uncertain correlation structure moves your power.

@@ -162,6 +162,43 @@ model$set_cluster("site", ICC = 0.15, n_clusters = 30,
 
 Halving `n_clusters` at fixed total N roughly doubles the SE of a cluster-level predictor while barely affecting within-cluster predictors. See [[concepts/mixed-effects#cluster-level-predictors|Cluster-level predictors]] for the design-effect discussion.
 
+When the quantity you actually budget is the **number of sites**, fix the cluster size instead and search in clusters — `from_size`/`to_size` are then read as a site count, with `cluster_size` (here 10) as the multiplier:
+
+```r
+# 10 patients per site fixed — search the number of sites directly
+model <- MCPower$new("outcome ~ treatment + (1|site)", family = "lme")
+model$set_cluster("site", ICC = 0.15, cluster_size = 10,
+                  cluster_level_vars = c("treatment"))
+result <- model$find_sample_size(target_test = "treatment", unit = "clusters",
+                                 from_size = 20, to_size = 80, by = 5, verbose = FALSE)
+```
+
+`set_cluster` takes either `n_clusters` or `cluster_size` — fix one and the other follows from N. That choice is what makes a unit available: `unit = "clusters"` needs a fixed `cluster_size`, `unit = "cluster_size"` needs a fixed `n_clusters`. Either way the result reports the unit value and the raw N side by side, so the total you'd have to recruit is never hidden.
+
+### More clusters or more observations each?
+
+At a fixed total N the two sizing regimes are not interchangeable. A **cluster-level** predictor (a treatment randomised per site, a condition assigned per participant) is estimated against the between-cluster variation, so its power tracks the number of clusters and moves little when you add observations inside each one. A **within-cluster** predictor (a condition that rotates trial by trial) is estimated against the within-cluster residual, so extra observations per cluster do help it.
+
+Run the search once in each unit and compare the two answers before committing to a recruitment plan:
+
+```r
+# How many sites, at 10 patients each?
+model <- MCPower$new("outcome ~ treatment + (1|site)", family = "lme")
+model$set_cluster("site", ICC = 0.15, cluster_size = 10,
+                  cluster_level_vars = c("treatment"))
+by_clusters <- model$find_sample_size(target_test = "treatment", unit = "clusters",
+                                      from_size = 20, to_size = 80, by = 5, verbose = FALSE)
+
+# ...or how many patients per site, with 30 sites?
+model <- MCPower$new("outcome ~ treatment + (1|site)", family = "lme")
+model$set_cluster("site", ICC = 0.15, n_clusters = 30,
+                  cluster_level_vars = c("treatment"))
+by_size <- model$find_sample_size(target_test = "treatment", unit = "cluster_size",
+                                  from_size = 5, to_size = 60, by = 5, verbose = FALSE)
+```
+
+For a cluster-level target the second search can run off the top of its range (a `≥ 60` cell) while the first lands comfortably inside — no cluster size buys what more clusters would. That is the design effect showing up in the answer, not a failed search. Reverse the pattern for a within-participant target: there the trials-per-participant search is the one that resolves.
+
 ### Crossed and nested groupings
 
 For crossed designs (e.g. participants × stimuli) or nested designs (classrooms within schools), name every grouping factor in the formula and call `set_cluster` once per factor:
@@ -230,11 +267,15 @@ result <- model$find_power(sample_size = 300, target_test = "treatment",
                            wald_se = "hessian", agq = 5, verbose = FALSE)
 ```
 
+A `unit = "cluster_size"` search walks down into small clusters, and 5–10
+observations per group is exactly where the Laplace default is least accurate —
+recheck a crossing that lands there with `agq = 5` before trusting it.
+
 See [[concepts/simulation-settings#estimation-mode|Estimation mode]] for the full
 explanation of both controls, including AGQ's eligibility rules and what happens
 when a design falls outside them.
 
-### Scenario stress-testing for mixed models
+### Sensitivity analysis (scenarios) for mixed models
 
 Mixed models support three scenario knobs: `random_effect_dist` (normal / heavy_tailed / right_skewed), `random_effect_df`, and `icc_noise_sd`. Use them to probe how sensitive power is to non-Gaussian random effects or an uncertain ICC:
 
@@ -247,6 +288,6 @@ model$find_power(sample_size = 600, target_test = "teaching_method",
                  scenarios = c("optimistic", "re_stress"))
 ```
 
-See [[concepts/scenario-analysis#mixed-model-knobs|Mixed-model scenario knobs]].
+See [[concepts/sensitivity-analysis#mixed-model-knobs|Mixed-model scenario knobs]].
 
 next → [[06_anova-posthoc|ANOVA & post-hoc]]

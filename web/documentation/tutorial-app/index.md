@@ -50,7 +50,7 @@ The action bar above the results pane summarises the current target, α, and
 sample-size range, and holds the two run buttons — **Find power** and **Find
 sample** — alongside the **Scenarios** toggle (re-run the same design under
 the optimistic / realistic / doomer assumption sets; see
-[[concepts/scenario-analysis|scenario analysis]]) and a status badge (*Ready
+[[concepts/sensitivity-analysis|sensitivity analysis]]) and a status badge (*Ready
 to run*, *Running…*, *Last run done*). While a run is in flight the buttons
 are replaced by **Cancel**.
 

@@ -25,6 +25,14 @@ model with a random intercept per patient:
 - **Solve for N instead.** Replace `find_power(sample_size=200, …)` with
   `find_sample_size(target_test="phase", from_size=120, to_size=420, by=40)` to
   get the minimum total sample that reaches 80% power.
+- **Solve for the number of visits per patient.** With the 40 patients already
+  recruited, the open question is how often to bring them back — search that
+  directly with
+  `find_sample_size(target_test="phase", unit="cluster_size", from_size=5, to_size=25, by=1)`.
+  The from/to range now reads as visits per patient (the engine needs at least 5),
+  each step of 1 is 40 more measurements, and the result reports the total N
+  behind it. `phase` varies *within* a patient, so extra visits genuinely sharpen
+  it — that is not true of a predictor fixed per patient.
 - **Same design, other fields:**
   - `seedling_height ~ week + (1|seedling)` — one plant measured weekly; test whether height increases on average (ecology).
   - `well_being ~ week + (1|individual)` — one person assessed at several wave points; test whether well-being trends over the study (social science).

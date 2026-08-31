@@ -26,19 +26,32 @@ The grouping term unlocks the cluster panel: the **cluster name** (mirrored from
 > [!important] Repeated measures: N is measurements, not participants
 > For a repeated-measures design the cluster is the **participant** and the sample size counts **measurements** — `N = participants × trials-per-participant`. Sixty participants on 100 trials each is `n = 6000` with **number of clusters = 60**, not `n = 60`. See [[concepts/mixed-effects#repeated-measures|Repeated measures]].
 
-> [!note] Unit chips on Find sample size
-> The **Find sample size** card carries two unit chips on their own row under the from/to/step inputs, labelled *search in*: **observations**, and — depending on which cluster field you fixed — either **cluster number** (fixed cluster size) or **cluster size** (fixed number of clusters). Switching which field you fix resets the chip to observations. A line under the row echoes the same range in the other unit, so you can read both without converting by hand. See [[concepts/required-sample-size#search-in-cluster-units|Search in cluster units]].
+Which of the two fields you fix also decides what **Find sample size** can search in — see step 7 below.
 
 ## 4. Predictors
 
 Each fixed-effect predictor is one card: pick its type next to the name (continuous, binary, or factor), then set its standardised effect size in the same card — continuous **0.10 / 0.25 / 0.40**, binary or factor **0.20 / 0.50 / 0.80**. See [[concepts/variable-types|variable types]] and [[concepts/effect-sizes|effect sizes]].
 
-## 5. Robustness scenarios
+## 5. Sensitivity analysis (scenarios)
 
-The **Robustness scenarios** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. Mixed models additionally perturb the random effect (its distribution, df, and ICC noise). If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/scenario-analysis|scenario analysis]].
+The **Sensitivity analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. Mixed models additionally perturb the random effect (its distribution, df, and ICC noise). If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/sensitivity-analysis|sensitivity analysis]].
 
 ## 6. Optional settings
 
 The **Advanced** section exposes the number of simulations (mixed models default to 800, since each fit is heavier), α (0.05), seed (2137), and the failed-simulation tolerance.
 
 For a clustered **Logit**, **Probit**, or **Poisson** model, Advanced also shows the estimation-mode switch — **Fast**, **Accurate**, or **AGQ** — see [[concepts/simulation-settings#estimation-mode|estimation mode]] for what each does and when AGQ is available.
+
+## 7. Find sample size in cluster units
+
+**Find sample size** sweeps a from/to grid of *n* and reads the required sample size off the fitted power curve. For a mixed model that grid does not have to be in observations — the card carries two unit chips on their own row under the from/to/step inputs, labelled *search in*.
+
+1. In the cluster panel (step 3), fix the field you are **not** searching for. Fix the **number of clusters** to search cluster size; fix the **cluster size** to search the number of clusters.
+2. Open the **Find sample size** card. The chip row now offers **observations** plus one cluster chip — **cluster size** when the cluster number is fixed, **cluster number** when the cluster size is fixed. Only the one your fixed field allows is offered.
+3. Pick the cluster chip and type the from/to/step range in that unit — a range in participants, or in trials per participant, not in measurements.
+4. Read the echo line under the row: it restates the same range in the other unit, so you can see the total N a "20 to 80 sites" search actually sweeps without converting by hand.
+5. Run. The result reports both numbers, the unit value and the raw N behind it.
+
+Going back to the cluster panel and switching which field is fixed resets the chip to **observations** — the old cluster unit no longer has a divisor, so the range would be meaningless. Reselect the chip after the switch.
+
+Which unit to search is a design question, not a display preference: a predictor assigned at the cluster level (a treatment randomised per site) gains power from more clusters and little from bigger ones, while a predictor that varies within the cluster gains from both. See [[concepts/required-sample-size#search-in-cluster-units|Search in cluster units]] and [[concepts/mixed-effects#cluster-level-predictors|Cluster-level predictors]].

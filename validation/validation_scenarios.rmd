@@ -485,7 +485,7 @@ run_fg_flip <- function(case) {
 
 # What this report shows
 
-MCPower's **scenario analysis** deliberately stresses a planned study: instead of
+MCPower's **sensitivity analysis** deliberately stresses a planned study: instead of
 simulating the idealised design you specified, each scenario *perturbs* it —
 slopes wobble between observations, residual variance trends with the predictors,
 correlations differ from the plan, predictor and residual distributions get

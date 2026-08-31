@@ -1170,6 +1170,9 @@ class MCPower:
     def set_scenario_configs(self, configs: Dict[str, Dict[str, Any]]) -> "MCPower":
         """Merge custom scenario configurations on top of the defaults.
 
+        Scenarios are the named settings bundles of the sensitivity analysis
+        (run via ``scenarios=`` on ``find_power`` / ``find_sample_size``).
+
         Merge behaviour matches v1:
 
           * If a scenario name already exists in the defaults (``optimistic``,
@@ -1909,9 +1912,12 @@ class MCPower:
         most 3 random effects per group) — an ineligible or even/out-of-range
         value warns and runs at Laplace instead. No-op for OLS/LMM.
 
-        Returns a result dict (single scenario) or a scenarios envelope
-        (``{"scenarios": {...}, "comparison": {...}}``) when ``scenarios`` is
-        truthy or a list.
+        ``scenarios`` runs the sensitivity analysis: the same design is
+        rerun under the named scenarios (``True`` = all configured;
+        ``["optimistic", ...]`` = a subset) with perturbed data-generation
+        settings. Returns a result dict (single scenario) or a scenarios
+        envelope (``{"scenarios": {...}, "comparison": {...}}``) when
+        ``scenarios`` is truthy or a list.
         """
         if not self._applied:
             self._apply()

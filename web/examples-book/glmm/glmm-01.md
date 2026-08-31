@@ -31,6 +31,12 @@ logistic model: `infection ~ treatment + (1 | hospital)`.
 - **Solve for N instead.** Replace `find_power(sample_size=300, …)` with
   `find_sample_size(target_test="treatment", from_size=100, to_size=600, by=25)`
   to get the minimum N that reaches 80% power.
+- **Solve for the number of hospitals.** The treatment is randomised per
+  hospital, so the recruitment question is how many hospitals: fix the hospital
+  size with `set_cluster("hospital", ICC=0.05, cluster_size=10)` and pass
+  `find_sample_size(target_test="treatment", unit="clusters", from_size=15, to_size=80, by=5)`.
+  The from/to range reads as a hospital count and the result reports the total N
+  behind it.
 - **Same design, other fields**
   - *Ecology:* `germinated ~ treatment + (1|tank)` — seedling germination (yes/no) randomised at the tank level across 30 tanks, one pesticide treatment per tank.
   - *Social science:* `voted ~ treatment + (1|region)` — voter turnout (yes/no) in a get-out-the-vote cluster RCT where regions are the clusters.

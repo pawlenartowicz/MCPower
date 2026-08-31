@@ -32,6 +32,14 @@ intercept per patient:
 - **Solve for N instead.** Replace `find_power(sample_size=300, …)` with
   `find_sample_size(target_test="month, treatment", from_size=180, to_size=600, by=60)`
   to get the minimum total sample that reaches 80% power.
+- **Solve for the number of measurements per patient.** Keeping the 50 patients,
+  search the follow-up schedule instead:
+  `find_sample_size(target_test="month, treatment", unit="cluster_size", from_size=5, to_size=20, by=1)`.
+  The range reads as measurements per patient (5 is the floor) and one step adds
+  50 measurements overall. Watch the two rows diverge: `month` varies within a
+  patient and gains from every extra visit, while `treatment` is fixed per
+  patient and is driven by the patient count — its required cluster size can run
+  off the top of the range.
 - **Same design, other fields**
   - *Ecology:* `germinated ~ month + treatment + (1|seedling)` — seedling germination (yes/no) recorded at monthly intervals across two irrigation regimes, with each seedling as its own cluster.
   - *Social science:* `employed ~ period + treatment + (1|individual)` — employment status (yes/no) tracked over several survey periods for individuals in a job-placement programme vs control.

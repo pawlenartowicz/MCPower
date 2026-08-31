@@ -1,6 +1,6 @@
 ---
 title: "ANOVA power analysis - MCPower app"
-description: "ANOVA power & sample-size analysis in the MCPower app - factorial designs, post-hoc corrections, and robustness scenarios by Monte Carlo simulation."
+description: "ANOVA power & sample-size analysis in the MCPower app - factorial designs, post-hoc corrections, and sensitivity analysis by Monte Carlo simulation."
 ---
 # ANOVA power (app)
 
@@ -38,9 +38,9 @@ Click ⚙ on a factor card to open its Advanced dialog. Here you can:
 
 Click **Add covariate** to create a covariate card; covariates are auto-named cov1, cov2, …. Unlike factor cards, the **kind** badge is switchable — choose **continuous**, **binary**, or **factor**. Set the standardised effect size in the card (continuous benchmarks: **0.10 / 0.25 / 0.40**; binary or factor: **0.20 / 0.50 / 0.80**). This is an ANCOVA design: the covariate is included as a predictor to adjust for. See [[concepts/variable-types|variable types]].
 
-## 3. Robustness scenarios
+## 3. Sensitivity analysis (scenarios)
 
-The **Robustness scenarios** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/scenario-analysis|scenario analysis]].
+The **Sensitivity analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/sensitivity-analysis|sensitivity analysis]].
 
 ## 4. Optional settings
 

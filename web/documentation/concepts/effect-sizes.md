@@ -106,7 +106,7 @@ For a logistic model you also set the **baseline probability** — the expected 
 
 > [!tip] Rules of thumb
 > - When in doubt, use a **smaller** effect size — overestimation is the more costly error.
-> - Use [[concepts/scenario-analysis|scenario analysis]] to test how sensitive your power is to effect-size uncertainty.
+> - Use [[concepts/sensitivity-analysis|sensitivity analysis]] to test how sensitive your power is to effect-size uncertainty.
 > - If prior work reports Cohen's *d*, it maps roughly onto the beta of a binary predictor.
 > - Main effects are almost always larger than interaction effects in the same model.
 

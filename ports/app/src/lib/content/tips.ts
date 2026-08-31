@@ -11,7 +11,7 @@ import mixedEffects from '$docs/concepts/mixed-effects.md?raw';
 import multipleTesting from '$docs/concepts/multiple-testing.md?raw';
 import conceptsIndex from '$docs/concepts/index.md?raw';
 import simulationSettings from '$docs/concepts/simulation-settings.md?raw';
-import scenarioAnalysis from '$docs/concepts/scenario-analysis.md?raw';
+import scenarioAnalysis from '$docs/concepts/sensitivity-analysis.md?raw';
 import uploadConcepts from '$docs/concepts/upload-data.md?raw';
 import requiredSampleSize from '$docs/concepts/required-sample-size.md?raw';
 import uploadApp from '$docs/tutorial-app/upload-data.md?raw';
@@ -52,19 +52,19 @@ export const TIP_SOURCES: Record<string, TipSource> = {
   waldSe:                   { doc: 'concepts/mixed-effects', anchor: 'se-method-and-quadrature', md: mixedEffects },
   contrasts:                { doc: 'concepts/multiple-testing', anchor: 'contrasts-and-post-hoc', md: multipleTesting },
   testFormulaOverride:      { doc: 'concepts/model-specification', anchor: 'test-formula-misspecification', md: modelSpec },
-  sampledShares:            { doc: 'concepts/scenario-analysis', anchor: 'factor-allocation', md: scenarioAnalysis },
+  sampledShares:            { doc: 'concepts/sensitivity-analysis', anchor: 'factor-allocation', md: scenarioAnalysis },
   outcomeType:              { doc: 'concepts/effect-sizes', anchor: 'continuous-vs-binary-outcomes', md: effectSizes },
 
   // --- Scenario knobs (Settings → Scenarios tab) ---
-  scenHeterogeneity:      { doc: 'concepts/scenario-analysis', anchor: 'heterogeneity', md: scenarioAnalysis },
-  scenHeteroskedasticity: { doc: 'concepts/scenario-analysis', anchor: 'heteroskedasticity', md: scenarioAnalysis },
-  scenCorrNoise:          { doc: 'concepts/scenario-analysis', anchor: 'correlation-noise', md: scenarioAnalysis },
-  scenDistChange:         { doc: 'concepts/scenario-analysis', anchor: 'distribution-swaps', md: scenarioAnalysis },
-  scenResidChange:        { doc: 'concepts/scenario-analysis', anchor: 'residual-swaps', md: scenarioAnalysis },
-  scenResidDf:            { doc: 'concepts/scenario-analysis', anchor: 'residual-swaps', md: scenarioAnalysis },
-  scenReDist:             { doc: 'concepts/scenario-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
-  scenReDf:               { doc: 'concepts/scenario-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
-  scenIccNoise:           { doc: 'concepts/scenario-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
+  scenHeterogeneity:      { doc: 'concepts/sensitivity-analysis', anchor: 'heterogeneity', md: scenarioAnalysis },
+  scenHeteroskedasticity: { doc: 'concepts/sensitivity-analysis', anchor: 'heteroskedasticity', md: scenarioAnalysis },
+  scenCorrNoise:          { doc: 'concepts/sensitivity-analysis', anchor: 'correlation-noise', md: scenarioAnalysis },
+  scenDistChange:         { doc: 'concepts/sensitivity-analysis', anchor: 'distribution-swaps', md: scenarioAnalysis },
+  scenResidChange:        { doc: 'concepts/sensitivity-analysis', anchor: 'residual-swaps', md: scenarioAnalysis },
+  scenResidDf:            { doc: 'concepts/sensitivity-analysis', anchor: 'residual-swaps', md: scenarioAnalysis },
+  scenReDist:             { doc: 'concepts/sensitivity-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
+  scenReDf:               { doc: 'concepts/sensitivity-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
+  scenIccNoise:           { doc: 'concepts/sensitivity-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
 
   // --- Section tips (run cards / tabs) ---
   sampleSizeSearch:    { doc: 'concepts/required-sample-size', anchor: 'the-search-grid', md: requiredSampleSize },

@@ -1,10 +1,10 @@
 ---
-title: "Scenario analysis for robust power planning"
-description: "Scenario analysis for robust power planning: heterogeneity, non-normality, heteroskedasticity, correlation noise, and custom scenarios."
+title: "Sensitivity analysis for robust power planning"
+description: "Sensitivity analysis for robust power planning: heterogeneity, non-normality, heteroskedasticity, correlation noise, and custom scenarios."
 ---
-# Scenario analysis
+# Sensitivity analysis (scenarios)
 
-Traditional power analysis assumes ideal conditions: effects exactly as specified, perfectly normal distributions, constant error variance. Real studies never match those assumptions. Scenario analysis reports how robust your power is when they break down — a *range* of power estimates instead of one optimistic number.
+Traditional power analysis assumes ideal conditions: effects exactly as specified, perfectly normal distributions, constant error variance. Real studies never match those assumptions. Sensitivity analysis reports how robust your power is when they break down — a *range* of power estimates instead of one optimistic number.
 
 This page is the reference for every scenario knob: what assumption violation it represents, how MCPower simulates it, and what the number means in your simulated data.
 

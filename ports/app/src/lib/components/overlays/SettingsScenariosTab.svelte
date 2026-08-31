@@ -35,7 +35,7 @@
 <div class="space-y-4 px-1 pt-1">
   <div class="flex items-baseline justify-between gap-3">
     <p class="text-xs text-muted-foreground">
-      Scenarios are {sharedPrefs.scenariosEnabled ? 'on' : 'off'} — toggle in the status bar.
+      Sensitivity analysis is {sharedPrefs.scenariosEnabled ? 'on' : 'off'} — toggle in the status bar.
       Edits below modify this device's copy of <code>configs/scenarios.json</code>;
       the default values are restored via Reset.
     </p>

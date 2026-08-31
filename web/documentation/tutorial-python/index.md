@@ -63,7 +63,7 @@ Each rung adds one modelling idea and powers it. Climb from the top:
 5. [[05_mixed-models|Mixed models]] — grouped / hierarchical data
 6. [[06_anova-posthoc|ANOVA & post-hoc]] — factors and pairwise contrasts
 7. [[07_multiple-testing|Multiple testing]] — corrections across many tests
-8. [[08_custom-scenarios|Custom scenarios]] — robustness sweeps
+8. [[08_custom-scenarios|Custom scenarios]] — sensitivity sweeps
 9. [[09_upload-data|Upload data]] — drive simulation from a CSV or dataframe
 10. [[10_model-misspecification|Model misspecification]] — what testing the wrong model costs
 

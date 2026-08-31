@@ -49,8 +49,8 @@ One run gives you the whole picture: power curves across a range of sample
 sizes, automatic sample-size search, multiple-comparison corrections — and
 power for many p-values at once: the chance that *all* your key tests come out
 significant in the same study, which is what a multi-hypothesis paper actually
-stands on. On top of that, built-in robustness scenarios stress-test the
-design: flip a switch and the same analysis reruns with heterogeneous effects,
+stands on. On top of that, built-in sensitivity analysis stress-tests the
+design under three scenarios: flip a switch and the same analysis reruns with heterogeneous effects,
 non-normal residuals, and outliers, so you see the power you'd get from messy
 real-world data, not just the textbook case.
 
