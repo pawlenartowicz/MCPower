@@ -102,6 +102,7 @@ def build_linear_spec(
     correction: Optional[str],
     wald_se: Optional[str] = None,
     nagq: int = 1,
+    df_method: Optional[str] = None,
     target_test: Optional[str],
     test_formula: Optional[str],
     pending_data: Optional[Dict[str, Any]],
@@ -240,6 +241,16 @@ def build_linear_spec(
         wald_se = get_estimation_defaults()["wald_se"]
     wald_se_wire = wald_se.lower().replace("-", "_").replace(" ", "_")
 
+    # df_method: same fallback/normalisation pattern as wald_se.
+    # "between_within" (between-within denominator df for mixed fits, the
+    # default) or "asymptotic" (Wald z) are the valid wire values; validation
+    # already ran in _validate_df_method_arg.
+    if df_method is None:
+        from ..config import get_estimation_defaults
+
+        df_method = get_estimation_defaults()["df_method"]
+    df_method_wire = df_method.lower().replace("-", "_").replace(" ", "_")
+
     # Scenarios — pre-encode through `_scenario_dict` so the integer
     # code translation matches the existing Python projection exactly.
     scenarios = [build_scenario_dict(name, scenario_configs) for name in scenario_names]
@@ -331,6 +342,7 @@ def build_linear_spec(
         "correction": correction_wire,
         "wald_se": wald_se_wire,
         "nagq": int(nagq),
+        "df_method": df_method_wire,
         "targets": wire_targets,
         "report_overall": wire_report_overall,
         "contrast_pairs": [list(pair) for pair in wire_contrast_pairs],

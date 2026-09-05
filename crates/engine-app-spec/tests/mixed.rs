@@ -29,6 +29,7 @@ fn minimal_mixed(cluster_dim: ClusterDim) -> MixedSpec {
         tests: TestSelection::All,
         correction: CorrectionMethod::None,
         wald_se: Default::default(),
+        df_method: Default::default(),
         scenarios: vec![],
         csv: None,
         report_overall: true,

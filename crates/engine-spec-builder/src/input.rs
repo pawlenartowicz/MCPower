@@ -82,6 +82,10 @@ pub struct LinearSpec {
     /// opt-in). No-op for OLS/LMM and unclustered GLM.
     #[serde(default)]
     pub wald_se: engine_contract::WaldSe,
+    /// Reference distribution for mixed-model fixed-effect Wald tests. No-op
+    /// for `Ols` and unclustered `Glm`.
+    #[serde(default)]
+    pub df_method: engine_contract::DfMethod,
     /// AGQ node count for the GLMM likelihood (1 = Laplace, the default).
     /// Host-side eligibility (Binary/Count GLMM, single grouping, ≤ 3 REs, odd
     /// k ≤ 25) is checked before this reaches the engine; the contract backstop
@@ -330,6 +334,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
         }
     }

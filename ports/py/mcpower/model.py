@@ -489,6 +489,7 @@ class MCPower:
             n_clusters,
             cluster_size,
             parsed_grouping_vars,
+            n_per_parent,
         ).raise_if_invalid()
 
         if cluster_level_vars:
@@ -780,6 +781,18 @@ class MCPower:
                 "Valid values: 'rx' (default, fastmode) or 'hessian'."
             )
 
+    def _validate_df_method_arg(self, df_method: str) -> None:
+        """Validate a per-call ``df_method=`` kwarg.
+
+        Accepts ``"asymptotic"`` and ``"between_within"`` only.
+        """
+        key = (df_method or "between_within").lower().replace("-", "_").replace(" ", "_")
+        if key not in {"asymptotic", "between_within"}:
+            raise ValueError(
+                f"df_method={df_method!r} is not recognised. "
+                "Valid values: 'between_within' (default) or 'asymptotic'."
+            )
+
     def _agq_eligible(self) -> bool:
         """Whether the current design admits adaptive Gauss–Hermite quadrature
         (``agq > 1``). Mirrors the contract backstop (invariant 25) and glmm's
@@ -796,17 +809,22 @@ class MCPower:
         n_re = 1 + len(cfg.get("random_slopes") or [])  # intercept + slopes
         return n_re <= 3
 
-    def _resolve_estimation(self, wald_se, agq):
-        """Resolve the ``wald_se`` / ``agq`` kwargs against the config defaults,
-        validate them, and warn-and-strip an ineligible ``agq > 1`` to Laplace.
+    def _resolve_estimation(self, wald_se, agq, df_method=None):
+        """Resolve the ``wald_se`` / ``agq`` / ``df_method`` kwargs against the
+        config defaults, validate them, and warn-and-strip an ineligible
+        ``agq > 1`` to Laplace.
 
-        Returns ``(wald_se_str, nagq_int)``. ``None`` inputs fall back to the
-        ``configs/config.json`` ``estimation`` block (the cross-port home)."""
+        Returns ``(wald_se_str, nagq_int, df_method_str)``. ``None`` inputs
+        fall back to the ``configs/config.json`` ``estimation`` block (the
+        cross-port home)."""
         from .config import get_estimation_defaults
         _est = get_estimation_defaults()
         if wald_se is None:
             wald_se = _est["wald_se"]
         self._validate_wald_se_arg(wald_se)
+        if df_method is None:
+            df_method = _est["df_method"]
+        self._validate_df_method_arg(df_method)
         nagq = int(_est["nagq"]) if agq is None else int(agq)
         if nagq < 1 or nagq > 25 or nagq % 2 == 0:
             raise ValueError(
@@ -822,7 +840,7 @@ class MCPower:
                 stacklevel=3,
             )
             nagq = 1
-        return wald_se, nagq
+        return wald_se, nagq, df_method
 
     def _resolve_tests(self, target_test: str) -> Dict[str, Any]:
         """Parse a ``target_test`` DSL string into the wire dict.
@@ -1374,8 +1392,9 @@ class MCPower:
             parsed_grouping_vars,
         ).raise_if_invalid()
 
-        # Validate extra groupings (must have n_clusters explicitly; no
-        # sample_size derivation for secondary groupings).
+        # Validate extra groupings. A crossed grouping must have n_clusters
+        # explicitly (no sample_size derivation for secondary groupings); a
+        # nested grouping (n_per_parent set) is sized by that count instead.
         for extra_var, extra_cfg in items[1:]:
             _validate_cluster_config(
                 extra_var,
@@ -1383,6 +1402,7 @@ class MCPower:
                 extra_cfg.get("n_clusters"),
                 extra_cfg.get("cluster_size"),
                 parsed_grouping_vars,
+                extra_cfg.get("n_per_parent"),
             ).raise_if_invalid()
 
         # Derive effective n_clusters from the primary grouping only.
@@ -1580,6 +1600,7 @@ class MCPower:
         correction: Optional[str] = None,
         wald_se: Optional[str] = None,
         nagq: int = 1,
+        df_method: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Project current state into the Rust ``LinearSpec`` JSON contract.
 
@@ -1591,12 +1612,17 @@ class MCPower:
         (the cross-port home — no hardcoded per-port default). ``find_power`` /
         ``find_sample_size`` pass the already-resolved value; the direct callers
         (``to_simulation_spec``, golden fixtures) rely on this fallback.
+        ``df_method`` mirrors ``wald_se``, falling back to
+        ``estimation.df_method``.
         """
         if not self._applied:
             self._apply()
         if wald_se is None:
             from .config import get_estimation_defaults
             wald_se = get_estimation_defaults()["wald_se"]
+        if df_method is None:
+            from .config import get_estimation_defaults
+            df_method = get_estimation_defaults()["df_method"]
         # Collect cluster_level_vars across all pending cluster specs.
         _clv: List[str] = []
         for _cfg in self._pending_clusters.values():
@@ -1611,6 +1637,7 @@ class MCPower:
             correction=correction,
             wald_se=wald_se,
             nagq=nagq,
+            df_method=df_method,
             target_test=target_test,
             test_formula=test_formula,
             pending_data=getattr(self, "_pending_data", None),
@@ -1880,6 +1907,7 @@ class MCPower:
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
         wald_se: Optional[str] = None,
+        df_method: Optional[str] = None,
         agq: Optional[int] = None,
         test_formula: Optional[str] = None,
         n_sims: Optional[int] = None,
@@ -1911,6 +1939,18 @@ class MCPower:
         eligible (a Binary or Count GLMM with a single grouping factor and at
         most 3 random effects per group) — an ineligible or even/out-of-range
         value warns and runs at Laplace instead. No-op for OLS/LMM.
+        ``df_method`` selects the reference distribution for mixed-model
+        fixed-effect tests: ``"between_within"`` (default) tests each fixed
+        effect against a t with between-within denominator degrees of
+        freedom — between-cluster df if the predictor is cluster-level,
+        within-cluster df otherwise; ``"asymptotic"`` tests against a Wald z.
+        Ignored for OLS and unclustered GLM; not applied (falls back to Wald
+        z) with crossed or nested extra groupings. Cluster-level predictors
+        must be declared with ``cluster_level_vars`` (see
+        :meth:`set_cluster`) for the between df to apply. A fit whose random-effect variances all collapse
+        to zero (a singular fit) is tested against the residual df ``N - p``
+        (LME) or Wald z (GLMM) instead, the collapsed model's own reference —
+        the same switch a Satterthwaite reference makes there.
 
         ``scenarios`` runs the sensitivity analysis: the same design is
         rerun under the named scenarios (``True`` = all configured;
@@ -1926,7 +1966,7 @@ class MCPower:
         n_variables = len(self._registry.effect_names)
         _validate_sample_size_for_model(sample_size, n_variables).raise_if_invalid()
         self._validate_correction_arg(correction)
-        wald_se, nagq = self._resolve_estimation(wald_se, agq)
+        wald_se, nagq, df_method = self._resolve_estimation(wald_se, agq, df_method)
 
         if test_formula is not None:
             available = self._registry.non_factor_names + self._registry.factor_names
@@ -1966,6 +2006,7 @@ class MCPower:
             correction=correction,
             wald_se=wald_se,
             nagq=nagq,
+            df_method=df_method,
         )
         outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
@@ -2120,6 +2161,7 @@ class MCPower:
         target_test: Optional[str] = None,
         correction: Optional[str] = None,
         wald_se: Optional[str] = None,
+        df_method: Optional[str] = None,
         agq: Optional[int] = None,
         test_formula: Optional[str] = None,
         target_power: Optional[float] = None,
@@ -2138,8 +2180,8 @@ class MCPower:
 
         ``target_test`` / ``correction`` mirror :meth:`find_power` — they
         select the tested effect(s) and the multiple-comparison correction for
-        this call (see that method's docstring). ``wald_se`` / ``agq`` mirror
-        :meth:`find_power` — see that docstring for details.
+        this call (see that method's docstring). ``wald_se`` / ``df_method`` /
+        ``agq`` mirror :meth:`find_power` — see that docstring for details.
 
         The search sweeps ``from_size .. to_size`` and reports the smallest N
         that reaches the target power for each tested effect. ``by`` controls
@@ -2203,7 +2245,7 @@ class MCPower:
             by = _ssb["by"]  # "auto"
 
         self._validate_correction_arg(correction)
-        wald_se, nagq = self._resolve_estimation(wald_se, agq)
+        wald_se, nagq, df_method = self._resolve_estimation(wald_se, agq, df_method)
 
         _validate_sample_size_range(from_size, to_size, by).raise_if_invalid()
 
@@ -2240,6 +2282,7 @@ class MCPower:
             correction=correction,
             wald_se=wald_se,
             nagq=nagq,
+            df_method=df_method,
         )
         outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()

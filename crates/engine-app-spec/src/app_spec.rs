@@ -1,6 +1,6 @@
 //! `AppSpec` tagged-enum state model (`Linear`/`Logit`/`Mixed`) mirrored by the app's TS `AppSpec`.
 
-use engine_contract::{CorrectionMethod, WaldSe};
+use engine_contract::{CorrectionMethod, DfMethod, WaldSe};
 use engine_spec_builder::input::{ScenarioInput, UploadColumn, UploadMode};
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +9,13 @@ use serde::{Deserialize, Serialize};
 /// matching `#[serde(default)]` on decode.
 fn wald_se_is_default(w: &WaldSe) -> bool {
     *w == WaldSe::default()
+}
+
+/// `#[serde(skip_serializing_if)]` predicate for `df_method`: omit the field
+/// when it equals the default so a pre-`df_method` spec round-trips unchanged,
+/// matching `#[serde(default)]` on decode.
+fn df_method_is_default(d: &DfMethod) -> bool {
+    *d == DfMethod::default()
 }
 
 /// Link for a binary outcome. `Logit` (default) → canonical; `Probit` → the
@@ -112,8 +119,8 @@ pub struct LogitSpec {
     pub tests: TestSelection,
     pub correction: CorrectionMethod,
     /// Wald SE method. Only affects clustered-binary GLMM (Mixed+Binary);
-    /// OLS/LME and unclustered Glm (Logit) ignore it — default `Hessian`
-    /// (lme4 `use.hessian = TRUE`); `Rx` is the opt-in speed knob.
+    /// OLS/LME and unclustered Glm (Logit) ignore it — default `Rx` (the
+    /// Schur speed knob); `Hessian` (lme4 `use.hessian = TRUE`) is the opt-in.
     /// `#[serde(default)]` keeps older specs intact; skip-serialize when default.
     #[serde(default, skip_serializing_if = "wald_se_is_default")]
     pub wald_se: WaldSe,
@@ -278,11 +285,20 @@ pub struct MixedSpec {
     pub tests: TestSelection,
     pub correction: CorrectionMethod,
     /// Wald SE method. Only affects clustered-binary GLMM (this family with Binary
-    /// outcome); Gaussian LME ignores it. Default `Hessian` (per-fit FD-Hessian SE,
-    /// lme4 `use.hessian = TRUE`); `Rx` is the opt-in Schur speed knob.
+    /// outcome); Gaussian LME ignores it. Default `Rx` (the Schur speed knob);
+    /// `Hessian` (per-fit FD-Hessian SE, lme4 `use.hessian = TRUE`) is the opt-in.
     /// `#[serde(default)]` keeps older specs intact; skip-serialize when default.
     #[serde(default, skip_serializing_if = "wald_se_is_default")]
     pub wald_se: WaldSe,
+    /// Reference distribution for the fixed-effect Wald tests. `BetweenWithin`
+    /// (default) is the between-within denominator df, which reaches a
+    /// predictor as the between-cluster df only when that predictor is also
+    /// listed in `cluster_level_vars`; `Asymptotic` opts into the Wald z
+    /// against the standard normal. Mixed-only knob — the other families' fits
+    /// ignore it, so it is not carried on their specs. `#[serde(default)]` keeps older
+    /// specs intact; skip-serialize when default.
+    #[serde(default, skip_serializing_if = "df_method_is_default")]
+    pub df_method: DfMethod,
     /// Scenarios to fan out, mirroring `engine_spec_builder::ScenarioInput`
     /// (host-projected from the Scenarios toggle). Empty → one baseline contract
     /// (toggle off), identical to the pre-fan-out behavior.

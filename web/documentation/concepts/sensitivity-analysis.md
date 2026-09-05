@@ -111,7 +111,8 @@ This knob decides whether each simulated dataset hits your requested group propo
 
 > [!note] Empirical values in research
 > - Lim & In (2019) — under simple randomization, the probability of landing outside a 45/55 split is 52.7% at n = 40, 15.7% at n = 200, and 4.6% at n = 400. At typical power-analysis sample sizes imbalance is more likely than not, so sampled counts are the realistic case.
-> - Kang et al. (2008) — the power cost is modest: at n = 40 (d = 0.91), an exact 20/20 split gives 80% power, a realized 25/15 gives 77%, an extreme 30/10 gives 67%.
+> - Lim & In (2019), Fig. 1 — the power cost is modest: at n = 40 (two-tailed, d = 0.91, α = 0.05), an exact 20/20 split gives 80% power, a realized 25/15 gives 77%, an extreme 30/10 gives 67%.
+> - Kang et al. (2008) — simple randomization is unreliable below n ≈ 100 (a coin toss at n = 10 can give a 7/3 split) and can be trusted above n ≈ 200.
 > - Lachin (1988) — group sizes under simple randomization are binomial; power is materially reduced only beyond about a 70/30 split, a remote event.
 > - Schulz & Grimes (2002a, b) — exact balance is power-optimistic but bias-pessimistic: in non-blinded trials a forced-balance schedule makes upcoming assignments predictable, and published "simple randomized" trials report exactly equal groups far more often than chance allows (54–71%).
 
@@ -156,7 +157,7 @@ Residuals assumed normal are often heavy-tailed or skewed in practice. The `resi
 
 > [!note] Empirical values in research
 > - Cain, Zhang & Yuan (2017) — calibrates the df ladder: the 75th-percentile excess kurtosis observed in real data (1.62) maps to t-df ≈ 7.7 ≈ realistic df = 8; the 95th percentile (9.48) maps to df ≈ 4.6 ≈ doomer df = 5.
-> - Lange, Little & Taylor (1989) — fitted t degrees of freedom across real scientific datasets cluster in 3–10, with df = 4 recommended as a robust default; df ≈ 10 fits near-normal data, the optimistic baseline.
+> - Lange, Little & Taylor (1989) — fitted t degrees of freedom across their real-data examples run from about 1 (data with extreme outliers) through 3.4 and 4.6 to 10.3 (near-normal data), and df = 4 is their fixed default that "has worked well in many of our applications"; df ≈ 10 fits near-normal data, the optimistic baseline.
 > - Ng, Zhu, Zhang & Reid (2026) — robust-regression work treating df ∈ {2, 5, 10} as the operative heavy-to-mild range; the 5/8/10 ladder sits within its moderate band.
 > - Micceri (1989); Blanca et al. (2013) — the prevalence backdrop: 49% of real distributions have at least one heavy tail, and the maximum excess kurtosis Blanca et al. observe (7.41) corresponds to df ≈ 4.8.
 >
@@ -269,7 +270,7 @@ The studies behind the preset values, cited throughout **The knobs**. Three are 
 - Klein, R. A., Ratliff, K. A., Vianello, M., Adams, R. B., Jr., Bahník, Š., Bernstein, M. J., … Nosek, B. A. (2014). Investigating variation in replicability: A "many labs" replication project. *Social Psychology*. https://doi.org/10.1027/1864-9335/a000178
 - Klein, R. A., Vianello, M., Hasselman, F., Adams, B. G., Adams, R. B., Jr., Alper, S., … Nosek, B. A. (2018). Many Labs 2: Investigating variation in replicability across samples and settings. *Advances in Methods and Practices in Psychological Science*. https://doi.org/10.1177/2515245918810225
 - Lachin, J. M. (1988). Properties of simple randomization in clinical trials. *Controlled Clinical Trials*. https://doi.org/10.1016/0197-2456(88)90046-3
-- Lange, K. L., Little, R. J. A., & Taylor, J. M. G. (1989). Robust statistical modeling using the t distribution. *Journal of the American Statistical Association*. https://doi.org/10.1080/01621459.1989.10478834
+- Lange, K. L., Little, R. J. A., & Taylor, J. M. G. (1989). Robust statistical modeling using the t distribution. *Journal of the American Statistical Association*. https://doi.org/10.1080/01621459.1989.10478852
 - Lim, C.-Y., & In, J. (2019). Randomization in clinical studies. *Korean Journal of Anesthesiology*. https://doi.org/10.4097/kja.19049
 - Long, J. S., & Ervin, L. H. (2000). Using heteroscedasticity consistent standard errors in the linear regression model. *The American Statistician*. https://doi.org/10.1080/00031305.2000.10474549
 - McCulloch, C. E., & Neuhaus, J. M. (2011). Misspecifying the shape of a random effects distribution: Why getting it wrong may not matter. *Statistical Science*. https://doi.org/10.1214/11-STS361

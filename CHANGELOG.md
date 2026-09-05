@@ -5,6 +5,43 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each language
 port keeps its own version, so a version listed here may reach Python, R, the
 desktop app, and the web app on different dates.
 
+## [1.4.0] — 2026-09-06
+
+### Added
+- `df_method` on `find_power` / `find_sample_size` (Python and R) selects the
+  reference distribution for fixed-effect tests in any mixed model (LME or
+  clustered GLMM). `"between_within"` tests each fixed effect against a *t*
+  with between-within denominator degrees of freedom — between-cluster df for
+  a predictor declared cluster-level, within-cluster df otherwise — and
+  `"asymptotic"` keeps the Wald z. It has no effect on OLS or unclustered GLM,
+  and falls back to Wald z with a crossed or nested extra grouping. A fit whose
+  random-effect variances all collapse to zero is tested against the collapsed
+  model's own reference instead (residual-df *t* for an LME, Wald z for a GLMM).
+- App and web app: a **Denominator df** selector on the run panel for mixed
+  models, next to the estimation-mode switch; exported Python/R scripts carry
+  the chosen value.
+- `debug_report` / `load_data` report the critical value and degrees of
+  freedom per target, since they now differ across targets under the
+  between-within reference.
+- The Python `to_dataframe()` and R `as_tibble()` power frames include one row
+  per post-hoc pairwise contrast (`target_test="all-contrasts"`), labelled as in
+  the printed table, and always carry the full column set even with zero rows.
+- Validation: a denominator-df calibration page comparing both `df_method`
+  settings against lmerTest Satterthwaite on LMMs and against the empirical
+  Type I rate on logit GLMMs.
+
+### Changed
+- **Mixed-model tests default to `df_method="between_within"`.** Power for
+  any LME or clustered GLMM can differ from 1.3.x, most visibly with few
+  clusters or cluster-level predictors, where the Wald z was optimistic. Pass
+  `df_method="asymptotic"` to reproduce the 1.3.x numbers.
+- Under the between-within default a design that leaves fewer than one
+  between-cluster df (`g − p_between < 1`, i.e. at least as many cluster-level
+  columns, intercept included, as clusters) or fewer than one within-cluster df
+  is refused with an error naming the counts, instead of running on the Wald
+  z. Pick `df_method="asymptotic"` or add clusters. In `find_sample_size` the
+  check applies to every candidate N in the searched range.
+
 ## [1.3.0] — 2026-08-28
 
 ### Added
@@ -93,6 +130,7 @@ Python, R, the desktop app, and the in-browser web app — from the same core.
 - Bring-your-own-data: seed the simulation from a pilot or previous study so it
   inherits real correlations and distributions.
 
+[1.4.0]: https://github.com/pawlenartowicz/mcpower/releases
 [1.3.0]: https://github.com/pawlenartowicz/mcpower/releases
 [1.1.2]: https://github.com/pawlenartowicz/mcpower/releases
 [1.1.1]: https://github.com/pawlenartowicz/mcpower/releases

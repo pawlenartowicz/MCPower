@@ -168,6 +168,22 @@ describe('generateScript (mixed)', () => {
     expect(hess).toContain('wald_se="hessian"');
   });
 
+  it('emits df_method only for the opt-in (asymptotic), in both languages', () => {
+    const base = mixedSpec({ kind: 'n_clusters', value: 20 });
+    const betweenWithin = generateMixedScript(base, 'find-power', { sample_size: 100 });
+    expect(betweenWithin).not.toContain('df_method');
+    const betweenWithinR = generateMixedScript(base, 'find-power', { sample_size: 100 }, 'r');
+    expect(betweenWithinR).not.toContain('df_method');
+    const asym = { ...base, df_method: 'asymptotic' } as AppSpec;
+    expect(generateMixedScript(asym, 'find-power', { sample_size: 100 })).toContain(
+      'df_method="asymptotic"',
+    );
+    // R named arguments carry spaces around `=`, like the `unit` argument.
+    expect(generateMixedScript(asym, 'find-power', { sample_size: 100 }, 'r')).toContain(
+      'df_method = "asymptotic"',
+    );
+  });
+
   it('emits agq only when > 1 (adaptive quadrature opt-in)', () => {
     const base = mixedSpec({ kind: 'n_clusters', value: 20 });
     const binary = { kind: 'binary' as const, baseline_probability: 0.3 };

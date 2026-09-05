@@ -45,6 +45,7 @@ fn ols_spec(n_non_factor: u32, effect_sizes: Vec<f64>) -> SimulationSpec {
         link: None,
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         intercept: 0.0,
         posthoc: vec![],

@@ -42,6 +42,8 @@ The **Advanced** section exposes the number of simulations (mixed models default
 
 For a clustered **Logit**, **Probit**, or **Poisson** model, Advanced also shows the estimation-mode switch — **Fast**, **Accurate**, or **AGQ** — see [[concepts/simulation-settings#estimation-mode|estimation mode]] for what each does and when AGQ is available.
 
+For any mixed model, Advanced also shows a **Denominator df** select, with two options: **Between-within df (default)** and **Wald z (asymptotic)**. Between-within tests each fixed effect against a *t* distribution rather than a Wald z — between-cluster df if the predictor is cluster-level, within-cluster df otherwise. Mark cluster-level predictors under **cluster settings → Cluster-level variables** for the between df to apply; crossed or nested extra groupings fall back to Wald z. The calibration of both against lmerTest Satterthwaite is on the [[validation/validation_df_calibration|denominator-df calibration page]]; see [[concepts/simulation-settings#denominator-degrees-of-freedom|denominator degrees of freedom]].
+
 ## 7. Find sample size in cluster units
 
 **Find sample size** sweeps a from/to grid of *n* and reads the required sample size off the fitted power curve. For a mixed model that grid does not have to be in observations — the card carries two unit chips on their own row under the from/to/step inputs, labelled *search in*.

@@ -49,7 +49,9 @@ outcome, and cluster ids, byte-for-byte), fit them two ways —
 — and compare the fitted fixed-effect coefficients, the test statistics, and the
 decision threshold. The statistic is the **Wald _z_** on the fixed effect
 (`fixef / sqrt(diag(vcov))`), *not* lmerTest's Satterthwaite *t* — MCPower's own test
-definition is the Wald z. Because both fit the identical bytes, sampling noise
+definition builds that statistic and refers it to a between-within *t* by default,
+and the R side derives that same between-within reference independently (see step 2
+below). Because both fit the identical bytes, sampling noise
 cancels: any difference is a solver discrepancy.
 
 The chosen cases sit at ICC 0.1–0.2 with 20–30 clusters, well clear of the
@@ -63,7 +65,16 @@ expected to hit it.
 1. **Provenance.** Re-generate the dataset from the committed seed and confirm its
    content hash matches the saved file — proof the bytes haven't drifted.
 2. **B (R) vs C (MCPower)** on those bytes: fixed-effect coefficients, the Wald *z*
-   statistics (β̂/se), and the critical value `qnorm(1 − α/2)` ≈ 1.96.
+   statistics (β̂/se), the critical value, and the denominator degrees of freedom
+   behind it. The reference distribution is rebuilt in R from the case definition
+   and the saved dataset alone — `g` clusters counted off the saved cluster ids,
+   `p_between` = the design columns constant within cluster (the intercept plus
+   anything the case declared cluster-level), `df_between = g − p_between`,
+   `df_within = (N − p) − df_between` — so the R-side critical value is
+   `qt(1 − α/2, df)` at *R's* df, never at the df MCPower reported. MCPower's own
+   reported df is then checked against it for exact equality, and a mismatch
+   fails the row: without that check a miscounted `p_between` would move the
+   engine's df and the R critical value together and stay green.
 3. **C vs A** (a readable sanity overlay): MCPower's recovered coefficients next to
    the formula's true values.
 
@@ -73,7 +84,8 @@ expected to hit it.
 |---|---|---|
 | Coefficient (β) | `r SOLVING_TOL$estimate_rel_iter` relative | REML profile optimisation — agrees with `lmer` inside this band |
 | Statistic (*z*) | `r SOLVING_TOL$estimate_rel_iter` relative | derived from the same β and variance |
-| Critical value | `r SOLVING_TOL$crit_abs_iter` absolute | engine's own normal/χ² quantile vs R's `qnorm` ≈1.6e-9 |
+| Critical value | `r SOLVING_TOL$crit_abs_iter` absolute | engine's own t/normal quantile vs R's `qt` ≈1.6e-9 |
+| Denominator df | exact equality | integer-valued on both sides — an inequality is a `p_between` / cluster-count fault, not rounding |
 
 These are the B↔C gates from `tolerances.R`. MLE is a **REML profile optimisation**
 (Brent on the variance component) — the loosest of the three fits against the
@@ -86,8 +98,8 @@ called out in the summary.
 RESULTS <- lapply(MLE_CASES, function(case) {
   saved <- readRDS(file.path(DATA_DIR, paste0(case$label, ".rds")))
   hc    <- hash_check(case)                    # provenance (common.R)
-  sota  <- sota_side(case, saved)
   mc    <- mcpower_side(case, saved)
+  sota  <- sota_side(case, saved, mc)
   sr    <- compare_sides(case, sota, mc, saved)
   list(case = case, saved = saved, hash_ok = hc$ok, sota = sota,
        table = sr$table, converged = sr$converged)

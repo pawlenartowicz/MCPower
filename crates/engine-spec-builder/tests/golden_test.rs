@@ -148,6 +148,7 @@ fn linear_interaction_xi_xj_builds_with_interaction_term() {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
     };
 
@@ -237,6 +238,7 @@ fn linear_factor_interaction_builds_with_interaction_term() {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
     };
 
@@ -336,6 +338,7 @@ fn build_linear_contract_generation_column_kinds() {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
     };
 

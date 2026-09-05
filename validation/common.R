@@ -42,9 +42,13 @@ build_model <- function(case) {
   }
   if (!is.null(case$cluster)) {
     cl <- case$cluster
+    # cluster_level_vars must reach the engine because reference_df() rebuilds
+    # p_between from the SAME declaration on the R side; a case declaring it
+    # here while the engine saw none would put the two df out of step.
     m$set_cluster(cl$var, ICC = cl$ICC,
                   n_clusters = cl$n_clusters %||% NULL,
-                  cluster_size = cl$cluster_size %||% NULL)
+                  cluster_size = cl$cluster_size %||% NULL,
+                  cluster_level_vars = cl$cluster_level_vars %||% NULL)
   }
   m
 }
@@ -283,7 +287,8 @@ parse_factor_props <- function(case) {
 # betas + SEs aligned to the design columns. design already carries the intercept
 # as its first all-ones column, so all fits are through the origin on the matrix
 # (matching MCPower's own test definition: OLS marginal t, GLM Wald z, LME REML
-# Wald z via lmer — NOT lmerTest Satterthwaite).
+# via lmer referred to a t on the R-computed between-within df — NOT lmerTest
+# Satterthwaite).
 fit_sota <- function(family, design, outcome, cluster_ids = NULL) {
   if (family == "lme") {
     df <- as.data.frame(design)
@@ -358,60 +363,154 @@ hash_check <- function(case) {
 # ---- B<->C (+ C<->A) comparison for one case ---------------------------------
 # Fits the SAME saved bytes in R-SOTA (B) and MCPower (C), aligned by design
 # column, and returns a per-term data frame with the gate verdicts. Covers all
-# three estimators: the R fit, the R reference critical value, and the estimate
-# band all switch on case$family -- fit_sota(case$family, ...) (OLS lm / GLM
-# binomial glm / LME lmer), a qt critical value for OLS-t vs qnorm for GLM/MLE-z,
-# and the estimate band `estimate_rel_ols` (closed-form OLS) vs `estimate_rel_iter`
-# (the iterative IRLS / REML-Brent fits). The crit band splits the same way:
-# `crit_abs` (OLS t vs qt) vs `crit_abs_iter` (GLM/MLE z, where the engine's own
-# normal/chi2 quantile is coarser than qnorm). Bands stay central in SOLVING_TOL
+# three estimators: the R fit and the estimate band switch on case$family --
+# fit_sota(case$family, ...) (OLS lm / GLM binomial glm / LME lmer), and the
+# estimate band `estimate_rel_ols` (closed-form OLS) vs `estimate_rel_iter`
+# (the iterative IRLS / REML-Brent fits). The R-side reference distribution is
+# rebuilt here from the case definition plus the saved dataset alone -- see
+# reference_df(): a residual-df t for OLS, a between-within t for the mixed
+# cases, a standard normal everywhere else. The R side never reads the df
+# MCPower reports; compare_sides() instead gates that df against the R-computed
+# one, so a miscounted p_between cannot move both sides together and stay
+# green. The crit band splits the same way: `crit_abs` (OLS t vs qt) vs
+# `crit_abs_iter` (GLM z / mixed between-within t, where the engine's own
+# quantile is coarser than R's). Bands stay central in SOLVING_TOL
 # (tolerances.R); the report sources it, so SOLVING_TOL is in scope when this is
 # called. C<->A (vs the true formula) rides along as a readable sanity column.
 
+# Which design columns are constant within cluster, aligned to `columns`.
+# Mirrors the engine rule: the intercept always is; a predictor (and every dummy
+# of a factor) is iff the case declared it in cluster$cluster_level_vars; an
+# interaction is iff every one of its parents is (one within-cluster parent
+# makes the product vary within cluster). term_labels() gives the human name per
+# column ("x1", "g[2]", "x1:x2"), so the parents are the ":"-split label with
+# any "[level]" suffix stripped.
+cluster_level_flags <- function(case, columns) {
+  clv  <- case$cluster$cluster_level_vars %||% character(0)
+  labs <- term_labels(case, columns)
+  vapply(seq_along(columns), function(j) {
+    if (identical(columns[j], "intercept")) return(TRUE)
+    parents <- sub("\\[.*", "", trimws(strsplit(labs[j], ":", fixed = TRUE)[[1]]))
+    length(parents) > 0L && all(parents %in% clv)
+  }, logical(1))
+}
+
+# The R side's INDEPENDENT reference distribution, one entry per design column.
+# Built from the case definition and the saved dataset only -- deliberately
+# nothing from MCPower's debug report, so it can serve as the oracle for the
+# engine's own df. Returns list(kind = "t"|"z", df = per-column df, NA under "z").
+#
+# Mixed cases (a cluster spec, no crossed/nested extra grouping) get the
+# between-within denominator df (SAS PROC MIXED, DDFM=BETWITHIN):
+#   g          = number of distinct cluster ids in the saved data
+#   p_between  = design columns constant within cluster (cluster_level_flags)
+#   df_between = g - p_between          -- carries the cluster-level columns
+#   df_within  = (N - p) - df_between   -- carries everything else
+# A collapsed linear-mixed fit (every variance component pinned at zero) is the
+# single-level model on the same columns, so every column falls back to the
+# residual df N - p; a collapsed GLMM has no exact t and falls back to the Wald
+# z. `collapsed` is read off the fit's variance components (mcpower_side()), not
+# off the df the engine reports. OLS is the residual-df t; an unclustered GLM,
+# and any design the between-within partition is not defined for, is the Wald z.
+reference_df <- function(case, saved, collapsed = FALSE) {
+  cols     <- saved$columns
+  df_resid <- saved$n - saved$n_predictors
+  zref     <- list(kind = "z", df = rep(NA_real_, length(cols)))
+  if (identical(case$family, "ols"))
+    return(list(kind = "t", df = rep(as.numeric(df_resid), length(cols))))
+  mixed <- !is.null(case$cluster) && is.null(case$extra_groupings) && is.null(case$extra)
+  if (!mixed) return(zref)
+  if (isTRUE(collapsed))
+    return(if (identical(case$family, "lme"))
+             list(kind = "t", df = rep(as.numeric(df_resid), length(cols))) else zref)
+  between    <- cluster_level_flags(case, cols)
+  g          <- length(unique(saved$cluster_ids))
+  df_between <- g - sum(between)
+  df_within  <- df_resid - df_between
+  list(kind = "t", df = as.numeric(ifelse(between, df_between, df_within)))
+}
+
 # B side — R-SOTA on the saved bytes. The frozen golden is exactly this list
 # (an INDEPENDENT oracle: lm/glm/lmer fit, not MCPower's own output).
-sota_side <- function(case, saved) {
+#
+# The critical value is the R-computed reference: qt at reference_df()'s
+# per-column df, or qnorm where that reference is the standard normal. `mc`
+# (optional) is the already-computed mcpower_side() result for the SAME bytes
+# and is read for one bit only — whether the mixed fit collapsed to zero
+# variance components, which is a property of the fit and not of the df the
+# engine chose.
+sota_side <- function(case, saved, mc = NULL) {
   alpha <- 0.05
-  df    <- saved$n - saved$n_predictors
   bf    <- fit_sota(case$family, saved$design, saved$outcome, saved$cluster_ids)
+  ref   <- reference_df(case, saved, collapsed = isTRUE(mc$collapsed))
+  n     <- length(bf$beta)
+  crit  <- if (identical(ref$kind, "z")) rep(stats::qnorm(1 - alpha/2), n)
+           else stats::qt(1 - alpha/2, ref$df[seq_len(n)])
   list(
     beta = as.numeric(bf$beta),
     se   = as.numeric(bf$se),
     stat = as.numeric(bf$beta / bf$se),                                   # marginal t / Wald z
-    crit = if (case$family == "ols") stats::qt(1 - alpha/2, df) else stats::qnorm(1 - alpha/2)
+    crit = crit
   )
 }
 
 # C side — MCPower load_data() on the saved bytes. Targets map by 0-based kernel idx.
+# `stat_kind` / `df` carry the debug report's per-target statistic kind ("t"/"z")
+# and denominator df (NA outside "t") — see StatisticKind in the Rust debug
+# report. They are the QUANTITY UNDER TEST in compare_sides(), never an input to
+# the R-side reference. `collapsed` flags a mixed fit whose variance components
+# all pinned at zero, which moves the engine's reference to the residual df.
 mcpower_side <- function(case, saved) {
   cols <- saved$columns
   cf <- fit_mcpower(case, list(design = saved$design, columns = cols,
                                outcome = saved$outcome, cluster_ids = saved$cluster_ids))
-  c_se <- c_stat <- c_crit <- rep(NA_real_, length(cols))
+  c_se <- c_stat <- c_crit <- c_df <- rep(NA_real_, length(cols))
+  c_kind <- rep(NA_character_, length(cols))
   for (tg in cf$targets) {
     j <- tg$target_index + 1L
     c_se[j]   <- tg$se
     c_stat[j] <- tg$statistic
     c_crit[j] <- tg$critical_value
+    c_kind[j] <- tg$statistic_kind
+    c_df[j]   <- if (length(tg$df)) tg$df[1] else NA_real_
   }
+  vc <- cf$variance_components
   list(beta = cf$betas, se = c_se, stat = c_stat, crit = c_crit,
+       stat_kind = c_kind, df = c_df,
+       collapsed = length(vc) > 0L && all(vc == 0),
        converged = isTRUE(cf$converged))
 }
 
 # Shared B<->C comparator — identical logic live (sota = sota_side) and frozen
-# (sota = golden). `sota$crit` is a scalar reference critical value.
+# (sota = golden). `sota$crit` is either a scalar reference critical value
+# (every target shares it — the pre-existing frozen goldens) or a per-target
+# vector (sota_side(), and any golden frozen since); `crit_at()` picks the right
+# entry either way.
+crit_at <- function(crit, j) if (length(crit) > 1) crit[[j]] else crit
+
 compare_sides <- function(case, sota, mc, saved) {
   cols  <- saved$columns
   tb    <- true_beta_vector(case, cols)
   terms <- term_labels(case, cols)
+  ref   <- reference_df(case, saved, collapsed = isTRUE(mc$collapsed))
   est_tol  <- if (case$family == "ols") SOLVING_TOL$estimate_rel_ols else SOLVING_TOL$estimate_rel_iter
   crit_tol <- if (case$family == "ols") SOLVING_TOL$crit_abs        else SOLVING_TOL$crit_abs_iter
   rel <- function(a, b) if (b == 0) abs(a - b) else abs(a - b) / abs(b)
   rows <- lapply(seq_along(cols), function(j) {
-    is_tgt  <- !is.na(mc$stat[j])
+    is_tgt    <- !is.na(mc$stat[j])
+    sota_crit <- crit_at(sota$crit, j)
+    ref_df    <- if (identical(ref$kind, "z")) NA_real_ else ref$df[j]
     beta_ok <- rel(mc$beta[j], sota$beta[j]) <= est_tol
     stat_ok <- if (is_tgt) rel(mc$stat[j], abs(sota$stat[j])) <= est_tol else TRUE
-    crit_ok <- if (is_tgt) abs(mc$crit[j] - sota$crit) <= crit_tol else TRUE
+    crit_ok <- if (is_tgt) abs(mc$crit[j] - sota_crit) <= crit_tol else TRUE
+    # The engine must land on the reference distribution R derived on its own:
+    # the same t/z kind and, under t, the identical (integer-valued) df. Without
+    # this equality a miscounted p_between would move the engine's df and the
+    # R-side crit that is derived from it in lockstep, and crit_ok alone would
+    # still read PASS.
+    df_ok <- if (!is_tgt) TRUE
+             else if (is.na(ref_df)) identical(mc$stat_kind[j], "z") && is.na(mc$df[j])
+             else identical(mc$stat_kind[j], "t") && !is.na(mc$df[j]) && mc$df[j] == ref_df
     data.frame(
       Term            = terms[j],
       `True (formula)`= tb[j],
@@ -419,17 +518,21 @@ compare_sides <- function(case, sota, mc, saved) {
       `MCPower beta`  = mc$beta[j],
       `R t`           = if (is_tgt) abs(sota$stat[j]) else NA_real_,
       `MCPower stat`  = if (is_tgt) mc$stat[j]   else NA_real_,
-      `R crit`        = if (is_tgt) sota$crit     else NA_real_,
+      `R crit`        = if (is_tgt) sota_crit     else NA_real_,
       `MCPower crit`  = if (is_tgt) mc$crit[j]   else NA_real_,
-      Verdict         = if (beta_ok && stat_ok && crit_ok) "PASS" else "FAIL",
+      `R df`          = if (is_tgt) ref_df       else NA_real_,
+      `MCPower df`    = if (is_tgt) mc$df[j]     else NA_real_,
+      Verdict         = if (beta_ok && stat_ok && crit_ok && df_ok) "PASS" else "FAIL",
       check.names = FALSE, row.names = NULL)
   })
   list(table = do.call(rbind, rows), converged = mc$converged)
 }
 
-# Live B<->C (unchanged behaviour — same table + converged as before the refactor).
+# Live B<->C (mixed cases take the per-target qt crit at the R-computed
+# between-within df — see reference_df()).
 solving_rows <- function(case, saved) {
-  compare_sides(case, sota_side(case, saved), mcpower_side(case, saved), saved)
+  mc <- mcpower_side(case, saved)
+  compare_sides(case, sota_side(case, saved, mc), mc, saved)
 }
 
 # ---- solver-report presentation (shared by OLS/GLM/MLE solving reports) -------
@@ -485,12 +588,22 @@ compact_solver_table <- function(tb) {
     max(rb, rs)
   }, numeric(1))
   crit_abs <- abs(tb[["MCPower crit"]] - tb[["R crit"]])
+  # df is an exact-equality gate, so it renders as one value when the engine
+  # agrees with the R-computed reference and as "R ≠ MCPower" when it does not
+  # (the Verdict already reads FAIL there; this says which number moved).
+  rdf <- tb[["R df"]]; mdf <- tb[["MCPower df"]]
+  df_txt <- ifelse(is.na(rdf) & is.na(mdf), "—",
+            ifelse(!is.na(rdf) & !is.na(mdf) & rdf == mdf, sprintf("%g", rdf),
+                   sprintf("%s ≠ %s",
+                           ifelse(is.na(rdf), "—", sprintf("%g", rdf)),
+                           ifelse(is.na(mdf), "—", sprintf("%g", mdf)))))
   data.frame(
     Term                  = tb$Term,
     `True (formula)`      = tb[["True (formula)"]],
     `β (R = MCPower)`= tb[["R beta"]],
     `t / z`               = tb[["R t"]],
     `crit`                = tb[["R crit"]],
+    `df`                  = df_txt,
     `rel. diff (β, stat)` = formatC(rel_est, format = "e", digits = 1),
     `crit abs. diff`      = ifelse(is.na(crit_abs), "—", formatC(crit_abs, format = "e", digits = 1)),
     Verdict               = tb$Verdict,

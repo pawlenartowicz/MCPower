@@ -126,6 +126,7 @@ pub fn build_linear_contract_with_skeleton(
         },
         estimator: EstimatorSpec::Ols, // overwritten by build_contract
         wald_se: spec.wald_se,
+        df_method: spec.df_method,
         nagq: spec.nagq,
         test: TestSpec {
             targets: target_terms,
@@ -1105,6 +1106,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
         }
     }
@@ -1125,6 +1127,17 @@ mod tests {
             Some(TestTarget::Marginal { term: 1 })
         ));
         c.validate().unwrap();
+    }
+
+    #[test]
+    fn df_method_threads_from_input_to_contract() {
+        // Threads the non-default value, so a builder that ignored the field
+        // and emitted the default would fail here.
+        let mut spec = simple_spec();
+        spec.df_method = engine_contract::DfMethod::Asymptotic;
+        let mut contracts = build_linear_contract(&spec).unwrap();
+        let c = contracts.pop().unwrap();
+        assert_eq!(c.df_method, engine_contract::DfMethod::Asymptotic);
     }
 
     #[test]
@@ -1541,6 +1554,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
         }
     }
@@ -1586,6 +1600,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
         };
         let c = build_linear_contract(&spec).unwrap().pop().unwrap();
@@ -2141,6 +2156,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
         }
     }
@@ -2507,6 +2523,7 @@ mod tests {
             upload: None,
             cluster_level_vars: vec![],
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
         };
         let contracts = build_linear_contract(&spec).unwrap();

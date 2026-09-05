@@ -20,10 +20,11 @@
   models.** Analytical power formulas exist for a few textbook designs and are
   correct only when all their assumptions are met (they aren't). Monte Carlo
   is the ground truth they approximate.
-- **Fast enough to mean it.** A purpose-built engine, 100–1000× faster
-  than a hand-written R/Python simulation loop — even the most complex power
-  analysis runs in seconds, not hours or even days for mixed models. Speed
-  stops being the reason to avoid simulation.
+- **Fast enough to mean it.** A purpose-built engine, hundreds to thousands
+  of times faster per fit than simr, simglm, or Superpower, and 60–1,200×
+  faster than a hand-optimized R/Python loop — a full sample-size search (ten
+  candidate n × 10,000 simulations) runs in seconds, not hours or even days
+  for mixed models. Speed stops being the reason to avoid simulation.
 - **Robustness built in.** Stress-tests your design against the messy,
   non-ideal data that formulas assume away, so you catch under-powering before
   you collect.

@@ -54,6 +54,7 @@ pub fn example1_simple_ols() -> SimulationContract {
         design_test: None, // None = correctly-specified (uses design_generation)
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         test: TestSpec {
             targets: vec![

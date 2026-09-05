@@ -225,6 +225,7 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         report_overall,
         factor_min_level_count: 0,
         wald_se: c.wald_se,
+        df_method: c.df_method,
         nagq: c.nagq,
     })
 }
@@ -896,10 +897,10 @@ mod tests {
     use super::*;
     use engine_contract::fixtures::example1_simple_ols;
     use engine_contract::{
-        ClusterSizing, ClusterSpec, ColumnId, CorrectionMethod, DesignSpec, EstimatorSpec,
-        GenerationSpec, LmeScenarioPerturbations, OutcomeKind, OutcomeSpec, PosthocSpec,
-        ResidualSpec, ScenarioPerturbations, SimulationContract, SlopeTerm, TestSpec, TestTarget,
-        UploadedFrame, WaldSe,
+        ClusterSizing, ClusterSpec, ColumnId, CorrectionMethod, DesignSpec, DfMethod,
+        EstimatorSpec, GenerationSpec, LmeScenarioPerturbations, OutcomeKind, OutcomeSpec,
+        PosthocSpec, ResidualSpec, ScenarioPerturbations, SimulationContract, SlopeTerm, TestSpec,
+        TestTarget, UploadedFrame, WaldSe,
     };
 
     #[test]
@@ -985,6 +986,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 3 }],
@@ -1048,6 +1050,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
@@ -1126,6 +1129,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
@@ -1211,6 +1215,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 // term 1 in design_test names x2.
@@ -1322,6 +1327,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![
@@ -1416,6 +1422,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![
@@ -1636,6 +1643,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Joint { terms: vec![1, 2] }],
@@ -1725,6 +1733,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
@@ -1814,6 +1823,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Contrast {
@@ -1936,6 +1946,7 @@ mod tests {
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 // Target the interaction term (term index 3 in design_generation)
@@ -2008,6 +2019,7 @@ mod tests {
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
@@ -2160,6 +2172,7 @@ mod tests {
             design_test: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 2 }],
@@ -2241,6 +2254,7 @@ mod tests {
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 1 }],
@@ -2413,6 +2427,7 @@ mod tests {
             }),
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![
@@ -2436,5 +2451,15 @@ mod tests {
         c.wald_se = WaldSe::Hessian;
         let spec = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(spec.wald_se, WaldSe::Hessian);
+    }
+
+    #[test]
+    fn adapter_threads_df_method() {
+        // Threads the non-default value, so an adapter that dropped the field
+        // and left the default would fail here.
+        let mut c = example1_simple_ols();
+        c.df_method = DfMethod::Asymptotic;
+        let spec = contract_to_simulation_spec(&c).unwrap();
+        assert_eq!(spec.df_method, DfMethod::Asymptotic);
     }
 }

@@ -416,6 +416,7 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
         },
         correction: CorrectionMethod::None,
         wald_se: Default::default(),
+        df_method: Default::default(),
         scenarios: vec![],
         csv: Some(CsvData {
             mode: UploadMode::Partial,

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::design::DesignSpec;
-use crate::estimator::{EstimatorSpec, WaldSe};
+use crate::estimator::{DfMethod, EstimatorSpec, WaldSe};
 use crate::generation::GenerationSpec;
 use crate::outcome::OutcomeSpec;
 use crate::scenarios::ScenarioPerturbations;
@@ -31,6 +31,11 @@ pub struct SimulationContract {
     /// mirroring `config.json` estimation.wald_se. (design §7.)
     #[serde(default)]
     pub wald_se: WaldSe,
+    /// Reference distribution for mixed-model fixed-effect Wald tests
+    /// (no-op for `Ols` and unclustered `Glm`). Additive; serde default keeps
+    /// older payloads valid, mirroring `config.json` estimation.df_method.
+    #[serde(default)]
+    pub df_method: DfMethod,
     /// Adaptive Gauss–Hermite quadrature node count for the GLMM likelihood.
     /// `1` = Laplace (the default). `> 1` requires an eligible shape
     /// (Binary/Count GLMM, single grouping factor, ≤ 3 REs per group, odd
@@ -59,7 +64,7 @@ fn default_nagq() -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::estimator::WaldSe;
+    use crate::estimator::{DfMethod, WaldSe};
     use crate::fixtures::example1_simple_ols;
 
     #[test]
@@ -78,13 +83,18 @@ mod tests {
         let v = rmp_serde::to_vec_named(&c).unwrap();
         let mut val: rmpv::Value = rmp_serde::from_slice(&v).unwrap();
         if let rmpv::Value::Map(entries) = &mut val {
-            entries.retain(|(k, _)| k.as_str() != Some("wald_se") && k.as_str() != Some("nagq"));
+            entries.retain(|(k, _)| {
+                k.as_str() != Some("wald_se")
+                    && k.as_str() != Some("nagq")
+                    && k.as_str() != Some("df_method")
+            });
         }
         let mut stripped = Vec::new();
         rmpv::encode::write_value(&mut stripped, &val).unwrap();
         let back: SimulationContract = rmp_serde::from_slice(&stripped).unwrap();
-        // Absent wald_se/nagq deserialize to the 1.1.0 fastmode defaults.
+        // Absent wald_se/nagq/df_method deserialize to their 1.1.0 defaults.
         assert_eq!(back.wald_se, WaldSe::Rx);
         assert_eq!(back.nagq, 1);
+        assert_eq!(back.df_method, DfMethod::BetweenWithin);
     }
 }

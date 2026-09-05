@@ -98,6 +98,7 @@ fn logit_spec(n_non_factor: u32, effect_sizes: Vec<f64>) -> SimulationSpec {
         link: None,
         estimator: EstimatorSpec::Glm,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         intercept,
         posthoc: vec![],

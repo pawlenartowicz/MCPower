@@ -85,9 +85,12 @@ run_per_draw <- function(cell, which, base_seed, K) {
 }
 
 # ---- find_power power read (target marginal, NORMAL Wald reference) -----------
+# df_method pinned to "asymptotic" so the decision matches Z_CRIT; the default
+# between-within t would drift from the per-draw arm on few-cluster cells.
 fp_power <- function(model, n, n_sims, mode, seed) {
   r <- suppressWarnings(model$find_power(sample_size = n, n_sims = n_sims,
-                                         wald_se = mode, seed = seed,
+                                         wald_se = mode, df_method = "asymptotic",
+                                         seed = seed,
                                          progress_callback = FALSE, verbose = FALSE))
   r$power_uncorrected[[1]]
 }

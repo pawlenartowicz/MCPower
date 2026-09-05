@@ -139,7 +139,10 @@ test_that("MCPowerDebug$load_data round-trips a clustered (LME) dataset", {
   for (tg in res$targets) {
     expect_true(tg$se > 0)
     expect_true(is.finite(tg$statistic))
-    expect_equal(tg$statistic_kind, "z")
+    # Default df_method is between_within, so a mixed fit reports a t with a
+    # denominator df; x1 varies inside clusters, so the df is N - g - 1.
+    expect_equal(tg$statistic_kind, "t")
+    expect_equal(tg$df[[1]], 400 - 20 - 1)
   }
 })
 

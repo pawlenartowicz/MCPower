@@ -68,6 +68,7 @@ fn mixed_spec(estimator: EstimatorSpec, outcome_kind: OutcomeKind) -> Simulation
         link: None,
         estimator,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         intercept: 0.0,
         posthoc: vec![],

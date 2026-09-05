@@ -736,7 +736,8 @@ MCPower <- R6::R6Class(
         ncol           = as.integer(ncol_design),
         outcome        = outcome,
         cluster_ids    = cluster_ids,
-        wald_se        = ""               # use the contract's configured SE mode
+        wald_se        = "",              # use the contract's configured SE mode
+        df_method      = ""               # use the contract's configured df method
       )
 
       betas <- fit$betas
@@ -884,17 +885,29 @@ MCPower <- R6::R6Class(
     #'   factor and at most 3 random effects per group) -- an ineligible or
     #'   even/out-of-range value warns and runs at Laplace instead. No-op for
     #'   OLS/LMM.
+    #' @param df_method Reference distribution for mixed-model fixed-effect
+    #'   tests: \code{"between_within"} (default) tests each fixed effect
+    #'   against a t with between-within denominator degrees of freedom --
+    #'   between-cluster df if the predictor is cluster-level, within-cluster
+    #'   df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
+    #'   for OLS and unclustered GLM; not applied (falls back to Wald z) with
+    #'   crossed or nested extra groupings. Cluster-level predictors must be
+    #'   declared with \code{cluster_level_vars} (see \code{set_cluster}) for
+    #'   the between df to apply. A fit whose random-effect variances all
+    #'   collapse to zero (a singular fit) is tested against the residual df
+    #'   \code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
+    #'   reference -- the same switch a Satterthwaite reference makes there.
     find_power = function(sample_size, target_test = NULL, correction = NULL,
                           wald_se = NULL, agq = NULL, test_formula = NULL,
                           n_sims = NULL,
                           seed = NULL, scenarios = FALSE, progress_callback = TRUE,
-                          verbose = TRUE) {
+                          verbose = TRUE, df_method = NULL) {
       if (!private$applied) private$apply()
 
       # Validate correction (raises on unknown names).
       private$validate_correction_arg(correction)
-      # Resolve wald_se / agq against config; warn-and-strip ineligible agq.
-      est <- private$resolve_estimation(wald_se, agq)
+      # Resolve wald_se / agq / df_method against config; warn-and-strip ineligible agq.
+      est <- private$resolve_estimation(wald_se, agq, df_method)
 
       names <- private$resolve_scenarios_arg(scenarios)
 
@@ -928,7 +941,8 @@ MCPower <- R6::R6Class(
 
       contracts <- private$build_contract_bytes(
         names, target_test = target_test, correction = correction,
-        wald_se = est$wald_se, nagq = est$nagq, test_formula = test_formula)
+        wald_se = est$wald_se, nagq = est$nagq, test_formula = test_formula,
+        df_method = est$df_method)
 
       progress <- private$resolve_progress(progress_callback)
       raw <- find_power(contracts, as.integer(sample_size), n, base_seed,
@@ -1010,13 +1024,26 @@ MCPower <- R6::R6Class(
     #'   than requested -- e.g. 20 subjects crossed with 12 items: a requested
     #'   step of 1 trial per subject snaps to 12 trials (the atom is 240
     #'   observations / 20 subjects).
+    #' @param df_method Reference distribution for mixed-model fixed-effect
+    #'   tests: \code{"between_within"} (default) tests each fixed effect
+    #'   against a t with between-within denominator degrees of freedom --
+    #'   between-cluster df if the predictor is cluster-level, within-cluster
+    #'   df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
+    #'   for OLS and unclustered GLM; not applied (falls back to Wald z) with
+    #'   crossed or nested extra groupings. Cluster-level predictors must be
+    #'   declared with \code{cluster_level_vars} (see \code{set_cluster}) for
+    #'   the between df to apply. A fit whose random-effect variances all
+    #'   collapse to zero (a singular fit) is tested against the residual df
+    #'   \code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
+    #'   reference -- the same switch a Satterthwaite reference makes there.
     find_sample_size = function(target_test = NULL, correction = NULL,
                                 wald_se = NULL, agq = NULL, test_formula = NULL,
                                 target_power = NULL,
                                 from_size = NULL, to_size = NULL, by = NULL,
                                 mode = "linear", unit = "observations",
                                 n_sims = NULL, seed = NULL, scenarios = FALSE,
-                                progress_callback = TRUE, verbose = TRUE) {
+                                progress_callback = TRUE, verbose = TRUE,
+                                df_method = NULL) {
       if (!private$applied) private$apply()
       .ssb <- .sim_defaults()$sample_size_bounds
       if (is.null(from_size)) from_size <- .ssb$from
@@ -1025,8 +1052,8 @@ MCPower <- R6::R6Class(
 
       # Validate correction (raises on unknown names).
       private$validate_correction_arg(correction)
-      # Resolve wald_se / agq against config; warn-and-strip ineligible agq.
-      est <- private$resolve_estimation(wald_se, agq)
+      # Resolve wald_se / agq / df_method against config; warn-and-strip ineligible agq.
+      est <- private$resolve_estimation(wald_se, agq, df_method)
 
       names <- private$resolve_scenarios_arg(scenarios)
       n <- if (!is.null(n_sims)) as.integer(n_sims) else as.integer(self$n_simulations)
@@ -1056,7 +1083,8 @@ MCPower <- R6::R6Class(
 
       contracts <- private$build_contract_bytes(
         names, target_test = target_test, correction = correction,
-        wald_se = est$wald_se, nagq = est$nagq, test_formula = test_formula)
+        wald_se = est$wald_se, nagq = est$nagq, test_formula = test_formula,
+        df_method = est$df_method)
 
       tp <- if (!is.null(target_power)) as.numeric(target_power) else as.numeric(self$power)
       progress <- private$resolve_progress(progress_callback)
@@ -1392,13 +1420,16 @@ MCPower <- R6::R6Class(
       n_re <= 3L
     },
 
-    # model.py _resolve_estimation — resolve wald_se / agq against the config
-    # `estimation` defaults, validate, and warn-and-strip an ineligible agq > 1
-    # to Laplace (nagq = 1). Returns list(wald_se = <str>, nagq = <int>).
-    resolve_estimation = function(wald_se, agq) {
+    # model.py _resolve_estimation — resolve wald_se / agq / df_method against
+    # the config `estimation` defaults, validate, and warn-and-strip an
+    # ineligible agq > 1 to Laplace (nagq = 1). Returns
+    # list(wald_se = <str>, nagq = <int>, df_method = <str>).
+    resolve_estimation = function(wald_se, agq, df_method = NULL) {
       est <- .config()$estimation
       if (is.null(wald_se)) wald_se <- est$wald_se
       wald_se_wire <- .wald_se_for_rust(wald_se)  # validates
+      if (is.null(df_method)) df_method <- est$df_method
+      df_method_wire <- .df_method_for_rust(df_method)  # validates
       nagq <- if (is.null(agq)) as.integer(est$nagq) else as.integer(agq)
       if (is.na(nagq) || nagq < 1L || nagq > 25L || nagq %% 2L == 0L) {
         stop(sprintf("agq must be an odd integer in 1..=25, got %s", format(agq)),
@@ -1412,7 +1443,7 @@ MCPower <- R6::R6Class(
           nagq), call. = FALSE)
         nagq <- 1L
       }
-      list(wald_se = wald_se_wire, nagq = nagq)
+      list(wald_se = wald_se_wire, nagq = nagq, df_method = df_method_wire)
     },
 
     # model.py _resolve_scenarios_arg.
@@ -1532,7 +1563,8 @@ MCPower <- R6::R6Class(
     # .build_report_meta can include the effect_skeleton without a separate call.
     build_contract_bytes = function(scenario_names, target_test = NULL,
                                     correction = NULL, wald_se = NULL,
-                                    nagq = 1L, test_formula = NULL) {
+                                    nagq = 1L, test_formula = NULL,
+                                    df_method = NULL) {
       if (!private$applied) private$apply()
       reg <- private$registry
 
@@ -1547,6 +1579,7 @@ MCPower <- R6::R6Class(
         correction = correction,
         wald_se = wald_se,
         nagq = nagq,
+        df_method = df_method,
         target_test = target_test,
         heteroskedasticity = private$heteroskedasticity,
         residual_name = private$residual_dist_name,

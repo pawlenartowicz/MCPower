@@ -287,7 +287,8 @@ The \code{MCPower} object invisibly (for chaining).
   seed = NULL,
   scenarios = FALSE,
   progress_callback = TRUE,
-  verbose = TRUE
+  verbose = TRUE,
+  df_method = NULL
 )}\if{html}{\out{</div>}}
 }
 
@@ -301,6 +302,19 @@ the design is eligible (a Binary or Count GLMM with a single grouping
 factor and at most 3 random effects per group) -- an ineligible or
 even/out-of-range value warns and runs at Laplace instead. No-op for
 OLS/LMM.}
+
+\item{\code{df_method}}{Reference distribution for mixed-model fixed-effect
+tests: \code{"between_within"} (default) tests each fixed effect
+against a t with between-within denominator degrees of freedom --
+between-cluster df if the predictor is cluster-level, within-cluster
+df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
+for OLS and unclustered GLM; not applied (falls back to Wald z) with
+crossed or nested extra groupings. Cluster-level predictors must be
+declared with \code{cluster_level_vars} (see \code{set_cluster}) for
+the between df to apply. A fit whose random-effect variances all
+collapse to zero (a singular fit) is tested against the residual df
+\code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
+reference -- the same switch a Satterthwaite reference makes there.}
 }
 \if{html}{\out{</div>}}
 }
@@ -326,7 +340,8 @@ OLS/LMM.}
   seed = NULL,
   scenarios = FALSE,
   progress_callback = TRUE,
-  verbose = TRUE
+  verbose = TRUE,
+  df_method = NULL
 )}\if{html}{\out{</div>}}
 }
 
@@ -362,6 +377,19 @@ point to the cluster atom in N, so a unit step can land on a wider one
 than requested -- e.g. 20 subjects crossed with 12 items: a requested
 step of 1 trial per subject snaps to 12 trials (the atom is 240
 observations / 20 subjects).}
+
+\item{\code{df_method}}{Reference distribution for mixed-model fixed-effect
+tests: \code{"between_within"} (default) tests each fixed effect
+against a t with between-within denominator degrees of freedom --
+between-cluster df if the predictor is cluster-level, within-cluster
+df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
+for OLS and unclustered GLM; not applied (falls back to Wald z) with
+crossed or nested extra groupings. Cluster-level predictors must be
+declared with \code{cluster_level_vars} (see \code{set_cluster}) for
+the between df to apply. A fit whose random-effect variances all
+collapse to zero (a singular fit) is tested against the residual df
+\code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
+reference -- the same switch a Satterthwaite reference makes there.}
 }
 \if{html}{\out{</div>}}
 }

@@ -24,14 +24,25 @@ impl EstimatorSpec {
         matches!(self, EstimatorSpec::Ols)
     }
 
-    /// Degrees-of-freedom slots reported for this estimator: OLS reports its
-    /// residual df; the z-based estimators (GLM/MLE) report none. Same OLS-vs-z
-    /// partition as [`Self::uses_student_t`].
-    pub fn df_slots(self, df_resid: f64) -> Vec<f64> {
-        if self.uses_student_t() {
-            vec![df_resid]
+    /// Per-target degrees-of-freedom slots, mirroring the shape of
+    /// `CritValueTable::df_per_target`'s row for one sample size: reads
+    /// `df_per_target` — already resolved by the crit-table builder, including
+    /// the between-within denominator df for a mixed spec — rather than
+    /// recomputing it here. An empty `df_per_target` (every standard-normal /
+    /// Wald-z build, which is OLS's `uses_student_t() == false` twin `Glm`/`Mle`
+    /// under `DfMethod::Asymptotic`) reports `n_targets` empty slots; a
+    /// non-empty row (OLS always; a mixed target under the between-within
+    /// reference) reports one `[df]` slot per target.
+    pub fn df_slots(self, df_per_target: &[f64], n_targets: usize) -> Vec<Vec<f64>> {
+        if df_per_target.is_empty() {
+            vec![Vec::new(); n_targets]
         } else {
-            Vec::new()
+            debug_assert_eq!(
+                df_per_target.len(),
+                n_targets,
+                "a non-empty df_per_target row must carry exactly one df per target"
+            );
+            df_per_target.iter().map(|&d| vec![d]).collect()
         }
     }
 }
@@ -64,6 +75,23 @@ impl WaldSe {
     }
 }
 
+/// Reference distribution for mixed-model fixed-effect Wald tests. Additive
+/// contract field; no-op for `Ols` and unclustered `Glm`. This default mirrors
+/// `configs/config.json` `estimation.df_method` — the single home for the
+/// cross-port default; change both together.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DfMethod {
+    /// Wald z against the standard normal, applied to every clustered fit
+    /// regardless of estimator — the opt-in.
+    Asymptotic,
+    /// Between-within denominator degrees of freedom (SAS `DDFM=BETWITHIN`)
+    /// applied to mixed fits — `Mle`, or `Glm` with a cluster spec — the
+    /// default. Unclustered `Glm` and `Ols` ignore the knob.
+    #[default]
+    BetweenWithin,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +111,20 @@ mod tests {
         assert!(!WaldSe::Hessian.affects(EstimatorSpec::Glm, false)); // unclustered GLM
         assert!(!WaldSe::Hessian.affects(EstimatorSpec::Ols, true));
         assert!(!WaldSe::Hessian.affects(EstimatorSpec::Mle, true)); // LMM
+    }
+
+    #[test]
+    fn df_method_serde_snake_case_and_default() {
+        // wire tags are snake_case
+        assert_eq!(
+            serde_json::to_string(&DfMethod::Asymptotic).unwrap(),
+            "\"asymptotic\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DfMethod::BetweenWithin).unwrap(),
+            "\"between_within\""
+        );
+        // default is between-within; mirrors config.json estimation.df_method
+        assert_eq!(DfMethod::default(), DfMethod::BetweenWithin);
     }
 }

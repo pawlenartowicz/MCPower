@@ -27,12 +27,12 @@ use std::sync::OnceLock;
 use rayon::prelude::*;
 
 use crate::correction::apply_correction;
-use crate::critvals::CritValueTable;
+use crate::critvals::{BetweenWithinDf, CritValueTable};
 use crate::data_gen::generate_sim_data;
 use crate::posthoc::evaluate_posthoc;
 use crate::spec::{
-    BatchResult, CorrectionMethod, EngineError, EstimatorSpec, PosthocBlockShape, ProgressSink,
-    ResultShape, SimulationSpec,
+    BatchResult, CorrectionMethod, DfMethod, EngineError, EstimatorSpec, PosthocBlockShape,
+    ProgressSink, ResultShape, SimulationSpec,
 };
 use crate::workspace::{ReducedCritEntry, SimWorkspace};
 use glmm::loop_advanced::{fit_suff_stats_t_sq, ols_contrast_t_sq, OlsScratch, OlsSuffStats};
@@ -248,6 +248,24 @@ fn run_batch_impl(
             "sample_sizes[0] must be > 0".into(),
         ));
     }
+    // The per-cluster random-effect draw buffers are sized once, from the
+    // largest sample size, by flooring `max_n / cluster_size` — but the
+    // row→cluster map sends a remainder row to one further cluster, whose draw
+    // would then sit past the end of those buffers. So the grid must END on a
+    // complete cluster (an intermediate point may carry a partial trailing one:
+    // its draws are already allocated).
+    if let Some(cluster) = spec.cluster.as_ref() {
+        if let crate::spec::ClusterSizing::FixedSize { cluster_size } = cluster.sizing {
+            let size = cluster_size.max(1);
+            let max_n = *sample_sizes.last().expect("sample_sizes is non-empty");
+            if max_n % size != 0 {
+                return Err(EngineError::InvalidSpec(format!(
+                    "largest sample_size {max_n} is not a multiple of cluster_size {size}; \
+                     a FixedSize design must end on a complete cluster"
+                )));
+            }
+        }
+    }
 
     let n_non_factor = spec.n_non_factor as usize;
     let n_factor_dummies = spec.n_factor_dummies as usize;
@@ -343,8 +361,25 @@ fn run_batch_impl(
     // One authority for every df-dependent threshold: the same builder also
     // produces the reduced-model tables for sparse-exclusion rounds (see
     // `reduced_crit_entry`), so reduced thresholds cannot drift from these.
-    let (crit, posthoc_correction_crit_sq) =
-        build_crit_tables(spec, sample_sizes, n_predictors_total as u32)?;
+    //
+    // Built at the FITTED width, not the generation width. A `test_formula` is
+    // spec-constant, so when it drops columns every sim decides against a
+    // reduced table and this one is never read for a threshold — sizing it at
+    // the full design would let its df guards (`N − P`, and the between-within
+    // `g − p_between`) refuse a run over numbers no fit ever uses. Without a
+    // `test_formula` the keep-set is every column, so this is the full design.
+    let entry_flags = vec![0u8; spec.factor_n_levels.len()];
+    let mut entry_kept_cols: Vec<u32> = Vec::new();
+    let mut entry_col_remap = vec![-1i32; n_predictors_total];
+    let p_entry = build_exclusion_remap(
+        spec,
+        &entry_flags,
+        &mut entry_kept_cols,
+        &mut entry_col_remap,
+    );
+    let p_between_entry = crate::critvals::between_column_count(spec, Some(&entry_kept_cols));
+    let (crit, crit_boundary, posthoc_correction_crit_sq) =
+        build_crit_tables(spec, sample_sizes, p_entry as u32, p_between_entry)?;
 
     // Posthoc support — Σ C(kᵢ, 2) across blocks, where kᵢ = dummies+1.
     let posthoc_blocks: Vec<PosthocBlockShape> = posthoc_block_shapes(spec);
@@ -594,6 +629,7 @@ fn run_batch_impl(
                 sample_sizes,
                 base_seed,
                 &crit,
+                crit_boundary.as_ref(),
                 &posthoc_contrasts,
                 &posthoc_correction_crit_sq,
                 n_predictors_total,
@@ -705,6 +741,7 @@ fn run_batch_impl(
                             sample_sizes,
                             base_seed,
                             &crit,
+                            crit_boundary.as_ref(),
                             &posthoc_contrasts,
                             &posthoc_correction_crit_sq,
                             n_predictors_total,
@@ -796,6 +833,7 @@ fn run_one_sim(
     sample_sizes: &[u32],
     base_seed: u64,
     crit: &CritValueTable,
+    crit_boundary: Option<&CritValueTable>,
     posthoc_contrasts: &[Vec<f64>],
     posthoc_correction_crit_sq: &[Vec<f64>],
     n_predictors_total: usize,
@@ -1022,8 +1060,13 @@ fn run_one_sim(
                     if !needs_reduced_fit {
                         (crit, n_idx, &posthoc_correction_crit_sq[n_idx])
                     } else {
-                        let e =
-                            reduced_crit_entry(&mut ws.reduced_crit_cache, n, p_red as u32, spec)?;
+                        let e = reduced_crit_entry(
+                            &mut ws.reduced_crit_cache,
+                            n,
+                            p_red as u32,
+                            reduced_p_between(spec, &excl_kept_cols),
+                            spec,
+                        )?;
                         (&e.crit, 0, &e.posthoc_corr_row)
                     };
 
@@ -1031,7 +1074,10 @@ fn run_one_sim(
                 let row_end = row_start + main_row;
                 let unc_slice = &mut unc[row_start..row_end];
                 unc_slice.fill(0);
-                let t_crit_unc = crit_src.t_crit_sq_uncorrected[crit_idx];
+                // Per-target under the between-within denominator df; one repeated
+                // value everywhere else. Mirrors the LME and GLMM marginal reads —
+                // change together.
+                let t_crit_unc = &crit_src.t_crit_sq_uncorrected[crit_idx];
 
                 // Build combined t² array: marginals followed
                 // by contrast pairs. Use lme_joint_rhs as a
@@ -1083,7 +1129,7 @@ fn run_one_sim(
                     }
                     // Write uncorrected significance.
                     for (j, &t_sq) in all_t_sq.iter().enumerate() {
-                        if !t_sq.is_nan() && t_sq > t_crit_unc {
+                        if !t_sq.is_nan() && t_sq > t_crit_unc[j] {
                             unc_slice[j] = 1;
                         }
                     }
@@ -1103,7 +1149,6 @@ fn run_one_sim(
                     apply_correction(
                         spec.correction_method,
                         all_t_sq,
-                        t_crit_unc,
                         &crit_src.correction_t_crit_sq[crit_idx],
                         cor_slice,
                     );
@@ -1426,6 +1471,48 @@ fn run_one_sim(
                     }
                 }
 
+                // Every df-dependent threshold for this round, from one source —
+                // mirrors the OLS arm's `crit_src` split, change together. The
+                // reduced round only needs its own table when a df actually backs
+                // the thresholds, i.e. under the between-within reference: the
+                // asymptotic mixed crit is Wald-z and df-free, so the full table is
+                // exact there and stays bit-identical. Disjoint-field borrow of ws
+                // (the cache vs the fit buffers held by `view`).
+                //
+                // A collapsed fit (every variance component pinned at zero) is
+                // decided against the collapsed twin of whichever table applies —
+                // see `fit_collapsed` / `build_crit_tables`. Mirrors the GLMM arm,
+                // change together. The cold reduced fit strips every random slope
+                // (above), so the fitted model has one intercept component per
+                // grouping — size the pinned mask from that, not the spec.
+                let n_components = if needs_reduced_fit {
+                    1 + cluster.extra_groupings.len()
+                } else {
+                    cluster.n_variance_components()
+                };
+                let collapsed = converged && fit_collapsed(n_components, diag.pinned_components);
+                let (crit_src, crit_idx): (&CritValueTable, usize) =
+                    if needs_reduced_fit && crit.has_df() {
+                        let e = reduced_crit_entry(
+                            &mut ws.reduced_crit_cache,
+                            n,
+                            p_red as u32,
+                            reduced_p_between(spec, &excl_kept_cols),
+                            spec,
+                        )?;
+                        let t = match (&e.crit_boundary, collapsed) {
+                            (Some(b), true) => b,
+                            _ => &e.crit,
+                        };
+                        (t, 0)
+                    } else {
+                        let t = match (crit_boundary, collapsed) {
+                            (Some(b), true) => b,
+                            _ => crit,
+                        };
+                        (t, n_idx)
+                    };
+
                 conv[n_idx] = u8::from(converged);
                 bh[n_idx] = diag.boundary_hit;
                 // Per-component boundary bitmask straight off the fit (BOBYQA on
@@ -1454,9 +1541,27 @@ fn run_one_sim(
                 // reduced target set (excluded targets are untestable by definition).
                 let k_red = targets_fit.len(); // spec.target_indices.len() hot, excl_targets.len() cold
                 let joint_crit = if !needs_reduced_fit {
-                    crit.joint_t_crit_sq[n_idx]
+                    crit_src.joint_t_crit_sq[crit_idx]
                 } else if k_red == 0 {
                     f64::INFINITY // no testable targets ⇒ joint never significant
+                } else if crit_src.has_df() {
+                    // A df on an Mle build means the between-within reference is
+                    // active: the joint statistic goes against k · F(k, df_joint)
+                    // with df_joint the smallest df among the targets that survived
+                    // exclusion, read off the REDUCED table. Mirrors the joint arm of
+                    // `CritValueTable::build_with_tukey_k` and the GLMM joint site
+                    // below — change together.
+                    let dfs = &crit_src.df_per_target[crit_idx];
+                    let df_joint = excl_target_slots
+                        .iter()
+                        .map(|&s| dfs[s])
+                        .fold(f64::INFINITY, f64::min);
+                    k_red as f64
+                        * crate::critvals::f_ppf(
+                            1.0 - spec.crit_values.alpha,
+                            k_red as f64,
+                            df_joint,
+                        )
                 } else {
                     // Reduced target set: χ² df must match k_red. This is the one
                     // reduced-df crit NOT served by the (N, p_red) cache the OLS/GLM
@@ -1477,7 +1582,10 @@ fn run_one_sim(
                 let row_end = row_start + main_row;
                 let unc_slice = &mut unc[row_start..row_end];
                 unc_slice.fill(0);
-                let t_crit_unc = crit.t_crit_sq_uncorrected[n_idx];
+                // Per-target under the between-within denominator df; one repeated
+                // value everywhere else. Mirrors the OLS and GLMM marginal reads —
+                // change together.
+                let t_crit_unc = &crit_src.t_crit_sq_uncorrected[crit_idx];
                 // PREDICTOR-indexed gather (module-header invariant).
                 // Hot path: t_sq is indexed by original predictor position (0..P);
                 //   gather via spec.target_indices.
@@ -1494,7 +1602,7 @@ fn run_one_sim(
                                 _ => f64::NAN,
                             }
                         };
-                        if !tj.is_nan() && tj > t_crit_unc {
+                        if !tj.is_nan() && tj > t_crit_unc[j] {
                             unc_slice[j] = 1;
                         }
                     }
@@ -1540,8 +1648,7 @@ fn run_one_sim(
                     apply_correction(
                         spec.correction_method,
                         all_t_sq,
-                        t_crit_unc,
-                        &crit.correction_t_crit_sq[n_idx],
+                        &crit_src.correction_t_crit_sq[crit_idx],
                         cor_slice,
                     );
                 } else {
@@ -1735,6 +1842,41 @@ fn run_one_sim(
                         }
                     }
 
+                    // Every df-dependent threshold for this round, from one source —
+                    // mirrors the OLS and LME arms' `crit_src` split, change together.
+                    // `test_formula` is the only reduction a clustered spec allows, and
+                    // only the between-within reference makes the thresholds depend on
+                    // the fitted column set; the asymptotic mixed crit is df-free, so
+                    // the full table stays exact and bit-identical there.
+                    //
+                    // Collapsed fit ⇒ the collapsed twin, as in the LME arm — for a
+                    // GLMM that twin is the asymptotic (Wald z) table. The reduced
+                    // GLMM fit reuses the full RE workspace (slopes intact), so the
+                    // spec's component count is the fitted one.
+                    let collapsed = converged
+                        && fit_collapsed(cluster.n_variance_components(), diag.pinned_components);
+                    let (crit_src, crit_idx): (&CritValueTable, usize) =
+                        if test_reduces && crit.has_df() {
+                            let e = reduced_crit_entry(
+                                &mut ws.reduced_crit_cache,
+                                n,
+                                p_fit as u32,
+                                reduced_p_between(spec, &spec.fit_columns),
+                                spec,
+                            )?;
+                            let t = match (&e.crit_boundary, collapsed) {
+                                (Some(b), true) => b,
+                                _ => &e.crit,
+                            };
+                            (t, 0)
+                        } else {
+                            let t = match (crit_boundary, collapsed) {
+                                (Some(b), true) => b,
+                                _ => crit,
+                            };
+                            (t, n_idx)
+                        };
+
                     conv[n_idx] = u8::from(converged);
                     bh[n_idx] = diag.boundary_hit;
                     pc[n_idx] = diag.pinned_components;
@@ -1747,15 +1889,19 @@ fn run_one_sim(
                         overall[n_idx] = 0;
                     }
 
-                    // Joint Wald-χ² significance — identical rule to the LME arm
-                    // (`joint_t_sq > χ²(k, 1−α)`, outside the FW-correction set so
-                    // joint_cor == joint_unc). The χ² crit is computed here via
-                    // chi2_ppf because the shared table only populates
-                    // joint_t_crit_sq for Mle (NaN for Glm) — same formula the LME
-                    // cold path uses, k = #targets (no exclusion).
+                    // Joint Wald significance — identical rule to the LME arm
+                    // (outside the FW-correction set, so joint_cor == joint_unc).
+                    // The asymptotic χ² crit is computed here rather than read from
+                    // the table, which populates joint_t_crit_sq only for Mle (NaN
+                    // for Glm) — same formula the LME cold path uses, k = #targets
+                    // (no exclusion). Under the between-within reference the table
+                    // does carry the clustered-GLMM value, so read it instead.
+                    // Mirrors the LME joint site above — change together.
                     let k = spec.target_indices.len();
                     let joint_crit = if k == 0 {
                         f64::INFINITY
+                    } else if crit_src.joint_t_crit_sq[crit_idx].is_finite() {
+                        crit_src.joint_t_crit_sq[crit_idx]
                     } else {
                         crate::critvals::chi2_ppf(1.0 - spec.crit_values.alpha, k as f64)
                     };
@@ -1777,11 +1923,14 @@ fn run_one_sim(
                     let row_end = row_start + main_row;
                     let unc_slice = &mut unc[row_start..row_end];
                     unc_slice.fill(0);
-                    let t_crit_unc = crit.t_crit_sq_uncorrected[n_idx];
+                    // Per-target under the between-within denominator df; one
+                    // repeated value everywhere else. Mirrors the OLS and LME
+                    // marginal reads — change together.
+                    let t_crit_unc = &crit_src.t_crit_sq_uncorrected[crit_idx];
                     if converged {
                         for (j, &ti) in fit_targets.iter().enumerate() {
                             let v = t_sq[ti as usize];
-                            if !v.is_nan() && v > t_crit_unc {
+                            if !v.is_nan() && v > t_crit_unc[j] {
                                 unc_slice[j] = 1;
                             }
                         }
@@ -1810,8 +1959,7 @@ fn run_one_sim(
                         apply_correction(
                             spec.correction_method,
                             all_t_sq,
-                            t_crit_unc,
-                            &crit.correction_t_crit_sq[n_idx],
+                            &crit_src.correction_t_crit_sq[crit_idx],
                             cor_slice,
                         );
                     } else {
@@ -2027,7 +2175,7 @@ fn run_one_sim(
                 let row_end = row_start + main_row;
                 let unc_slice = &mut unc[row_start..row_end];
                 unc_slice.fill(0);
-                let t_crit_unc = crit.t_crit_sq_uncorrected[n_idx];
+                let t_crit_unc = &crit.t_crit_sq_uncorrected[n_idx];
                 let n_targets = spec.target_indices.len();
 
                 // Build full-width t² buffer (length n_targets) with NaN at dropped
@@ -2050,7 +2198,7 @@ fn run_one_sim(
                         }
                     }
                     for (j, &t_sq) in all_t_sq.iter().enumerate() {
-                        if !t_sq.is_nan() && t_sq > t_crit_unc {
+                        if !t_sq.is_nan() && t_sq > t_crit_unc[j] {
                             unc_slice[j] = 1;
                         }
                     }
@@ -2068,7 +2216,6 @@ fn run_one_sim(
                     apply_correction(
                         spec.correction_method,
                         all_t_sq,
-                        t_crit_unc,
                         &crit.correction_t_crit_sq[n_idx],
                         cor_slice,
                     );
@@ -2097,6 +2244,7 @@ fn run_one_sim(
                             &mut ws.reduced_crit_cache,
                             n,
                             fit_final_p_red as u32,
+                            reduced_p_between(spec, &excl_kept_cols),
                             spec,
                         )?
                         .crit
@@ -2279,6 +2427,8 @@ fn build_posthoc_correction_crit_with_levels(
             correction_method,
             estimator,
             &tukey_k_per_contrast,
+            // Post-hoc contrasts are OLS-only, so no between-within split here.
+            None,
         )?
     } else {
         CritValueTable::build(
@@ -2321,11 +2471,19 @@ fn posthoc_block_shapes(spec: &SimulationSpec) -> Vec<PosthocBlockShape> {
 /// the correction-rank alphas follow the *planned* family size even when some
 /// targets are untestable in a given round; only the df transform follows
 /// `n_predictors`.
+///
+/// `p_between` is how many of those `n_predictors` columns are constant within
+/// cluster — the second df input of the between-within denominator degrees of
+/// freedom, and the reason a reduced rebuild needs more than a column count:
+/// dropping a cluster-level dummy and dropping a within-cluster one move
+/// different halves of the split.
+#[allow(clippy::type_complexity)]
 fn build_crit_tables(
     spec: &SimulationSpec,
     sample_sizes: &[u32],
     n_predictors: u32,
-) -> Result<(CritValueTable, Vec<Vec<f64>>), EngineError> {
+    p_between: u32,
+) -> Result<(CritValueTable, Option<CritValueTable>, Vec<Vec<f64>>), EngineError> {
     let n_targets = spec.target_indices.len() + spec.contrast_pairs.len();
     // Per-target Tukey `k` (the factor level count `L` of the factor each target
     // belongs to). Only consumed by the TukeyHsd arm; cheap to always compute.
@@ -2357,6 +2515,7 @@ fn build_crit_tables(
     } else {
         Vec::new()
     };
+    let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between);
     let crit = CritValueTable::build_with_tukey_k(
         &spec.crit_values,
         sample_sizes,
@@ -2365,7 +2524,25 @@ fn build_crit_tables(
         spec.correction_method,
         spec.estimator,
         &tukey_k_per_target,
+        bw.as_ref(),
     )?;
+    // The collapsed-fit twin: same inputs, but the reference a fit whose
+    // variance components all pinned at zero is decided against (see
+    // `BetweenWithinDf::collapsed`). Built only under the between-within
+    // reference; the asymptotic table is df-free, so nothing to swap there.
+    let crit_boundary = match bw.as_ref() {
+        None => None,
+        Some(b) => Some(CritValueTable::build_with_tukey_k(
+            &spec.crit_values,
+            sample_sizes,
+            n_predictors,
+            n_targets as u32,
+            spec.correction_method,
+            spec.estimator,
+            &tukey_k_per_target,
+            b.collapsed(spec.estimator).as_ref(),
+        )?),
+    };
 
     // Build correction crit per block, concatenating into one flat-per-n_idx Vec.
     let posthoc_blocks = posthoc_block_shapes(spec);
@@ -2393,34 +2570,71 @@ fn build_crit_tables(
             result
         }
     };
-    Ok((crit, posthoc_correction_crit_sq))
+    Ok((crit, crit_boundary, posthoc_correction_crit_sq))
+}
+
+/// Whether a mixed fit collapsed to its single-level model: every diagonal
+/// variance component pinned at zero (`pinned` is the fit's bitmask, bit `k`
+/// = component `k` in `LmmGroupings::diagonal_theta()` order). Such a fit is
+/// decided against the collapsed crit table (`build_crit_tables`). False for
+/// a partial pin (an intercept variance alive with a slope variance at zero
+/// is still a mixed model). `n_components` counts the diagonal components of
+/// the model that was FITTED — the LME cold reduced fit strips every random
+/// slope, so its count is not the spec's `n_variance_components()`.
+pub(crate) fn fit_collapsed(n_components: usize, pinned: u64) -> bool {
+    let k = n_components;
+    if k == 0 || k >= 64 {
+        return false;
+    }
+    let all = (1u64 << k) - 1;
+    pinned & all == all
 }
 
 // ---------------------------------------------------------------------------
 // Exclusion helpers
 // ---------------------------------------------------------------------------
 
+/// `p_between` for a reduced round's kept columns, or `0` when the
+/// between-within denominator df is not selected — the table then depends on
+/// `p_red` alone, so the cache key needs no scan and the reduced rounds of an
+/// asymptotic spec pay nothing.
+fn reduced_p_between(spec: &SimulationSpec, kept: &[u32]) -> u32 {
+    if spec.df_method == DfMethod::BetweenWithin {
+        crate::critvals::between_column_count(spec, Some(kept))
+    } else {
+        0
+    }
+}
+
 /// Look up (or build and memoize) the reduced-model crit entry for a
-/// sparse-exclusion round. Key is `(n, p_red)`: every df-dependent threshold
-/// depends only on the kept column count, never on which factors were dropped
-/// (see `SimWorkspace::reduced_crit_cache`). Built by `build_crit_tables` —
-/// the same constructor as the hot-path tables.
+/// sparse-exclusion round. Key is `(n, p_red, p_between_red)`: a threshold
+/// depends on the kept column count and, once the between-within denominator df
+/// is in play, on how many of those kept columns are cluster-level — never on
+/// which particular factors were dropped (see `SimWorkspace::reduced_crit_cache`).
+/// Built by `build_crit_tables` — the same constructor as the hot-path tables.
 fn reduced_crit_entry<'a>(
     cache: &'a mut Vec<ReducedCritEntry>,
     n: u32,
     p_red: u32,
+    p_between_red: u32,
     spec: &SimulationSpec,
 ) -> Result<&'a ReducedCritEntry, EngineError> {
-    if let Some(i) = cache.iter().position(|e| e.n == n && e.p_red == p_red) {
+    if let Some(i) = cache
+        .iter()
+        .position(|e| e.n == n && e.p_red == p_red && e.p_between_red == p_between_red)
+    {
         return Ok(&cache[i]);
     }
-    let (crit, mut posthoc_corr) = build_crit_tables(spec, &[n], p_red)?;
+    let (crit, crit_boundary, mut posthoc_corr) =
+        build_crit_tables(spec, &[n], p_red, p_between_red)?;
     // Single-N build → exactly one per-N row (empty when no posthoc blocks).
     let posthoc_corr_row = posthoc_corr.pop().unwrap_or_default();
     cache.push(ReducedCritEntry {
         n,
         p_red,
+        p_between_red,
         crit,
+        crit_boundary,
         posthoc_corr_row,
     });
     Ok(cache.last().expect("entry just pushed"))
@@ -2632,6 +2846,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
@@ -2963,6 +3178,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept,
             posthoc: vec![],
@@ -3029,6 +3245,69 @@ mod tests {
         assert_eq!(r1.converged, r2.converged);
     }
 
+    /// A between-within LMM fit that collapsed (τ̂² pinned at 0, `boundary_hit
+    /// == 1`) is decided against the residual df, not the between df. Design:
+    /// `y ~ x1 + (1 | g)`, x1 cluster-level, 6 clusters x 10 rows = 60, true
+    /// τ² = 0 so a large share of fits pin.
+    ///
+    ///   live      p = 2, p_between = 2, g = 6 => df_between = 4,
+    ///             crit t^2(0.975; 4) = 7.7086
+    ///   collapsed df = N − P = 58, crit t^2(0.975; 58) = 4.0139
+    ///
+    /// Every converged sim's flag must equal `t^2 > crit(bh)` exactly, and the
+    /// run must contain both kinds of fit and sims where the two crits disagree.
+    #[test]
+    fn lme_collapsed_fit_uses_residual_df() {
+        let mut spec = minimal_lme_spec();
+        spec.df_method = DfMethod::BetweenWithin;
+        spec.between_var_indices = vec![1];
+        spec.effect_sizes = vec![0.0, 0.6];
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 6 },
+            tau_squared: 0.0,
+            slopes: vec![],
+            extra_groupings: vec![],
+        });
+        let t_live = crate::critvals::t_ppf(0.975, 4.0);
+        let crit_live = t_live * t_live;
+        let t_coll = crate::critvals::t_ppf(0.975, 58.0);
+        let crit_coll = t_coll * t_coll;
+
+        let n_sims = 96u32;
+        let (batch, stat_sq) = run_batch_st_capture(&spec, &[60], n_sims, 2137).unwrap();
+        let (mut live, mut collapsed, mut disagree) = (0, 0, 0);
+        for (i, &t_sq) in stat_sq.iter().enumerate() {
+            if batch.converged[i] == 0 {
+                continue;
+            }
+            let crit = if batch.boundary_hit[i] == 1 {
+                collapsed += 1;
+                crit_coll
+            } else {
+                live += 1;
+                crit_live
+            };
+            assert_eq!(
+                batch.uncorrected[i],
+                u8::from(t_sq > crit),
+                "sim {i} (boundary_hit {}): t^2 {t_sq} must be decided against {crit}",
+                batch.boundary_hit[i]
+            );
+            if (t_sq > crit_live) != (t_sq > crit_coll) {
+                disagree += 1;
+            }
+        }
+        assert!(
+            collapsed >= 8,
+            "expected many pinned fits at τ² = 0, got {collapsed}"
+        );
+        assert!(live >= 8, "expected some live fits, got {live}");
+        assert!(
+            disagree >= 4,
+            "the two crits must disagree on some sims, got {disagree}"
+        );
+    }
+
     /// GLMM dispatch: a clustered logit (random intercept) routes Glm + cluster
     /// to `glmm::fit_glmm`, surfaces `n_variance_components == 1`, and writes a
     /// finite τ̂² for every converged fit.
@@ -3093,6 +3372,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
@@ -3112,6 +3392,191 @@ mod tests {
             extra_slope_cols: Vec::new(),
             fit_columns: Vec::new(),
         }
+    }
+
+    /// A mixed spec whose fit is reduced by `test_formula` must take its
+    /// between-within denominator df from the REDUCED design, not the full one.
+    /// Design: `y ~ x1 + x2 + x3 + x4 + (1 | g)`, all four predictors
+    /// cluster-level, 6 clusters x 10 rows = 60, target x1, `fit_columns = [0, 1]`.
+    ///
+    ///   full    p = 5, p_between = 5, g = 6 => df_between = 6 - 5 = 1,
+    ///           crit t^2(0.975; 1) = 161.4476
+    ///   reduced p = 2, p_between = 2, g = 6 => df_between = 6 - 2 = 4,
+    ///           crit t^2(0.975; 4) =   7.7086
+    ///
+    /// Every converged sim's significance flag must equal `t^2 > 7.7086` exactly,
+    /// and the two thresholds must disagree on a real share of the sims — without
+    /// that second check the first one would pass on a design where the tables
+    /// happen to decide alike.
+    #[test]
+    fn lme_test_formula_uses_reduced_between_within_df() {
+        let mut spec = minimal_lme_spec();
+        spec.df_method = DfMethod::BetweenWithin;
+        spec.n_non_factor = 4;
+        spec.correlation = vec![
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        spec.var_types = vec![Distribution::Normal; 4];
+        spec.var_params = vec![0.0; 4];
+        spec.between_var_indices = vec![1, 2, 3, 4];
+        spec.effect_sizes = vec![0.0, 1.0, 0.0, 0.0, 0.0];
+        spec.target_indices = vec![1];
+        spec.fit_columns = vec![0, 1];
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 6 },
+            tau_squared: 0.01,
+            slopes: vec![],
+            extra_groupings: vec![],
+        });
+
+        let t_red = crate::critvals::t_ppf(0.975, 4.0);
+        let crit_reduced = t_red * t_red;
+        let t_full = crate::critvals::t_ppf(0.975, 1.0);
+        let crit_full = t_full * t_full;
+        // A fit that pinned τ̂² at 0 is decided against the reduced model's
+        // residual df instead (60 − 2 = 58; see `lme_collapsed_fit_uses_residual_df`).
+        let t_coll = crate::critvals::t_ppf(0.975, 58.0);
+        let crit_collapsed = t_coll * t_coll;
+
+        let n_sims = 64u32;
+        let (batch, stat_sq) = run_batch_st_capture(&spec, &[60], n_sims, 2137).unwrap();
+        let mut converged = 0;
+        let mut live = 0;
+        let mut disagree = 0;
+        for (i, &t_sq) in stat_sq.iter().enumerate() {
+            if batch.converged[i] == 0 {
+                continue;
+            }
+            converged += 1;
+            if batch.boundary_hit[i] == 1 {
+                assert_eq!(
+                    batch.uncorrected[i],
+                    u8::from(t_sq > crit_collapsed),
+                    "sim {i} (pinned): t^2 {t_sq} must be decided against the reduced \
+                     model's residual-df crit {crit_collapsed}"
+                );
+                continue;
+            }
+            live += 1;
+            assert_eq!(
+                batch.uncorrected[i],
+                u8::from(t_sq > crit_reduced),
+                "sim {i}: t^2 {t_sq} must be decided against the reduced-model crit \
+                 {crit_reduced}, not the full-model crit {crit_full}"
+            );
+            if (t_sq > crit_reduced) != (t_sq > crit_full) {
+                disagree += 1;
+            }
+        }
+        assert!(
+            converged as f64 >= 0.9 * n_sims as f64,
+            "expected nearly every fit to converge, got {converged}/{n_sims}"
+        );
+        assert!(
+            live >= 16 && disagree * 4 >= live,
+            "the two tables must decide differently on a real share of live sims for \
+             this test to discriminate, got {disagree}/{live}"
+        );
+    }
+
+    /// A between-within spec whose FULL design has no between-cluster df left
+    /// (`g − p_between < 1`) still runs when `test_formula` reduces every fit to
+    /// a design that does: 4 clusters, 4 cluster-level predictors
+    /// (full p_between = 5 ⇒ df_between = −1), fitted down to `{intercept, x1}`
+    /// (p_between = 2 ⇒ df_between = 2, df_within = 38 − 2 = 36). No fit ever
+    /// reads a full-width threshold, so the full width must not gate the run.
+    #[test]
+    fn between_within_full_design_df_gate_does_not_block_reduced_fit() {
+        let mut spec = minimal_lme_spec();
+        spec.df_method = DfMethod::BetweenWithin;
+        spec.n_non_factor = 4;
+        spec.correlation = vec![
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        spec.var_types = vec![Distribution::Normal; 4];
+        spec.var_params = vec![0.0; 4];
+        spec.between_var_indices = vec![1, 2, 3, 4];
+        spec.effect_sizes = vec![0.0, 1.0, 0.0, 0.0, 0.0];
+        spec.target_indices = vec![1];
+        spec.fit_columns = vec![0, 1];
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 4 },
+            tau_squared: 0.25,
+            slopes: vec![],
+            extra_groupings: vec![],
+        });
+
+        let n_sims = 32u32;
+        let (batch, stat_sq) = run_batch_st_capture(&spec, &[40], n_sims, 2137)
+            .expect("the reduced fit has between-within df to spare and must run");
+
+        // The thresholds actually applied are the reduced design's, not the
+        // full design's (which has no df at all).
+        let t_red = crate::critvals::t_ppf(0.975, 2.0);
+        let crit_reduced = t_red * t_red;
+        let t_coll = crate::critvals::t_ppf(0.975, 38.0);
+        let crit_collapsed = t_coll * t_coll;
+        let mut converged = 0;
+        for (i, &t_sq) in stat_sq.iter().enumerate() {
+            if batch.converged[i] == 0 {
+                continue;
+            }
+            converged += 1;
+            let crit = if batch.boundary_hit[i] == 1 {
+                crit_collapsed
+            } else {
+                crit_reduced
+            };
+            assert_eq!(
+                batch.uncorrected[i],
+                u8::from(t_sq > crit),
+                "sim {i}: t^2 {t_sq} must be decided against the reduced-design crit {crit}"
+            );
+        }
+        assert!(
+            converged as f64 >= 0.9 * n_sims as f64,
+            "expected nearly every fit to converge, got {converged}/{n_sims}"
+        );
+    }
+
+    /// The between-within df refusal still fires when the FITTED design is the
+    /// one without between-cluster df: same 4-cluster spec, but the test formula
+    /// keeps all four cluster-level predictors (p_between = 4 ⇒ df_between = 0).
+    #[test]
+    fn between_within_refuses_when_fitted_design_has_no_between_df() {
+        let mut spec = minimal_lme_spec();
+        spec.df_method = DfMethod::BetweenWithin;
+        spec.n_non_factor = 4;
+        spec.correlation = vec![
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        spec.var_types = vec![Distribution::Normal; 4];
+        spec.var_params = vec![0.0; 4];
+        spec.between_var_indices = vec![1, 2, 3, 4];
+        spec.effect_sizes = vec![0.0, 1.0, 0.0, 0.0, 0.0];
+        spec.target_indices = vec![1];
+        spec.fit_columns = vec![0, 1, 2, 3];
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 4 },
+            tau_squared: 0.25,
+            slopes: vec![],
+            extra_groupings: vec![],
+        });
+
+        let err = run_batch(&spec, &[40], 8, 2137, None).unwrap_err();
+        assert!(
+            matches!(err, EngineError::InvalidSpec(_)),
+            "expected InvalidSpec for a fitted design with df_between = 0, got {err:?}"
+        );
     }
 
     /// Power is monotone non-decreasing in N.
@@ -3261,6 +3726,30 @@ mod tests {
             matches!(err, EngineError::InvalidSpec(_)),
             "Expected InvalidSpec, got {err:?}"
         );
+    }
+
+    /// A `FixedSize` design whose largest sample size is not a whole number of
+    /// clusters is refused, not run. The per-cluster draw buffers are sized by
+    /// flooring `max_n / cluster_size`, while the row→cluster map sends the
+    /// remainder rows to one further cluster, so generation would index past the
+    /// end of those buffers.
+    #[test]
+    fn run_batch_rejects_fixed_size_partial_trailing_cluster() {
+        let mut spec = minimal_lme_spec();
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing: crate::spec::ClusterSizing::FixedSize { cluster_size: 8 },
+            tau_squared: 0.25,
+            slopes: vec![],
+            extra_groupings: vec![],
+        });
+        let err = run_batch(&spec, &[41], 8, 42, None).unwrap_err();
+        assert!(
+            matches!(err, EngineError::InvalidSpec(_)),
+            "expected InvalidSpec for N = 41 in clusters of 8, got {err:?}"
+        );
+        // The same design on a whole number of clusters still runs.
+        run_batch(&spec, &[40], 8, 42, None)
+            .expect("N = 40 is five complete clusters of 8 and must run");
     }
 
     /// LME + posthoc → InvalidSpec (posthoc stays Ols-only). Scenarios on the
@@ -3424,6 +3913,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![crate::spec::PosthocSpec {
@@ -3582,6 +4072,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
@@ -4133,6 +4624,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
@@ -4360,6 +4852,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![crate::spec::PosthocSpec {
@@ -4475,6 +4968,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept,
             posthoc: vec![],
@@ -4649,6 +5143,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
@@ -4709,6 +5204,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept,
             posthoc: vec![],
@@ -4833,6 +5329,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
@@ -5021,16 +5518,15 @@ mod tests {
     #[test]
     fn reduced_crit_table_matches_known_quantiles() {
         let spec = factor_5level_spec(0.0, vec![0.92, 0.02, 0.02, 0.02, 0.02], 5);
-        let (red, posthoc_rows) = build_crit_tables(&spec, &[12], 2).unwrap();
+        let (red, _, posthoc_rows) = build_crit_tables(&spec, &[12], 2, 1).unwrap();
+        let unc = red.t_crit_sq_uncorrected[0][0];
         assert!(
-            (red.t_crit_sq_uncorrected[0] - 4.964_602_7).abs() < 1e-5,
-            "t² crit at df=10: got {}",
-            red.t_crit_sq_uncorrected[0]
+            (unc - 4.964_602_7).abs() < 1e-5,
+            "t² crit at df=10: got {unc}"
         );
         assert!(
-            (red.overall_crit[0] - red.t_crit_sq_uncorrected[0]).abs() < 1e-7,
-            "t²(ν) = F(1, ν) identity: t²={} F={}",
-            red.t_crit_sq_uncorrected[0],
+            (red.overall_crit[0] - unc).abs() < 1e-7,
+            "t²(ν) = F(1, ν) identity: t²={unc} F={}",
             red.overall_crit[0]
         );
         // No posthoc blocks → one (empty) per-N row for the single-N build.
@@ -5038,7 +5534,7 @@ mod tests {
         assert!(posthoc_rows[0].is_empty());
 
         let glm = logit_5level_spec(0.0, 0.0, vec![0.92, 0.02, 0.02, 0.02, 0.02], 5);
-        let (red_glm, _) = build_crit_tables(&glm, &[60], 2).unwrap();
+        let (red_glm, _, _) = build_crit_tables(&glm, &[60], 2, 1).unwrap();
         assert!(
             (red_glm.overall_crit[0] - 3.841_458_8).abs() < 1e-6,
             "χ² crit at df=1: got {}",

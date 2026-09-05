@@ -1,6 +1,6 @@
 // Maps FamilyConfig (UI state) to a serde-compatible AppSpec (Rust wire shape); validates inputs and returns accumulated errors + non-blocking warnings.
 
-import { LIMITS } from '$lib/configs/app-config';
+import { ESTIMATION, LIMITS } from '$lib/configs/app-config';
 import {
   parsedFormulaStore,
   toClusterTerms,
@@ -733,6 +733,9 @@ export function familyConfigToAppSpec(
       cluster_name,
       icc: cl.icc,
       cluster_dim,
+      // Config state persisted before the knob existed has no df_method; fall
+      // back to the shared default rather than putting `undefined` on the wire.
+      df_method: config.advanced.df_method ?? ESTIMATION.df_method,
       cluster_level_vars: cl.clusterLevelVars ?? [],
       extra_groupings,
       slopes,

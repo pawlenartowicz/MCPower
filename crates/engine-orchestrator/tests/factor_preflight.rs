@@ -76,6 +76,7 @@ fn factor_contract(probs: [f64; 2]) -> SimulationContract {
         design_test: None,
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         test,
         posthoc: vec![],

@@ -243,6 +243,18 @@ A clustered GLMM (binary or count) has two more expert controls: `wald_se` (whic
 
 These controls only affect the **clustered binary/count GLMM**. OLS, Gaussian mixed models, and unclustered GLMs already have exact standard errors, so both settings are ignored there.
 
+### Denominator degrees of freedom
+
+`df_method` selects the reference distribution for fixed-effect tests on any
+mixed model (LME or clustered GLMM): `"between_within"` (default) tests
+against a *t* with between-within denominator degrees of freedom — a
+predictor declared cluster-level (via `set_cluster`'s cluster-level-variables
+argument) gets the between-cluster df, others get the within-cluster df;
+`"asymptotic"` tests against a Wald z. It falls back to Wald z with a crossed
+or nested extra grouping, and has no effect on OLS or unclustered GLM. See
+[[concepts/simulation-settings#denominator-degrees-of-freedom|Denominator
+degrees of freedom]] for the full explanation.
+
 ## Clustered count (Poisson GLMM) and clustered probit
 
 The same clustered-GLMM machinery covers a clustered **count** outcome (`family="poisson"`) and a clustered **probit** outcome (`family="probit"`) — swap the family and, for Poisson, size the random intercept by raw variance instead of ICC: `set_cluster(grouping, tau_squared=..., n_clusters=...)`. See [[concepts/supported-families|supported families]] for the baseline setters and the ICC-vs-`tau_squared` distinction across all four families.

@@ -71,8 +71,8 @@ tables below show OLS's actual margin.
 RESULTS <- lapply(OLS_CASES, function(case) {
   saved <- readRDS(file.path(DATA_DIR, paste0(case$label, ".rds")))
   hc    <- hash_check(case)                    # provenance (common.R)
-  sota  <- sota_side(case, saved)
   mc    <- mcpower_side(case, saved)
+  sota  <- sota_side(case, saved, mc)
   sr    <- compare_sides(case, sota, mc, saved)
   list(case = case, saved = saved, hash_ok = hc$ok, sota = sota,
        table = sr$table, converged = sr$converged)

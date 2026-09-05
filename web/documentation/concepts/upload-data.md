@@ -201,8 +201,16 @@ returns a ready-to-paste `set_effects(...)` string, with `y` naming the outcome
 column. It is a convenience for turning a pilot into a starting point — the
 values come back already on MCPower's standardized scale.
 
-Two things to keep in mind:
+Three things to keep in mind:
 
+- Effect sizes estimated from a pilot are noisy at typical pilot sample sizes,
+  and biased upward when the pilot itself was picked because it looked
+  promising; a power analysis built on them inherits that bias (Albers &
+  Lakens, 2018; Kraemer et al., 2006). Use the pilot for what it measures
+  well — predictor distributions and correlations — and take the effect size
+  itself from theory, prior literature, or a smallest effect size of
+  interest, treating the borrowed value as a starting point to override, not
+  a justification.
 - The numbers are an **approximation, not a target**: they carry the pilot's
   sampling error and the usual standardization assumptions. Treat them as a
   sensible first guess to then vary, not as ground truth. The values are
@@ -227,3 +235,8 @@ For a continuous predictor, recall the usual standardized-effect benchmarks
 If you do not have data yet, you lose nothing: describe the design directly with
 [[variable-types|variable types]] and [[correlations|correlations]] and MCPower
 simulates from your assumptions.
+
+## References
+
+- Albers, C., & Lakens, D. (2018). When power analyses based on pilot data are biased: Inaccurate effect size estimators and follow-up bias. *Journal of Experimental Social Psychology, 74*, 187–195. https://doi.org/10.1016/j.jesp.2017.09.004
+- Kraemer, H. C., Mintz, J., Noda, A., Tinklenberg, J., & Yesavage, J. A. (2006). Caution regarding the use of pilot studies to guide power calculations for study proposals. *Archives of General Psychiatry, 63*(5), 484–489. https://doi.org/10.1001/archpsyc.63.5.484

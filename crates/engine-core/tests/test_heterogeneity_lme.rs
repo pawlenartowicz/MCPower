@@ -56,6 +56,7 @@ fn make_lme_spec(het: f64) -> SimulationSpec {
         link: None,
         estimator: EstimatorSpec::Mle,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         intercept: 0.0,
         posthoc: vec![],

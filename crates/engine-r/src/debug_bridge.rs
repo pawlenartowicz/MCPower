@@ -267,6 +267,7 @@ pub fn debug_load_data(
     outcome: &[f64],
     cluster_ids: &[i32],
     wald_se: &str,
+    df_method: &str,
 ) -> Result<List> {
     let all_contracts = decode_contracts(contracts)?;
     // Validation-only SE-mode override (Oracle harness). `""`/`"default"` keeps
@@ -279,6 +280,17 @@ pub fn debug_load_data(
         other => {
             return Err(Error::Other(format!(
                 "unknown wald_se override {other:?}; expected \"\", \"default\", \"rx\", or \"hessian\""
+            )))
+        }
+    };
+    // Validation-only df-method override, same rationale/reach as `wald_se`.
+    let df_method_override = match df_method {
+        "" | "default" => None,
+        "asymptotic" => Some(engine_contract::DfMethod::Asymptotic),
+        "between_within" => Some(engine_contract::DfMethod::BetweenWithin),
+        other => {
+            return Err(Error::Other(format!(
+                "unknown df_method override {other:?}; expected \"\", \"default\", \"asymptotic\", or \"between_within\""
             )))
         }
     };
@@ -302,6 +314,7 @@ pub fn debug_load_data(
         outcome,
         cluster_u32.as_deref(),
         wald_se_override,
+        df_method_override,
     )
     .map_err(|e| Error::Other(format!("{e}")))?;
 

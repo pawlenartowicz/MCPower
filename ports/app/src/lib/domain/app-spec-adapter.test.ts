@@ -1470,6 +1470,23 @@ describe('wald_se adapter', () => {
   });
 });
 
+describe('df_method adapter', () => {
+  it('defaults to the shared config default and passes asymptotic through for mixed', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    const r1 = familyConfigToAppSpec('mixed', cfg);
+    expect(r1.errors).toEqual([]);
+    if (r1.spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect((r1.spec as any).df_method).toBe('between_within');
+    cfg.advanced.df_method = 'asymptotic';
+    const r2 = familyConfigToAppSpec('mixed', cfg);
+    expect(r2.errors).toEqual([]);
+    if (r2.spec?.family !== 'mixed') throw new Error('expected mixed');
+    expect((r2.spec as any).df_method).toBe('asymptotic');
+  });
+});
+
 describe('familyConfigToAppSpec — validation harmonization (soft warns + ICC band)', () => {
   function oneEffectLinear() {
     return linearConfig({

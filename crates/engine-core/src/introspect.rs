@@ -40,10 +40,23 @@ pub struct IntrospectData {
 /// Per-target uncorrected threshold + df, in the engine's squared space.
 #[derive(Debug, Clone)]
 pub struct IntrospectCrit {
-    /// `t_crit_sq_uncorrected[0]` — the shared (squared) uncorrected threshold.
+    /// First target's (squared) uncorrected threshold. Every target shares it
+    /// except under the between-within denominator df, which this single slot
+    /// cannot express; NaN when the spec has no targets.
     pub crit_sq_uncorrected: f64,
-    /// `N - n_predictors_total` as f64 (OLS df_resid; ignored by z-families).
+    /// `N` minus the FITTED predictor count as f64 — the same entry width the
+    /// per-target rows below are built at (OLS df_resid; ignored by z-families).
     pub df_resid: f64,
+    /// Per-target (squared) uncorrected threshold, aligned to `target_indices`
+    /// then `contrast_pairs` — the full row `CritValueTable::t_crit_sq_uncorrected`
+    /// carries for this N. Differs across targets only under the between-within
+    /// denominator df; otherwise every entry equals `crit_sq_uncorrected`.
+    pub crit_sq_uncorrected_per_target: Vec<f64>,
+    /// Per-target denominator df, mirroring `CritValueTable::df_per_target`'s row
+    /// for this N: empty when the threshold is standard-normal (Wald-z) for
+    /// every target, one entry per target when it is Student-t/F-referenced
+    /// (OLS always; a mixed target under the between-within denominator df).
+    pub df_per_target: Vec<f64>,
 }
 
 /// Result of fitting a *provided* dataset (the `data → results` debug path).
@@ -54,7 +67,9 @@ pub struct IntrospectCrit {
 /// estimator producers (OLS, GLM, MLE) are wired.
 #[derive(Debug, Clone)]
 pub struct IntrospectResults {
-    /// Fitted coefficient per design column, length `ncol`.
+    /// Fitted coefficient per design column of the design that was HANDED IN,
+    /// length `ncol`. A column a `test_formula` reduction drops carries NaN —
+    /// the reduced fit never estimated it.
     pub betas: Vec<f64>,
     /// Standard error per *target*, length `n_targets` = `sqrt(var_diag[t])`.
     pub se: Vec<f64>,
@@ -64,11 +79,18 @@ pub struct IntrospectResults {
     /// (= `spec.target_indices`). Lets the host align targets to design columns.
     pub target_cols: Vec<u32>,
     pub converged: bool,
-    /// Shared (squared) uncorrected threshold, `t_crit_sq_uncorrected[0]`.
+    /// First target's (squared) uncorrected threshold — see
+    /// [`IntrospectCrit::crit_sq_uncorrected`].
     pub crit_sq_uncorrected: f64,
-    /// `N - n_predictors_total`. Only meaningful for OLS (Student-t df_resid);
+    /// `N` minus the FITTED predictor count (the full design width unless a
+    /// `test_formula` reduces it). Only meaningful for OLS (Student-t df_resid);
     /// the z-based GLM/MLE estimators are df-independent and ignore it.
     pub df_resid: f64,
+    /// Per-target (squared) uncorrected threshold — see
+    /// [`IntrospectCrit::crit_sq_uncorrected_per_target`].
+    pub crit_sq_uncorrected_per_target: Vec<f64>,
+    /// Per-target denominator df — see [`IntrospectCrit::df_per_target`].
+    pub df_per_target: Vec<f64>,
     /// Estimated variance components: the diagonals of each grouping's RE
     /// covariance D = σ̂²·ΛΛ′. Order [primary (q_p entries), extras in
     /// declaration order (q_g entries each)]. Filled by the general (multi-
@@ -169,7 +191,11 @@ fn capture_sim0_data(
 ///
 /// This function deliberately does NOT mirror the sparse-factor exclusion branch
 /// of `run_one_sim` — debug fits provided bytes as-is so the L3 same-bytes
-/// contract holds.
+/// contract holds. It DOES honour a `test_formula` reduction (`spec.fit_columns`),
+/// because that reduction is spec-constant: every sim of the corresponding
+/// `find_power` run fits the same reduced design, so a debug fit of the full
+/// design would answer a different question. `design`/`ncol` stay the full
+/// generation design; the reduction happens on the way into the fit.
 pub fn fit_provided_data(
     spec: &SimulationSpec,
     design: &[f64],
@@ -178,7 +204,15 @@ pub fn fit_provided_data(
     outcome: &[f64],
     cluster_ids: Option<&[u32]>,
 ) -> Result<IntrospectResults, EngineError> {
-    let p = n_predictors_total(spec) as usize;
+    // `test_formula` reduction: fit only the columns the test design keeps, in
+    // `build_exclusion_remap` order — the same reduced design every sim of the
+    // hot path fits (batch.rs `test_reduces`; change together). `kept` maps a
+    // fitted position back to the caller's design column. An empty
+    // `fit_columns` makes `kept` the identity over the full design, so every
+    // branch below collapses to the former full-width behaviour bit-for-bit.
+    let (p_fit, _, kept) = entry_width(spec);
+    let p_fit = p_fit as usize;
+    let reduces = p_fit < ncol;
     let n_non_factor = spec.n_non_factor as usize;
     let n_factors = spec.factor_n_levels.len();
     let n_clusters_ws = spec
@@ -187,13 +221,15 @@ pub fn fit_provided_data(
         .map(|c| c.sizing.n_clusters_at(nrow))
         .unwrap_or(0);
 
-    let mut ws = SimWorkspace::new(nrow, p, n_non_factor, n_factors, spec.cluster.as_ref());
+    let mut ws = SimWorkspace::new(nrow, p_fit, n_non_factor, n_factors, spec.cluster.as_ref());
 
-    // Inject the provided data into the workspace buffers (column-major in).
-    // Captured design/outcome are f64; narrow into the f32 data plane.
-    for j in 0..ncol {
+    // Inject the provided data into the workspace buffers (column-major in),
+    // gathering only the fitted columns. Captured design/outcome are f64;
+    // narrow into the f32 data plane.
+    for (j, &cj) in kept.iter().enumerate() {
+        let src = cj as usize * nrow;
         for i in 0..nrow {
-            ws.x_full[(i, j)] = design[j * nrow + i] as f32;
+            ws.x_full[(i, j)] = design[src + i] as f32;
         }
     }
     #[allow(clippy::needless_range_loop)]
@@ -204,7 +240,7 @@ pub fn fit_provided_data(
     // y_full_f64; data plane stays f32). introspect injects directly rather than
     // via generate_sim_data, so widen here too. Per-column contiguous slices so
     // the cast autovectorizes (see batch.rs).
-    for j in 0..ncol {
+    for j in 0..p_fit {
         let src = ws.x_full.col(j).try_as_col_major().unwrap().as_slice();
         let dst = ws
             .x_full_f64
@@ -225,12 +261,34 @@ pub fn fit_provided_data(
         }
     }
 
-    let n_test_targets = spec.target_indices.len();
+    // Targets and the truth-β start move into the fitted design's index space
+    // (mirrors the reduced arms of batch.rs). Every test target is in the test
+    // design by construction, so no target is dropped. Both are exact clones of
+    // the spec's own vectors when nothing is reduced.
+    let fit_targets: Vec<u32> = if reduces {
+        spec.target_indices
+            .iter()
+            .map(|&t| {
+                kept.iter()
+                    .position(|&c| c == t)
+                    .expect("a test target is always in the test design") as u32
+            })
+            .collect()
+    } else {
+        spec.target_indices.clone()
+    };
+    let fit_beta: Vec<f64> = kept
+        .iter()
+        .map(|&cj| spec.effect_sizes[cj as usize])
+        .collect();
+    let n_test_targets = fit_targets.len();
 
     // Dispatch on the estimator — each arm mirrors the corresponding
     // `run_one_sim` arm exactly (same kernel, same injected bytes).
     #[allow(clippy::type_complexity)]
-    let (betas, se, statistic, converged, variance_components, sigma_sq_hat, re_corr): (
+    // `pinned`: the mixed fit's pinned-component bitmask (0 for OLS / unclustered
+    // GLM) — decides whether the collapsed crit table applies below.
+    let (betas, se, statistic, converged, variance_components, sigma_sq_hat, re_corr, pinned): (
         Vec<f64>,
         Vec<f64>,
         Vec<f64>,
@@ -238,6 +296,7 @@ pub fn fit_provided_data(
         Vec<f64>,
         f64,
         Vec<f64>,
+        u64,
     ) = match spec.estimator {
         EstimatorSpec::Ols => {
             // OLS — suff-stats then closed-form fit. var_diag / t_sq are
@@ -271,11 +330,11 @@ pub fn fit_provided_data(
                 ws.suff_yty,
                 ws.suff_sum_y,
                 ws.suff_n_rows,
-                &spec.target_indices,
+                &fit_targets,
                 ws.suff_xtx_work.as_mut(),
                 scratch,
             );
-            let betas = fit.betas[..ncol].to_vec();
+            let betas = fit.betas[..p_fit].to_vec();
             let se = (0..n_test_targets)
                 .map(|t| fit.var_diag[t].sqrt())
                 .collect();
@@ -288,6 +347,7 @@ pub fn fit_provided_data(
                 vec![],
                 f64::NAN,
                 vec![],
+                0,
             )
         }
         EstimatorSpec::Glm if spec.cluster.is_some() => {
@@ -310,26 +370,37 @@ pub fn fit_provided_data(
             // not a grid). build_mixed_workspaces builds the sized spec, per-point
             // ids, and the frozen opts (target_indices/wald_se/nagq) exactly as the
             // production find_power path does.
-            // Introspect always fits FULL width: it fills and reads full-width x
-            // (`x_rowmajor[..nrow*ncol]`, `betas()[..ncol]`). But
-            // build_mixed_workspaces sizes p to `fit_columns.len()` for a reduced GLM
-            // fit, which would mismatch full-width x → wrong fit or panic. Clearing
-            // fit_columns on a local copy forces the full-width (`_ => n_predictors`)
-            // sizing, matching the pre-migration GLMM introspect.
-            let mut full_spec = spec.clone();
-            full_spec.fit_columns.clear();
+            // Sized at the FITTED width: `p_fit` already equals
+            // `fit_columns.len()` under a `test_formula`, so
+            // build_mixed_workspaces' own reduction guard is inert and the
+            // β-dimension matches the reduced x injected above. The RE design Z
+            // stays full — only fixed columns shrink.
             let (mut mixed, ids, opts) = crate::mixed_workspace::build_mixed_workspaces(
-                &full_spec,
+                spec,
                 &[nrow as u32],
-                ncol,
+                p_fit,
                 &ws.cluster_ids,
                 &ws.extra_grouping_ids,
             )
             .expect("Glm+cluster ⇒ build_mixed_workspaces is Some");
+            // The batch opts carry the FULL-design target set; a reduced fit
+            // needs its own (target_indices is not frozen by `fit_on`).
+            let opts_red;
+            let opts = if reduces {
+                opts_red = glmm::FitOptions {
+                    target_indices: fit_targets.clone(),
+                    wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
+                    nagq: spec.nagq,
+                    ..Default::default()
+                };
+                &opts_red
+            } else {
+                &opts
+            };
             // `fit_on` takes row-major x[i·p + j]; x_full_f64 is column-major faer.
             for i in 0..nrow {
-                for j in 0..ncol {
-                    ws.x_rowmajor[i * ncol + j] = ws.x_full_f64[(i, j)];
+                for j in 0..p_fit {
+                    ws.x_rowmajor[i * p_fit + j] = ws.x_full_f64[(i, j)];
                 }
             }
             // Truth-start under the scenario's `truth_start` assumption: seed the
@@ -346,39 +417,38 @@ pub fn fit_provided_data(
                 vec![1.0; theta.len()]
             };
             let start = glmm::StartValues {
-                beta: spec.effect_sizes.clone(),
+                beta: fit_beta.clone(),
                 theta: start_theta,
             };
             let view = glmm::loop_advanced::fit_on(
                 &mut mixed[0],
-                &ws.x_rowmajor[..nrow * ncol],
+                &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
                 &ids[0],
                 Some(&start),
-                &opts,
+                opts,
             );
             let converged = view.converged();
-            let betas = view.betas()[..ncol].to_vec();
+            let pinned = view.diagnostics().pinned_components;
+            let betas = view.betas()[..p_fit].to_vec();
             // var_diag / t_sq are PREDICTOR-indexed for the mixed arms.
-            let se = spec
-                .target_indices
+            let se = fit_targets
                 .iter()
                 .map(|&t| view.var_diag()[t as usize].sqrt())
                 .collect();
-            let statistic = spec
-                .target_indices
+            let statistic = fit_targets
                 .iter()
                 .map(|&t| view.t_sq()[t as usize].sqrt())
                 .collect();
             // `into_fit` consumes the view; read the accessors above first.
             let fit = view.into_fit(
-                &ws.x_rowmajor[..nrow * ncol],
+                &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
                 &ids[0],
                 nrow,
-                ncol,
+                p_fit,
                 &model,
-                &opts,
+                opts,
             );
             let (variance_components, re_corr) = unpack_varcorr(&fit);
             (
@@ -389,6 +459,7 @@ pub fn fit_provided_data(
                 variance_components,
                 fit.dispersion, // ≡ 1.0 for binomial/Poisson (dispersion fixed)
                 re_corr,
+                pinned,
             )
         }
         EstimatorSpec::Glm => {
@@ -420,13 +491,13 @@ pub fn fit_provided_data(
                 f64::NAN, // nb_theta: ignored outside NB family (glm.rs doc comment)
                 x_slice,
                 y_slice,
-                &spec.target_indices,
-                Some(&spec.effect_sizes),
+                &fit_targets,
+                Some(&fit_beta),
                 None, // prior_w: MCPower has no prior-observation-weights feature
                 None, // offset: no offset feature — byte-identical to the offset-free fit
                 scratch,
             );
-            let betas = fit.betas[..ncol].to_vec();
+            let betas = fit.betas[..p_fit].to_vec();
             let se = (0..n_test_targets)
                 .map(|t| fit.var_diag[t].sqrt())
                 .collect();
@@ -439,6 +510,7 @@ pub fn fit_provided_data(
                 vec![],
                 f64::NAN,
                 vec![],
+                0,
             )
         }
         EstimatorSpec::Mle => {
@@ -452,24 +524,63 @@ pub fn fit_provided_data(
             // same layout functions as the hot path); build_mixed_workspaces slices
             // them by N. `into_fit` surfaces D̂ = σ̂²·Λ̂Λ̂' per grouping.
             let cluster = spec.cluster.as_ref().expect("Mle requires ClusterSpec");
-            let model = crate::mixed_workspace::cluster_to_model_spec(
+            let mut model = crate::mixed_workspace::cluster_to_model_spec(
                 cluster,
                 glmm::Family::Gaussian,
                 &spec.cluster_slope_design_cols,
                 &spec.extra_slope_cols,
             );
-            let (mut mixed, ids, opts) = crate::mixed_workspace::build_mixed_workspaces(
-                spec,
-                &[nrow as u32],
-                ncol,
-                &ws.cluster_ids,
-                &ws.extra_grouping_ids,
-            )
-            .expect("Mle ⇒ build_mixed_workspaces is Some");
+            // A `test_formula` reduction strips every random slope (primary and
+            // extras) so q_g = 1 everywhere: a slope may reference a fixed column
+            // the reduced design no longer carries, and the kept columns don't map
+            // to the full-design slope cols. MIRRORS batch.rs's reduced LMM fit —
+            // change together.
+            if reduces {
+                if let Some(re) = model.re.as_mut() {
+                    re.slopes.clear();
+                    for g in &mut re.extra_groupings {
+                        g.slopes.clear();
+                    }
+                }
+            }
+            // The reduced fit needs its own workspace: `build_mixed_workspaces`
+            // rebuilds the model from `spec` (slopes intact) and sizes the LMM
+            // β-dimension at the full width, so it cannot express the stripped
+            // reduced model. Same construction as batch.rs's cold reduced fit.
+            let (mut mixed, ids, opts) = if reduces {
+                let opts = glmm::FitOptions {
+                    target_indices: fit_targets.clone(),
+                    wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
+                    nagq: spec.nagq,
+                    ..Default::default()
+                };
+                let raw = glmm::GroupIds {
+                    primary: ws.cluster_ids[..nrow].to_vec(),
+                    extra: ws
+                        .extra_grouping_ids
+                        .iter()
+                        .map(|v| v[..nrow].to_vec())
+                        .collect(),
+                };
+                let (sized, sized_ids, perm) =
+                    glmm::loop_advanced::spec_sized_from_ids_pub(&model, &raw);
+                let w =
+                    glmm::loop_advanced::build_workspace(&sized, perm, nrow, p_fit, &opts);
+                (vec![w], vec![sized_ids.into_owned()], opts)
+            } else {
+                crate::mixed_workspace::build_mixed_workspaces(
+                    spec,
+                    &[nrow as u32],
+                    p_fit,
+                    &ws.cluster_ids,
+                    &ws.extra_grouping_ids,
+                )
+                .expect("Mle ⇒ build_mixed_workspaces is Some")
+            };
             // `fit_on` takes row-major x[i·p + j]; x_full_f64 is column-major faer.
             for i in 0..nrow {
-                for j in 0..ncol {
-                    ws.x_rowmajor[i * ncol + j] = ws.x_full_f64[(i, j)];
+                for j in 0..p_fit {
+                    ws.x_rowmajor[i * p_fit + j] = ws.x_full_f64[(i, j)];
                 }
             }
             // Truth-start under the scenario's `truth_start` assumption: seed the
@@ -478,30 +589,31 @@ pub fn fit_provided_data(
             // θ. NOT a speed knob — the MLE is start-sensitive. MIRRORS batch.rs's
             // Mle arm; the hot loop and this debug path must derive the same hint —
             // change together.
-            let theta = crate::mixed_workspace::truth_theta(cluster, true);
+            // The stripped reduced model has one intercept scalar τ per grouping,
+            // so its θ warm start must drop the slopes too (`include_slopes`).
+            let theta = crate::mixed_workspace::truth_theta(cluster, !reduces);
             let start = spec.scenario.truth_start.then(|| glmm::StartValues {
-                beta: spec.effect_sizes.clone(),
+                beta: fit_beta.clone(),
                 theta,
             });
             let view = glmm::loop_advanced::fit_on(
                 &mut mixed[0],
-                &ws.x_rowmajor[..nrow * ncol],
+                &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
                 &ids[0],
                 start.as_ref(),
                 &opts,
             );
             let converged = view.converged();
-            let betas = view.betas()[..ncol].to_vec();
+            let pinned = view.diagnostics().pinned_components;
+            let betas = view.betas()[..p_fit].to_vec();
             // var_diag / t_sq are PREDICTOR-indexed for the mixed arms: extract by
-            // spec.target_indices, NOT by target rank.
-            let se = spec
-                .target_indices
+            // the fitted target columns, NOT by target rank.
+            let se = fit_targets
                 .iter()
                 .map(|&t| view.var_diag()[t as usize].sqrt())
                 .collect();
-            let statistic = spec
-                .target_indices
+            let statistic = fit_targets
                 .iter()
                 .map(|&t| view.t_sq()[t as usize].sqrt())
                 .collect();
@@ -509,11 +621,11 @@ pub fn fit_provided_data(
             // covers the sparse route (Prebuilt holds a full Fit — varcorr/dispersion
             // read fine; only joint_t_sq/theta degrade, which introspect never reads).
             let fit = view.into_fit(
-                &ws.x_rowmajor[..nrow * ncol],
+                &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
                 &ids[0],
                 nrow,
-                ncol,
+                p_fit,
                 &model,
                 &opts,
             );
@@ -526,6 +638,7 @@ pub fn fit_provided_data(
                 variance_components,
                 fit.dispersion, // σ̂² (NaN on a degenerate LMM fit — varcorr is then empty too)
                 re_corr,
+                pinned,
             )
         }
     };
@@ -535,15 +648,22 @@ pub fn fit_provided_data(
     // threshold read below is target-count-independent, but matching the
     // pipeline's build keeps the two paths provably identical (the basis of the
     // bit-equivalence test). `n_targets` is the module-private helper already in
-    // introspect.rs — distinct from `n_test_targets` above.
-    let table = CritValueTable::build(
-        &spec.crit_values,
-        &[nrow as u32],
-        n_predictors_total(spec),
-        n_targets(spec) as u32,
-        spec.correction_method,
-        spec.estimator,
-    )?;
+    // introspect.rs — distinct from `n_test_targets` above. A collapsed mixed
+    // fit swaps in the collapsed table, as the hot path does.
+    let table = build_crit_table_for_fit(spec, nrow as u32, pinned)?;
+
+    // Report betas in the CALLER's design-column space: hosts index this vector
+    // by the same column ids they passed in (and that `target_cols` carries).
+    // A `test_formula`-dropped column has no estimate, so its slot is NaN.
+    let betas = if reduces {
+        let mut full = vec![f64::NAN; ncol];
+        for (rj, &cj) in kept.iter().enumerate() {
+            full[cj as usize] = betas[rj];
+        }
+        full
+    } else {
+        betas
+    };
 
     Ok(IntrospectResults {
         betas,
@@ -551,8 +671,13 @@ pub fn fit_provided_data(
         statistic,
         target_cols: spec.target_indices.clone(),
         converged,
-        crit_sq_uncorrected: table.t_crit_sq_uncorrected[0],
-        df_resid: (nrow as i64 - n_predictors_total(spec) as i64) as f64,
+        crit_sq_uncorrected: table.t_crit_sq_uncorrected[0]
+            .first()
+            .copied()
+            .unwrap_or(f64::NAN),
+        df_resid: (nrow as i64 - p_fit as i64) as f64,
+        crit_sq_uncorrected_per_target: table.t_crit_sq_uncorrected[0].clone(),
+        df_per_target: table.df_per_target[0].clone(),
         variance_components,
         sigma_sq_hat,
         re_corr,
@@ -609,6 +734,78 @@ fn n_predictors_total(spec: &SimulationSpec) -> u32 {
     1 + spec.n_non_factor + spec.n_factor_dummies + spec.interactions.len() as u32
 }
 
+/// The column set the run's entry crit table is built over (batch.rs
+/// `p_entry` / `p_between_entry` — change together): a `test_formula`
+/// reduction makes every sim decide against the reduced design, so the debug
+/// table follows it rather than the full generation width. Returns
+/// `(p, p_between, kept_cols)`, where `kept_cols[j]` is the full-design column
+/// sitting at fitted position `j`.
+fn entry_width(spec: &SimulationSpec) -> (u32, u32, Vec<u32>) {
+    let flags = vec![0u8; spec.factor_n_levels.len()];
+    let mut kept: Vec<u32> = Vec::new();
+    let mut remap = vec![-1i32; n_predictors_total(spec) as usize];
+    let p = crate::batch::build_exclusion_remap(spec, &flags, &mut kept, &mut remap) as u32;
+    let p_between = crate::critvals::between_column_count(spec, Some(&kept));
+    (p, p_between, kept)
+}
+
+/// Build the crit table `run_introspect` reports, resolving the between-within
+/// denominator df exactly as the hot path's `build_crit_tables` does (same
+/// entry width and `p_between` input, same `BetweenWithinDf::resolve` gate) so
+/// a debug run and a real `find_power` run see the same per-target reference.
+/// Tukey `k` is not threaded here — no debug caller reports a Tukey-adjusted
+/// threshold, matching this module's pre-existing behaviour.
+fn build_crit_table_for_debug(
+    spec: &SimulationSpec,
+    sample_sizes: &[u32],
+) -> Result<CritValueTable, EngineError> {
+    let (p, p_between, _) = entry_width(spec);
+    let bw = crate::critvals::BetweenWithinDf::resolve(spec, sample_sizes, p_between);
+    build_debug_table(spec, sample_sizes, p, bw.as_ref())
+}
+
+/// The table a single provided-data fit is decided against: the collapsed
+/// twin when every variance component pinned at zero, else the live one —
+/// the same rule as the hot path's `fit_collapsed` routing in batch.rs.
+/// `pinned` is the fit's component bitmask. Built at the FITTED width (see
+/// `entry_width`), because `fit_provided_data` fits the reduced design whenever
+/// a `test_formula` narrows it.
+fn build_crit_table_for_fit(
+    spec: &SimulationSpec,
+    sample_size: u32,
+    pinned: u64,
+) -> Result<CritValueTable, EngineError> {
+    let (p, p_between, _) = entry_width(spec);
+    let bw = crate::critvals::BetweenWithinDf::resolve(spec, &[sample_size], p_between);
+    let collapsed = spec
+        .cluster
+        .as_ref()
+        .is_some_and(|c| crate::batch::fit_collapsed(c.n_variance_components(), pinned));
+    let bw = match (bw, collapsed) {
+        (Some(b), true) => b.collapsed(spec.estimator),
+        (b, _) => b,
+    };
+    build_debug_table(spec, &[sample_size], p, bw.as_ref())
+}
+
+fn build_debug_table(
+    spec: &SimulationSpec,
+    sample_sizes: &[u32],
+    n_predictors: u32,
+    bw: Option<&crate::critvals::BetweenWithinDf>,
+) -> Result<CritValueTable, EngineError> {
+    CritValueTable::build_with_tukey_k(
+        &spec.crit_values,
+        sample_sizes,
+        n_predictors,
+        n_targets(spec) as u32,
+        spec.correction_method,
+        spec.estimator,
+        &[],
+        bw,
+    )
+}
+
 pub fn run_introspect(
     spec: &SimulationSpec,
     n: u32,
@@ -617,17 +814,18 @@ pub fn run_introspect(
     mask: IntrospectMask,
 ) -> Result<IntrospectOut, EngineError> {
     let crit = if mask.crit {
-        let table = CritValueTable::build(
-            &spec.crit_values,
-            &[n],
-            n_predictors_total(spec),
-            n_targets(spec) as u32,
-            spec.correction_method,
-            spec.estimator,
-        )?;
+        let table = build_crit_table_for_debug(spec, &[n])?;
+        // Fitted width, matching `df_per_target` below — both come from the
+        // entry crit table, which is built over the fitted design.
+        let (p_entry, _, _) = entry_width(spec);
         Some(IntrospectCrit {
-            crit_sq_uncorrected: table.t_crit_sq_uncorrected[0],
-            df_resid: (n as i64 - n_predictors_total(spec) as i64) as f64,
+            crit_sq_uncorrected: table.t_crit_sq_uncorrected[0]
+                .first()
+                .copied()
+                .unwrap_or(f64::NAN),
+            df_resid: (n as i64 - p_entry as i64) as f64,
+            crit_sq_uncorrected_per_target: table.t_crit_sq_uncorrected[0].clone(),
+            df_per_target: table.df_per_target[0].clone(),
         })
     } else {
         None
@@ -731,6 +929,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Glm,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],
@@ -1137,6 +1336,7 @@ mod tests {
             design_test: None,
             estimator: EstimatorSpec::Ols,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             test: TestSpec {
                 targets: vec![TestTarget::Marginal { term: 3 }],
@@ -1376,6 +1576,194 @@ mod tests {
         assert!(r.re_corr.is_empty()); // no slope ⇒ no off-diagonal
     }
 
+    /// A collapsed between-within LMM fit (τ̂² pinned at 0) reports the
+    /// residual df `N − P` on every target; a live fit keeps the within df
+    /// `N − P − (g − 1)`. True τ² = 0 so seeds split between the two; the
+    /// loop must see both. Mirrors the hot path's `lme_collapsed_fit_uses_residual_df`.
+    #[test]
+    fn fit_provided_data_collapsed_lmm_reports_residual_df() {
+        use engine_contract::{ClusterSizing, ClusterSpec, DfMethod, EstimatorSpec};
+        let mut c = minimal_ols_contract();
+        c.estimator = EstimatorSpec::Mle;
+        c.df_method = DfMethod::BetweenWithin;
+        c.generation.cluster = Some(ClusterSpec::intercept_only(
+            ClusterSizing::FixedClusters { n_clusters: 8 },
+            0.0,
+        ));
+        let spec = contract_to_simulation_spec(&c).unwrap();
+        let p = (1 + spec.n_non_factor + spec.n_factor_dummies) as usize;
+        let n = 160usize;
+        let df_resid = (n - p) as f64;
+        let df_within = df_resid - 7.0; // g − p_between = 8 − 1
+        let (mut seen_live, mut seen_collapsed) = (false, false);
+        for seed in 0..12u64 {
+            let mut ws = SimWorkspace::new(
+                n,
+                p,
+                spec.n_non_factor as usize,
+                spec.factor_n_levels.len(),
+                spec.cluster.as_ref(),
+            );
+            crate::data_gen::generate_sim_data(&spec, 0, 2137 + seed, &mut ws).unwrap();
+            let mut design = vec![0.0; n * p];
+            for j in 0..p {
+                for i in 0..n {
+                    design[j * n + i] = ws.x_full[(i, j)] as f64;
+                }
+            }
+            let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
+            let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
+            let r = fit_provided_data(&spec, &design, n, p, &outcome, Some(&cids)).unwrap();
+            if !r.converged {
+                continue;
+            }
+            let expected = if r.variance_components[0] == 0.0 {
+                seen_collapsed = true;
+                df_resid
+            } else {
+                seen_live = true;
+                df_within
+            };
+            assert!(
+                r.df_per_target.iter().all(|&d| d == expected),
+                "seed {seed}: τ̂² = {} ⇒ df {expected}, got {:?}",
+                r.variance_components[0],
+                r.df_per_target
+            );
+            let t = crate::critvals::t_ppf(0.975, expected);
+            assert!(r
+                .crit_sq_uncorrected_per_target
+                .iter()
+                .all(|&c| (c - t * t).abs() < 1e-12));
+        }
+        assert!(
+            seen_collapsed && seen_live,
+            "need both a pinned and a live fit"
+        );
+    }
+
+    /// A `test_formula` reduction must reach the provided-data fit too: the
+    /// FULL design here has no between-cluster df left (4 clusters, 4
+    /// cluster-level predictors ⇒ p_between = 5, g − p_between = −1, which the
+    /// between-within crit table refuses), while the fitted design
+    /// `{intercept, x1}` has p_between = 2 ⇒ df_between = 4 − 2 = 2. Same shape
+    /// as the hot path's `between_within_full_design_df_gate_does_not_block_reduced_fit`.
+    /// Before honouring `fit_columns` this fit errored `InvalidSpec` on the
+    /// full-width df gate.
+    #[test]
+    fn fit_provided_data_test_formula_uses_reduced_between_within_df() {
+        use crate::spec::{
+            ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, DfMethod, EstimatorSpec,
+            HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations,
+        };
+        let spec = SimulationSpec {
+            n_non_factor: 4,
+            n_factor_dummies: 0,
+            correlation: vec![
+                1.0, 0.0, 0.0, 0.0, //
+                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0,
+            ],
+            var_types: vec![Distribution::Normal; 4],
+            var_pinned: vec![],
+            var_params: vec![0.0; 4],
+            upload_normal: vec![],
+            upload_normal_shape: (0, 0),
+            upload_data: vec![],
+            upload_data_shape: (0, 0),
+            bootstrap_frame_map: vec![],
+            between_var_indices: vec![1, 2, 3, 4],
+            factor_n_levels: vec![],
+            factor_proportions: vec![],
+            factor_sampled: Vec::new(),
+            effect_sizes: vec![0.0, 1.0, 0.0, 0.0, 0.0],
+            target_indices: vec![1],
+            contrast_pairs: vec![],
+            interactions: vec![],
+            correction_method: CorrectionMethod::None,
+            crit_values: CritValues {
+                alpha: 0.05,
+                posthoc_alpha: None,
+            },
+            heteroskedasticity_driver: None,
+            residual_dist: ResidualDist::Normal,
+            residual_pinned: false,
+            outcome_kind: OutcomeKind::Continuous,
+            link: None,
+            estimator: EstimatorSpec::Mle,
+            wald_se: Default::default(),
+            df_method: DfMethod::BetweenWithin,
+            nagq: 1,
+            intercept: 0.0,
+            posthoc: vec![],
+            max_failed_fraction: 0.1,
+            cluster: Some(ClusterSpec {
+                sizing: ClusterSizing::FixedClusters { n_clusters: 4 },
+                tau_squared: 0.25,
+                slopes: vec![],
+                extra_groupings: vec![],
+            }),
+            scenario: ScenarioPerturbations::optimistic(),
+            t3_table: None,
+            het_coeffs: HeteroskedasticityCoeffs::default(),
+            report_overall: false,
+            factor_min_level_count: 0,
+            cluster_slope_design_cols: vec![],
+            extra_slope_cols: Vec::new(),
+            fit_columns: vec![0, 1],
+        };
+
+        // Data is generated at the FULL design width (5 columns) — the caller
+        // hands in the whole design; the reduction happens inside the fit.
+        let n = 40usize;
+        let p_full = 5usize;
+        let mut ws = SimWorkspace::new(
+            n,
+            p_full,
+            spec.n_non_factor as usize,
+            spec.factor_n_levels.len(),
+            spec.cluster.as_ref(),
+        );
+        // Seed 8 lands a comfortably live τ̂² (≈ 0.40); a τ̂² pinned at 0 would be
+        // decided against the residual df instead (see
+        // `fit_provided_data_collapsed_lmm_reports_residual_df`).
+        crate::data_gen::generate_sim_data(&spec, 0, 8, &mut ws).unwrap();
+        let mut design = vec![0.0_f64; n * p_full];
+        for j in 0..p_full {
+            for i in 0..n {
+                design[j * n + i] = ws.x_full[(i, j)] as f64;
+            }
+        }
+        let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
+        let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
+
+        let r = fit_provided_data(&spec, &design, n, p_full, &outcome, Some(&cids))
+            .expect("the reduced fit has between-within df to spare and must build a crit table");
+        assert!(r.converged);
+        assert!(
+            r.variance_components[0] > 0.0,
+            "a collapsed fit would be decided against the residual df instead; got τ̂² = {}",
+            r.variance_components[0]
+        );
+        // g − p_between = 4 − 2 = 2, the REDUCED design's between df.
+        assert_eq!(
+            r.df_per_target,
+            vec![2.0],
+            "cluster-level target must take the reduced design's between df"
+        );
+        let t = crate::critvals::t_ppf(0.975, 2.0);
+        assert!((r.crit_sq_uncorrected - t * t).abs() < 1e-12);
+        // df_resid follows the fitted width too: 40 − 2.
+        assert_eq!(r.df_resid, 38.0);
+        // Targets stay in the CALLER's column space; dropped columns have no
+        // estimate.
+        assert_eq!(r.target_cols, vec![1]);
+        assert_eq!(r.betas.len(), p_full);
+        assert!(r.betas[0].is_finite() && r.betas[1].is_finite());
+        assert!(r.betas[2..].iter().all(|b| b.is_nan()));
+    }
+
     /// `fit_provided_data` on a (1+x1|g) spec surfaces [τ̂₀², τ̂₁²] in
     /// `variance_components` and one finite correlation in `re_corr` (q_p=2
     /// primary block → q_p(q_p−1)/2 = 1 off-diagonal entry, |·| ≤ 1).
@@ -1421,6 +1809,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Mle,
             wald_se: Default::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],

@@ -37,3 +37,38 @@ For a **clustered binary or count model** (a logit, probit, or Poisson GLMM — 
 - an odd integer `> 1`, up to `25` — adaptive Gauss–Hermite quadrature, more accurate than Laplace at small cluster sizes but more expensive. Only allowed for a binary/count GLMM with a **single grouping factor** and **at most 3 random effects per group**. A design outside that envelope (crossed/nested groupings, too many random effects, an even node count, or a value above 25) warns and silently falls back to `agq=1` — the run still completes, on Laplace.
 
 The desktop and web app surface both controls as one three-way switch: **Fast** (`wald_se="rx"`), **Accurate** (`wald_se="hessian"`), and **AGQ** (`agq=k`, k configurable), next to the model's other advanced settings.
+
+## Denominator degrees of freedom
+
+For any **mixed-effects model** (LME or clustered GLMM), `df_method` on
+`find_power`/`find_sample_size` selects the reference distribution for each
+fixed-effect test:
+
+- `"between_within"` (the default) — tests each fixed effect against a *t*
+  distribution with between-within denominator degrees of freedom: a
+  predictor declared cluster-level (see
+  [[concepts/mixed-effects|mixed-effects models]]) gets the between-cluster
+  df, others get the within-cluster df. The joint Wald test uses `k·F(k, df)`
+  with the smaller df across the target set. There is no overall (omnibus) F
+  for mixed models under either setting.
+- `"asymptotic"` — tests each fixed effect against a Wald z.
+
+When a simulated fit collapses (every random-effect variance estimated at
+zero, lme4's "singular fit"), the between-within split no longer describes
+the fitted model, so that fit is tested against the collapsed model's own
+reference instead: Student *t* on the residual df N − p for an LME, Wald z
+for a GLMM. For an LME on a balanced design this is also where a Satterthwaite
+reference puts the df of a cluster-level effect, so the two agree there.
+
+`df_method="between_within"` falls back to Wald z when the design has a
+crossed or nested extra grouping. When the design leaves fewer than one
+between-cluster df (`g − p_between < 1`: at least as many cluster-level
+columns, intercept included, as clusters) or fewer than one within-cluster
+df, the run stops with an error naming the counts; pick
+`df_method="asymptotic"` or add clusters. It has no effect on OLS or unclustered
+GLM, which already use their exact reference distributions. Its calibration
+against lmerTest Satterthwaite is on the
+[[validation/validation_df_calibration|denominator-df calibration page]]. The
+desktop and web app surface it as the **Denominator df** setting on the run
+panel, alongside the estimation-mode switch above, with a per-predictor
+cluster-level toggle.

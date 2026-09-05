@@ -51,6 +51,7 @@ fn make_spec(driver: Option<u32>, lambda: f64) -> SimulationSpec {
         link: None,
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         intercept: 0.0,
         posthoc: vec![],

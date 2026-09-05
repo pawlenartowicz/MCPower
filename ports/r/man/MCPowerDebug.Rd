@@ -113,7 +113,7 @@ critical_value back.}
 \if{latex}{\out{\hypertarget{method-MCPowerDebug-load_data}{}}}
 \subsection{Method \code{load_data()}}{
 \subsection{Usage}{
-\if{html}{\out{<div class="r">}}\preformatted{MCPowerDebug$load_data(d, wald_se = NULL, nagq = 1L)}\if{html}{\out{</div>}}
+\if{html}{\out{<div class="r">}}\preformatted{MCPowerDebug$load_data(d, wald_se = NULL, nagq = 1L, df_method = NULL)}\if{html}{\out{</div>}}
 }
 
 \subsection{Arguments}{
@@ -134,7 +134,12 @@ critical_value, target_index, target_label, df, two_sided, ...)}
 \item{\code{wald_se}}{Validation-only override of the Wald-SE kernel mode for this
 single fit. NULL (default) uses the contract's configured mode; accepts
 "rx" (Schur SE) or "hessian" (FD-Hessian SE). Used by the GLMM Oracle
-harness to read per-fit rx vs hessian SE on one dataset.
+harness to read per-fit rx vs hessian SE on one dataset.}
+
+\item{\code{df_method}}{Validation-only override of the denominator-df reference
+distribution for this single fit. NULL (default) uses the contract's
+configured mode; accepts "asymptotic" or "between_within". Used by the
+GLMM Oracle harness to read a per-fit df_method on one dataset.
 Debug-only: attach extra grouping factors (crossed / nested random
 intercepts) to the pending cluster spec, in the contract's serde JSON
 shape, e.g.

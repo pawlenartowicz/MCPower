@@ -18,7 +18,10 @@
 //! Quantiles for the Studentized Range*, Appl. Statist. 38(1), 185–189.
 
 use crate::distributions::phi;
-use crate::spec::{CorrectionMethod, CritValues, EngineError, EstimatorSpec};
+use crate::spec::{
+    ClusterSizing, CorrectionMethod, CritValues, DfMethod, EngineError, EstimatorSpec,
+    SimulationSpec,
+};
 
 // ---------------------------------------------------------------------------
 // Student-t inverse CDF
@@ -746,6 +749,151 @@ pub(crate) fn q_tukey_ppf(p: f64, k: f64, df: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// Between-within denominator degrees of freedom
+// ---------------------------------------------------------------------------
+
+/// Inputs for the between-within denominator degrees of freedom (SAS
+/// `DDFM=BETWITHIN`), resolved once per table build by [`BetweenWithinDf::resolve`].
+///
+/// Passing `None` to the builder selects the asymptotic (Wald-z) reference,
+/// which is both today's default and the fallback for designs where the
+/// between/within partition is not defined.
+#[derive(Debug, Clone)]
+pub struct BetweenWithinDf {
+    /// Cluster count `g`, one entry per element of `sample_sizes`.
+    pub clusters_per_n: Vec<usize>,
+    /// Fitted columns that are constant within cluster: the intercept, every
+    /// cluster-level predictor, and every interaction whose factors are all
+    /// cluster-level.
+    pub p_between: u32,
+    /// One flag per target (marginals in `target_indices` order, then
+    /// contrasts): `true` selects `df_between`, `false` `df_within`.
+    pub between_per_target: Vec<bool>,
+    /// The fit collapsed to a single-level model: every variance component
+    /// pinned at zero (lme4's "singular fit"), so the fitted model is the
+    /// plain OLS on the same columns and every target is referred to its
+    /// residual df `N − P` instead of the between/within split. Set only by
+    /// [`BetweenWithinDf::collapsed`]; `resolve` always yields `false`.
+    pub collapsed: bool,
+}
+
+/// Whether kernel column `col` is constant within cluster. The intercept is;
+/// `between_var_indices` names the cluster-level predictors (factor dummies
+/// already expanded); an interaction inherits the property only if every one of
+/// its factors has it — a product with any within-cluster factor varies within
+/// cluster.
+fn column_is_cluster_level(spec: &SimulationSpec, col: u32) -> bool {
+    if col == 0 {
+        return true;
+    }
+    if spec.between_var_indices.contains(&col) {
+        return true;
+    }
+    let first_interaction = 1 + spec.n_non_factor + spec.n_factor_dummies;
+    if col >= first_interaction {
+        if let Some(factors) = spec.interactions.get((col - first_interaction) as usize) {
+            return !factors.is_empty()
+                && factors.iter().all(|c| spec.between_var_indices.contains(c));
+        }
+    }
+    false
+}
+
+/// `p_between`: how many of the fitted columns are constant within cluster.
+/// `kept` is the ascending kernel-column set of a reduced (sparse-exclusion /
+/// test-formula) rebuild; `None` counts the full design.
+pub fn between_column_count(spec: &SimulationSpec, kept: Option<&[u32]>) -> u32 {
+    match kept {
+        Some(cols) => cols
+            .iter()
+            .filter(|&&c| column_is_cluster_level(spec, c))
+            .count() as u32,
+        None => {
+            let p = 1 + spec.n_non_factor + spec.n_factor_dummies + spec.interactions.len() as u32;
+            (0..p).filter(|&c| column_is_cluster_level(spec, c)).count() as u32
+        }
+    }
+}
+
+impl BetweenWithinDf {
+    /// Resolve the between-within inputs for `spec`, or `None` when the
+    /// asymptotic reference applies: `df_method` is `Asymptotic`, the fit is
+    /// not mixed (`Ols`, or `Glm` without a cluster spec), or the design
+    /// carries crossed / nested extra groupings, for which the between/within
+    /// partition of the residual df is not defined. `p_between` is supplied by
+    /// the caller so a reduced-model rebuild can pass its own count.
+    ///
+    /// The clustered-`Glm` half of the predicate below is the same condition
+    /// `WaldSe::affects` uses; `Mle` is in scope here and not there, so the two
+    /// are not interchangeable.
+    pub fn resolve(
+        spec: &SimulationSpec,
+        sample_sizes: &[u32],
+        p_between: u32,
+    ) -> Option<BetweenWithinDf> {
+        if spec.df_method != DfMethod::BetweenWithin {
+            return None;
+        }
+        // The `?` already established a cluster spec, so a surviving `Glm` is the
+        // clustered GLMM; `Ols` over clustered data is not a mixed fit.
+        let cluster = spec.cluster.as_ref()?;
+        let mixed = matches!(spec.estimator, EstimatorSpec::Mle | EstimatorSpec::Glm);
+        if !mixed || !cluster.extra_groupings.is_empty() {
+            return None;
+        }
+        // `n_clusters_at` floors; the row→cluster map assigns the remainder rows
+        // of a `FixedSize` design to one further partial cluster, so the count
+        // that matches the data is the ceiling.
+        let clusters_per_n = sample_sizes
+            .iter()
+            .map(|&n| match cluster.sizing {
+                ClusterSizing::FixedClusters { n_clusters } => n_clusters.max(1) as usize,
+                ClusterSizing::FixedSize { cluster_size } => {
+                    let s = cluster_size.max(1) as usize;
+                    (n as usize).div_ceil(s)
+                }
+            })
+            .collect();
+        let mut between_per_target: Vec<bool> = spec
+            .target_indices
+            .iter()
+            .map(|&c| column_is_cluster_level(spec, c))
+            .collect();
+        // A contrast β_p − β_n is cluster-level only if both sides are; one
+        // within-cluster side makes the difference vary within cluster.
+        between_per_target.extend(
+            spec.contrast_pairs.iter().map(|&(p, n)| {
+                column_is_cluster_level(spec, p) && column_is_cluster_level(spec, n)
+            }),
+        );
+        Some(BetweenWithinDf {
+            clusters_per_n,
+            p_between,
+            between_per_target,
+            collapsed: false,
+        })
+    }
+
+    /// The reference for a fit whose variance components all pinned at zero.
+    /// The between/within split assumes a real cluster variance; without one
+    /// the fitted model is the single-level one on the same columns, and its
+    /// exact test is the residual-df Student-t for a Gaussian outcome
+    /// (`Some`, every target at `N − P`) and the Wald z for a GLM (`None`, the
+    /// asymptotic table). A Satterthwaite reference does the same for a
+    /// cluster-level effect on a balanced design: off the boundary its df
+    /// equals `g − p_between`, on the boundary it jumps to the residual df.
+    pub fn collapsed(&self, estimator: EstimatorSpec) -> Option<BetweenWithinDf> {
+        match estimator {
+            EstimatorSpec::Mle => Some(BetweenWithinDf {
+                collapsed: true,
+                ..self.clone()
+            }),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // CritValueTable
 // ---------------------------------------------------------------------------
 
@@ -754,8 +902,17 @@ pub(crate) fn q_tukey_ppf(p: f64, k: f64, df: f64) -> f64 {
 /// directly without a square root on the SE side.
 #[derive(Debug, Clone)]
 pub struct CritValueTable {
-    /// One entry per element of `sample_sizes`.
-    pub t_crit_sq_uncorrected: Vec<f64>,
+    /// Outer length = `sample_sizes.len()`; inner length = `n_targets`.
+    /// One threshold per target: they coincide except under the between-within
+    /// denominator df, where a cluster-level target is referred to a different
+    /// df than a within-cluster one.
+    pub t_crit_sq_uncorrected: Vec<Vec<f64>>,
+    /// Denominator df behind each entry of `t_crit_sq_uncorrected`, same shape.
+    /// Inner rows are EMPTY whenever no df enters the threshold — every
+    /// standard-normal (Wald-z) build, which is `Glm`/`Mle` under
+    /// `DfMethod::Asymptotic` and every fallback in [`BetweenWithinDf::resolve`].
+    /// OLS repeats its residual df `N − P` per target.
+    pub df_per_target: Vec<Vec<f64>>,
     /// Outer length = `sample_sizes.len()`; inner length = `n_targets`.
     /// Per-target thresholds sequenced as v1 does (entry `k` walks the
     /// Bonferroni-step sequence under Holm and the BH step-up sequence under
@@ -765,9 +922,14 @@ pub struct CritValueTable {
     /// `t_ppf(1 - posthoc_alpha/2, df)²` (or the uncorrected entry when
     /// `posthoc_alpha` is None).
     pub posthoc_t_crit_sq: Vec<f64>,
-    /// χ²(k, 1-α) for the LME joint Wald-χ² test; `NaN` for non-LME families.
-    /// Per-N for layout parity with `t_crit_sq_uncorrected` (the χ²(k) value is
-    /// df-independent for the asymptotic test, so all entries are equal).
+    /// Joint Wald critical value over the whole target set, one entry per
+    /// element of `sample_sizes`; `NaN` where no joint test is defined.
+    /// - asymptotic mixed (`EstimatorSpec::Mle`) → χ²(k, 1−α), df-independent so
+    ///   every entry is equal (the per-N layout matches `t_crit_sq_uncorrected`).
+    /// - between-within mixed (`Mle`, or `Glm` with a cluster spec) →
+    ///   `k · F(1−α; k, df_joint)`, with `df_joint` the smallest df in the
+    ///   target set, so it does vary with N.
+    /// - everything else → `NaN`.
     pub joint_t_crit_sq: Vec<f64>,
     /// One entry per element of `sample_sizes`. v1-parity overall (joint)
     /// critical value used by the OLS F-test and Logit LRT. NOT squared — the
@@ -780,6 +942,15 @@ pub struct CritValueTable {
 }
 
 impl CritValueTable {
+    /// Whether a denominator df backs these thresholds — true for OLS (its
+    /// residual df) and for a mixed build under the between-within reference,
+    /// false for every standard-normal (Wald-z) build. Inside a mixed estimator
+    /// arm it is exactly "the between-within split is active", which is what
+    /// decides whether a reduced-model round has to rebuild the table.
+    pub fn has_df(&self) -> bool {
+        self.df_per_target.iter().any(|row| !row.is_empty())
+    }
+
     /// Build the per-batch table.
     ///
     /// - `crit`: spec-level α and optional posthoc α.
@@ -806,6 +977,7 @@ impl CritValueTable {
             correction_method,
             estimator,
             &[],
+            None,
         )
     }
 
@@ -823,7 +995,17 @@ impl CritValueTable {
     /// targets always fail under Tukey (a Tukey design should not point a target
     /// at a non-factor column).
     ///
+    /// `bw` is `Some` only for a mixed fit that asked for the between-within
+    /// denominator degrees of freedom (SAS `DDFM=BETWITHIN`) and for which the
+    /// partition is defined — see [`BetweenWithinDf::resolve`]. It replaces the
+    /// standard-normal reference with a Student-t / F reference at a per-target
+    /// df; `None` reproduces the asymptotic table exactly.
+    ///
     /// [`build`]: CritValueTable::build
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "single df authority; each argument is one independent table input"
+    )]
     pub fn build_with_tukey_k(
         crit: &CritValues,
         sample_sizes: &[u32],
@@ -832,6 +1014,7 @@ impl CritValueTable {
         correction_method: CorrectionMethod,
         estimator: EstimatorSpec,
         tukey_k_per_target: &[f64],
+        bw: Option<&BetweenWithinDf>,
     ) -> Result<CritValueTable, EngineError> {
         if !crit.alpha.is_finite() || crit.alpha <= 0.0 || crit.alpha >= 1.0 {
             return Err(EngineError::InvalidSpec(format!(
@@ -867,10 +1050,19 @@ impl CritValueTable {
         let n = sample_sizes.len();
         let m = n_targets as usize;
         let mut t_crit_sq_uncorrected = Vec::with_capacity(n);
+        let mut df_per_target = Vec::with_capacity(n);
         let mut correction_t_crit_sq = Vec::with_capacity(n);
         let mut posthoc_t_crit_sq = Vec::with_capacity(n);
+        // Smallest reference df across the target set, one entry per N. Feeds
+        // both the rank-indexed corrections and the joint Wald crit below.
+        let mut df_family_per_n = Vec::with_capacity(n);
+        let between_flags: &[bool] = bw.map(|b| b.between_per_target.as_slice()).unwrap_or(&[]);
+        debug_assert!(
+            bw.is_none() || between_flags.len() == m,
+            "between-within callers must pass one between/within flag per target"
+        );
 
-        for &sample_size in sample_sizes {
+        for (n_idx, &sample_size) in sample_sizes.iter().enumerate() {
             let df_signed = sample_size as i64 - n_predictors as i64;
             if df_signed < 1 {
                 return Err(EngineError::InvalidSpec(format!(
@@ -879,8 +1071,79 @@ impl CritValueTable {
             }
             let df = df_signed as f64;
 
-            let t_unc = crit_quantile(1.0 - alpha / 2.0, df);
-            t_crit_sq_uncorrected.push(t_unc * t_unc);
+            // Between-within denominator degrees of freedom (SAS
+            // `DDFM=BETWITHIN`): the residual df splits into a between-cluster
+            // part `g − p_between`, which carries the cluster-level effects, and
+            // the within-cluster remainder, which carries the rest. `None` keeps
+            // every target on the asymptotic reference.
+            let bw_split: Option<(f64, f64)> = match bw {
+                None => None,
+                // Collapsed fit: the single-level model's residual df on every
+                // target, still a Student-t reference.
+                Some(b) if b.collapsed => Some((df, df)),
+                Some(b) => {
+                    let g = b.clusters_per_n[n_idx] as i64;
+                    let df_between = g - b.p_between as i64;
+                    let df_within = df_signed - df_between;
+                    if df_between < 1 || df_within < 1 {
+                        return Err(EngineError::InvalidSpec(format!(
+                            "between-within df at N = {sample_size}: between = g - p_between = \
+                             {g} - {} = {df_between}, within = {df_within}; both must be >= 1. \
+                             Use df_method = \"asymptotic\" for the Wald z reference, or add clusters",
+                            b.p_between
+                        )));
+                    }
+                    Some((df_between as f64, df_within as f64))
+                }
+            };
+            let df_at = |i: usize| -> f64 {
+                match bw_split {
+                    Some((between, within)) => {
+                        if between_flags.get(i).copied().unwrap_or(false) {
+                            between
+                        } else {
+                            within
+                        }
+                    }
+                    None => df,
+                }
+            };
+            // Under the between-within reference a mixed Wald statistic is
+            // referred to Student-t at the target's own df instead of the
+            // standard normal; every other build keeps `crit_quantile`.
+            let quantile_at = |p: f64, i: usize| -> f64 {
+                if bw_split.is_some() {
+                    t_ppf(p, df_at(i))
+                } else {
+                    crit_quantile(p, df)
+                }
+            };
+            // Holm's and BH's row entries are RANK-indexed — which target lands
+            // at rank k is only known once a sim's t² values are sorted — so no
+            // per-target df can be baked in. Both fall back to the smallest df in
+            // the target set, the most conservative reference of the family, as
+            // does the joint Wald crit. Equal to `df` outside the split.
+            let df_family = if m == 0 {
+                df
+            } else {
+                (0..m).map(&df_at).fold(f64::INFINITY, f64::min)
+            };
+            df_family_per_n.push(df_family);
+
+            let unc_row: Vec<f64> = (0..m)
+                .map(|i| {
+                    let t = quantile_at(1.0 - alpha / 2.0, i);
+                    t * t
+                })
+                .collect();
+            df_per_target.push(if bw_split.is_some() {
+                (0..m).map(&df_at).collect()
+            } else if estimator.uses_student_t() {
+                vec![df; m]
+            } else {
+                // Wald-z: no df enters the threshold, so there is none to report.
+                Vec::new()
+            });
 
             let mut row = Vec::with_capacity(m.max(1));
             if m == 0 {
@@ -889,14 +1152,12 @@ impl CritValueTable {
                 match correction_method {
                     CorrectionMethod::None => {
                         // None.
-                        for _ in 0..m {
-                            row.push(t_unc * t_unc);
-                        }
+                        row.extend_from_slice(&unc_row);
                     }
                     CorrectionMethod::Bonferroni => {
                         // Bonferroni.
-                        let bonf = crit_quantile(1.0 - alpha / (2.0 * m as f64), df);
-                        for _ in 0..m {
+                        for i in 0..m {
+                            let bonf = quantile_at(1.0 - alpha / (2.0 * m as f64), i);
                             row.push(bonf * bonf);
                         }
                     }
@@ -906,6 +1167,8 @@ impl CritValueTable {
                             let eff = alpha / (2.0 * (m - k) as f64);
                             let t = if eff < 1e-12 {
                                 f64::INFINITY
+                            } else if bw_split.is_some() {
+                                t_ppf(1.0 - eff, df_family)
                             } else {
                                 crit_quantile(1.0 - eff, df)
                             };
@@ -918,6 +1181,8 @@ impl CritValueTable {
                             let eff = (k + 1) as f64 / m as f64 * alpha / 2.0;
                             let t = if eff < 1e-12 {
                                 f64::INFINITY
+                            } else if bw_split.is_some() {
+                                t_ppf(1.0 - eff, df_family)
                             } else {
                                 crit_quantile(1.0 - eff, df)
                             };
@@ -941,7 +1206,7 @@ impl CritValueTable {
                         );
                         for i in 0..m {
                             let k = tukey_k_per_target.get(i).copied().unwrap_or(f64::NAN);
-                            let q = q_tukey_ppf(1.0 - alpha, k, df);
+                            let q = q_tukey_ppf(1.0 - alpha, k, df_at(i));
                             let t = q / std::f64::consts::SQRT_2;
                             row.push(t * t);
                         }
@@ -949,27 +1214,34 @@ impl CritValueTable {
                 }
             }
             correction_t_crit_sq.push(row);
+            t_crit_sq_uncorrected.push(unc_row);
 
+            // Post-hoc contrasts are rejected outside OLS at batch entry, so the
+            // between-within split never reaches this threshold.
             let t_post = crit_quantile(1.0 - posthoc_alpha / 2.0, df);
             posthoc_t_crit_sq.push(t_post * t_post);
         }
 
-        // Joint Wald-χ² critical value: χ²(k, 1-α) for EstimatorSpec::Mle, NaN
-        // otherwise. χ²(k) is df-independent for the asymptotic test, but we
-        // store one entry per N for layout parity with `t_crit_sq_uncorrected`
-        // (and so a future per-N Kenward-Roger F upgrade fits without
-        // re-shaping the table).
-        let joint_t_crit_sq: Vec<f64> = match estimator {
-            EstimatorSpec::Mle => {
-                let k = n_targets as f64;
-                if k <= 0.0 {
-                    vec![f64::NAN; n]
-                } else {
-                    let chi2_crit = chi2_ppf(1.0 - alpha, k);
-                    vec![chi2_crit; n]
-                }
+        // Joint Wald critical value over the whole target set. The asymptotic
+        // mixed test is χ²(k, 1-α), df-independent, but stored one entry per N
+        // for layout parity with `t_crit_sq_uncorrected`. Under the
+        // between-within reference the joint statistic is referred to
+        // `k · F(1−α; k, df_joint)` instead, so the entries do vary with N —
+        // and the clustered GLMM gets a value too, where the asymptotic build
+        // leaves NaN and batch.rs recomputes χ² inline.
+        let joint_t_crit_sq: Vec<f64> = if n_targets == 0 {
+            vec![f64::NAN; n]
+        } else if bw.is_some() {
+            let k = n_targets as f64;
+            df_family_per_n
+                .iter()
+                .map(|&df_joint| k * f_ppf(1.0 - alpha, k, df_joint))
+                .collect()
+        } else {
+            match estimator {
+                EstimatorSpec::Mle => vec![chi2_ppf(1.0 - alpha, n_targets as f64); n],
+                _ => vec![f64::NAN; n],
             }
-            _ => vec![f64::NAN; n],
         };
 
         // Overall (joint) critvals — v1-parity F (OLS) / LRT (Logit) thresholds.
@@ -1004,6 +1276,7 @@ impl CritValueTable {
 
         Ok(CritValueTable {
             t_crit_sq_uncorrected,
+            df_per_target,
             correction_t_crit_sq,
             posthoc_t_crit_sq,
             joint_t_crit_sq,
@@ -1149,7 +1422,9 @@ mod tests {
         for (i, &n) in sample_sizes.iter().enumerate() {
             let df = (n - n_predictors) as f64;
             let t_crit = t_ppf(1.0 - 0.05 / 2.0, df);
-            assert_eq!(t_crit * t_crit, table.t_crit_sq_uncorrected[i]);
+            for &v in &table.t_crit_sq_uncorrected[i] {
+                assert_eq!(t_crit * t_crit, v);
+            }
         }
     }
 
@@ -1294,7 +1569,10 @@ mod tests {
         )
         .unwrap();
         // posthoc_t_crit_sq must equal uncorrected when posthoc_alpha is None.
-        assert_eq!(table.posthoc_t_crit_sq[0], table.t_crit_sq_uncorrected[0]);
+        assert_eq!(
+            table.posthoc_t_crit_sq[0],
+            table.t_crit_sq_uncorrected[0][0]
+        );
     }
 
     #[test]
@@ -1359,7 +1637,7 @@ mod tests {
         .unwrap();
         let z = norm_ppf(0.975);
         let expected = z * z;
-        let got = table.t_crit_sq_uncorrected[0];
+        let got = table.t_crit_sq_uncorrected[0][0];
         let rel = (got - expected).abs() / expected;
         assert!(
             rel < 1e-12,
@@ -1453,12 +1731,14 @@ mod tests {
             EstimatorSpec::Mle,
         )
         .unwrap();
-        let delta = (tab_logit.t_crit_sq_uncorrected[0] - tab_lme.t_crit_sq_uncorrected[0]).abs();
+        let logit_z_sq = tab_logit.t_crit_sq_uncorrected[0][0];
+        let lme_z_sq = tab_lme.t_crit_sq_uncorrected[0][0];
+        let delta = (logit_z_sq - lme_z_sq).abs();
         assert!(
             delta < 1e-12,
             "Glm z² = {}, Mle z² = {}, delta = {}",
-            tab_logit.t_crit_sq_uncorrected[0],
-            tab_lme.t_crit_sq_uncorrected[0],
+            logit_z_sq,
+            lme_z_sq,
             delta
         );
         // Also verify posthoc and correction slots are identical.
@@ -1922,5 +2202,436 @@ mod tests {
                 "f_ppf({p},{dfn},{dfd})={got}, expected {expected}, rel {rel}"
             );
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Between-within denominator degrees of freedom (SAS DDFM=BETWITHIN)
+    // -----------------------------------------------------------------
+
+    /// Balanced one-way mixed design: intercept + one cluster-level continuous
+    /// predictor (kernel column 1) + one within-cluster one (column 2), so
+    /// `p = 3` and `p_between = 2`. Targets are those two columns, in that
+    /// order.
+    fn bw_two_predictor_spec(estimator: EstimatorSpec, sizing: ClusterSizing) -> SimulationSpec {
+        let mut spec = crate::spec::tests::minimal_ols_spec();
+        spec.estimator = estimator;
+        spec.df_method = DfMethod::BetweenWithin;
+        spec.n_non_factor = 2;
+        spec.between_var_indices = vec![1];
+        spec.target_indices = vec![1, 2];
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing,
+            tau_squared: 0.5,
+            slopes: vec![],
+            extra_groupings: vec![],
+        });
+        spec
+    }
+
+    /// Build the table for `spec` at one sample size, with `n_predictors` fitted
+    /// columns of which `p_between` are cluster-level.
+    fn bw_table(
+        spec: &SimulationSpec,
+        n: u32,
+        n_predictors: u32,
+        p_between: u32,
+        correction_method: CorrectionMethod,
+        tukey_k: &[f64],
+    ) -> CritValueTable {
+        let bw = BetweenWithinDf::resolve(spec, &[n], p_between);
+        CritValueTable::build_with_tukey_k(
+            &spec.crit_values,
+            &[n],
+            n_predictors,
+            (spec.target_indices.len() + spec.contrast_pairs.len()) as u32,
+            correction_method,
+            spec.estimator,
+            tukey_k,
+            bw.as_ref(),
+        )
+        .unwrap()
+    }
+
+    /// CRIT-11: the between-within split of a balanced one-way design matches
+    /// the hand arithmetic. N = 40 rows in clusters of 8 ⇒ g = 5; the fitted
+    /// design is intercept + one cluster-level + one within-cluster predictor
+    /// ⇒ p = 3, p_between = 2. So df_resid = 40 − 3 = 37,
+    /// df_between = 5 − 2 = 3, df_within = 37 − 3 = 34.
+    #[test]
+    fn bw_df_of_balanced_one_way_matches_hand_computation() {
+        let spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 8 },
+        );
+        let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::None, &[]);
+        assert_eq!(table.df_per_target[0], vec![3.0, 34.0]);
+    }
+
+    /// CRIT-12: the cluster-level target is referred to df_between and the
+    /// within-cluster one to df_within — both as Student-t, not the standard
+    /// normal the asymptotic build uses for `Mle`.
+    #[test]
+    fn bw_between_target_gets_between_df_within_target_gets_within_df() {
+        let spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 8 },
+        );
+        let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::None, &[]);
+        let between = t_ppf(0.975, 3.0);
+        let within = t_ppf(0.975, 34.0);
+        assert_eq!(
+            table.t_crit_sq_uncorrected[0],
+            vec![between * between, within * within]
+        );
+        // The cluster-level target is the harder test: fewer df ⇒ larger crit.
+        assert!(table.t_crit_sq_uncorrected[0][0] > table.t_crit_sq_uncorrected[0][1]);
+        // ... and both exceed the asymptotic z² the same design would have used.
+        let z = norm_ppf(0.975);
+        assert!(table.t_crit_sq_uncorrected[0][1] > z * z);
+    }
+
+    /// CRIT-13: no-op tripwire. Under `DfMethod::Asymptotic` every value the
+    /// table holds is bit-identical to what the pre-between-within code
+    /// produced; the literals below were captured from a build of that
+    /// code, not recomputed from the current one.
+    #[test]
+    fn asymptotic_tables_are_bit_identical_to_pre_change_values() {
+        let a = CritValueTable::build(
+            &CritValues {
+                alpha: 0.05,
+                posthoc_alpha: None,
+            },
+            &[40, 80],
+            4,
+            3,
+            CorrectionMethod::Holm,
+            EstimatorSpec::Mle,
+        )
+        .unwrap();
+        assert_eq!(
+            a.t_crit_sq_uncorrected,
+            vec![
+                vec![3.841458826888164, 3.841458826888164, 3.841458826888164],
+                vec![3.841458826888164, 3.841458826888164, 3.841458826888164],
+            ]
+        );
+        assert_eq!(
+            a.correction_t_crit_sq,
+            vec![
+                vec![5.731139288752486, 5.02388618220602, 3.841458826888164],
+                vec![5.731139288752486, 5.02388618220602, 3.841458826888164],
+            ]
+        );
+        assert_eq!(
+            a.posthoc_t_crit_sq,
+            vec![3.841458826888164, 3.841458826888164]
+        );
+        assert_eq!(
+            a.joint_t_crit_sq,
+            vec![7.814727903251182, 7.814727903251182]
+        );
+        assert_eq!(a.overall_crit, vec![f64::INFINITY, f64::INFINITY]);
+        // Wald-z build ⇒ no df backs the threshold.
+        assert!(a.df_per_target.iter().all(|r| r.is_empty()));
+
+        let b = CritValueTable::build(
+            &CritValues {
+                alpha: 0.05,
+                posthoc_alpha: Some(0.01),
+            },
+            &[20, 50],
+            4,
+            3,
+            CorrectionMethod::BenjaminiHochberg,
+            EstimatorSpec::Ols,
+        )
+        .unwrap();
+        assert_eq!(
+            b.t_crit_sq_uncorrected,
+            vec![
+                vec![4.493998477666361, 4.493998477666361, 4.493998477666361],
+                vec![4.0517486921491965, 4.0517486921491965, 4.0517486921491965],
+            ]
+        );
+        assert_eq!(
+            b.correction_t_crit_sq,
+            vec![
+                vec![7.145101604364694, 5.421079040141435, 4.493998477666361],
+                vec![6.173691995153475, 4.813165220184376, 4.0517486921491965],
+            ]
+        );
+        assert_eq!(
+            b.posthoc_t_crit_sq,
+            vec![8.530965285896206, 7.220041507491684]
+        );
+        assert!(b.joint_t_crit_sq.iter().all(|v| v.is_nan()));
+        assert_eq!(b.overall_crit, vec![3.238871517453583, 2.806844928806262]);
+        // OLS reports its residual df N − P per target.
+        assert_eq!(
+            b.df_per_target,
+            vec![vec![16.0, 16.0, 16.0], vec![46.0, 46.0, 46.0]]
+        );
+
+        let c = CritValueTable::build_with_tukey_k(
+            &CritValues {
+                alpha: 0.05,
+                posthoc_alpha: None,
+            },
+            &[30],
+            3,
+            2,
+            CorrectionMethod::TukeyHsd,
+            EstimatorSpec::Ols,
+            &[3.0, 3.0],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            c.t_crit_sq_uncorrected,
+            vec![vec![4.210008468359758, 4.210008468359758]]
+        );
+        assert_eq!(
+            c.correction_t_crit_sq,
+            vec![vec![6.147514869456612, 6.147514869456612]]
+        );
+        assert_eq!(c.posthoc_t_crit_sq, vec![4.210008468359758]);
+        assert!(c.joint_t_crit_sq[0].is_nan());
+        assert_eq!(c.overall_crit, vec![3.3541308285292044]);
+
+        let d = CritValueTable::build(
+            &CritValues {
+                alpha: 0.05,
+                posthoc_alpha: None,
+            },
+            &[40, 80],
+            4,
+            3,
+            CorrectionMethod::Bonferroni,
+            EstimatorSpec::Glm,
+        )
+        .unwrap();
+        assert_eq!(
+            d.correction_t_crit_sq,
+            vec![
+                vec![5.731139288752486, 5.731139288752486, 5.731139288752486],
+                vec![5.731139288752486, 5.731139288752486, 5.731139288752486],
+            ]
+        );
+        assert!(d.joint_t_crit_sq.iter().all(|v| v.is_nan()));
+        assert_eq!(d.overall_crit, vec![7.814727903251182, 7.814727903251182]);
+    }
+
+    /// CRIT-14: an interaction of two cluster-level columns is itself
+    /// cluster-level and counts in `p_between`; an interaction that pulls in a
+    /// within-cluster column does not. Design: three continuous predictors
+    /// (columns 1-3) with 1 and 3 cluster-level, plus interactions x1:x3
+    /// (column 4) and x1:x2 (column 5).
+    #[test]
+    fn bw_all_between_interaction_counts_in_p_between_mixed_one_does_not() {
+        let mut spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 10 },
+        );
+        spec.n_non_factor = 3;
+        spec.between_var_indices = vec![1, 3];
+        spec.interactions = vec![vec![1, 3], vec![1, 2]];
+        spec.target_indices = vec![4, 5];
+        // intercept + columns 1 and 3 + the all-between interaction = 4 of 6.
+        assert_eq!(between_column_count(&spec, None), 4);
+
+        // N = 100 in clusters of 10 ⇒ g = 10; p = 6, p_between = 4 ⇒
+        // df_between = 6, df_resid = 94, df_within = 88.
+        let table = bw_table(&spec, 100, 6, 4, CorrectionMethod::None, &[]);
+        assert_eq!(table.df_per_target[0], vec![6.0, 88.0]);
+    }
+
+    /// CRIT-15: a reduced-model rebuild that drops a cluster-level dummy carries
+    /// the reduced `p_between`, which moves the split — dropping a within-cluster
+    /// column would not. Design: intercept + one within-cluster continuous
+    /// (column 1) + a cluster-level 3-level factor (dummies at columns 2 and 3).
+    #[test]
+    fn bw_reduced_rebuild_uses_reduced_p_between() {
+        let mut spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 10 },
+        );
+        spec.n_non_factor = 1;
+        spec.n_factor_dummies = 2;
+        spec.factor_n_levels = vec![3];
+        spec.between_var_indices = vec![2, 3];
+        spec.target_indices = vec![2, 1];
+        assert_eq!(between_column_count(&spec, None), 3);
+
+        // Dropping the second dummy leaves columns [0, 1, 2]: p_red = 3 of which
+        // p_between_red = 2 (intercept + the surviving dummy).
+        let kept = [0u32, 1, 2];
+        let p_between_red = between_column_count(&spec, Some(&kept));
+        assert_eq!(p_between_red, 2);
+
+        // N = 100 in clusters of 10 ⇒ g = 10. Full: p = 4, p_between = 3 ⇒
+        // df_between = 7, df_within = 96 − 7 = 89. Reduced: p_red = 3,
+        // p_between_red = 2 ⇒ df_between = 8, df_within = 97 − 8 = 89.
+        let full = bw_table(&spec, 100, 4, 3, CorrectionMethod::None, &[]);
+        assert_eq!(full.df_per_target[0], vec![7.0, 89.0]);
+        let reduced = bw_table(&spec, 100, 3, p_between_red, CorrectionMethod::None, &[]);
+        assert_eq!(reduced.df_per_target[0], vec![8.0, 89.0]);
+    }
+
+    /// CRIT-16: crossed or nested extra groupings leave the between-within
+    /// partition undefined, so the build falls back to the asymptotic table —
+    /// value for value, not merely without panicking.
+    #[test]
+    fn bw_falls_back_to_asymptotic_for_crossed_and_nested_groupings() {
+        let base = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 8 },
+        );
+        let mut asymptotic = base.clone();
+        asymptotic.df_method = DfMethod::Asymptotic;
+        let reference = bw_table(&asymptotic, 40, 3, 2, CorrectionMethod::Bonferroni, &[]);
+
+        for extra in [
+            engine_contract::GroupingRelation::Crossed { n_clusters: 4 },
+            engine_contract::GroupingRelation::NestedWithin { n_per_parent: 2 },
+        ] {
+            let mut spec = base.clone();
+            spec.cluster.as_mut().unwrap().extra_groupings = vec![engine_contract::GroupingSpec {
+                relation: extra.clone(),
+                tau_squared: 0.3,
+                slopes: vec![],
+            }];
+            assert!(
+                BetweenWithinDf::resolve(&spec, &[40], 2).is_none(),
+                "{extra:?} must refuse the between-within split"
+            );
+            let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::Bonferroni, &[]);
+            assert_eq!(
+                table.t_crit_sq_uncorrected, reference.t_crit_sq_uncorrected,
+                "{extra:?} must reproduce the asymptotic thresholds"
+            );
+            assert_eq!(table.correction_t_crit_sq, reference.correction_t_crit_sq);
+            assert_eq!(table.joint_t_crit_sq, reference.joint_t_crit_sq);
+            // The refusal is observable: no df backs an asymptotic threshold.
+            assert!(table.df_per_target.iter().all(|r| r.is_empty()));
+        }
+    }
+
+    /// CRIT-17: the split depends on the design, not the solver — a Gaussian LMM
+    /// and a clustered GLMM over the same design get the same per-target df and
+    /// the same thresholds.
+    #[test]
+    fn bw_df_identical_for_mle_and_clustered_glm() {
+        let sizing = ClusterSizing::FixedSize { cluster_size: 8 };
+        let mle = bw_two_predictor_spec(EstimatorSpec::Mle, sizing.clone());
+        let glmm = bw_two_predictor_spec(EstimatorSpec::Glm, sizing);
+        let a = bw_table(&mle, 40, 3, 2, CorrectionMethod::None, &[]);
+        let b = bw_table(&glmm, 40, 3, 2, CorrectionMethod::None, &[]);
+        assert_eq!(a.df_per_target, b.df_per_target);
+        assert_eq!(a.df_per_target[0], vec![3.0, 34.0]);
+        assert_eq!(a.t_crit_sq_uncorrected, b.t_crit_sq_uncorrected);
+        // The clustered GLMM gets a joint crit under the split, where the
+        // asymptotic build leaves NaN.
+        assert_eq!(a.joint_t_crit_sq, b.joint_t_crit_sq);
+        assert!(b.joint_t_crit_sq[0].is_finite());
+    }
+
+    /// CRIT-18: the joint Wald crit is `k · F(1−α; k, df_joint)` with `df_joint`
+    /// the smallest df in the target set. The set here mixes a cluster-level
+    /// target (df 3) with a within-cluster one (df 34), so the smaller wins.
+    /// External oracle: R `qf(0.95, 2, 3)` = 9.552094.
+    #[test]
+    fn bw_joint_crit_uses_smallest_df_in_the_target_set() {
+        let spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 8 },
+        );
+        let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::None, &[]);
+        let expected = 2.0 * 9.552094;
+        let got = table.joint_t_crit_sq[0];
+        assert!(
+            (got - expected).abs() / expected < 1e-6,
+            "joint crit {got}, expected 2 * qf(0.95, 2, 3) = {expected}"
+        );
+        // Both targets within-cluster ⇒ the larger df, hence a smaller crit.
+        let mut all_within = spec.clone();
+        all_within.between_var_indices = vec![];
+        let within_only = bw_table(&all_within, 40, 3, 1, CorrectionMethod::None, &[]);
+        assert!(within_only.joint_t_crit_sq[0] < got);
+    }
+
+    /// CRIT-19: `FixedSize` cluster counting rounds UP. `n_clusters_at` floors,
+    /// but the row-to-cluster map puts the remainder rows in one further
+    /// partial cluster, so the count that matches the data is the ceiling:
+    /// N = 41 in clusters of 8 is 6 clusters, not 5.
+    #[test]
+    fn bw_cluster_count_is_ceiling_under_fixed_size() {
+        let sizing = ClusterSizing::FixedSize { cluster_size: 8 };
+        assert_eq!(sizing.n_clusters_at(41), 5);
+        let spec = bw_two_predictor_spec(EstimatorSpec::Mle, sizing);
+        let bw = BetweenWithinDf::resolve(&spec, &[41], 2).unwrap();
+        assert_eq!(bw.clusters_per_n, vec![6]);
+        // g = 6, p = 3, p_between = 2 ⇒ df_between = 4, df_within = 38 − 4 = 34.
+        let table = bw_table(&spec, 41, 3, 2, CorrectionMethod::None, &[]);
+        assert_eq!(table.df_per_target[0], vec![4.0, 34.0]);
+    }
+
+    /// CRIT-20: the studentized-range df follows the same between/within rule as
+    /// the marginal test — a cluster-level factor's dummies go against
+    /// df_between, a within-cluster factor's against df_within.
+    #[test]
+    fn bw_tukey_df_follows_the_target_between_within_level() {
+        let mut spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 8 },
+        );
+        spec.n_non_factor = 0;
+        spec.n_factor_dummies = 2;
+        spec.factor_n_levels = vec![2, 2];
+        // Column 1 = the cluster-level factor's dummy, column 2 = the
+        // within-cluster factor's.
+        spec.between_var_indices = vec![1];
+        spec.target_indices = vec![1, 2];
+        let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::TukeyHsd, &[2.0, 2.0]);
+        let row = &table.correction_t_crit_sq[0];
+        let between = q_tukey_ppf(0.95, 2.0, 3.0) / std::f64::consts::SQRT_2;
+        let within = q_tukey_ppf(0.95, 2.0, 34.0) / std::f64::consts::SQRT_2;
+        assert_eq!(row[0], between * between);
+        assert_eq!(row[1], within * within);
+        assert!(row[0] > row[1]);
+    }
+
+    /// CRIT-21: the collapsed reference. An LMM whose variance components all
+    /// pinned at zero is the OLS on the same columns, so every target — the
+    /// cluster-level one included — goes against Student-t at the residual df
+    /// `N − P` (here 40 − 3 = 37), and the joint test against `k · F(k, 37)`.
+    /// A collapsed GLMM is a plain GLM, whose reference is the Wald z: `None`.
+    #[test]
+    fn bw_collapsed_fit_refers_every_target_to_the_residual_df() {
+        let spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 8 },
+        );
+        let split = BetweenWithinDf::resolve(&spec, &[40], 2).unwrap();
+        let collapsed = split.collapsed(EstimatorSpec::Mle).unwrap();
+        assert!(collapsed.collapsed && !split.collapsed);
+        let table = CritValueTable::build_with_tukey_k(
+            &spec.crit_values,
+            &[40],
+            3,
+            2,
+            CorrectionMethod::None,
+            EstimatorSpec::Mle,
+            &[],
+            Some(&collapsed),
+        )
+        .unwrap();
+        assert_eq!(table.df_per_target[0], vec![37.0, 37.0]);
+        let t = t_ppf(0.975, 37.0);
+        assert_eq!(table.t_crit_sq_uncorrected[0], vec![t * t, t * t]);
+        assert_eq!(table.joint_t_crit_sq[0], 2.0 * f_ppf(0.95, 2.0, 37.0));
+        // Off the boundary the same design gives df 3 / 34 (CRIT-19).
+        let live = bw_table(&spec, 40, 3, 2, CorrectionMethod::None, &[]);
+        assert_eq!(live.df_per_target[0], vec![3.0, 34.0]);
+        assert!(split.collapsed(EstimatorSpec::Glm).is_none());
     }
 }

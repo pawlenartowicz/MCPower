@@ -492,6 +492,12 @@ as.data.frame.mcpower_sample_size_result <- function(x, ...) {
   # ≤ / ≥ sentinel rows with no single exportable integer).
   # ci_lo/ci_hi: floor/ceiling-rounded when status == fitted and bound present;
   # NA_integer_ otherwise (mirrors Python SampleSizeResult.to_dataframe()).
+  # No posthoc block here: the engine computes no per-contrast required-N
+  # crossing for "all-contrasts" targets, so a pure post-hoc query yields the
+  # empty-but-correctly-columned frame below (mirrors results.py).
+  empty <- data.frame(test = character(0), scenario = character(0),
+                       required_n = integer(0), ci_lo = integer(0), ci_hi = integer(0),
+                       stringsAsFactors = FALSE)
   meta <- attr(x, "mcpower_meta")
   recs <- list()
   for (nm in names(.scenarios(x))) {
@@ -520,6 +526,7 @@ as.data.frame.mcpower_sample_size_result <- function(x, ...) {
         stringsAsFactors = FALSE)
     }
   }
+  if (length(recs) == 0L) return(empty)
   do.call(rbind, recs)
 }
 
@@ -641,13 +648,18 @@ NULL
 
 #' Convert an mcpower_result to a long-format tibble.
 #'
-#' Each row corresponds to one tested effect in one scenario. Factor header
-#' rows (baseline labels) are omitted. Columns: \code{test}, \code{scenario},
-#' \code{power}, \code{ci_lo}, \code{ci_hi}.
+#' Each row corresponds to one tested effect in one scenario, plus one row per
+#' post-hoc pairwise contrast (\code{target_test = "all-contrasts"}), labelled
+#' the same way as the printed table (e.g. \code{"3 vs 1"}). Factor header
+#' rows (baseline labels) and post-hoc header spans are omitted. Columns:
+#' \code{test}, \code{scenario}, \code{power}, \code{ci_lo}, \code{ci_hi}.
+#' Always carries this full column set, even with zero rows (e.g. a query with
+#' no targets and no post-hoc factors).
 #'
 #' @param x   An mcpower_result object returned by \code{find_power()}.
 #' @param ... Ignored.
-#' @return A tibble with one row per non-header effect per scenario.
+#' @return A tibble with one row per non-header effect and per post-hoc
+#'   contrast, per scenario.
 #' @importFrom tibble as_tibble
 #' @export
 as_tibble.mcpower_result <- function(x, ...) {
@@ -674,6 +686,24 @@ as_tibble.mcpower_result <- function(x, ...) {
         stringsAsFactors = FALSE
       )
     }
+    blocks <- inner$posthoc %||% list()
+    for (r in .posthoc_descriptors(meta)) {
+      if (identical(r$kind, "posthoc_header") || r$block > length(blocks)) next
+      blk     <- blocks[[r$block]]
+      ci_pair <- blk[[ckey]][[r$contrast]]
+      recs[[length(recs) + 1L]] <- data.frame(
+        test     = r$label,
+        scenario = nm,
+        power    = blk[[pkey]][[r$contrast]],
+        ci_lo    = ci_pair[[1]],
+        ci_hi    = ci_pair[[2]],
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  if (length(recs) == 0L) {
+    return(tibble::tibble(test = character(0), scenario = character(0),
+                           power = numeric(0), ci_lo = numeric(0), ci_hi = numeric(0)))
   }
   tibble::as_tibble(do.call(rbind, recs))
 }

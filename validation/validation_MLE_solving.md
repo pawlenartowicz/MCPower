@@ -19,10 +19,11 @@ matrix, outcome, and cluster ids, byte-for-byte), fit them two ways —
 
 — and compare the fitted fixed-effect coefficients, the test statistics,
 and the decision threshold. The statistic is the **Wald *z*** on the
-fixed effect (`fixef / sqrt(diag(vcov))`), *not* lmerTest’s
-Satterthwaite *t* — MCPower’s own test definition is the Wald z. Because
-both fit the identical bytes, sampling noise cancels: any difference is
-a solver discrepancy.
+fixed effect (`fixef / sqrt(diag(vcov))`), MCPower's default test
+definition, *not* lmerTest's Satterthwaite *t* (MCPower's opt-in
+`df_method="between_within"` uses a between-within *t* instead, but
+that is not what this comparison runs). Because both fit the identical
+bytes, sampling noise cancels: any difference is a solver discrepancy.
 
 The chosen cases sit at ICC 0.1–0.2 with 20–30 clusters, well clear of
 the **τ̂ ≈ 0 boundary**. If a case ever collapsed to that boundary,

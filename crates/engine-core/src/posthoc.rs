@@ -25,7 +25,8 @@ pub type Contrast = Vec<f64>;
 /// - `posthoc_t_crit_sq`: scalar squared posthoc-α critical value (uncorrected).
 /// - `correction_method`: typed enum applied over the contrast set
 ///   (independent of the main target correction).
-/// - `correction_crit_sq`: per-rank thresholds for Bonferroni/Holm/BH; length `C`.
+/// - `correction_crit_sq`: per-contrast thresholds under `None`/Bonferroni/Tukey,
+///   per-rank under Holm/BH; length `C`.
 /// - `t_sq_scratch`: caller-owned per-contrast `t²` staging buffer. Grown to
 ///   `C` on first use, reused thereafter (the contrast count is not known at
 ///   workspace construction, so this is a `Vec` rather than a fixed slice).
@@ -107,13 +108,7 @@ pub fn evaluate_posthoc(
     }
 
     // Corrected — delegate to `apply_correction` over the contrast set.
-    apply_correction(
-        correction_method,
-        t_sq_all,
-        posthoc_t_crit_sq,
-        correction_crit_sq,
-        cor_out,
-    );
+    apply_correction(correction_method, t_sq_all, correction_crit_sq, cor_out);
 }
 
 /// Solve `L u = b` by forward substitution on the lower-triangular Cholesky
@@ -235,7 +230,7 @@ mod tests {
             &contrasts,
             1e12,
             CorrectionMethod::None,
-            &[],
+            &[1e12, 1e12],
             &mut t_sq_scratch,
             &mut u_scratch,
             &mut high_unc,
@@ -249,7 +244,7 @@ mod tests {
             &contrasts,
             0.0,
             CorrectionMethod::None,
-            &[],
+            &[0.0, 0.0],
             &mut t_sq_scratch,
             &mut u_scratch,
             &mut low_unc,
@@ -380,7 +375,7 @@ mod tests {
                 &list,
                 lo,
                 CorrectionMethod::None,
-                &[],
+                &[lo],
                 &mut t_sq_scratch,
                 &mut u_scratch,
                 &mut unc,
@@ -392,7 +387,7 @@ mod tests {
                 &list,
                 hi,
                 CorrectionMethod::None,
-                &[],
+                &[hi],
                 &mut t_sq_scratch,
                 &mut u_scratch,
                 &mut unc,

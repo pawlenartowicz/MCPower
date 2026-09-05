@@ -316,9 +316,13 @@ mod entry {
     }
 
     /// Map kernel estimator → per-target statistic family (D-C). The OLS-vs-z
-    /// partition is owned by `EstimatorSpec`; this only names the wire variants.
-    fn wire_statistic_kind(e: EstimatorSpec) -> StatisticKind {
-        if e.uses_student_t() {
+    /// partition is owned by `EstimatorSpec`; `has_df` additionally reports `T`
+    /// for a mixed spec where the between-within denominator df actually
+    /// applied (a non-empty `df_per_target` row from the crit table) — never
+    /// for the asymptotic build or a between-within fallback (crossed/nested
+    /// extra grouping), both of which stay Wald-z.
+    fn wire_statistic_kind(e: EstimatorSpec, has_df: bool) -> StatisticKind {
+        if e.uses_student_t() || has_df {
             StatisticKind::T
         } else {
             StatisticKind::Z
@@ -437,7 +441,10 @@ mod entry {
                 IntrospectMask {
                     stats: stages.stats,
                     data: stages.data,
-                    crit: stages.crit || need_power,
+                    // Also asked for when only `stats` is requested: the crit
+                    // table's `has_df` decides `stat_kind` (T vs Z) below, and
+                    // building it costs nothing per-sim.
+                    crit: stages.crit || need_power || stages.stats,
                     power: need_power,
                 },
             )?)
@@ -478,7 +485,15 @@ mod entry {
             None
         };
         let labels = synth_target_labels(spec);
-        let stat_kind = wire_statistic_kind(spec.estimator);
+        // has_df: whether the crit table actually resolved a between-within
+        // denominator df (empty row ⇒ Wald-z — asymptotic mixed, or the
+        // crossed/nested fallback; non-empty ⇒ Student-t/F).
+        let has_df = icall
+            .as_ref()
+            .and_then(|o| o.crit.as_ref())
+            .map(|c| !c.df_per_target.is_empty())
+            .unwrap_or(false);
+        let stat_kind = wire_statistic_kind(spec.estimator, has_df);
 
         let stats = if stages.stats {
             let o = icall.as_ref().expect("introspect call");
@@ -517,19 +532,25 @@ mod entry {
         let crit = if stages.crit {
             let o = icall.as_ref().expect("introspect call");
             let ic = o.crit.as_ref().expect("crit when stages.crit");
-            // Natural threshold (D-B). df slots per D-C.
-            let crit_value = ic.crit_sq_uncorrected.sqrt();
-            let df = spec.estimator.df_slots(ic.df_resid);
+            // Natural threshold (D-B), per target — differs across targets
+            // only under the between-within denominator df. df slots per D-C,
+            // read from the crit table rather than recomputed.
+            let df = spec.estimator.df_slots(&ic.df_per_target, labels.len());
             let targets = labels
                 .iter()
                 .enumerate()
                 .map(|(t, label)| TargetCrit {
                     target_index: t,
                     target_label: label.clone(),
-                    critical_value: crit_value,
+                    critical_value: ic
+                        .crit_sq_uncorrected_per_target
+                        .get(t)
+                        .copied()
+                        .unwrap_or(f64::NAN)
+                        .sqrt(),
                     alpha: spec.crit_values.alpha,
                     distribution: stat_kind,
-                    df: df.clone(),
+                    df: df[t].clone(),
                     two_sided: true,
                 })
                 .collect();
@@ -585,6 +606,9 @@ mod entry {
         // one dataset). Bypasses the port-level `rx` rejection by design — no
         // production path passes a `Some`.
         wald_se: Option<engine_contract::WaldSe>,
+        // Validation-only override of the contract's `df_method` reference
+        // distribution, same rationale/reach as `wald_se` above.
+        df_method: Option<engine_contract::DfMethod>,
     ) -> Result<LoadDataResult, OrchestratorError> {
         let scenarios = lower_contracts(std::slice::from_ref(c), seed)?;
         let mut scenario = scenarios
@@ -593,6 +617,9 @@ mod entry {
             .ok_or_else(|| OrchestratorError::InvalidScenarios("empty".into()))?;
         if let Some(w) = wald_se {
             scenario.spec.wald_se = w;
+        }
+        if let Some(d) = df_method {
+            scenario.spec.df_method = d;
         }
         let spec = &scenario.spec;
 
@@ -610,9 +637,14 @@ mod entry {
             spec.n_factor_dummies,
             spec.interactions.len() as u32,
         );
-        let stat_kind = wire_statistic_kind(spec.estimator);
-        let df = spec.estimator.df_slots(r.df_resid);
-        let crit_value = r.crit_sq_uncorrected.sqrt();
+        let has_df = !r.df_per_target.is_empty();
+        let stat_kind = wire_statistic_kind(spec.estimator, has_df);
+        // df_per_target has one slot per marginal then per contrast, like
+        // the crit table it was read from.
+        let df = spec.estimator.df_slots(
+            &r.df_per_target,
+            r.target_cols.len() + spec.contrast_pairs.len(),
+        );
 
         let targets = r
             .target_cols
@@ -630,9 +662,14 @@ mod entry {
                     se: r.se[t],
                     statistic: r.statistic[t],
                     statistic_kind: stat_kind,
-                    critical_value: crit_value,
+                    critical_value: r
+                        .crit_sq_uncorrected_per_target
+                        .get(t)
+                        .copied()
+                        .unwrap_or(f64::NAN)
+                        .sqrt(),
                     alpha: spec.crit_values.alpha,
-                    df: df.clone(),
+                    df: df[t].clone(),
                     two_sided: true,
                 }
             })

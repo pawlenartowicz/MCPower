@@ -975,7 +975,7 @@ RVariableRegistry <- R6::R6Class(
                                   residual_name, residual_pinned = FALSE, max_failed,
                                   test_formula, scenario_configs = .scenario_defaults(),
                                   pending_data = NULL, cluster_level_vars = NULL,
-                                  estimator = "ols") {
+                                  estimator = "ols", df_method = NULL) {
   # Predictors — non-factors first (formula order), then factors. (model.py _to_linear_spec_dict)
   predictors <- list()
   non_factor_names <- reg$non_factor_names
@@ -1069,6 +1069,10 @@ RVariableRegistry <- R6::R6Class(
   # spec field is always emitted so the engine can apply it uniformly.
   wald_se_wire <- .wald_se_for_rust(wald_se)
 
+  # df_method: normalise and validate; only affects mixed-model fits, but the
+  # spec field is always emitted so the engine can apply it uniformly.
+  df_method_wire <- .df_method_for_rust(df_method)
+
   # Scenarios (model.py _to_linear_spec_dict).
   scenarios <- lapply(scenario_names, function(nm) .scenario_dict(nm, scenario_configs))
   # RE knobs (random_effect_dist/df, icc_noise_sd) are LME-only: the engine
@@ -1135,6 +1139,7 @@ RVariableRegistry <- R6::R6Class(
     correction = correction_wire,
     wald_se = wald_se_wire,
     nagq = as.integer(nagq),
+    df_method = df_method_wire,
     targets = wire_targets,
     report_overall = wire_report_overall,
     contrast_pairs = wire_contrast_pairs,

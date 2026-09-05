@@ -64,6 +64,18 @@
     sQuote(wald_se)))
 }
 
+# Canonical DfMethod variant names (engine-contract). NULL falls back to the
+# config `estimation.df_method` default (the cross-port home — no hardcoded
+# per-port default). Mirrors .wald_se_for_rust.
+.df_method_for_rust <- function(df_method) {
+  if (is.null(df_method)) df_method <- .config()$estimation$df_method
+  key <- gsub("[- ]", "_", tolower(df_method))
+  if (key %in% c("asymptotic", "between_within")) return(key)
+  stop(sprintf(
+    "unknown df_method %s (use \"asymptotic\" or \"between_within\")",
+    sQuote(df_method)))
+}
+
 .mcpower_cache <- new.env(parent = emptyenv())
 
 .config <- function() {

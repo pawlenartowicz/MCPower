@@ -53,6 +53,7 @@ fn simple_spec() -> LinearSpec {
         upload: None,
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
     }
 }

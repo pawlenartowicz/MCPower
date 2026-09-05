@@ -30,6 +30,7 @@ fn load_data_reproduces_sim0_statistic_and_crit_bit_for_bit() {
         &d.outcome,
         d.cluster_ids.as_deref(),
         None,
+        None,
     )
     .unwrap();
 
@@ -93,6 +94,7 @@ fn load_data_reproduces_glm_sim0_statistic_and_crit_bit_for_bit() {
         &d.outcome,
         d.cluster_ids.as_deref(),
         None,
+        None,
     )
     .unwrap();
 
@@ -147,6 +149,7 @@ fn load_data_reproduces_mle_sim0_statistic_and_crit_bit_for_bit() {
         d.design.ncol,
         &d.outcome,
         d.cluster_ids.as_deref(),
+        None,
         None,
     )
     .unwrap();
@@ -228,6 +231,7 @@ fn debug_surfaces_extra_grouping_ids_and_variance_components() {
         &d.outcome,
         d.cluster_ids.as_deref(),
         None,
+        None,
     )
     .unwrap();
     assert!(ld.converged, "general-path fit converged");
@@ -277,6 +281,7 @@ fn load_data_wald_se_override_hessian_ge_rx_same_betas() {
             &d.outcome,
             d.cluster_ids.as_deref(),
             Some(mode),
+            None,
         )
         .unwrap()
     };

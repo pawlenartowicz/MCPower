@@ -15,9 +15,17 @@ pub struct ReducedCritEntry {
     pub n: u32,
     /// Reduced predictor-column count (intercept included).
     pub p_red: u32,
+    /// How many of those kept columns are constant within cluster — the second
+    /// df input of the between-within denominator degrees of freedom, and part
+    /// of the key because two rounds can keep the same number of columns while
+    /// dropping different halves of the split.
+    pub p_between_red: u32,
     /// Single-N `CritValueTable` (built with a one-element sample-size slice;
     /// all per-N vectors have exactly one row, read at index 0).
     pub crit: crate::critvals::CritValueTable,
+    /// The collapsed-fit twin of `crit` (see `batch::build_crit_tables`);
+    /// `None` outside the between-within reference.
+    pub crit_boundary: Option<crate::critvals::CritValueTable>,
     /// Per-contrast post-hoc correction crits for that single N (flat across
     /// post-hoc blocks); empty when the spec has no post-hoc blocks.
     pub posthoc_corr_row: Vec<f64>,

@@ -542,11 +542,17 @@ def _validate_cluster_config(
     n_clusters: Optional[int],
     cluster_size: Optional[int],
     parsed_grouping_vars: List[str],
+    n_per_parent: Optional[int] = None,
 ) -> _ValidationResult:
     """Validate cluster configuration parameters.
 
     Random slopes, crossed/nested groupings, and cluster-level predictors are
     all supported and configured through ``set_cluster``.
+
+    A nested child grouping (``n_per_parent`` set) is sized entirely by that
+    count against its parent's cluster count/size — it carries no
+    ``n_clusters``/``cluster_size`` of its own, so the sizing requirement
+    below is skipped for it.
     """
     from ..config import get_limits
     errors: List[str] = []
@@ -569,7 +575,10 @@ def _validate_cluster_config(
             f"Got {icc}. Extreme ICC values (< {icc_lo} or > {icc_hi}) cause convergence issues in mixed models."
         )
 
-    if n_clusters is not None and cluster_size is not None:
+    if n_per_parent is not None:
+        if not isinstance(n_per_parent, int) or n_per_parent < 2:
+            errors.append(f"n_per_parent must be an integer >= 2, got {n_per_parent}")
+    elif n_clusters is not None and cluster_size is not None:
         errors.append("Specify either n_clusters OR cluster_size, not both")
     elif n_clusters is None and cluster_size is None:
         errors.append("Must specify either n_clusters or cluster_size")

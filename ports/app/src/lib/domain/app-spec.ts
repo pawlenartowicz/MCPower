@@ -208,6 +208,12 @@ export interface MixedSpec extends LinearSpec {
     cluster_name: string;
     icc: number;
     cluster_dim: ClusterDim;
+    /** Reference distribution for the fixed-effect Wald tests. Optional — mirrors
+     *  the Rust `#[serde(default)]` (omitted ⇒ engine default `between_within`).
+     *  `'between_within'` gives the between-cluster df to the predictors named in
+     *  `cluster_level_vars` and the within-cluster df to the rest; `'asymptotic'`
+     *  is the Wald-z opt-in. */
+    df_method?: 'asymptotic' | 'between_within';
     /** Predictor names constant within cluster (cluster-level covariates). Default []. */
     cluster_level_vars?: string[];
     /** Extra grouping factors (crossed / nested) after the primary. Default []. */

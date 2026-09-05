@@ -222,6 +222,15 @@ export function generateMixedScript(
     mode === 'find-sample-size' && unit !== 'observations'
       ? `unit${language === 'r' ? ' = ' : '='}"${unit}"`
       : undefined;
+  // df_method is the mixed denominator-df knob, exposed by both ports on the
+  // find_* calls. Between-within is the port default, so only the asymptotic
+  // opt-in is written out; rendered here like `unit` so the R script keeps R's
+  // spacing around a named argument.
+  const dfMethod = s.df_method ?? 'between_within';
+  const dfMethodArg =
+    dfMethod !== 'between_within'
+      ? `df_method${language === 'r' ? ' = ' : '='}"${dfMethod}"`
+      : undefined;
   for (const line of buildFindCallLines(
     lang,
     mode,
@@ -231,6 +240,7 @@ export function generateMixedScript(
     s.wald_se,
     s.agq,
     unitArg,
+    dfMethodArg,
   ))
     lines.push(line);
 

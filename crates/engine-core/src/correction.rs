@@ -10,18 +10,21 @@ use crate::spec::CorrectionMethod;
 ///
 /// - `correction_method`: typed enum (None / Bonferroni / Holm / BenjaminiHochberg).
 /// - `t_sq`: per-target squared t-statistics (length `T`); NaN → fail.
-/// - `t_crit_sq_uncorrected`: scalar squared critical value (used by `None`).
-/// - `crit_sq`: per-rank squared critical values (Bonferroni/Holm/BH; length `T`).
+/// - `crit_sq`: squared critical values, length `≥ T`. Target-indexed under
+///   `None`/Bonferroni/Tukey, rank-indexed under Holm/BH. Under `None` the
+///   builder fills it with the uncorrected thresholds, which is why this
+///   function needs no separate uncorrected scalar — and must not have one, as
+///   the between-within denominator df makes that threshold per-target.
 /// - `out`: per-target pass/fail (0/1), length `T`.
 pub fn apply_correction(
     correction_method: CorrectionMethod,
     t_sq: &[f64],
-    t_crit_sq_uncorrected: f64,
     crit_sq: &[f64],
     out: &mut [u8],
 ) {
     let t = t_sq.len();
     debug_assert_eq!(out.len(), t, "out length must match t_sq");
+    debug_assert!(crit_sq.len() >= t, "crit_sq must hold one entry per target");
 
     // Zero output first so NaN entries / unwalked positions land as fail.
     out.fill(0);
@@ -33,7 +36,7 @@ pub fn apply_correction(
     match correction_method {
         CorrectionMethod::None => {
             for i in 0..t {
-                if !t_sq[i].is_nan() && t_sq[i] > t_crit_sq_uncorrected {
+                if !t_sq[i].is_nan() && t_sq[i] > crit_sq[i] {
                     out[i] = 1;
                 }
             }
@@ -126,13 +129,7 @@ mod tests {
     fn none_method_compares_to_uncorrected() {
         let t_sq = vec![1.0_f64, 5.0, 3.0];
         let mut out = vec![0u8; 3];
-        apply_correction(
-            CorrectionMethod::None,
-            &t_sq,
-            4.0,
-            &[10.0, 10.0, 10.0],
-            &mut out,
-        );
+        apply_correction(CorrectionMethod::None, &t_sq, &[4.0, 4.0, 4.0], &mut out);
         assert_eq!(out, vec![0, 1, 0]);
     }
 
@@ -141,7 +138,7 @@ mod tests {
         let t_sq = vec![3.0_f64, 9.0, 4.5];
         let crit_sq = [4.0, 4.0, 4.0];
         let mut out = vec![0u8; 3];
-        apply_correction(CorrectionMethod::Bonferroni, &t_sq, 4.0, &crit_sq, &mut out);
+        apply_correction(CorrectionMethod::Bonferroni, &t_sq, &crit_sq, &mut out);
         assert_eq!(out, vec![0, 1, 1]);
     }
 
@@ -153,19 +150,19 @@ mod tests {
         let t_sq = vec![9.0_f64, 4.0, 1.0];
         let crit_sq = [10.0, 5.0, 3.0];
         let mut out = vec![0u8; 3];
-        apply_correction(CorrectionMethod::Holm, &t_sq, 3.84, &crit_sq, &mut out);
+        apply_correction(CorrectionMethod::Holm, &t_sq, &crit_sq, &mut out);
         assert_eq!(out, vec![0, 0, 0]);
 
         // Now make rank 0 pass; rank 1 fails → only target with rank 0 passes.
         let crit_sq2 = [5.0, 5.0, 3.0];
         let mut out = vec![0u8; 3];
-        apply_correction(CorrectionMethod::Holm, &t_sq, 3.84, &crit_sq2, &mut out);
+        apply_correction(CorrectionMethod::Holm, &t_sq, &crit_sq2, &mut out);
         assert_eq!(out, vec![1, 0, 0]);
 
         // All thresholds easy → all pass.
         let crit_sq3 = [0.5, 0.5, 0.5];
         let mut out = vec![0u8; 3];
-        apply_correction(CorrectionMethod::Holm, &t_sq, 0.5, &crit_sq3, &mut out);
+        apply_correction(CorrectionMethod::Holm, &t_sq, &crit_sq3, &mut out);
         assert_eq!(out, vec![1, 1, 1]);
     }
 
@@ -183,7 +180,6 @@ mod tests {
         apply_correction(
             CorrectionMethod::BenjaminiHochberg,
             &t_sq,
-            3.84,
             &crit_sq,
             &mut out,
         );
@@ -202,7 +198,7 @@ mod tests {
             CorrectionMethod::TukeyHsd,
         ] {
             let mut out = vec![0u8; 3];
-            apply_correction(m, &t_sq, 1.0, &crit_sq, &mut out);
+            apply_correction(m, &t_sq, &crit_sq, &mut out);
             assert_eq!(out[1], 0, "method {m:?}: NaN must fail");
             // The non-NaN entries should pass.
             assert_eq!(out[0], 1, "method {m:?}: t² > crit must pass");
@@ -229,7 +225,7 @@ mod tests {
         //   k=2: 1.2 > 1.5? no → stop. Targets 2 & 1 fail.
         // Expected: out = [1, 0, 0, 1]
         let mut out = vec![0u8; 4];
-        apply_correction(CorrectionMethod::Holm, &t_sq, 1.0, &crit_sq, &mut out);
+        apply_correction(CorrectionMethod::Holm, &t_sq, &crit_sq, &mut out);
         assert_eq!(out, vec![1, 0, 0, 1], "Holm fixture 1");
 
         // BH on same |t| sequence with thresholds [3.0, 2.0, 1.5, 1.0].
@@ -245,7 +241,6 @@ mod tests {
         apply_correction(
             CorrectionMethod::BenjaminiHochberg,
             &t_sq,
-            1.0,
             &crit_sq_bh,
             &mut out,
         );
@@ -265,7 +260,6 @@ mod tests {
         apply_correction(
             CorrectionMethod::BenjaminiHochberg,
             &t_sq,
-            1.0,
             &crit_sq_bh,
             &mut out,
         );
@@ -295,6 +289,7 @@ mod tests {
             CorrectionMethod::TukeyHsd,
             EstimatorSpec::Ols,
             &[l],
+            None,
         )
         .unwrap();
         table.correction_t_crit_sq[0][0]
@@ -330,7 +325,7 @@ mod tests {
                     EstimatorSpec::Ols,
                 )
                 .unwrap();
-                table.t_crit_sq_uncorrected[0]
+                table.t_crit_sq_uncorrected[0][0]
             };
 
             // Bonferroni with m = C(L,2) comparisons.
@@ -386,6 +381,7 @@ mod tests {
             CorrectionMethod::TukeyHsd,
             EstimatorSpec::Ols,
             &[3.0, 2.0],
+            None,
         )
         .unwrap();
         let row = &table.correction_t_crit_sq[0];
@@ -416,7 +412,6 @@ mod tests {
         // t_sq = [25.0, NaN, 9.0] with crits that make 25.0 and 9.0 pass.
         // The NaN slot (index 1) must never appear as 1 in output.
         let t_sq = vec![25.0_f64, f64::NAN, 9.0];
-        let crit_unc = 4.0;
         let crit_sq = vec![4.0_f64, 4.0, 4.0];
         for m in [
             CorrectionMethod::None,
@@ -426,7 +421,7 @@ mod tests {
             CorrectionMethod::BenjaminiHochberg,
         ] {
             let mut out = vec![0u8; 3];
-            apply_correction(m, &t_sq, crit_unc, &crit_sq, &mut out);
+            apply_correction(m, &t_sq, &crit_sq, &mut out);
             assert_eq!(
                 out[1], 0,
                 "method {m:?}: NaN entry must never be significant"
@@ -442,13 +437,7 @@ mod tests {
         // Rank 0: 25 > 4 → pass. Rank 1: 9 > 4 → pass. Rank 2: NaN → break
         // (Holm does break here, but both finite entries already passed — harmless).
         let mut holm_out = vec![0u8; 3];
-        apply_correction(
-            CorrectionMethod::Holm,
-            &t_sq,
-            crit_unc,
-            &crit_sq,
-            &mut holm_out,
-        );
+        apply_correction(CorrectionMethod::Holm, &t_sq, &crit_sq, &mut holm_out);
         assert_eq!(
             holm_out,
             vec![1, 0, 1],
@@ -490,7 +479,6 @@ mod tests {
         apply_correction(
             CorrectionMethod::BenjaminiHochberg,
             &t_sq,
-            0.5,
             &crit_sq,
             &mut out,
         );
@@ -504,7 +492,6 @@ mod tests {
         apply_correction(
             CorrectionMethod::Bonferroni,
             &t_sq,
-            30.0,
             &bonf_crit,
             &mut out_bonf,
         );

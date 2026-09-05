@@ -188,8 +188,12 @@ reports the **estimated baseline probability** with a `set_baseline_probability(
 snippet, recovered from the fitted intercept.
 
 Treat them as a **first guess, not a target**: they carry the pilot's sampling
-error, and they are never applied automatically — you read the string, decide,
-and call `set_effects` yourself. See
+error, and they are biased upward when the pilot was picked for looking
+promising, so a power analysis built on them inherits that bias (Albers &
+Lakens, 2018; Kraemer et al., 2006). Use the pilot for what it measures
+well — predictor distributions and correlations — and take the effect size
+from theory or prior literature; the borrowed value is never applied
+automatically — you read the string, decide, and call `set_effects` yourself. See
 [[concepts/upload-data#borrowing-starting-effects|borrowing starting effects]].
 
 next → [[10_model-misspecification|Model misspecification]]

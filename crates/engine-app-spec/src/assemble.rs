@@ -165,6 +165,7 @@ fn assemble_mixed(
     builder_spec.scenarios = spec.scenarios.clone();
     builder_spec.cluster_level_vars = spec.cluster_level_vars.clone();
     builder_spec.wald_se = spec.wald_se;
+    builder_spec.df_method = spec.df_method;
     builder_spec.nagq = resolve_nagq(spec.agq, mixed_agq_eligible(spec), &mut warnings);
     apply_outcome_options(
         &mut builder_spec,
@@ -722,6 +723,7 @@ fn project_to_builder_spec(
         upload: csv.map(csv_to_upload_input),
         cluster_level_vars: vec![],
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
     })
 }
@@ -1735,6 +1737,7 @@ mod tests {
             tests: TestSelection::All,
             correction: CorrectionMethod::None,
             wald_se: Default::default(),
+            df_method: Default::default(),
             scenarios: vec![],
             csv: None,
             report_overall: false,
@@ -1838,11 +1841,34 @@ mod tests {
         spec.cluster_level_vars = vec!["x2".into()];
         let (contracts, _, _) =
             assemble_mixed(&spec).expect("assemble_mixed with cluster_level_vars must not error");
-        // x2 must land as a cluster-level column, not be silently dropped (was: is_ok only).
+        // x2 must land as a cluster-level column, not be silently dropped, and
+        // nothing else may: x1 and x2 are both non-factor, so the resolver maps
+        // x2 to ColumnId(1) (its position in the non-factor block).
         assert_eq!(
-            contracts[0].generation.cluster_level_columns.len(),
-            1,
-            "x2 must forward as one cluster-level column"
+            contracts[0].generation.cluster_level_columns,
+            vec![engine_contract::ColumnId(1)],
+            "x2 alone must forward as the cluster-level column"
+        );
+    }
+
+    // df_method threads from the AppSpec onto every assembled contract; the
+    // default (BetweenWithin) is what a spec that never touched the knob
+    // carries.
+    #[test]
+    fn assemble_mixed_forwards_df_method() {
+        let mut spec = mixed_fixture();
+        let (default_contracts, _, _) = assemble_mixed(&spec).expect("assemble_mixed ok");
+        assert_eq!(
+            default_contracts[0].df_method,
+            engine_contract::DfMethod::BetweenWithin
+        );
+
+        spec.df_method = engine_contract::DfMethod::Asymptotic;
+        let (contracts, _, _) =
+            assemble_mixed(&spec).expect("assemble_mixed with df_method must not error");
+        assert_eq!(
+            contracts[0].df_method,
+            engine_contract::DfMethod::Asymptotic
         );
     }
 

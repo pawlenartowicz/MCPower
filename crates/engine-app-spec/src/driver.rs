@@ -476,7 +476,10 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
     // the fitter's cluster buffers match the cluster_ids built above.
     // Effect recovery fits a single clean design to the uploaded data: zero the
     // effects and drop any scenario perturbations so `assemble_spec` yields one
-    // baseline contract (the `.next()` below then takes it).
+    // baseline contract (the `.next()` below then takes it). The test formula
+    // is dropped too: the estimates fill the GENERATION design's effects, and a
+    // reduced test fit would leave every dropped term without an estimate
+    // (Python/R `get_effects_from_data` likewise pass no test formula).
     let zeroed_spec = match spec {
         AppSpec::Linear(l) => AppSpec::Linear({
             let mut s = l.clone();
@@ -484,6 +487,7 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
                 e.value = 0.0;
             }
             s.scenarios.clear();
+            s.test_formula = None;
             s
         }),
         AppSpec::Logit(l) => AppSpec::Logit({
@@ -492,6 +496,7 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
                 e.value = 0.0;
             }
             s.scenarios.clear();
+            s.test_formula = None;
             s
         }),
         AppSpec::Mixed(m) => AppSpec::Mixed({
@@ -500,6 +505,7 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
                 e.value = 0.0;
             }
             s.scenarios.clear();
+            s.test_formula = None;
             s.cluster_dim = ClusterDim::NClusters {
                 value: n_clusters as u32,
             };
@@ -511,6 +517,7 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
                 e.value = 0.0;
             }
             s.scenarios.clear();
+            s.test_formula = None;
             s
         }),
     };
@@ -534,6 +541,7 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
         ncol,
         &outcome,
         cluster_ids.as_deref(),
+        None,
         None,
     )?;
 

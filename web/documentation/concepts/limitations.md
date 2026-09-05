@@ -30,16 +30,24 @@ fully controlled experiments. The two answer slightly different questions, so
 their power numbers can legitimately differ — most visibly at small samples.
 That gap is a framing difference, not an error in either tool.
 
-## The tests are large-sample tests (logistic and mixed)
+## The tests are large-sample tests (logistic)
 
-OLS power uses the exact Student-*t* test, at any sample size. Logistic and
-mixed-model power use **Wald z tests** — the standard large-sample
-approximation — not likelihood-ratio tests or small-sample degree-of-freedom
-corrections (such as Satterthwaite). At reasonable sample sizes the difference
-is negligible; with very small samples, or a mixed design with only a handful
-of clusters, the z approximation runs slightly optimistic. Treat power
-estimates at those edges with extra caution, and prefer more clusters over
-more rows per cluster when you can.
+OLS power uses the exact Student-*t* test, at any sample size. Logistic power
+uses a **Wald z test** — the standard large-sample approximation — not a
+likelihood-ratio test. At reasonable sample sizes the difference is
+negligible; with very small samples the z approximation runs slightly
+optimistic.
+
+For mixed models (LME and clustered GLMM), the `df_method` setting defaults to
+`"between_within"`: each fixed effect is tested against a *t* distribution
+with between-within denominator degrees of freedom (a cluster-level predictor
+gets the between-cluster df, others get the within-cluster df). Setting
+`df_method="asymptotic"` opts into the Wald z instead. The calibration of
+both against lmerTest Satterthwaite is on the
+[[validation/validation_df_calibration|denominator-df calibration page]].
+Satterthwaite and Kenward-Roger degree-of-freedom corrections are not
+available. Where the z approximation runs optimistic, prefer more clusters
+over more rows per cluster when you can.
 
 ## Mixed-effects structure has depth limits
 
@@ -60,10 +68,13 @@ reach.)
 
 ## Outcome families are limited
 
-The engine fits three model families: **continuous outcomes** (OLS), **binary
-outcomes** (logistic regression), and **clustered continuous outcomes**
-(mixed models). Counts, ordinal scales, survival times, and multinomial
-outcomes are out of scope — power for those needs a different tool.
+The engine fits four outcome families — **linear** (`family="ols"`),
+**logit** (`family="logit"`), **probit** (`family="probit"`), and
+**Poisson** (`family="poisson"`, counts) — each with a clustered
+(mixed-model) form. See [[concepts/supported-families|supported outcome
+families]] for the link functions, baseline setters, and estimators. Ordinal
+scales, survival times, and multinomial outcomes are out of scope — power for
+those needs a different tool.
 
 ## Some tests are only available for some models
 

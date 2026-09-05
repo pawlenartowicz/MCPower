@@ -12,10 +12,15 @@
 \item{...}{Ignored.}
 }
 \value{
-A tibble with one row per non-header effect per scenario.
+A tibble with one row per non-header effect and per post-hoc
+contrast, per scenario.
 }
 \description{
-Each row corresponds to one tested effect in one scenario. Factor header
-rows (baseline labels) are omitted. Columns: \code{test}, \code{scenario},
-\code{power}, \code{ci_lo}, \code{ci_hi}.
+Each row corresponds to one tested effect in one scenario, plus one row per
+post-hoc pairwise contrast (\code{target_test = "all-contrasts"}), labelled
+the same way as the printed table (e.g. \code{"3 vs 1"}). Factor header
+rows (baseline labels) and post-hoc header spans are omitted. Columns:
+\code{test}, \code{scenario}, \code{power}, \code{ci_lo}, \code{ci_hi}.
+Always carries this full column set, even with zero rows (e.g. a query with
+no targets and no post-hoc factors).
 }

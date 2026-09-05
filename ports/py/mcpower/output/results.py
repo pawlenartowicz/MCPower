@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List
 
-from .tables import _scenarios, build_rows, render_short
+from .tables import _scenarios, build_rows, posthoc_rows, render_short
 
 
 def add_boundary_hit_rates(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -140,8 +140,15 @@ class PowerResult(dict):
         return Report(self, self._meta, kind="find_power")
 
     def to_dataframe(self):
-        """Long-format (test x scenario x ...) frame. Parity with R's as_tibble."""
+        """Long-format (test x scenario x ...) frame. Parity with R's as_tibble.
+
+        Includes one row per post-hoc pairwise contrast (target_test="all-contrasts")
+        alongside the marginal/explicit-contrast rows — same columns, same label
+        style ("B vs A") as the printed table. Always carries the full column set,
+        even when there are no rows (e.g. a pure post-hoc query with an empty
+        target_indices), so downstream code never hits a missing-column error."""
         import pandas as pd
+        columns = ["test", "scenario", "power", "ci_lo", "ci_hi"]
         rows = []
         for scen_name, inner in _scenarios(self):
             corr = bool(self._meta.get("correction") and self._meta["correction"] != "none")
@@ -158,7 +165,18 @@ class PowerResult(dict):
                     "power": inner[pkey][0][pos],
                     "ci_lo": ci[0], "ci_hi": ci[1],
                 })
-        return pd.DataFrame(rows)
+            blocks = inner.get("posthoc") or []
+            for r in posthoc_rows(self._meta):
+                if r["kind"] == "posthoc_header" or r["block"] >= len(blocks):
+                    continue
+                blk = blocks[r["block"]]
+                ci = blk[ckey][r["contrast"]]
+                rows.append({
+                    "test": r["label"], "scenario": scen_name,
+                    "power": blk[pkey][r["contrast"]],
+                    "ci_lo": ci[0], "ci_hi": ci[1],
+                })
+        return pd.DataFrame(rows, columns=columns)
 
     def save_plot(self, path: str, *, theme: str = "light-print", scale: float = 2.0, ppi=None) -> None:
         """Render this result's chart(s) to file(s) (png / svg / pdf / html,
@@ -234,9 +252,16 @@ class SampleSizeResult(dict):
         no fitted), NA otherwise (not_reached, at_or_below_min — these render as
         ≤ / ≥ sentinels and have no meaningful integer to export).
         ci_lo/ci_hi: outward-rounded integers when status == fitted and bound
-        present, NA otherwise. Both cast to pandas nullable Int64."""
+        present, NA otherwise. Both cast to pandas nullable Int64.
+
+        Always carries the full column set, even when there are no rows (e.g. a
+        pure post-hoc query with an empty target_indices), so the Int64 cast
+        below never hits a missing-column error. Post-hoc pairwise contrasts
+        (target_test="all-contrasts") carry no required-N search result here —
+        the engine does not compute a per-contrast crossing for them."""
         import math
         import pandas as pd
+        columns = ["test", "scenario", "required_n", "ci_lo", "ci_hi"]
         rows = []
         for scen_name, inner in _scenarios(self):
             fitted_map = inner.get("fitted") or {}
@@ -265,7 +290,7 @@ class SampleSizeResult(dict):
                     ci_hi = None
                 rows.append({"test": r["label"], "scenario": scen_name,
                              "required_n": req, "ci_lo": ci_lo, "ci_hi": ci_hi})
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(rows, columns=columns)
         # Nullable integer dtype: NAs propagate correctly in downstream arithmetic.
         df["ci_lo"] = df["ci_lo"].astype("Int64")
         df["ci_hi"] = df["ci_hi"].astype("Int64")

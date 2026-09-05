@@ -7,6 +7,7 @@
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import CorrectionSelect from './CorrectionSelect.svelte';
+  import DfMethodSelect from './DfMethodSelect.svelte';
   import EstimationSelect from './EstimationSelect.svelte';
   import TestChooser from './TestChooser.svelte';
 
@@ -18,6 +19,10 @@
   const showEstimation = $derived(
     familyStore.active === 'mixed' && familyStore.activeOutcome !== 'linear',
   );
+  // The denominator-df knob applies to every mixed fit (Gaussian LME and GLMM
+  // alike) and to nothing else — OLS and unclustered GLMs have no cluster to
+  // split the df between, and the engine ignores the switch there.
+  const showDfMethod = $derived(familyStore.active === 'mixed' && cfg.cluster !== undefined);
 </script>
 
 <div class="space-y-3">
@@ -56,6 +61,11 @@
       </div>
     {/if}
   </div>
+  {#if showDfMethod}
+    <div class="max-w-md">
+      <DfMethodSelect />
+    </div>
+  {/if}
   <TestChooser />
   <!-- Same format as the model Formula field: label above, full-width input. -->
   <div class="space-y-1">

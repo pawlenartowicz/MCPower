@@ -64,6 +64,7 @@ fn ols_spec(beta_x1: f64, het: f64) -> SimulationSpec {
         link: None,
         estimator: EstimatorSpec::Ols,
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         intercept: 0.0,
         posthoc: vec![],

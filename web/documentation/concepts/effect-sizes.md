@@ -27,12 +27,14 @@ These two cases use different effect-size benchmarks — see [Cohen's benchmarks
 
 ## Cohen's benchmarks
 
-With no pilot data or prior literature to go on, Cohen's (1988) conventions are a starting point:
+With no pilot data or prior literature to go on, the binary/factor row follows Cohen's (1988) conventions and the continuous row is MCPower's own calibration matched to it:
 
 | Predictor type | Small | Medium | Large |
 |---|---|---|---|
 | Continuous | 0.10 | 0.25 | 0.40 |
 | Binary / factor | 0.20 | 0.50 | 0.80 |
+
+These are rules of thumb for when nothing better exists. They do not replace an effect-size justification from prior studies, theory, or a smallest effect size of interest.
 
 > [!note] Why two different scales?
 > For **binary/factor** predictors MCPower keeps the variable as 0/1, so the beta equals Cohen's *d* directly — the 0.20/0.50/0.80 benchmarks are Cohen's standard conventions. For **continuous** predictors the variable is standardized to $N(0,1)$, so beta is the change in $Y$ per 1-SD change in $X$. The continuous benchmarks are calibrated so that a "medium" continuous effect ($\beta = 0.25$) yields about the same power as a "medium" binary effect ($d = 0.50$) at the same sample size. The labels *small / medium / large* therefore carry consistent practical meaning across predictor types.

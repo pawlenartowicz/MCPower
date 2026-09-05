@@ -9,9 +9,10 @@
     "cluster_auto_count": 12
   },
   "estimation": {
-    "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'rx' (fastmode: rx + Laplace) is the 1.1.0 default; 'hessian' is the accurate/AGQ opt-in. nagq: 1 = Laplace. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq) — change together.",
+    "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'rx' (fastmode: rx + Laplace) is the 1.1.0 default; 'hessian' is the accurate/AGQ opt-in. nagq: 1 = Laplace. df_method: 'between_within' (between-within denominator df for mixed fits) is the default; 'asymptotic' opts into the Wald z reference. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq, DfMethod::default) — change together.",
     "wald_se": "rx",
-    "nagq": 1
+    "nagq": 1,
+    "df_method": "between_within"
   },
   "benchmarks": {
     "continuous": [0.1, 0.25, 0.4],

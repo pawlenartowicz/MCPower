@@ -19,8 +19,8 @@ def get_simulation_defaults() -> Dict[str, Any]:
 
 
 def get_estimation_defaults() -> Dict[str, Any]:
-    """Cross-port GLMM estimation defaults (``wald_se``, ``nagq``). Single home
-    in ``configs/config.json`` ``estimation`` block."""
+    """Cross-port GLMM estimation defaults (``wald_se``, ``nagq``, ``df_method``).
+    Single home in ``configs/config.json`` ``estimation`` block."""
     return get_config()["estimation"]
 
 

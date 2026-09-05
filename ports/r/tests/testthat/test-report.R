@@ -10,6 +10,15 @@ test_that("report config loads format constants from the engine", {
   MCPower$new("y ~ x1 + condition")$set_effects("x1=0.5, condition=0.4")$set_simulations(200)
 }
 
+# One-way ANOVA with a 3-level factor, matching test-posthoc.R's
+# .simple_anova_model fixture (dose_group[1] is the reference).
+.r_posthoc_only_model <- function() {
+  MCPower$new("pain_reduction = dose_group")$
+    set_variable_type("dose_group=(factor,0.34,0.33,0.33)")$
+    set_effects("dose_group[2]=0.5, dose_group[3]=0.8")$
+    set_simulations(200)
+}
+
 test_that("find_power returns a classed result that still carries raw fields", {
   res <- .r_ols_model()$find_power(sample_size = 120, verbose = FALSE, progress_callback = FALSE)
   expect_s3_class(res, "mcpower_result")
@@ -222,6 +231,21 @@ test_that("as_tibble returns a long-format frame", {
   res <- .r_ols_model()$find_power(sample_size = 120, verbose = FALSE, progress_callback = FALSE)
   tb <- tibble::as_tibble(res)
   expect_true(all(c("test", "scenario", "power", "ci_lo", "ci_hi") %in% names(tb)))
+})
+
+test_that("as_tibble: target_test='all-contrasts' exports one row per contrast", {
+  # target_indices is empty for a pure all-contrasts query; as_tibble() must
+  # not crash and must export the C(3,2)=3 pairwise contrasts with non-NA
+  # power and CI, labelled the same way as the printed table.
+  skip_if_not_installed("tibble")
+  m <- .r_posthoc_only_model()
+  res <- m$find_power(sample_size = 200, target_test = "all-contrasts",
+                      verbose = FALSE, progress_callback = FALSE)
+  tb <- tibble::as_tibble(res)
+  expect_setequal(tb$test, c("2 vs 1", "3 vs 1", "3 vs 2"))
+  expect_equal(nrow(tb), 3L)
+  expect_true(all(!is.na(tb$power)) && all(tb$power >= 0 & tb$power <= 1))
+  expect_true(all(!is.na(tb$ci_lo)) && all(!is.na(tb$ci_hi)))
 })
 
 # ──CDN-HTML plot() ─────────────────────────────────────────────────
@@ -748,6 +772,19 @@ test_that("as.data.frame for find_sample_size gives test x scenario x required_n
     expect_true(all(fitted_rows$ci_lo <= fitted_rows$required_n))
     expect_true(all(fitted_rows$required_n <= fitted_rows$ci_hi))
   }
+})
+
+test_that("as.data.frame: target_test='all-contrasts' gives an empty but correctly-columned frame", {
+  # The engine computes no per-contrast required-N crossing for post-hoc
+  # targets, so target_indices is empty and the frame has zero rows — but it
+  # must still carry the full column set, not error on construction.
+  m <- .r_posthoc_only_model()
+  res <- m$find_sample_size(from_size = 40, to_size = 200, by = 40,
+                            target_test = "all-contrasts",
+                            verbose = FALSE, progress_callback = FALSE)
+  df <- as.data.frame(res)
+  expect_identical(names(df), c("test", "scenario", "required_n", "ci_lo", "ci_hi"))
+  expect_equal(nrow(df), 0L)
 })
 
 test_that("as.data.frame: NA conventions for at_or_below_min and not_reached", {

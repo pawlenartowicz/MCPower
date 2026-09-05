@@ -61,11 +61,13 @@ Real candidates, but with an open question that has to clear before they ship:
 - **Bayesian power (Bayes factors)** — under consideration only if it can run
   fast enough to stay interactive, since the appeal of MCPower is getting an
   answer in seconds, not minutes.
-- **Small-sample significance reference for mixed models** — finer-grained
-  critical values (e.g. a between-within or Satterthwaite degrees-of-freedom
-  correction) for designs with few clusters, where the standard test is mildly
-  anticonservative. The shipped test is the honest power of the test most people
-  actually run, so this would be built **on request** rather than by default.
+- **Satterthwaite degrees of freedom for mixed models** — a finer-grained
+  small-sample correction than between-within, for designs with few clusters,
+  where the Wald z test is mildly anticonservative. A between-within
+  degrees-of-freedom correction (`df_method="between_within"`) already
+  shipped and is the default; on linear mixed models it matched lmerTest
+  Satterthwaite in the [[validation/validation_df_calibration|calibration]],
+  on logit GLMMs with 5–10 clusters it still over-rejects.
 
 ## Deliberately out of scope
 

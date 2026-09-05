@@ -266,6 +266,7 @@ pub fn fit_uploaded_data(
         &outcome,
         cluster_ids.as_deref(),
         wald_se_override,
+        None,
     )
     .map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))?;
 

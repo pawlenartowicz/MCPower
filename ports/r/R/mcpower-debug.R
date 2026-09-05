@@ -100,7 +100,11 @@ MCPowerDebug <- R6::R6Class(
     #'   single fit. NULL (default) uses the contract's configured mode; accepts
     #'   "rx" (Schur SE) or "hessian" (FD-Hessian SE). Used by the GLMM Oracle
     #'   harness to read per-fit rx vs hessian SE on one dataset.
-    load_data = function(d, wald_se = NULL, nagq = 1L) {
+    #' @param df_method Validation-only override of the denominator-df reference
+    #'   distribution for this single fit. NULL (default) uses the contract's
+    #'   configured mode; accepts "asymptotic" or "between_within". Used by the
+    #'   GLMM Oracle harness to read a per-fit df_method on one dataset.
+    load_data = function(d, wald_se = NULL, nagq = 1L, df_method = NULL) {
       if (!private$applied) private$apply()
       # nagq is baked into the contract (build_contract_bytes -> LinearSpec.nagq);
       # the engine's fit_provided_data honours it (AGQ when > 1). Used by the
@@ -119,7 +123,8 @@ MCPowerDebug <- R6::R6Class(
         ncol           = ncol(design),
         outcome        = as.numeric(d$outcome),
         cluster_ids    = if (is.null(cl)) integer(0) else as.integer(cl),
-        wald_se        = if (is.null(wald_se)) "" else wald_se
+        wald_se        = if (is.null(wald_se)) "" else wald_se,
+        df_method      = if (is.null(df_method)) "" else df_method
       )
     },
 

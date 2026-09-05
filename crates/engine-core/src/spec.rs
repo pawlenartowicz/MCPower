@@ -5,7 +5,8 @@
 //! is host-agnostic.
 
 pub use engine_contract::{
-    CorrectionMethod, Distribution, EstimatorSpec, LinkKind, OutcomeKind, ResidualDist, WaldSe,
+    CorrectionMethod, DfMethod, Distribution, EstimatorSpec, LinkKind, OutcomeKind, ResidualDist,
+    WaldSe,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -360,6 +361,11 @@ pub struct SimulationSpec {
     /// elsewhere). Threaded from the contract field of the same name. (design §7.)
     #[serde(default)]
     pub wald_se: WaldSe,
+    /// Reference distribution for mixed-model fixed-effect Wald tests (no-op
+    /// for `Ols` and unclustered `Glm`). Threaded from the contract field of
+    /// the same name.
+    #[serde(default)]
+    pub df_method: DfMethod,
     /// AGQ node count for the GLMM likelihood (1 = Laplace). Threaded from the
     /// contract `nagq`; the eligibility backstop already ran in `validate()`.
     #[serde(default = "default_nagq_spec")]
@@ -604,7 +610,7 @@ pub struct BatchResult {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Build a minimal but realistic OLS spec for round-trip testing.
@@ -641,6 +647,7 @@ mod tests {
             link: None,
             estimator: EstimatorSpec::Ols,
             wald_se: WaldSe::default(),
+            df_method: Default::default(),
             nagq: 1,
             intercept: 0.0,
             posthoc: vec![],

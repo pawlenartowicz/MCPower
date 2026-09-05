@@ -4,6 +4,16 @@ from mcpower import MCPower
 pd = pytest.importorskip("pandas")
 
 
+def _posthoc_only_model():
+    """One-way ANOVA with a 3-level factor, matching test_posthoc.py's
+    simple_anova_model fixture (dose_group[1] is the reference)."""
+    m = MCPower("pain_reduction = dose_group")
+    m.set_variable_type("dose_group=(factor,0.34,0.33,0.33)")
+    m.set_effects("dose_group[2]=0.5, dose_group[3]=0.8")
+    m.set_simulations(200)
+    return m
+
+
 def test_to_dataframe_long_format():
     m = MCPower("y = x1 + condition")
     m.set_effects("x1=0.5, condition=0.4")
@@ -46,6 +56,32 @@ def test_sample_size_to_dataframe_ci_columns():
     fitted_hi = df["ci_hi"].dropna()
     if len(fitted_hi) > 0:
         assert (fitted_hi % 1 == 0).all(), "ci_hi must contain only whole numbers"
+
+
+def test_to_dataframe_all_contrasts_only_has_one_row_per_contrast():
+    """target_test='all-contrasts' leaves target_indices empty; to_dataframe()
+    must not crash and must export the C(3,2)=3 pairwise contrasts with
+    non-null power and CI, labelled the same way as the printed table."""
+    m = _posthoc_only_model()
+    r = m.find_power(sample_size=200, target_test="all-contrasts", verbose=False)
+    df = r.to_dataframe()
+    assert set(df["test"]) == {"2 vs 1", "3 vs 1", "3 vs 2"}
+    assert len(df) == 3
+    assert df["power"].notna().all()
+    assert (df["power"].between(0, 1)).all()
+    assert df["ci_lo"].notna().all() and df["ci_hi"].notna().all()
+
+
+def test_sample_size_to_dataframe_all_contrasts_does_not_crash():
+    """Same target_test on find_sample_size: no contrast is computed for
+    required-N at the engine level, so the frame is empty, but it must carry
+    the full column set rather than raising KeyError on the Int64 cast."""
+    m = _posthoc_only_model()
+    r = m.find_sample_size(from_size=40, to_size=200, by=40,
+                            target_test="all-contrasts", verbose=False)
+    df = r.to_dataframe()
+    assert list(df.columns) == ["test", "scenario", "required_n", "ci_lo", "ci_hi"]
+    assert len(df) == 0
 
 
 def test_sample_size_to_dataframe_required_n_conventions():

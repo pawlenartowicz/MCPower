@@ -1,4 +1,4 @@
-// Typed wrapper over `mcpower/configs/config.json` — exposes SIMULATION, BENCHMARKS, LIMITS, UPLOAD.
+// Typed wrapper over `mcpower/configs/config.json` — exposes SIMULATION, ESTIMATION, BENCHMARKS, LIMITS, UPLOAD.
 // Field shapes must stay in sync with mcpower/configs/config.json.
 // The App reads config.json directly via Vite's $configs alias; no Rust bridge involved.
 import config from '$configs/config.json';
@@ -9,6 +9,13 @@ export const SIMULATION = config.simulation as {
   max_failed_fraction: number;
   sample_size_bounds: { from: number; to: number; by: number | 'auto' };
   cluster_auto_count: number;
+};
+// Cross-port estimation defaults; config.json is the single home for them, so
+// the port reads the default rather than repeating the literal.
+export const ESTIMATION = config.estimation as unknown as {
+  wald_se: 'hessian' | 'rx';
+  nagq: number;
+  df_method: 'asymptotic' | 'between_within';
 };
 export const BENCHMARKS = config.benchmarks as {
   continuous: number[];

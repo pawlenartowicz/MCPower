@@ -64,6 +64,7 @@ fn base_spec(outcome_kind: OutcomeKind, effect_sizes: Vec<f64>) -> SimulationSpe
             OutcomeKind::Binary | OutcomeKind::Count => EstimatorSpec::Glm,
         },
         wald_se: Default::default(),
+        df_method: Default::default(),
         nagq: 1,
         intercept,
         posthoc: vec![],

@@ -372,6 +372,38 @@ def test_clusters_json_nested_grouping():
     assert abs(eg["tau_squared"] - 0.10 / 0.90) < 1e-12
 
 
+def test_set_cluster_accepts_n_per_parent_alone():
+    """A nested child needs only n_per_parent — no n_clusters/cluster_size of
+    its own, since its size is fully determined by n_per_parent against the
+    parent's cluster count (matches the documented example)."""
+    m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
+    m.set_effects("treatment=0.5")
+    m.set_cluster("school", ICC=0.15, n_clusters=10)
+    m.set_cluster("school:classroom", ICC=0.10, n_per_parent=4)  # no size arg
+    assert m._pending_clusters["school:classroom"]["n_per_parent"] == 4
+    assert m._pending_clusters["school:classroom"]["n_clusters"] is None
+    assert m._pending_clusters["school:classroom"]["cluster_size"] is None
+
+    m._effective_n_clusters = 10
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    specs = _json.loads(clusters_json)
+    primary = specs[0]
+    eg = primary["extra_groupings"][0]
+    assert eg["relation"]["NestedWithin"]["n_per_parent"] == 4
+
+
+def test_set_cluster_n_per_parent_alone_passes_runtime_validation():
+    """_validate_lme_runtime accepts a nested child with only n_per_parent set."""
+    m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
+    m.set_effects("treatment=0.5")
+    m.set_cluster("school", ICC=0.15, n_clusters=10)
+    m.set_cluster("school:classroom", ICC=0.10, n_per_parent=6)
+    m._apply()
+    # Must not raise "Must specify either n_clusters or cluster_size".
+    m._validate_lme_runtime(sample_size=60, scenario_filter=["optimistic"])
+    assert m._effective_n_clusters == 10
+
+
 def test_validate_lme_runtime_multi_grouping_sets_effective_n():
     """_validate_lme_runtime with two groupings populates _effective_n_clusters
     from the primary (first) grouping and validates each spec independently."""

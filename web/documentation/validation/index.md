@@ -71,6 +71,7 @@ that matches what you want to confirm:
 | [Scenario perturbations](validation_scenarios.md) | heterogeneity, heteroskedasticity, correlation noise, and distribution swaps — each knob validated in isolation and in combination |
 | [Uploaded data](validation_upload.md) | the upload path — data simulated from a user-provided frame reproduces its moments and correlations across draws |
 | [Agreement with other tools](validation_tool_agreement.md) | an informal cross-check — MCPower's power lands on the same answer as the dedicated R tools (`simglm`, `simr`) and an independent DIY loop |
+| [Denominator df](validation_df_calibration.md) | the mixed-model reference distribution — Wald z versus between-within t type-I error and required N across cluster counts, against lmerTest Satterthwaite |
 
 ## How to read them
 

@@ -275,6 +275,24 @@ See [[concepts/simulation-settings#estimation-mode|Estimation mode]] for the ful
 explanation of both controls, including AGQ's eligibility rules and what happens
 when a design falls outside them.
 
+### Denominator degrees of freedom
+
+Any mixed model (LME or clustered GLMM) also accepts `df_method`: the default
+`"between_within"` tests each fixed effect against a *t* with between-within
+denominator degrees of freedom (between-cluster df for a cluster-level
+predictor, within-cluster df otherwise), falling back to Wald z with a crossed
+or nested extra grouping; `"asymptotic"` opts into the Wald z. The calibration
+of both against lmerTest Satterthwaite is on the
+[[validation/validation_df_calibration|denominator-df calibration page]].
+
+```python
+result = model.find_power(sample_size=300, target_test="treatment",
+                          df_method="asymptotic", verbose=False)
+```
+
+See [[concepts/simulation-settings#denominator-degrees-of-freedom|Denominator
+degrees of freedom]] for the full explanation.
+
 ### Sensitivity analysis (scenarios) for mixed models
 
 Mixed models support three scenario knobs: `random_effect_dist` (normal / heavy_tailed / right_skewed), `random_effect_df`, and `icc_noise_sd`. Use them to probe how sensitive power is to non-Gaussian random effects or an uncertain ICC:

@@ -15,7 +15,8 @@ debug_load_data(
   ncol,
   outcome,
   cluster_ids,
-  wald_se
+  wald_se,
+  df_method
 )
 }
 \description{
