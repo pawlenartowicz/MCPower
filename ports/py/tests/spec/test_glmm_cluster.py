@@ -13,7 +13,10 @@ _PI_SQ_OVER_3 = math.pi ** 2 / 3.0
 
 
 # ---------------------------------------------------------------------------
-# Task 1.1 — latent-scale ICC→τ² for binary outcome
+# Latent-scale ICC→τ² for binary outcome. The logit latent scale and the
+# Gaussian identity are pinned on the engine contract by
+# test_glmm_to_simulation_spec_uses_latent_scale_tau and
+# test_set_cluster.py::test_set_cluster_basic_round_trip.
 # ---------------------------------------------------------------------------
 
 
@@ -33,51 +36,6 @@ def _cluster_spec(model: MCPower) -> dict:
     specs = _json.loads(clusters_json)
     assert specs, "expected non-empty clusters_json"
     return specs[0]
-
-
-def test_logit_cluster_tau_squared_is_latent_scale():
-    """Binary+cluster path uses τ² = ICC/(1−ICC) · π²/3 (latent-scale logistic)."""
-    icc = 0.3
-    m = (
-        MCPower("y ~ x + (1|group)", family="logit")
-        .set_effects("x=0.5")
-        .set_baseline_probability(0.3)
-        .set_cluster("group", ICC=icc, n_clusters=20)
-    )
-    m._apply()
-    # Expected low-obs warning (5 obs/cluster) is incidental here
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        m._validate_lme_runtime(100, ["optimistic"])
-
-    spec = _cluster_spec(m)
-    expected = _tau_from_icc_logistic(icc)
-    assert abs(spec["tau_squared"] - expected) < 1e-12, (
-        f"tau_squared={spec['tau_squared']!r}, expected latent-scale {expected!r}"
-    )
-
-
-def test_continuous_cluster_tau_squared_unchanged():
-    """Gaussian (lme) path uses τ² = ICC/(1−ICC); π²/3 factor must NOT apply."""
-    icc = 0.3
-    m = (
-        MCPower("y ~ x + (1|group)", family="lme")
-        .set_effects("x=0.5")
-        .set_cluster("group", ICC=icc, n_clusters=20)
-    )
-    m._apply()
-    # Expected low-obs warning (5 obs/cluster) is incidental here
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        m._validate_lme_runtime(100, ["optimistic"])
-
-    spec = _cluster_spec(m)
-    expected_gaussian = _tau_from_icc_gaussian(icc)
-    assert abs(spec["tau_squared"] - expected_gaussian) < 1e-12, (
-        f"tau_squared={spec['tau_squared']!r}, expected Gaussian {expected_gaussian!r}"
-    )
-    # Confirm latent-scale was NOT applied.
-    assert abs(spec["tau_squared"] - _tau_from_icc_logistic(icc)) > 1e-6
 
 
 def test_probit_cluster_tau_squared_no_pi_sq_factor():
@@ -310,18 +268,6 @@ def test_find_power_glmm_no_warning_when_tau_low(monkeypatch):
 # ---------------------------------------------------------------------------
 # Task 1.3 — scenario RE knobs on the GLMM path
 # ---------------------------------------------------------------------------
-
-
-def test_set_scenario_configs_accepts_re_knobs_on_glmm_path():
-    """set_scenario_configs accepts icc_noise_sd on binary+cluster without error."""
-    m = (
-        MCPower("y ~ x + (1|group)", family="logit")
-        .set_effects("x=0.5")
-        .set_baseline_probability(0.3)
-        .set_cluster("group", ICC=0.3, n_clusters=20)
-    )
-    m.set_scenario_configs({"optimistic": {"icc_noise_sd": 0.05}})
-    assert m._scenario_configs["optimistic"]["icc_noise_sd"] == pytest.approx(0.05)
 
 
 def test_glmm_scenario_re_knob_reaches_engine():

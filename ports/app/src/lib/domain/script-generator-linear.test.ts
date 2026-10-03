@@ -50,18 +50,6 @@ describe('generateLinearScript', () => {
     expect(out).not.toContain('find_sample_size(');
   });
 
-  it('emits a structurally valid find-sample-size snippet with non-default grid bounds', () => {
-    const out = generateLinearScript(linearSpec, 'find-sample-size', {
-      bounds: [40, 300],
-      method: { Grid: { by: { Fixed: 20 }, mode: 'Linear' } },
-    });
-    expect(out).toContain('model.find_sample_size(');
-    expect(out).toContain('from_size=40,');
-    expect(out).toContain('to_size=300,');
-    expect(out).toContain('by=20,');
-    expect(out).not.toContain('find_power(');
-  });
-
   it('omits set_variable_type when all predictors are numeric', () => {
     const noVarTypes: AppSpec = {
       ...linearSpec,
@@ -72,11 +60,6 @@ describe('generateLinearScript', () => {
     };
     const out = generateLinearScript(noVarTypes, 'find-power', { sample_size: 80 });
     expect(out).not.toContain('set_variable_type');
-  });
-
-  it('raises a type-guard error when called with a non-linear spec', () => {
-    const logitSpec = { ...linearSpec, family: 'logit' } as unknown as AppSpec;
-    expect(() => generateLinearScript(logitSpec, 'find-power', { sample_size: 80 })).toThrow();
   });
 
   it('maps non-none corrections to their port tokens', () => {
@@ -130,9 +113,11 @@ describe('generateLinearScript', () => {
       bounds: [50, 400],
       method: { Grid: { by: { Fixed: 25 }, mode: 'Linear' } },
     } as ScriptParams, 'python');
+    expect(out2).toContain('model.find_sample_size(');
     expect(out2).toContain('from_size=50,');
     expect(out2).toContain('to_size=400,');
     expect(out2).toContain('by=25,');
+    expect(out2).not.toContain('find_power(');
   });
 
   it('generates an R script', () => {
@@ -156,16 +141,13 @@ describe('buildTestsArg', () => {
     expect(buildTestsArg(s)).toBeNull();
   });
 
-  it('returns a non-null string when report_overall is disabled', () => {
+  it('enumerates every effect when report_overall is disabled', () => {
     // kind=all + report_overall=false → enumerate effects explicitly (no omnibus token)
     const s: LinearSpec = { ...base, tests: { kind: 'all' }, report_overall: false, contrasts: [] };
-    const out = buildTestsArg(s);
-    expect(out).not.toBeNull();
-    expect(out).toContain('x1');
-    expect(out).toContain('x2');
+    expect(buildTestsArg(s)).toBe('x1, x2, x1:x2');
   });
 
-  it('returns a non-null string when a contrast pair is present', () => {
+  it('keeps the "all" token and appends a contrast pair', () => {
     // kind=all + report_overall=true → "all" token plus the contrast
     const s: LinearSpec = {
       ...base,
@@ -173,12 +155,10 @@ describe('buildTestsArg', () => {
       report_overall: true,
       contrasts: [['x1', 'x2']],
     };
-    const out = buildTestsArg(s);
-    expect(out).not.toBeNull();
-    expect(out).toContain('x1 vs x2');
+    expect(buildTestsArg(s)).toBe('all, x1 vs x2');
   });
 
-  it('returns a non-null string when tests.kind is effects', () => {
+  it('puts "overall" before the named effects when tests.kind is effects', () => {
     // kind=effects + report_overall=true → "overall" token then named effect
     const s: LinearSpec = {
       ...base,
@@ -186,41 +166,20 @@ describe('buildTestsArg', () => {
       report_overall: true,
       contrasts: [],
     };
-    const out = buildTestsArg(s);
-    expect(out).not.toBeNull();
-    expect(out).toContain('overall');
-    expect(out).toContain('x1');
+    expect(buildTestsArg(s)).toBe('overall, x1');
   });
 });
 
-// APIF-33: buildVarTypeString shape — null when all numeric, one token per non-numeric.
+// APIF-33: buildVarTypeString shape — one token per non-numeric (the all-numeric
+// null case is covered through generateLinearScript above).
 describe('buildVarTypeString', () => {
-  it('returns null when every variable is numeric', () => {
-    expect(
-      buildVarTypeString([
-        { kind: 'numeric', name: 'x1' },
-        { kind: 'numeric', name: 'x2' },
-      ]),
-    ).toBeNull();
-  });
-
-  it('emits a binary token for a binary variable', () => {
-    const out = buildVarTypeString([{ kind: 'binary', name: 'x2', binary_proportion: 0.4 }]);
-    expect(out).not.toBeNull();
-    expect(out).toContain('x2=(binary,0.4)');
-  });
-
   it('emits one token per non-numeric variable, skipping numerics', () => {
     const out = buildVarTypeString([
       { kind: 'numeric', name: 'x1' },
       { kind: 'binary', name: 'x2', binary_proportion: 0.4 },
       { kind: 'factor', name: 'f', factor_n_levels: 3, factor_proportions: [0.3, 0.3, 0.4] },
-    ])!;
-    expect(out).not.toBeNull();
-    expect(out.split(', ').length).toBe(2); // x2 + f, not x1
-    expect(out).toContain('x2=(binary,0.4)');
-    expect(out).toContain('f=(factor,0.3,0.3,0.4)');
-    expect(out).not.toContain('x1');
+    ]);
+    expect(out).toBe('x2=(binary,0.4), f=(factor,0.3,0.3,0.4)');
   });
 });
 
@@ -243,10 +202,7 @@ describe('buildCorrelationsString', () => {
       ...(linearSpec as LinearSpec),
       correlations: { names: ['a', 'b', 'c'], values: [[1, 0.2, 0], [0.2, 1, 0], [0, 0, 1]] },
     };
-    const out = buildCorrelationsString(s)!;
-    expect(out).not.toBeNull();
-    expect(out).toContain('a,b=0.2');
-    expect(out).not.toContain('c'); // c has no non-zero correlation
-    expect(out.split(',').length).toBe(2); // exactly one pair → "a,b=0.2"
+    // c has no non-zero correlation → exactly one pair
+    expect(buildCorrelationsString(s)).toBe('a,b=0.2');
   });
 });

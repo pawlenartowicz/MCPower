@@ -1,20 +1,14 @@
-"""Smoke tests for the contract-bridge entry points exposed by ``_engine``.
+"""Bridge test for the contract builder exposed by ``_engine``.
 
 ``build_contract_from_spec`` is the host path used by every Python
 ``find_power`` / ``find_sample_size`` call. It returns a
-``(names, contracts_msgpack)`` pair where ``contracts_msgpack`` decodes as a
-list of ``SimulationContract`` dicts.
-
-``build_contract_from_json`` returns the raw ``SimulationContract``
-msgpack — gated behind the engine-py ``test-bridge`` Cargo feature so
-release wheels don't ship it; the corresponding test below skips when the
-symbol is absent.
+``(names, contracts_msgpack, effect_skeleton_json)`` triple where
+``contracts_msgpack`` decodes as a list of ``SimulationContract`` dicts.
 """
 
 import json
 
 import msgpack
-import pytest
 
 from mcpower import _engine
 
@@ -65,17 +59,3 @@ def test_contract_specs_produces_expected_simulationspec() -> None:
     assert len(targets) == 2
     assert all(t["kind"] == "marginal" for t in targets)
     assert {t["term"] for t in targets} == {1, 2}
-
-
-@pytest.mark.skipif(
-    not hasattr(_engine, "build_contract_from_json"),
-    reason="build_contract_from_json is gated behind the engine-py `test-bridge` "
-    "Cargo feature; release wheels do not expose it.",
-)
-def test_build_contract_returns_msgpack() -> None:
-    contracts = _engine.build_contract_from_json(_simple_linear_spec_json())
-    assert len(contracts) == 1
-    name, payload = contracts[0]
-    assert name == "optimistic"
-    assert isinstance(payload, (bytes, bytearray))
-    assert len(payload) > 0

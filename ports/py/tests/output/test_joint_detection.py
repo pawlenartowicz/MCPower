@@ -3,20 +3,37 @@
 Contracts:
   1. "Joint detection" + "of 3 tests" present; "analytical fast-path" absent
      (the engine is MC-only; the string should never appear in output).
-  2. Header does not show the lowest grid N (N=20) when a higher N is needed.
+  2. The header N is the largest per-effect required N, or the
+     "N≥<ceiling> (not all reached)" sentinel when a target is unreachable.
   3. "≥ <ceiling>" sentinel appears when the target is unreachable within the
      search range (the required N lies above the grid's top — never a bare "—").
+  4. Joint cells follow the fitted_joint chain: fitted → n_achievable,
+     at_or_below_min → "≤ n_min", not_reached → "≥ ceiling".
 """
+
+import re
+
 import mcpower
+from mcpower.config import get_report_config
+from mcpower.output.report import Report
 
 
 def _fit_sample_size(target_power=0.8):
     model = mcpower.MCPower("y ~ a + b + c")
     model.set_effects("a=0.5, b=0.3, c=0.1")
     return model.find_sample_size(
-        from_size=20, to_size=400, by=20, target_power=target_power, n_sims=500,
+        from_size=20,
+        to_size=400,
+        by=20,
+        target_power=target_power,
+        n_sims=500,
         verbose=False,
     )
+
+
+def _per_effect_section(text):
+    assert "Required sample size per effect" in text
+    return text.split("Required sample size per effect")[1].split("\n\n")[0]
 
 
 def test_long_summary_has_joint_required_n_table():
@@ -28,25 +45,32 @@ def test_long_summary_has_joint_required_n_table():
 
 
 def test_long_summary_header_uses_recommended_n_not_first_grid_point():
+    # c=0.1 cannot reach 80% within N≤400, so the header shows the ceiling
+    # sentinel rather than any grid point.
     res = _fit_sample_size()
     text = str(res.summary())
-    assert "N=20 " not in text
+    assert "N≥400 (not all reached)" in text
 
 
 def test_long_summary_header_shows_recommended_n_when_all_reached():
     # All-large effects so every target reaches the target power within the
-    # grid -> the header must render the recommended "N≥<n>" form, not the
-    # "not reached" sentinel. Guards against a regression that shows the
-    # sentinel when an N actually was found.
+    # grid -> the header must render the recommended "N≥<n>" form (the largest
+    # per-effect required N), not the "not reached" sentinel.
     model = mcpower.MCPower("y ~ a + b + c")
     model.set_effects("a=0.5, b=0.5, c=0.5")
     res = model.find_sample_size(
-        from_size=20, to_size=400, by=20, target_power=0.8, n_sims=500,
+        from_size=20,
+        to_size=400,
+        by=20,
+        target_power=0.8,
+        n_sims=500,
         verbose=False,
     )
     text = str(res.summary())
-    assert "N≥" in text
-    assert "target not reached" not in text
+    assert "(not all reached)" not in text
+    per_effect = [int(n) for n in re.findall(r"\s(\d+)$", _per_effect_section(text), flags=re.M)]
+    header_n = int(re.search(r"N≥(\d+)\s+sims=", text).group(1))
+    assert per_effect and header_n == max(per_effect)
 
 
 def test_unreached_target_uses_geq_ceiling_sentinel():
@@ -54,54 +78,25 @@ def test_unreached_target_uses_geq_ceiling_sentinel():
     # lies above the grid ceiling (400) and renders as "≥ 400" in the Required N
     # column. The CI column may legitimately show "—" for unreached rows.
     res = _fit_sample_size(target_power=0.99)
-    text = str(res.summary())
-    assert "≥ 400" in text
-    # Required sample size table must not have a bare "—" in the Required N column
-    # (only "≥ 400" sentinel). Check specifically in the Required N section.
-    req_section = text.split("Required sample size per effect")[-1].split("\n\n")[0] if "Required sample size per effect" in text else ""
-    assert "—" not in req_section, f"Bare '—' found in required N section:\n{req_section}"
+    section = _per_effect_section(str(res.summary()))
+    assert "≥ 400" in section
+    assert "—" not in section, f"Bare '—' found in required N section:\n{section}"
 
 
 def test_joint_required_n_uses_fitted_joint_chain():
-    """fitted_joint status==fitted renders n_achievable; at_or_below_min renders ≤ n_min."""
-    import mcpower
-    from mcpower.output.report import Report
-
-    res = _fit_sample_size()
-    # Verify the fitted_joint key exists and has the right len.
-    fj = res.get("fitted_joint")
-    fja = res.get("first_joint_achieved", {})
-    assert fj is not None, "fitted_joint missing from result"
-    assert len(fj) == len(fja), "fitted_joint / first_joint_achieved length mismatch"
-
-    text = str(res.summary())
-    # Joint section must render without errors and contain the expected header.
-    assert "Joint detection" in text
-
-
-import json
-
-
-def test_sample_size_plot_set_includes_at_least_k_block():
-    """The sample-size plot set for multi-target results includes an at_least_k block."""
-    from mcpower.output import plotting
-    res = _fit_sample_size()
-    blocks = plotting._plot_blocks(res, res._meta, "find_sample_size", label_map={})
-    block_keys = [k for k, _ in blocks]
-    assert "at_least_k" in block_keys
-    # The at_least_k spec must have data rows with a "k" field
-    at_least_spec = next(s for k, s in blocks if k == "at_least_k")
-    assert at_least_spec["data"]["values"]
-    assert any("k" in row for row in at_least_spec["data"]["values"])
-
-
-def test_sample_size_mimebundle_has_print_theme():
-    """The mimebundle spec for a single-scenario sample-size result is the curve
-    block with the print theme applied."""
-    res = _fit_sample_size()
-    bundle = res.summary()._repr_mimebundle_()
-    spec = bundle["application/vnd.vegalite.v5+json"]
-    # Print theme is applied — check the config block is present
-    assert "config" in spec
-    # Print theme has a legend block
-    assert "legend" in spec["config"]
+    """Each joint cell renders from its fitted_joint status, not from the
+    first_joint_achieved grid value."""
+    inner = {
+        "sample_sizes": [40, 80, 120, 160, 200],
+        # Grid fallbacks that differ from every fitted_joint rendering below.
+        "first_joint_achieved": {0: 80, 1: 40, 2: 160},
+        "fitted_joint": {
+            0: {"status": "fitted", "n_star": 57.2, "n_achievable": 60},
+            1: {"status": "at_or_below_min", "n_min": 40},
+            2: {"status": "not_reached", "n_approx": None},
+        },
+    }
+    table = Report(inner, {"target_power": 0.8}, kind="find_sample_size")._joint_required_n_table(get_report_config())
+    assert re.search(r"≥ 1 of 3 tests\s+60$", table, flags=re.M)
+    assert re.search(r"≥ 2 of 3 tests\s+≤ 40$", table, flags=re.M)
+    assert re.search(r"≥ 3 of 3 tests\s+≥ 200$", table, flags=re.M)

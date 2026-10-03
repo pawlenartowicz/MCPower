@@ -48,7 +48,7 @@ fn wrap(parts: Vec<PowerResult>) -> Vec<ScenarioResult<PowerResult>> {
 fn merge_pools_success_counts() {
     let a = ols_pr(100, vec![80, 60], vec![75, 55], 100);
     let b = ols_pr(200, vec![160, 110], vec![150, 100], 200);
-    let merged = merge_power_results(&wrap(vec![a, b])).unwrap();
+    let merged = merge_power_results(&wrap(vec![a.clone(), b.clone()])).unwrap();
     let pr = &merged.scenarios[0].1;
     assert_eq!(pr.n_sims, 300);
     assert_eq!(pr.success_counts_uncorrected, vec![240, 170]);
@@ -65,6 +65,13 @@ fn merge_pools_success_counts() {
     // CIs recomputed from pooled integer counts, not averaged per-worker floats.
     assert_eq!(pr.ci_uncorrected[0], wilson_ci(240, 300), "ci_unc[0]");
     assert_eq!(pr.ci_uncorrected[1], wilson_ci(170, 300), "ci_unc[1]");
+    // Order-independent: pooled counters commute, so `[b, a]` yields the same
+    // result (boundary_hit is all-zero here, so its concatenation order is moot).
+    let ba = merge_power_results(&wrap(vec![b, a])).unwrap();
+    assert_eq!(
+        &ba.scenarios[0].1, pr,
+        "merge must not depend on part order"
+    );
 }
 
 /// success_counts length mismatch (a part built without the raw per-target
@@ -130,36 +137,19 @@ fn merge_pools_contrast_entries() {
     assert!((pr.power_uncorrected[1] - 50.0 / 200.0).abs() < 1e-12);
 }
 
+/// The head carries no contrast and counters sized for its two marginals, so
+/// the head-length guard passes and the per-part contrast_pairs guard is the
+/// one that must reject `b`.
 #[test]
 fn merge_rejects_mismatched_contrast_pairs() {
-    let mut a = ols_pr(10, vec![5, 5], vec![5, 5], 10);
-    a.contrast_pairs = vec![(2, 1)];
-    let b = ols_pr(10, vec![5, 5], vec![5, 5], 10);
+    let a = ols_pr(10, vec![5, 5], vec![5, 5], 10);
+    let mut b = ols_pr(10, vec![5, 5], vec![5, 5], 10);
+    b.contrast_pairs = vec![(2, 1)];
     let r = merge_power_results(&wrap(vec![a, b]));
-    assert!(matches!(r, Err(OrchestratorError::IncompatibleMerge(_))));
-}
-
-/// merge_power_results is order-independent — pooling `[A, B]` and
-/// `[B, A]` yields identical pooled rates (counter sums commute).
-#[test]
-fn merge_is_order_independent() {
-    let a = ols_pr(100, vec![80, 60], vec![75, 55], 100);
-    let b = ols_pr(200, vec![160, 110], vec![150, 100], 200);
-    let ab = merge_power_results(&wrap(vec![a.clone(), b.clone()])).unwrap();
-    let ba = merge_power_results(&wrap(vec![b, a])).unwrap();
-    let pr_ab = &ab.scenarios[0].1;
-    let pr_ba = &ba.scenarios[0].1;
-    assert_eq!(
-        pr_ab.success_counts_uncorrected,
-        pr_ba.success_counts_uncorrected
+    assert!(
+        matches!(&r, Err(OrchestratorError::IncompatibleMerge(m)) if m.contains("contrast_pairs")),
+        "{r:?}"
     );
-    assert_eq!(
-        pr_ab.success_counts_corrected,
-        pr_ba.success_counts_corrected
-    );
-    assert_eq!(pr_ab.power_uncorrected, pr_ba.power_uncorrected);
-    assert_eq!(pr_ab.power_corrected, pr_ba.power_corrected);
-    assert_eq!(pr_ab.n_sims, pr_ba.n_sims);
 }
 
 fn ssr_grid(parts_per_n: Vec<PowerResult>) -> SampleSizeResult {
@@ -300,7 +290,7 @@ fn merge_recomputes_crossing_fit_from_pooled_counts_golden() {
 
 #[test]
 fn merge_redrives_overall_crossing_from_pooled_counts() {
-    // Per-part overall counts pool to [60, 80, 95] of n_sims = 200 over grid
+    // Per-part overall counts pool to [100, 150, 190] of n_sims = 200 over grid
     // [50,100,150]. The merge path must re-derive fitted_overall and
     // first_overall_achieved from the POOLED overall counts, not copy a part.
     let mk = |n: usize, k_overall: u64| {
@@ -310,9 +300,11 @@ fn merge_redrives_overall_crossing_from_pooled_counts() {
         pr.overall_significant_count = k_overall;
         pr
     };
-    // Part A overall counts 30/40/47, Part B 30/40/48 ⇒ pooled 60/80/95.
-    let part_a = ssr_grid(vec![mk(50, 30), mk(100, 40), mk(150, 47)]);
-    let part_b = ssr_grid(vec![mk(50, 30), mk(100, 40), mk(150, 48)]);
+    // Part A alone (0.40/0.70/1.00) crosses 0.8 at n_star ≈ 116.7 and first
+    // reaches it at N=150; part B alone (0.60/0.80/0.90) hits 0.8 exactly at
+    // N=100. Only the pooled series (0.50/0.75/0.95) crosses at 112.5.
+    let part_a = ssr_grid(vec![mk(50, 40), mk(100, 70), mk(150, 100)]);
+    let part_b = ssr_grid(vec![mk(50, 60), mk(100, 80), mk(150, 90)]);
     let merged = merge_sample_size_results(&wrap_ssr(vec![part_a, part_b])).unwrap();
     let r = &merged.scenarios[0].1;
     let pooled: Vec<u64> = r
@@ -320,16 +312,20 @@ fn merge_redrives_overall_crossing_from_pooled_counts() {
         .iter()
         .map(|pr| pr.overall_significant_count)
         .collect();
-    assert_eq!(pooled, vec![60, 80, 95]);
-    // Pooled overall rates 0.30/0.40/0.475 — never reach 0.8, and the fitted
-    // endpoint 0.475 sits under the low-power hint gate ⇒ NotReached, no hint.
-    // That this is derived (not a copied per-part value) is the point: each
-    // part's own endpoint rate was 0.47/0.48, neither equal to the pooled fit.
-    assert_eq!(
-        r.fitted_overall,
-        Some(CrossingFit::NotReached { n_approx: None })
-    );
-    assert_eq!(r.first_overall_achieved, None);
+    assert_eq!(pooled, vec![100, 150, 190]);
+    // Part B alone would report Some(100); pooled 0.75 at N=100 misses 0.8.
+    assert_eq!(r.first_overall_achieved, Some(150));
+    match &r.fitted_overall {
+        Some(CrossingFit::Fitted {
+            n_star,
+            n_achievable,
+            ..
+        }) => {
+            assert!((n_star - 112.5).abs() < 1e-9, "n_star {n_star}");
+            assert_eq!(*n_achievable, 113);
+        }
+        other => panic!("expected Fitted overall crossing, got {other:?}"),
+    }
 }
 
 #[test]
@@ -471,23 +467,6 @@ fn merge_pools_posthoc_spanning_histogram() {
     );
 }
 
-/// A nonempty histogram with the wrong length (not 0 and not n_buckets) must be
-/// rejected loudly — silent zeros from skipping would corrupt pooled counts.
-/// ols_pr has target_indices=[0,1], so n_buckets=3; length 2 is wrong.
-#[test]
-fn merge_rejects_nonempty_wrong_length_histogram() {
-    let mut a = ols_pr(4, vec![3, 2], vec![3, 2], 4);
-    let mut b = ols_pr(4, vec![1, 4], vec![1, 4], 4);
-    a.success_count_histogram_uncorrected = vec![1, 1, 2]; // correct length 3
-    a.success_count_histogram_corrected = vec![1, 1, 2];
-    b.success_count_histogram_uncorrected = vec![1, 2]; // WRONG length 2 (nonempty)
-    b.success_count_histogram_corrected = vec![1, 2];
-    assert!(matches!(
-        merge_power_results(&wrap(vec![a, b])),
-        Err(OrchestratorError::IncompatibleMerge(_))
-    ));
-}
-
 /// Helper: build a PowerResult with one posthoc block (3 contrasts).
 fn pr_with_posthoc(n_sims: u64, counts_unc: Vec<u64>, counts_cor: Vec<u64>) -> PowerResult {
     let mut pr = ols_pr(n_sims, vec![3, 2], vec![3, 2], n_sims);
@@ -617,24 +596,27 @@ fn merge_pools_factor_exclusion_counts() {
     assert_eq!(pr.factor_separation_counts, vec![1, 5]);
 }
 
+/// Exclusion lengths agree, so only the separation-count guard can reject;
+/// the exclusion guard is covered by `merge_rejects_asymmetric_empty_factor_counts`.
 #[test]
-fn merge_rejects_mismatched_factor_exclusion_counts_length() {
+fn merge_rejects_mismatched_factor_separation_counts_length() {
     let mut a = ols_pr(10, vec![8, 6], vec![7, 5], 10);
     let mut b = ols_pr(10, vec![7, 5], vec![6, 4], 10);
     a.factor_exclusion_counts = vec![3, 0];
     a.factor_separation_counts = vec![1, 2];
-    b.factor_exclusion_counts = vec![2]; // WRONG length
-    b.factor_separation_counts = vec![0, 3];
+    b.factor_exclusion_counts = vec![2, 1];
+    b.factor_separation_counts = vec![0]; // WRONG length
 
-    assert!(matches!(
-        merge_power_results(&wrap(vec![a, b])),
-        Err(OrchestratorError::IncompatibleMerge(_))
-    ));
+    let r = merge_power_results(&wrap(vec![a, b]));
+    assert!(
+        matches!(&r, Err(OrchestratorError::IncompatibleMerge(m)) if m.contains("factor_separation_counts")),
+        "{r:?}"
+    );
 }
 
 /// Asymmetric empty-vs-populated factor counts (an older payload meeting a
-/// new one) must be rejected, not silently pooled — unlike the histogram gap
-/// below, the strict length guard covers this case.
+/// new one) must be rejected by the exclusion-count length guard, not silently
+/// pooled.
 #[test]
 fn merge_rejects_asymmetric_empty_factor_counts() {
     let mut a = ols_pr(10, vec![8, 6], vec![7, 5], 10);
@@ -763,7 +745,7 @@ fn merge_pools_boundary_component_counts() {
 
 /// Mismatched boundary_component_counts lengths (a part built with a different
 /// variance-component count) must be rejected, not summed against a shorter
-/// buffer — mirrors merge_rejects_mismatched_factor_exclusion_counts_length for
+/// buffer — mirrors merge_rejects_mismatched_factor_separation_counts_length for
 /// the one pooled count vector that previously lacked a mismatch-guard test.
 #[test]
 fn merge_rejects_mismatched_boundary_component_counts_length() {

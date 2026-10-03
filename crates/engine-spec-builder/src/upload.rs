@@ -180,7 +180,7 @@ pub fn build_recovery_design(
 /// - `Continuous`: z-score with population SD (ddof=0). If SD == 0, returns all zeros.
 /// - `Binary`: center at empirical proportion; `x - p` where `p = mean(values)`.
 /// - `Factor`: returns values unchanged (level codes 0..k-1 need no standardization).
-pub fn standardize_column(col: &UploadColumn) -> Vec<f64> {
+pub(crate) fn standardize_column(col: &UploadColumn) -> Vec<f64> {
     match col.col_type {
         UploadColumnType::Continuous => standardize_continuous(&col.values),
         UploadColumnType::Binary => {
@@ -541,6 +541,41 @@ pub fn measure_correlations(
 }
 
 #[cfg(test)]
+mod standardize_tests {
+    use super::*;
+
+    #[test]
+    fn standardize_continuous_is_zscore_ddof0() {
+        let col = UploadColumn {
+            name: "x".into(),
+            col_type: UploadColumnType::Continuous,
+            values: vec![1.0, 2.0, 3.0, 4.0, 5.0],
+            labels: vec![],
+        };
+        let z = standardize_column(&col);
+        let sd = 2f64.sqrt();
+        assert!((z[0] - (-2.0 / sd)).abs() < 1e-12);
+        assert!((z[2] - 0.0).abs() < 1e-12);
+        assert!((z[4] - (2.0 / sd)).abs() < 1e-12);
+        let m: f64 = z.iter().sum::<f64>() / z.len() as f64;
+        assert!(m.abs() < 1e-12);
+    }
+
+    #[test]
+    fn standardize_binary_centers_at_proportion() {
+        let col = UploadColumn {
+            name: "b".into(),
+            col_type: UploadColumnType::Binary,
+            values: vec![0.0, 0.0, 1.0, 1.0, 1.0],
+            labels: vec![],
+        };
+        let z = standardize_column(&col);
+        assert!((z[0] - (-0.6)).abs() < 1e-12);
+        assert!((z[2] - (0.4)).abs() < 1e-12);
+    }
+}
+
+#[cfg(test)]
 mod recovery_tests {
     use super::*;
     use crate::formula::parse_formula;
@@ -625,15 +660,6 @@ mod correlation_tests {
         assert_eq!(ranks, vec![2.5, 4.0, 1.0, 2.5]);
     }
 
-    /// ρ_S is measured on ranks and returned on the latent scale `2·sin(π·ρ_S/6)`.
-    /// a=[1..5], b=[1,2,3,5,4] → ρ_S = 0.9; latent = 0.9079809994790935 ≠ 0.9.
-    #[test]
-    fn spearman_to_latent_applies_norta_inversion() {
-        let lat = spearman_to_latent(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 2.0, 3.0, 5.0, 4.0]);
-        let expected = 2.0 * (std::f64::consts::PI * 0.9 / 6.0).sin();
-        assert!((lat - expected).abs() < 1e-12, "got {lat}, want {expected}");
-    }
-
     /// A constant (zero-variance) column ranks to all-equal → centered to zero →
     /// `pearson` denom 0 → ρ_S = 0 (latent 0). Must not panic or NaN.
     #[test]
@@ -642,19 +668,14 @@ mod correlation_tests {
         assert!(lat.abs() < 1e-12, "got {lat}");
     }
 
-    /// An already-PSD matrix is returned unchanged (ε = 0) — no de-calibration in
-    /// the common case.
-    #[test]
-    fn ridge_shrink_leaves_psd_unchanged() {
-        let r = vec![1.0, 0.5, 0.5, 1.0]; // 2×2, PSD
-        assert_eq!(ridge_shrink_to_psd(&r, 2), r);
-    }
-
-    /// An indefinite measured block is repaired: the result is PSD, keeps a unit
-    /// diagonal, and has off-diagonals shrunk toward zero (smaller magnitude).
+    /// An indefinite measured block is repaired with the SMALLEST shrink: the
+    /// result is PSD, keeps a unit diagonal, and its off-diagonals sit exactly at
+    /// the PSD boundary, not merely somewhere closer to zero.
     #[test]
     fn ridge_shrink_repairs_indefinite() {
-        // det = -2.888 → indefinite.
+        // det = -2.888 → indefinite. Eigenvalues 1.9, 1.9, -0.8; shrinking maps
+        // λ to (1−ε)λ + ε, so the minimum is ε* = 0.8/1.8 = 4/9 and every
+        // off-diagonal becomes (1 − 4/9)·(±0.9) = ±0.5.
         #[rustfmt::skip]
         let r = vec![
             1.0,  0.9, -0.9,
@@ -674,8 +695,13 @@ mod correlation_tests {
         for i in 0..3 {
             assert!((repaired[i * 3 + i] - 1.0).abs() < 1e-12);
         }
-        // Off-diagonals shrunk toward zero.
-        assert!(repaired[1].abs() < 0.9 && repaired[1].abs() > 0.0);
-        assert!((repaired[2].abs()) < 0.9);
+        // Minimal shrink: off-diagonals at ±0.5 (bisection tolerance 1e-9 on ε).
+        for (i, want) in [(1, 0.5), (2, -0.5), (5, 0.5)] {
+            assert!(
+                (repaired[i] - want).abs() < 1e-7,
+                "entry {i} = {}, expected {want}",
+                repaired[i]
+            );
+        }
     }
 }

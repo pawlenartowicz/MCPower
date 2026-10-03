@@ -24,5 +24,7 @@
   "expected_n_factor_dummies": 0,
   "expected_var_types": [0, 1],
   "expected_effect_sizes": [0.0, 0.5, 0.3],
-  "expected_target_indices": [1, 2]
+  "expected_target_indices": [1, 2],
+  "expected_factor_n_levels": [],
+  "expected_factor_proportions": []
 }

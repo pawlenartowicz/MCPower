@@ -38,12 +38,6 @@ impl RunRegistry {
     pub fn drop_run(&self, id: &str) {
         self.inner.lock().remove(id);
     }
-
-    /// Test helper.
-    #[cfg(test)]
-    pub fn contains(&self, id: &str) -> bool {
-        self.inner.lock().contains_key(id)
-    }
 }
 
 #[cfg(test)]
@@ -54,23 +48,17 @@ mod tests {
     fn register_cancel_drop_lifecycle() {
         let reg = RunRegistry::default();
         let (id, tok) = reg.register();
-        assert!(reg.contains(&id));
         assert!(!tok.is_cancelled());
-        assert!(reg.cancel(&id));
+        assert!(reg.cancel(&id), "a registered id is known");
         assert!(tok.is_cancelled());
         reg.drop_run(&id);
-        assert!(!reg.contains(&id));
+        assert!(!reg.cancel(&id), "a dropped id is no longer known");
+        reg.drop_run(&id); // dropping an unknown id is a no-op
     }
 
     #[test]
     fn cancel_unknown_id_returns_false() {
         let reg = RunRegistry::default();
         assert!(!reg.cancel("not-a-real-id"));
-    }
-
-    #[test]
-    fn drop_unknown_id_is_a_noop() {
-        let reg = RunRegistry::default();
-        reg.drop_run("not-a-real-id"); // must not panic
     }
 }

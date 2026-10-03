@@ -450,76 +450,9 @@ fn combinations<T: Clone>(items: &[T], r: usize) -> Vec<Vec<T>> {
 
 #[cfg(test)]
 mod tests {
+    //! Parser edge cases outside the shared corpus
+    //! (`configs/formula-fixtures/cases.json`, driven by `tests/formula_fixtures.rs`).
     use super::*;
-
-    #[test]
-    fn parses_simple_additive_formula() {
-        let f = parse_formula("y = x1 + x2").unwrap();
-        assert_eq!(f.dependent, "y");
-        assert_eq!(f.predictors, vec!["x1", "x2"]);
-        assert_eq!(
-            f.terms,
-            vec![
-                Term::Main { name: "x1".into() },
-                Term::Main { name: "x2".into() }
-            ]
-        );
-    }
-
-    #[test]
-    fn parses_tilde_separator() {
-        let f = parse_formula("y ~ x1 + x2").unwrap();
-        assert_eq!(f.dependent, "y");
-        assert_eq!(f.predictors, vec!["x1", "x2"]);
-    }
-
-    #[test]
-    fn parses_specific_interaction() {
-        let f = parse_formula("y = x1 + x2 + x1:x2").unwrap();
-        assert_eq!(f.predictors, vec!["x1", "x2"]);
-        assert_eq!(
-            f.terms,
-            vec![
-                Term::Main { name: "x1".into() },
-                Term::Main { name: "x2".into() },
-                Term::Interaction {
-                    vars: vec!["x1".into(), "x2".into()]
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn parses_star_expands_main_plus_all_interactions() {
-        let f = parse_formula("y = x1*x2*x3").unwrap();
-        assert_eq!(f.predictors, vec!["x1", "x2", "x3"]);
-        assert_eq!(
-            f.terms,
-            vec![
-                Term::Main { name: "x1".into() },
-                Term::Main { name: "x2".into() },
-                Term::Main { name: "x3".into() },
-                Term::Interaction {
-                    vars: vec!["x1".into(), "x2".into()]
-                },
-                Term::Interaction {
-                    vars: vec!["x1".into(), "x3".into()]
-                },
-                Term::Interaction {
-                    vars: vec!["x2".into(), "x3".into()]
-                },
-                Term::Interaction {
-                    vars: vec!["x1".into(), "x2".into(), "x3".into()]
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn no_lhs_defaults_to_explained_variable() {
-        let f = parse_formula("x1 + x2").unwrap();
-        assert_eq!(f.dependent, "explained_variable");
-    }
 
     #[test]
     fn empty_lhs_with_separator_defaults_to_explained_variable() {
@@ -531,18 +464,10 @@ mod tests {
         }
     }
 
+    // A separator with nothing after it is empty (the blank input is a corpus row).
     #[test]
-    fn empty_formula_errors() {
-        assert!(matches!(parse_formula(""), Err(SpecError::EmptyFormula)));
+    fn empty_rhs_after_separator_errors() {
         assert!(matches!(parse_formula("y ="), Err(SpecError::EmptyFormula)));
-    }
-
-    #[test]
-    fn term_removal_rejected() {
-        assert!(matches!(
-            parse_formula("y = x1 - x2"),
-            Err(SpecError::TermRemovalUnsupported)
-        ));
     }
 
     // Duplicate predictor names in the RHS collapse — each name appears once
@@ -561,31 +486,14 @@ mod tests {
         );
     }
 
-    // A non-identifier token in a term position is a syntax error.
+    // A non-identifier token in a later term position is a syntax error (the
+    // corpus row covers a bad first term).
     #[test]
     fn non_identifier_token_is_syntax_error() {
         assert!(matches!(
             parse_formula("y = x1 + 2bad"),
             Err(SpecError::FormulaSyntax { .. })
         ));
-    }
-
-    // A RE-only RHS is accepted and yields empty fixed-effect vecs with a
-    // non-empty random-effects vec.
-    #[test]
-    fn re_only_formula_has_empty_fixed_effects() {
-        let f = parse_formula("y ~ (1|g)").unwrap();
-        assert!(f.predictors.is_empty());
-        assert!(f.terms.is_empty());
-        // The RE-only path still extracts the actual random effect, not
-        // merely "something non-empty" — assert the parsed content (group/parent).
-        assert_eq!(
-            f.random_effects,
-            vec![RandomEffect::Intercept {
-                group: "g".into(),
-                parent: None,
-            }]
-        );
     }
 
     // A slope clause that matches the `(1+…|g)` shape but whose var list

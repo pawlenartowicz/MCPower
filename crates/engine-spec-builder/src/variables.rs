@@ -426,70 +426,6 @@ mod tests {
         assert_eq!(t.effect_columns, vec![vec![1], vec![2]]);
     }
 
-    #[test]
-    fn factor_dummies_ordered_after_non_factors() {
-        let f = parse_formula("y = x1 + group + x2").unwrap();
-        let preds = vec![
-            PredictorSpec {
-                name: "x1".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-            PredictorSpec {
-                name: "group".into(),
-                pinned: false,
-                kind: VarKind::Factor {
-                    levels: vec!["L1".into(), "L2".into()],
-                    proportions: vec![0.5, 0.5],
-                    reference: "L1".into(),
-                    sampled_proportions: None,
-                },
-            },
-            PredictorSpec {
-                name: "x2".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-        ];
-        let t = build_predictor_table(&f, &preds).unwrap();
-        assert_eq!(t.non_factor_names, vec!["x1", "x2"]);
-        // group is the only factor → 1 dummy at column n_nf+1 = 3.
-        let group_b_col = t
-            .effect_columns
-            .iter()
-            .zip(t.effect_names.iter())
-            .find_map(|(c, n)| (n == "group[L2]").then_some(c.clone()))
-            .expect("group[L2] should be present");
-        assert_eq!(group_b_col, vec![3]);
-    }
-
-    // Dummy effect_columns are 1-element vecs; the column index is 1-based
-    // (reference level excluded), and the level ordering matches the declaration
-    // order in `levels` with the reference removed.
-    #[test]
-    fn dummy_effect_columns_are_single_one_based_in_level_order() {
-        let f = parse_formula("y = group").unwrap();
-        let preds = vec![PredictorSpec {
-            name: "group".into(),
-            pinned: false,
-            kind: VarKind::Factor {
-                // reference is "B" (not first) to check ordering excludes it
-                // wherever it sits in declaration order.
-                levels: vec!["A".into(), "B".into(), "C".into()],
-                proportions: vec![0.4, 0.3, 0.3],
-                reference: "B".into(),
-                sampled_proportions: None,
-            },
-        }];
-        let t = build_predictor_table(&f, &preds).unwrap();
-        // Non-reference levels in declaration order: A, C.
-        assert_eq!(t.effect_names, vec!["group[A]", "group[C]"]);
-        // Each dummy maps to exactly one column.
-        assert!(t.effect_columns.iter().all(|c| c.len() == 1));
-        // 1-based, immediately after the (zero) non-factor block: cols 1, 2.
-        assert_eq!(t.effect_columns, vec![vec![1], vec![2]]);
-    }
-
     // An interaction between two k-level factors produces (k1-1)*(k2-1) effect
     // entries — the full Cartesian product of non-reference levels.
     #[test]
@@ -523,58 +459,6 @@ mod tests {
         assert_eq!(interaction_count, 2);
         assert!(t.effect_names.contains(&"f1[B]:f2[Q]".to_string()));
         assert!(t.effect_names.contains(&"f1[C]:f2[Q]".to_string()));
-    }
-
-    // factor_levels holds only non-reference levels in declaration order;
-    // factor_references is parallel to factor_names with the reference string for each factor.
-    #[test]
-    fn factor_levels_excludes_reference_and_references_parallel() {
-        let f = parse_formula("y = group").unwrap();
-        let preds = vec![PredictorSpec {
-            name: "group".into(),
-            pinned: false,
-            kind: VarKind::Factor {
-                levels: vec!["A".into(), "B".into(), "C".into()],
-                proportions: vec![0.4, 0.3, 0.3],
-                reference: "B".into(),
-                sampled_proportions: None,
-            },
-        }];
-        let t = build_predictor_table(&f, &preds).unwrap();
-        assert_eq!(t.factor_names, vec!["group"]);
-        // Non-reference levels in declaration order, reference "B" dropped.
-        assert_eq!(
-            t.factor_levels,
-            vec![vec!["A".to_string(), "C".to_string()]]
-        );
-        // Parallel reference vec.
-        assert_eq!(t.factor_references, vec!["B"]);
-    }
-
-    // effect_names and effect_columns are parallel vecs of equal length on every successful build.
-    #[test]
-    fn effect_names_and_columns_are_parallel() {
-        let f = parse_formula("y = x1 + group").unwrap();
-        let preds = vec![
-            PredictorSpec {
-                name: "x1".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-            PredictorSpec {
-                name: "group".into(),
-                pinned: false,
-                kind: VarKind::Factor {
-                    levels: vec!["A".into(), "B".into(), "C".into()],
-                    proportions: vec![0.4, 0.3, 0.3],
-                    reference: "A".into(),
-                    sampled_proportions: None,
-                },
-            },
-        ];
-        let t = build_predictor_table(&f, &preds).unwrap();
-        assert_eq!(t.effect_names.len(), t.effect_columns.len());
-        assert!(!t.effect_names.is_empty());
     }
 
     #[test]
@@ -624,7 +508,7 @@ mod tests {
     // list (reference included), NOT the reference-stripped dummy list and NOT
     // `level_index - 1`. With reference "B" sitting in the middle, the two
     // dummies A and C must carry level = 0 and level = 2 — the obvious
-    // off-by-one place. (Mirrors the plan's worked example.)
+    // off-by-one place.
     #[test]
     fn factor_level_descriptor_indexes_full_level_list_including_reference() {
         let f = parse_formula("y = group").unwrap();
@@ -639,7 +523,16 @@ mod tests {
             },
         }];
         let t = build_predictor_table(&f, &preds).unwrap();
+        // Non-reference levels in declaration order (reference "B" dropped),
+        // each a single 1-based column right after the (empty) non-factor block.
         assert_eq!(t.effect_names, vec!["group[A]", "group[C]"]);
+        assert_eq!(t.effect_columns, vec![vec![1], vec![2]]);
+        assert_eq!(t.factor_names, vec!["group"]);
+        assert_eq!(
+            t.factor_levels,
+            vec![vec!["A".to_string(), "C".to_string()]]
+        );
+        assert_eq!(t.factor_references, vec!["B"]);
         assert_eq!(
             t.effect_descriptors,
             vec![
@@ -680,7 +573,11 @@ mod tests {
             },
         ];
         let t = build_predictor_table(&f, &preds).unwrap();
-        // effect order: x1, group[B], group[C], x1:group[B], x1:group[C]
+        // x1:group expands to the Cartesian product with group's non-reference levels.
+        assert_eq!(
+            t.effect_names,
+            vec!["x1", "group[B]", "group[C]", "x1:group[B]", "x1:group[C]"]
+        );
         assert_eq!(t.effect_descriptors.len(), t.effect_names.len());
         assert_eq!(
             t.effect_descriptors[0],
@@ -730,68 +627,5 @@ mod tests {
                 ],
             }
         );
-    }
-
-    #[test]
-    fn interaction_with_factor_expands_to_cartesian_product() {
-        let f = parse_formula("y = x1 + group + x1:group").unwrap();
-        let preds = vec![
-            PredictorSpec {
-                name: "x1".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-            PredictorSpec {
-                name: "group".into(),
-                pinned: false,
-                kind: VarKind::Factor {
-                    levels: vec!["A".into(), "B".into(), "C".into()],
-                    proportions: vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
-                    reference: "A".into(),
-                    sampled_proportions: None,
-                },
-            },
-        ];
-        let t = build_predictor_table(&f, &preds).unwrap();
-        // Effects: x1, group[B], group[C], x1:group[B], x1:group[C]
-        assert_eq!(
-            t.effect_names,
-            vec!["x1", "group[B]", "group[C]", "x1:group[B]", "x1:group[C]"]
-        );
-    }
-
-    #[test]
-    fn factor_sampled_collected_into_predictor_table() {
-        let f = parse_formula("y = group").unwrap();
-        let preds = vec![PredictorSpec {
-            name: "group".into(),
-            pinned: false,
-            kind: VarKind::Factor {
-                levels: vec!["A".into(), "B".into(), "C".into()],
-                proportions: vec![0.4, 0.3, 0.3],
-                reference: "A".into(),
-                sampled_proportions: Some(true),
-            },
-        }];
-        let t = build_predictor_table(&f, &preds).unwrap();
-        assert_eq!(t.factor_n_levels, vec![3]);
-        assert_eq!(t.factor_sampled, vec![Some(true)]);
-    }
-
-    #[test]
-    fn factor_sampled_absent_collects_none() {
-        let f = parse_formula("y = group").unwrap();
-        let preds = vec![PredictorSpec {
-            name: "group".into(),
-            pinned: false,
-            kind: VarKind::Factor {
-                levels: vec!["A".into(), "B".into(), "C".into()],
-                proportions: vec![0.4, 0.3, 0.3],
-                reference: "A".into(),
-                sampled_proportions: None,
-            },
-        }];
-        let t = build_predictor_table(&f, &preds).unwrap();
-        assert_eq!(t.factor_sampled, vec![None]);
     }
 }

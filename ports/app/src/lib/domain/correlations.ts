@@ -93,3 +93,28 @@ export function pearson(a: number[], b: number[]): number {
     const denom = Math.sqrt(denA * denB);
     return denom === 0 ? 0 : num / denom;
 }
+
+/**
+ * Value the correlation editor shows for the pair (`nameI`, `nameJ`) whose
+ * stored correlation is `stored`. In partial mode an untouched pair (stored 0)
+ * of two uploaded continuous columns shows the measured Pearson r instead; every
+ * other case shows the stored value. Display only: the caller never writes the
+ * measured value back into the config.
+ */
+export function correlationDisplayValue(
+    stored: number,
+    mode: UploadMode,
+    csvData: CsvData | null | undefined,
+    nameI: string | undefined,
+    nameJ: string | undefined,
+): number {
+    if (mode !== 'partial' || stored !== 0) return stored;
+    if (nameI === undefined || nameJ === undefined) return stored;
+    const uploadedMap = uploadedColumnByName(csvData);
+    const colI = uploadedMap.get(nameI);
+    const colJ = uploadedMap.get(nameJ);
+    if (!colI || !colJ || colI.col_type !== 'continuous' || colJ.col_type !== 'continuous') {
+        return stored;
+    }
+    return pearson(colI.values, colJ.values);
+}

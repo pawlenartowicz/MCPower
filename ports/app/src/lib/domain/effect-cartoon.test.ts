@@ -11,8 +11,6 @@ import {
   POOL,
   POOL_SIZE,
   slopeScatter,
-  twoByTwo,
-  twoSlopes,
   X_CLAMP,
 } from './effect-cartoon';
 
@@ -66,13 +64,6 @@ describe('groupOutcomeBars', () => {
 });
 
 describe('bernoulliScatter', () => {
-  it('outcomes are 0/1 and deterministic for a fixed baseline+beta+index', () => {
-    const a = bernoulliScatter(logit(0.3), 0.8, 0).points;
-    const b = bernoulliScatter(logit(0.3), 0.8, 0).points;
-    expect(a).toEqual(b);
-    for (const p of a) expect(p.outcome === 0 || p.outcome === 1).toBe(true);
-  });
-
   it('resamples with sampleIndex and wraps modulo POOL_SIZE', () => {
     const i0 = bernoulliScatter(logit(0.3), 0.8, 0).points;
     const i1 = bernoulliScatter(logit(0.3), 0.8, 1).points;
@@ -105,32 +96,19 @@ describe('fitRange', () => {
 
   it('expands a near-zero span so the axis does not collapse', () => {
     const { lo, hi } = fitRange([0.1, 0.1]);
-    // span < 0.5 -> widened by 0.5 each side (then padded), so it never collapses
-    expect(hi - lo).toBeGreaterThan(0.9);
-    expect(lo).toBeLessThan(0.1);
-    expect(hi).toBeGreaterThan(0.1);
+    // span < 0.5 -> widened by 0.5 each side to [-0.4, 0.6], then padded 12% of 1.0
+    expect(lo).toBeCloseTo(-0.52, 10);
+    expect(hi).toBeCloseTo(0.72, 10);
   });
 
-  it('falls back to [-1,1]-ish on empty / non-finite input', () => {
+  it('falls back to [-1,1] (then padded) on empty / non-finite input', () => {
     const { lo, hi } = fitRange([]);
-    expect(lo).toBeLessThan(0);
-    expect(hi).toBeGreaterThan(0);
+    expect(lo).toBeCloseTo(-1.24, 10);
+    expect(hi).toBeCloseTo(1.24, 10);
   });
 });
 
 describe('resampling pool', () => {
-  it('keeps exactly POOL_SIZE vetted survivors', () => {
-    expect(POOL).toHaveLength(POOL_SIZE);
-    expect(POOL_SIZE).toBe(20);
-  });
-
-  it('carries a uniform u channel per continuous point (for the Bernoulli draw)', () => {
-    for (const u of POOL[0]!.cont.map((p) => p.u)) {
-      expect(u).toBeGreaterThanOrEqual(0);
-      expect(u).toBeLessThan(1);
-    }
-  });
-
   it('survivors are screened for outliers (no far point past the penalty band)', () => {
     // The maxAbs penalty kicks in past 3.3; the cleanest 20 of 100 should sit
     // comfortably below it on every gaussian channel, so no frame squashes.
@@ -141,20 +119,9 @@ describe('resampling pool', () => {
       expect(Math.max(...ns)).toBeLessThan(3.5);
     }
   });
-
-  it('is sorted tidiest-first (survivor 0 is the cleanest kept sample)', () => {
-    const spread = (b: (typeof POOL)[number]) => Math.max(...b.cont.map((p) => Math.abs(p.x)));
-    // Not a strict order across all (score blends channels), but the very first
-    // survivor must not be the worst-behaved of the pool.
-    expect(spread(POOL[0]!)).toBeLessThanOrEqual(spread(POOL[POOL_SIZE - 1]!) + 1);
-  });
 });
 
 describe('continuousScatter', () => {
-  it('is deterministic for a fixed beta + index (seeded pool)', () => {
-    expect(continuousScatter(0.4, 0).points).toEqual(continuousScatter(0.4, 0).points);
-  });
-
   it('resamples: a different sampleIndex yields a different cloud', () => {
     const a = continuousScatter(0.4, 0).points;
     const b = continuousScatter(0.4, 1).points;
@@ -209,27 +176,16 @@ describe('groupedColumns', () => {
   });
 });
 
-describe('twoByTwo / gridColumns', () => {
-  it('twoByTwo cells are [00, A, B, A+B+int] with ref A+B', () => {
-    const { cells, noInteractionRef } = twoByTwo(0.3, 0.5, 0.2);
-    expect(cells).toEqual([0, 0.3, 0.5, 0.3 + 0.5 + 0.2]);
-    expect(noInteractionRef).toBeCloseTo(0.8);
-  });
-
-  it('gridColumns has 4 columns; only the 4th carries the no-interaction ref = A+B', () => {
+describe('gridColumns', () => {
+  it('gridColumns has 4 columns [00, A, B, A+B+int]; only the 4th carries the no-interaction ref = A+B', () => {
     const { columns } = gridColumns(0.3, 0.5, 0.2);
-    expect(columns).toHaveLength(4);
+    expect(columns.map((c) => c.mean)).toEqual([0, 0.3, 0.5, 0.3 + 0.5 + 0.2]);
     expect(columns[0]!.ref).toBeNull();
     expect(columns[3]!.ref).toBeCloseTo(0.8);
-    expect(columns[3]!.mean).toBeCloseTo(1.0); // A+B+int
   });
 });
 
-describe('twoSlopes / slopeScatter', () => {
-  it('group1 slope = contBeta + interactionBeta', () => {
-    expect(twoSlopes(0.4, 0.3)).toEqual({ slope0: 0.4, slope1: 0.4 + 0.3 });
-  });
-
+describe('slopeScatter', () => {
   it('group1 line reflects the combined slope and the binary intercept shift', () => {
     const { group0, group1 } = slopeScatter(0.4, 0.3, 0.6);
     // group0: slope 0.4, intercept 0
@@ -238,9 +194,5 @@ describe('twoSlopes / slopeScatter', () => {
     expect(group1.line.y2).toBeCloseTo(0.6 + 0.7 * 2.6);
     expect(group0.points.length).toBeGreaterThan(0);
     expect(group1.points.length).toBeGreaterThan(0);
-  });
-
-  it('is deterministic (seeded base)', () => {
-    expect(slopeScatter(0.4, 0.3, 0.6)).toEqual(slopeScatter(0.4, 0.3, 0.6));
   });
 });

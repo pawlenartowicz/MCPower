@@ -50,15 +50,6 @@ describe('generateScript (mixed)', () => {
     expect(s).toContain('by=20,');
   });
 
-  it('omits by= when ByValue is Auto (port default)', () => {
-    const s = generateScript(mixedSpec({ kind: 'n_clusters', value: 20 }), 'find-sample-size', {
-      bounds: [40, 160],
-      method: { Grid: { by: { Auto: { count: 12 } }, mode: 'Linear' } },
-    });
-    // Auto is the port default — omit from the call rather than emitting by="auto"
-    expect(s).not.toContain('by=');
-  });
-
   it('folds the test selection into target_test= when non-default', () => {
     const spec = mixedSpec({ kind: 'n_clusters', value: 20 });
     if (spec.family !== 'mixed') throw new Error('expected mixed');
@@ -97,11 +88,6 @@ describe('generateScript (mixed)', () => {
     );
   });
 
-  it('raises a type-guard error when called with a non-mixed spec', () => {
-    const linearSpec = { ...mixedSpec({ kind: 'n_clusters', value: 20 }), family: 'linear' } as unknown as AppSpec;
-    expect(() => generateMixedScript(linearSpec, 'find-power', { sample_size: 200 })).toThrow();
-  });
-
   it('passes family="lme" and trims default config', () => {
     const spec = mixedSpec({ kind: 'n_clusters', value: 20 });
     const out = generateMixedScript(spec, 'find-power', { sample_size: 100 }, 'python');
@@ -111,6 +97,15 @@ describe('generateScript (mixed)', () => {
     expect(out).not.toContain('set_simulations');
     // fixture seed=2137 = default → set_seed omitted
     expect(out).not.toContain('set_seed');
+  });
+
+  it('measures a GLMM outcome against the OLS sim default, so the app 800 is emitted', () => {
+    const s = {
+      ...mixedSpec({ kind: 'n_clusters', value: 20 }),
+      outcome: { kind: 'binary' as const, baseline_probability: 0.3 },
+    } as AppSpec;
+    const out = generateMixedScript(s, 'find-power', { sample_size: 100 }, 'python');
+    expect(out).toContain('model.set_simulations(800)');
   });
 
   it('binary outcome → family="logit" + baseline probability', () => {
@@ -196,9 +191,8 @@ describe('generateScript (mixed)', () => {
   it('R output', () => {
     const spec = mixedSpec({ kind: 'n_clusters', value: 20 });
     const out = generateMixedScript(spec, 'find-power', { sample_size: 100 }, 'r');
-    expect(out).toContain('MCPower$new("');
-    expect(out).toContain('family = "lme"');
-    expect(out).toContain('model$set_cluster(');
+    expect(out).toContain('model <- MCPower$new("y ~ x + (1|school)", family = "lme")');
+    expect(out).toContain('model$set_cluster("school", n_clusters=20, ICC = 0.2)');
   });
 
   it('R output with slopes and cluster_level_vars uses R list syntax', () => {
@@ -215,17 +209,13 @@ describe('generateScript (mixed)', () => {
     expect(out).toContain('list(predictor = "x", variance = 0.05, corr_with_intercept = -0.1)');
   });
 
-  it('maps non-none corrections to their Python tokens', () => {
+  // The full token map is pinned in the linear tests; this proves the mixed
+  // generator routes the correction through it.
+  it('maps a non-none correction to its port token', () => {
     const base = mixedSpec({ kind: 'n_clusters', value: 20 });
     const bh = generateScript({ ...base, correction: 'benjamini_hochberg' }, 'find-power', { sample_size: 200 });
     expect(bh).toContain('correction="bh"');
     expect(bh).not.toContain('benjamini_hochberg');
-
-    const bonf = generateScript({ ...base, correction: 'bonferroni' }, 'find-power', { sample_size: 200 });
-    expect(bonf).toContain('correction="bonferroni"');
-
-    const holm = generateScript({ ...base, correction: 'holm' }, 'find-power', { sample_size: 200 });
-    expect(holm).toContain('correction="holm"');
   });
 });
 

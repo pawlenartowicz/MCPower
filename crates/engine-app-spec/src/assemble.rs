@@ -874,8 +874,8 @@ mod tests {
         assert_eq!(spec.formula, "y ~ 1");
     }
 
-    // Only non-zero off-diagonal correlations become CorrelationPairs;
-    // an all-zero matrix yields an empty pair list.
+    // Only non-zero off-diagonal correlations become CorrelationPairs; the
+    // zero off-diagonals (a,c) and (b,c) are dropped.
     #[test]
     fn project_emits_only_nonzero_correlation_pairs() {
         let corr = Some(CorrelationMatrix {
@@ -916,37 +916,6 @@ mod tests {
         assert_eq!(spec.correlations.len(), 1, "only the a,b=0.3 pair survives");
         assert_eq!(spec.correlations[0].a, "a");
         assert_eq!(spec.correlations[0].b, "b");
-    }
-
-    #[test]
-    fn project_all_zero_correlation_matrix_yields_no_pairs() {
-        let corr = Some(CorrelationMatrix {
-            names: vec!["a".into(), "b".into()],
-            values: vec![vec![1.0, 0.0], vec![0.0, 1.0]],
-        });
-        let spec = project_to_builder_spec(
-            &pf(vec!["a", "b"], vec![]),
-            &[
-                VarType::Numeric {
-                    name: "a".into(),
-                    distribution: NumericDistribution::Normal,
-                    pinned: false,
-                },
-                VarType::Numeric {
-                    name: "b".into(),
-                    distribution: NumericDistribution::Normal,
-                    pinned: false,
-                },
-            ],
-            &[],
-            &corr,
-            CorrectionMethod::None,
-            &TestSelection::All,
-            0.05,
-            None,
-        )
-        .expect("project ok");
-        assert!(spec.correlations.is_empty());
     }
 
     // TestSelection maps All→["overall"], Effects→names, Contrasts→names.
@@ -1300,21 +1269,6 @@ mod tests {
         );
     }
 
-    // icc_to_tau_squared is positive for icc>0 and clamps to 0.0
-    // (no NaN, no panic) when the denominator 1-icc is at or below zero.
-    #[test]
-    fn icc_to_tau_squared_positive_for_valid_icc() {
-        assert!(icc_to_tau_squared(0.2) > 0.0);
-        assert!(icc_to_tau_squared(0.5).is_finite());
-    }
-
-    #[test]
-    fn icc_to_tau_squared_clamps_degenerate_denominator_to_zero() {
-        assert_eq!(icc_to_tau_squared(1.0), 0.0);
-        assert_eq!(icc_to_tau_squared(1.5), 0.0);
-        assert!(icc_to_tau_squared(1.0).is_finite());
-    }
-
     // ── Upload class-conflict guard ────────────────────────────────────────
 
     use engine_spec_builder::input::{UploadColumn, UploadColumnType, UploadMode};
@@ -1390,47 +1344,6 @@ mod tests {
             }
             other => panic!("expected UploadClassConflict, got {other:?}"),
         }
-    }
-
-    // Declared binary, column detected binary → no error (matching class).
-    #[test]
-    fn upload_class_no_conflict_binary_matches_binary() {
-        let csv = make_csv("x1", UploadColumnType::Binary);
-        project_to_builder_spec(
-            &pf(vec!["x1"], vec![]),
-            &[VarType::Binary {
-                name: "x1".into(),
-                binary_proportion: 0.5,
-            }],
-            &[],
-            &None,
-            CorrectionMethod::None,
-            &TestSelection::All,
-            0.05,
-            Some(&csv),
-        )
-        .expect("matching binary class should not conflict");
-    }
-
-    // Declared Numeric (continuous subtype), column detected continuous → no error.
-    #[test]
-    fn upload_class_no_conflict_numeric_declared_continuous_detected() {
-        let csv = make_csv("x1", UploadColumnType::Continuous);
-        project_to_builder_spec(
-            &pf(vec!["x1"], vec![]),
-            &[VarType::Numeric {
-                name: "x1".into(),
-                distribution: NumericDistribution::Normal,
-                pinned: false,
-            }],
-            &[],
-            &None,
-            CorrectionMethod::None,
-            &TestSelection::All,
-            0.05,
-            Some(&csv),
-        )
-        .expect("Numeric declared against detected continuous should not conflict");
     }
 
     // ── Undeclared upload columns: detected type wins (data wins) ───────────
@@ -1765,35 +1678,6 @@ mod tests {
         assert!(!mixed_agq_eligible(&spec));
     }
 
-    // A single Binary GLMM grouping factor with no slopes (1 RE) is eligible.
-    #[test]
-    fn mixed_agq_eligible_for_single_group_binary_glmm() {
-        let mut spec = mixed_fixture();
-        spec.outcome = MixedOutcome::Binary {
-            baseline_probability: 0.3,
-            link: Default::default(),
-        };
-        assert!(mixed_agq_eligible(&spec));
-    }
-
-    // A second grouping factor (extra_groupings non-empty) is ineligible even
-    // though the outcome and RE count would otherwise qualify.
-    #[test]
-    fn mixed_agq_ineligible_with_extra_grouping() {
-        let mut spec = mixed_fixture();
-        spec.outcome = MixedOutcome::Binary {
-            baseline_probability: 0.3,
-            link: Default::default(),
-        };
-        spec.extra_groupings = vec![AppGroupingSpec {
-            tau_squared: 0.1,
-            relation: AppGroupingRelation::Crossed { n_clusters: 8 },
-            cluster_name: None,
-            slopes: vec![],
-        }];
-        assert!(!mixed_agq_eligible(&spec));
-    }
-
     // Intercept + 3 slopes = 4 REs per group exceeds the ≤3 cap — ineligible,
     // even for an otherwise-qualifying single-grouping Binary GLMM. (A
     // `resolve_slopes` limitation — its `corr_with` is always empty, so a
@@ -1872,32 +1756,6 @@ mod tests {
         );
     }
 
-    // A crossed extra grouping (no slopes) passes the engine's grouping
-    // invariants and builds.
-    #[test]
-    fn assemble_mixed_forwards_extra_groupings() {
-        let mut spec = mixed_fixture();
-        spec.extra_groupings = vec![AppGroupingSpec {
-            tau_squared: 0.1,
-            cluster_name: None,
-            relation: AppGroupingRelation::Crossed { n_clusters: 8 },
-            slopes: vec![],
-        }];
-        let (contracts, _, _) =
-            assemble_mixed(&spec).expect("assemble_mixed with extra_groupings must succeed");
-        // The crossed grouping must land on the contract's cluster (was: is_ok only).
-        let cluster = contracts[0]
-            .generation
-            .cluster
-            .as_ref()
-            .expect("mixed contract carries a cluster");
-        assert_eq!(
-            cluster.extra_groupings.len(),
-            1,
-            "crossed grouping must forward"
-        );
-    }
-
     // A slope on an extra grouping resolves through the same name → non-factor
     // column path as the primary and lands on that grouping's `GroupingSpec`.
     // (Mirrors `assemble_mixed_forwards_slopes`, but on a secondary grouping —
@@ -1927,6 +1785,11 @@ mod tests {
             1,
             "extra grouping must forward"
         );
+        assert_eq!(cluster.extra_groupings[0].tau_squared, 0.1);
+        assert_eq!(
+            cluster.extra_groupings[0].relation,
+            engine_contract::GroupingRelation::Crossed { n_clusters: 8 }
+        );
         assert_eq!(
             cluster.extra_groupings[0].slopes.len(),
             1,
@@ -1946,12 +1809,9 @@ mod tests {
     fn assemble_mixed_rejects_out_of_band_icc() {
         let mut spec = mixed_fixture();
 
-        // 0 = no clustering: must not be rejected by the ICC guards.
+        // 0 = no clustering: below the band but exempt from it.
         spec.icc = 0.0;
-        assert!(!matches!(
-            assemble_mixed(&spec),
-            Err(AdapterError::IccOutOfRange { .. } | AdapterError::IccOutOfStabilityBand { .. })
-        ));
+        assemble_mixed(&spec).expect("icc = 0 (no clustering) must assemble");
 
         // Below / above the stability band → band error.
         spec.icc = 0.02;
@@ -2087,6 +1947,7 @@ mod tests {
 
     #[test]
     fn assemble_mixed_binary_outcome_sets_binary_glm_and_logit_scale_tau() {
+        use crate::app_spec::AppSpec;
         use engine_contract::{EstimatorSpec, OutcomeKind};
 
         let p = 0.3_f64;
@@ -2098,7 +1959,9 @@ mod tests {
             link: BinaryLink::Logit,
         };
 
-        let (contracts, _, _) = assemble_mixed(&spec).expect("binary mixed assembles ok");
+        // Through the public entry the hosts' drivers use.
+        let contracts = assemble_spec(&AppSpec::Mixed(spec)).expect("binary mixed assembles ok");
+        assert_eq!(contracts.len(), 1, "no scenarios → one baseline contract");
         let c = &contracts[0];
 
         assert_eq!(c.outcome.kind, OutcomeKind::Binary, "binary outcome");
@@ -2116,101 +1979,6 @@ mod tests {
             (cluster.tau_squared - expected_tau).abs() < 1e-10,
             "τ² latent logistic scale"
         );
-    }
-
-    #[test]
-    fn assemble_mixed_gaussian_outcome_is_unchanged() {
-        use engine_contract::{EstimatorSpec, OutcomeKind};
-
-        let icc = 0.2_f64;
-        let mut spec = mixed_fixture();
-        spec.icc = icc;
-        spec.outcome = MixedOutcome::Gaussian;
-
-        let (contracts, _, _) = assemble_mixed(&spec).expect("gaussian mixed assembles ok");
-        let c = &contracts[0];
-        assert_eq!(c.outcome.kind, OutcomeKind::Continuous);
-        assert_eq!(c.estimator, EstimatorSpec::Mle);
-        assert!((c.outcome.intercept - 0.0).abs() < 1e-12);
-        let expected_tau = icc / (1.0 - icc);
-        let cluster = c.generation.cluster.as_ref().expect("cluster present");
-        assert!((cluster.tau_squared - expected_tau).abs() < 1e-10);
-    }
-
-    // ── icc_to_tau_squared_logit unit tests ──
-
-    #[test]
-    fn icc_to_tau_squared_logit_scales_by_pi_squared_over_3() {
-        let icc = 0.2_f64;
-        let ratio = icc_to_tau_squared_logit(icc) / icc_to_tau_squared(icc);
-        assert!((ratio - std::f64::consts::PI.powi(2) / 3.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn icc_to_tau_squared_logit_clamps_degenerate_denominator() {
-        assert_eq!(icc_to_tau_squared_logit(1.0), 0.0);
-        assert!(icc_to_tau_squared_logit(1.5).is_finite());
-    }
-
-    // ── logit / logistic are exact inverses (baseline round-trip) ──
-
-    #[test]
-    fn logistic_is_inverse_of_logit() {
-        // Baseline-from-data recovery (logistic) must exactly undo the forward
-        // baseline→intercept conversion (logit); drift here corrupts the round-trip.
-        for &p in &[0.01_f64, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99] {
-            let round_trip = logistic(logit(p));
-            assert!(
-                (round_trip - p).abs() < 1e-12,
-                "logistic(logit({p})) = {round_trip}, expected {p}"
-            );
-        }
-        // Spot-check the absolute scale: logit(0.5) == 0 → logistic(0) == 0.5.
-        assert!((logistic(0.0) - 0.5).abs() < 1e-12);
-    }
-
-    // ── Task 3.3 passthrough: binary MixedSpec round-trips through assemble_spec ──
-
-    #[test]
-    fn binary_mixed_spec_round_trips_to_binary_glm_contract() {
-        use crate::app_spec::AppSpec;
-        use engine_contract::{EstimatorSpec, OutcomeKind};
-
-        let p = 0.25_f64;
-        let icc = 0.15_f64;
-        let mut spec = mixed_fixture();
-        spec.icc = icc;
-        spec.outcome = MixedOutcome::Binary {
-            baseline_probability: p,
-            link: BinaryLink::Logit,
-        };
-
-        let contracts = assemble_spec(&AppSpec::Mixed(spec)).expect("binary mixed assembles");
-        assert_eq!(contracts.len(), 1);
-        let c = &contracts[0];
-        assert_eq!(c.outcome.kind, OutcomeKind::Binary);
-        assert_eq!(c.estimator, EstimatorSpec::Glm);
-        let expected_intercept = (p / (1.0 - p)).ln();
-        assert!((c.outcome.intercept - expected_intercept).abs() < 1e-10);
-        let expected_tau = icc_to_tau_squared_logit(icc);
-        let cluster = c.generation.cluster.as_ref().expect("contract has cluster");
-        assert!((cluster.tau_squared - expected_tau).abs() < 1e-10);
-    }
-
-    #[test]
-    fn binary_mixed_spec_with_scenarios_assembles_to_n_contracts() {
-        use crate::app_spec::AppSpec;
-
-        let mut spec = mixed_fixture();
-        spec.outcome = MixedOutcome::Binary {
-            baseline_probability: 0.3,
-            link: BinaryLink::Logit,
-        };
-        // mixed_fixture has no scenarios, so this produces one baseline contract.
-        let contracts = assemble_spec(&AppSpec::Mixed(spec)).expect("assembles ok");
-        for c in &contracts {
-            assert_eq!(c.outcome.kind, engine_contract::OutcomeKind::Binary);
-        }
     }
 
     // ── Probit link: latent τ² has no π²/3 factor (residual variance = 1) ────

@@ -1,5 +1,5 @@
-"""Spec-build tests — construction, set_baseline_probability, _validate_logit_runtime,
-and to_simulation_spec without calling find_power end-to-end.
+"""Spec-build tests — set_baseline_probability, the logit pre-engine gate, and
+to_simulation_spec without calling find_power end-to-end.
 """
 
 from __future__ import annotations
@@ -12,52 +12,8 @@ import pytest
 from mcpower import MCPower
 
 # ---------------------------------------------------------------------------
-# Construction gates
-# ---------------------------------------------------------------------------
-
-
-def test_logit_constructs_without_raising() -> None:
-    """MCPower('y = x', family='logit') must not raise."""
-    m = MCPower("y = x", family="logit")
-    assert m.family == "logit"
-
-
-def test_ols_still_constructs() -> None:
-    """OLS construction is unaffected by logit changes."""
-    m = MCPower("y = x", family="ols")
-    assert m.family == "ols"
-
-
-def test_lme_now_constructs() -> None:
-    """family='lme' is accepted at construction time."""
-    m = MCPower("y ~ x + (1|cluster)", family="lme")
-    assert m.family == "lme"
-
-
-def test_logit_init_intercept_default() -> None:
-    """self.intercept starts at 0.0 and _pending_baseline_probability at None."""
-    m = MCPower("y = x", family="logit")
-    assert m.intercept == 0.0
-    assert m._pending_baseline_probability is None
-
-
-# ---------------------------------------------------------------------------
 # set_baseline_probability + _apply_baseline_probability
 # ---------------------------------------------------------------------------
-
-
-def test_set_baseline_probability_valid() -> None:
-    """set_baseline_probability(0.3) stores the pending value."""
-    m = MCPower("y = x", family="logit")
-    m.set_baseline_probability(0.3)
-    assert m._pending_baseline_probability == pytest.approx(0.3)
-
-
-def test_set_baseline_probability_returns_self() -> None:
-    """set_baseline_probability is chainable."""
-    m = MCPower("y = x", family="logit")
-    result = m.set_baseline_probability(0.3)
-    assert result is m
 
 
 def test_set_baseline_probability_rejects_zero() -> None:
@@ -76,16 +32,6 @@ def test_set_baseline_probability_rejects_negative() -> None:
     m = MCPower("y = x", family="logit")
     with pytest.raises(ValueError):
         m.set_baseline_probability(-0.1)
-
-
-def test_apply_baseline_probability_sets_intercept() -> None:
-    """After _apply, self.intercept == logit(p) exactly."""
-    m = MCPower("y = x", family="logit")
-    m.set_baseline_probability(0.3)
-    m.set_effects("x=0.5")
-    m._apply()
-    expected = math.log(0.3 / 0.7)
-    assert abs(m.intercept - expected) < 1e-12
 
 
 def test_pending_baseline_stays_after_apply() -> None:
@@ -113,18 +59,9 @@ def test_find_power_without_baseline_raises_for_logit() -> None:
         m.find_power(sample_size=100)
 
 
-def test_find_power_ols_without_baseline_does_not_raise() -> None:
-    """OLS does not require set_baseline_probability (smoke: just checks no ValueError)."""
-    m = MCPower("y = x", family="ols")
-    m.set_effects("x=0.5")
-    # OLS has no logit gate — no raise from _validate_logit_runtime.
-    # We don't call the engine here; just verify the validator is silent.
-    m._apply()
-    m._validate_logit_runtime(["optimistic"])  # should not raise
-
-
-def test_find_power_logit_with_baseline_and_scenarios_runs() -> None:
-    """find_power with scenarios=True returns the 3-scenario envelope for logit.
+def test_find_power_logit_with_baseline_and_scenarios_runs() -> None:  # APIC-66
+    """find_power with scenarios=True returns the 3-scenario envelope for logit
+    (a multi-scenario result keeps the envelope; it is not unwrapped).
 
     Gate-removal regression: scenario analysis is supported for binary
     outcomes (β-jitter applies as log-odds heterogeneity).
@@ -136,33 +73,6 @@ def test_find_power_logit_with_baseline_and_scenarios_runs() -> None:
         sample_size=100, n_sims=50, scenarios=True, progress_callback=False
     )
     assert set(env["scenarios"].keys()) == {"optimistic", "realistic", "doomer"}
-
-
-def test_validate_logit_runtime_silent_for_ols() -> None:
-    """_validate_logit_runtime is a no-op for family='ols'."""
-    m = MCPower("y = x", family="ols")
-    m.set_effects("x=0.5")
-    m._apply()
-    # Should not raise for any scenario_filter value.
-    m._validate_logit_runtime(["realistic", "doomer"])
-
-
-def test_validate_logit_runtime_optimistic_ok() -> None:
-    """scenario_filter=['optimistic'] is the one allowed case for logit."""
-    m = MCPower("y = x", family="logit")
-    m.set_baseline_probability(0.3)
-    m.set_effects("x=0.5")
-    m._apply()
-    m._validate_logit_runtime(["optimistic"])  # must not raise
-
-
-def test_validate_logit_runtime_none_ok() -> None:
-    """scenario_filter=None is also allowed (no scenario block)."""
-    m = MCPower("y = x", family="logit")
-    m.set_baseline_probability(0.3)
-    m.set_effects("x=0.5")
-    m._apply()
-    m._validate_logit_runtime(None)  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +91,7 @@ def test_to_simulation_spec_ols_unchanged() -> None:
     assert spec["outcome"]["coefficients"][0] == 0.0
 
 
-def test_to_simulation_spec_logit_writes_intercept() -> None:
+def test_to_simulation_spec_logit_writes_intercept() -> None:  # APIC-41
     """Logit spec carries outcome.kind='binary', estimator='glm', outcome.intercept=logit(p), and coefficients[0]=0.0."""
     m = MCPower("y = x", family="logit")
     m.set_baseline_probability(0.3)
@@ -193,28 +103,8 @@ def test_to_simulation_spec_logit_writes_intercept() -> None:
     assert abs(spec["outcome"]["intercept"] - expected) < 1e-12
     # intercept is now a separate field; coefficients[0] is the placeholder (0.0)
     assert spec["outcome"]["coefficients"][0] == 0.0
-
-
-def test_to_simulation_spec_logit_x_effect_not_in_slot0() -> None:
-    """The predictor beta is not overwritten by the intercept injection."""
-    m = MCPower("y = x", family="logit")
-    m.set_baseline_probability(0.3)
-    m.set_effects("x=0.5")
-    spec = m.to_simulation_spec()
-    # coefficients has shape [placeholder(0.0), x_beta], so slot 1 must be 0.5.
+    # The predictor beta is not overwritten by the intercept injection.
     assert abs(spec["outcome"]["coefficients"][1] - 0.5) < 1e-12
-
-
-def test_to_simulation_spec_ols_two_predictors_shape() -> None:
-    """OLS coefficients layout is correct with two predictors."""
-    m = MCPower("y = x1 + x2")
-    m.set_effects("x1=0.3, x2=0.4")
-    spec = m.to_simulation_spec()
-    assert spec["outcome"]["kind"] == "continuous"
-    assert spec["estimator"] == "ols"
-    assert spec["outcome"]["coefficients"][0] == 0.0          # intercept placeholder slot
-    assert abs(spec["outcome"]["coefficients"][1] - 0.3) < 1e-12  # x1
-    assert abs(spec["outcome"]["coefficients"][2] - 0.4) < 1e-12  # x2
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +112,7 @@ def test_to_simulation_spec_ols_two_predictors_shape() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_headline_clustered_ols_spec() -> None:
+def test_headline_clustered_ols_spec() -> None:  # APIC-64
     """MCPower('y ~ x + (1|group)', family='lme', estimator='ols') must emit
     outcome.kind='continuous', estimator='ols', AND a non-empty cluster block
     (the 'cost of ignoring clustering' study: DGP is clustered but fitted with OLS).
@@ -260,16 +150,6 @@ def test_solve_as_alias_accepted() -> None:
     """solve_as= is an alias for estimator=; must not raise."""
     m = MCPower("y = x", solve_as="ols")
     assert m.estimator == "ols"
-
-
-def test_estimator_kwarg_accepted_none() -> None:
-    """estimator=None is the default; must not raise and must derive correctly."""
-    m_ols = MCPower("y = x", estimator=None)
-    assert m_ols.estimator == "ols"
-    m_glm = MCPower("y = x", family="logit", estimator=None)
-    assert m_glm.estimator == "glm"
-    m_mle = MCPower("y ~ x + (1|g)", family="lme", estimator=None)
-    assert m_mle.estimator == "mle"
 
 
 # ---------------------------------------------------------------------------
@@ -358,92 +238,33 @@ def test_set_heteroskedasticity_driver_no_warning_for_ols() -> None:
 
 def test_cluster_level_vars_emitted_in_linear_spec():
     """cluster_level_vars stored in set_cluster appear in the LinearSpec payload."""
-    from mcpower.spec.spec_builder import build_linear_spec
-
     m = MCPower("y ~ x1 + x2 + (1|school)", family="lme")
     m.set_effects("x1=0.3, x2=0.2")
     m.set_cluster("school", ICC=0.2, n_clusters=20, cluster_level_vars=["x2"])
-    m._apply()
-
-    # Collect cluster_level_vars across all pending clusters
-    clv: list = []
-    for cfg in m._pending_clusters.values():
-        clv.extend(cfg.get("cluster_level_vars", []))
-
-    payload = build_linear_spec(
-        m._registry,
-        ["optimistic"],
-        heteroskedasticity=m._heteroskedasticity,
-        residual_dist_name=m._residual_dist_name,
-        residual_pinned=m._residual_pinned,
-        alpha=m.alpha,
-        correction=None,
-        target_test=None,
-        test_formula=None,
-        pending_data=None,
-        equation=m.equation,
-        scenario_configs=m._scenario_configs,
-        max_failed_simulations=m.max_failed_simulations,
-        cluster_level_vars=clv,
-    )
-    assert "cluster_level_vars" in payload
+    payload = m._to_linear_spec_dict(["optimistic"])
     assert payload["cluster_level_vars"] == ["x2"]
 
 
 def test_cluster_level_vars_absent_when_empty():
     """When no cluster_level_vars are set the key is absent from the payload."""
-    from mcpower.spec.spec_builder import build_linear_spec
-
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.3")
     m.set_cluster("school", ICC=0.2, n_clusters=20)
-    m._apply()
-
-    payload = build_linear_spec(
-        m._registry,
-        ["optimistic"],
-        heteroskedasticity=m._heteroskedasticity,
-        residual_dist_name=m._residual_dist_name,
-        residual_pinned=m._residual_pinned,
-        alpha=m.alpha,
-        correction=None,
-        target_test=None,
-        test_formula=None,
-        pending_data=None,
-        equation=m.equation,
-        scenario_configs=m._scenario_configs,
-        max_failed_simulations=m.max_failed_simulations,
-    )
-    assert "cluster_level_vars" not in payload
+    assert "cluster_level_vars" not in m._to_linear_spec_dict(["optimistic"])
 
 
-def test_build_linear_spec_wald_se_default_reads_config():
-    """M10: ``build_linear_spec(wald_se=None)`` must resolve to the config
+def test_linear_spec_wald_se_default_reads_config(monkeypatch):
+    """M10: with no ``wald_se=`` the LinearSpec payload carries the config
     ``estimation.wald_se`` default, not a hardcoded literal — matches R's
-    ``.wald_se_for_rust(NULL)``, which reads the same config key. The two
-    golden-payload tests above call ``build_linear_spec`` directly (no
-    ``wald_se=``), so this pins the default they now get."""
-    from mcpower.config import get_estimation_defaults
-    from mcpower.spec.spec_builder import build_linear_spec
+    ``.wald_se_for_rust(NULL)``, which reads the same config key. The config
+    default is patched to the non-default ``"hessian"`` so a hardcoded
+    ``"rx"`` cannot pass."""
+    import mcpower.config as config
 
+    real = config.get_estimation_defaults
+    monkeypatch.setattr(config, "get_estimation_defaults", lambda: {**real(), "wald_se": "hessian"})
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.3")
     m.set_cluster("school", ICC=0.2, n_clusters=20)
-    m._apply()
-
-    payload = build_linear_spec(
-        m._registry,
-        ["optimistic"],
-        heteroskedasticity=m._heteroskedasticity,
-        residual_dist_name=m._residual_dist_name,
-        residual_pinned=m._residual_pinned,
-        alpha=m.alpha,
-        correction=None,
-        target_test=None,
-        test_formula=None,
-        pending_data=None,
-        equation=m.equation,
-        scenario_configs=m._scenario_configs,
-        max_failed_simulations=m.max_failed_simulations,
-    )
-    assert payload["wald_se"] == get_estimation_defaults()["wald_se"]
+    payload = m._to_linear_spec_dict(["optimistic"])
+    assert payload["wald_se"] == "hessian"

@@ -1,4 +1,5 @@
 """add_boundary_hit_rates must fold uint8-style nested lists into per-N rates without numpy."""
+
 from mcpower.output.results import add_boundary_hit_rates
 
 
@@ -8,13 +9,6 @@ def test_2d_list_rates_per_sample_size():
     out = add_boundary_hit_rates(res)
     assert out["boundary_hit_rate_tau_zero"] == [2 / 3, 0.0]
     assert out["boundary_hit_rate_high_tau"] == [0.0, 1 / 3]
-
-
-def test_1d_list_is_single_column():
-    res = {"boundary_hit": [1, 1, 0], "convergence_rate": [1.0]}
-    out = add_boundary_hit_rates(res)
-    assert out["boundary_hit_rate_tau_zero"] == [2 / 3]
-    assert out["boundary_hit_rate_high_tau"] == [0.0]
 
 
 def test_missing_key_zero_filled():

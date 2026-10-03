@@ -915,105 +915,6 @@ mod exactly_k_curve_tests {
 }
 
 #[cfg(test)]
-mod joint_curve_tests {
-    use super::*;
-
-    fn point(n: usize, hist: Vec<u64>) -> PlotPoint {
-        PlotPoint {
-            n,
-            target_indices: vec![1, 2],
-            contrast_pairs: vec![],
-            power: vec![],
-            ci: vec![],
-            histogram: hist,
-            overall_power: None,
-            overall_ci: None,
-        }
-    }
-
-    #[test]
-    fn emits_line_per_k_and_target_rule() {
-        let scenarios = vec![PlotScenario {
-            label: "optimistic".to_string(),
-            points: vec![
-                point(50, vec![80, 15, 5]),
-                point(100, vec![40, 40, 20]),
-                point(200, vec![5, 35, 60]),
-            ],
-        }];
-        let opts = PlotOptions {
-            title: None,
-            show_ci: false,
-            target_power_line: Some(0.8),
-            x_divisor: 1,
-        };
-        let spec = joint_detection_curve_spec(&scenarios, &opts);
-        let v: serde_json::Value = serde_json::from_str(&spec).expect("valid JSON");
-        assert!(v["$schema"].as_str().unwrap().contains("v5"));
-        // Single scenario: fixed-size, unfaceted, layers at top level.
-        assert_eq!(v["width"], json!(PANEL_WIDTH));
-        assert_eq!(v["height"], json!(CURVE_HEIGHT));
-        assert!(v.get("facet").is_none());
-        let rows = v["data"]["values"].as_array().expect("data.values array");
-        // 3 grid points x 2 k-values = 6 rows.
-        assert_eq!(rows.len(), 6);
-        assert!(rows.iter().any(|r| r["k"] == 1));
-        assert!(rows.iter().any(|r| r["k"] == 2));
-        let layers = v["layer"].as_array().expect("layer array");
-        assert!(layers.iter().any(|l| l["mark"]["type"] == "rule"));
-    }
-
-    #[test]
-    fn multi_scenario_facets_by_scenario_and_rekeys_series() {
-        let mk = |label: &str| PlotScenario {
-            label: label.to_string(),
-            points: vec![
-                point(50, vec![80, 15, 5]),
-                point(100, vec![40, 40, 20]),
-                point(200, vec![5, 35, 60]),
-            ],
-        };
-        let scenarios = vec![mk("optimistic"), mk("realistic"), mk("doomer")];
-        let opts = PlotOptions {
-            title: None,
-            show_ci: false,
-            target_power_line: Some(0.8),
-            x_divisor: 1,
-        };
-        let spec = joint_detection_curve_spec(&scenarios, &opts);
-        let v: serde_json::Value = serde_json::from_str(&spec).expect("valid JSON");
-        // Faceted by scenario, 3 columns; layers + panel size live under `spec`.
-        assert_eq!(v["facet"]["field"], json!("scenario"));
-        assert_eq!(v["facet"]["columns"], json!(FACET_COLUMNS));
-        assert_eq!(v["spec"]["width"], json!(FACET_PANEL_WIDTH));
-        assert_eq!(v["spec"]["height"], json!(CURVE_HEIGHT));
-        assert!(
-            v.get("layer").is_none(),
-            "layers move under spec when faceted"
-        );
-        // `series` is re-keyed without the scenario prefix so each panel colours
-        // by k only.
-        let rows = v["data"]["values"].as_array().expect("data.values array");
-        assert!(rows.iter().all(|r| {
-            let s = r["series"].as_str().unwrap();
-            !s.contains("optimistic") && !s.contains('·')
-        }));
-        // The target rule is datum-based (repeats across panels), not bound to a
-        // single inline-data cell.
-        let layers = v["spec"]["layer"].as_array().expect("spec.layer array");
-        let rule = layers
-            .iter()
-            .find(|l| l["mark"]["type"] == "rule")
-            .expect("rule layer");
-        assert!(
-            rule.get("data").is_none(),
-            "rule must not carry inline data"
-        );
-        assert_eq!(rule["encoding"]["y"]["datum"], json!(0.8));
-    }
-}
-
-#[cfg(test)]
 mod sample_size_curve_tests {
     use super::*;
 
@@ -1035,24 +936,6 @@ mod sample_size_curve_tests {
             overall_power: None,
             overall_ci: None,
         }
-    }
-
-    #[test]
-    fn curve_colors_by_effect_keeps_strokedash() {
-        let scenarios = vec![PlotScenario {
-            label: "s".into(),
-            points: vec![curve_pt(50, vec![0.3, 0.5]), curve_pt(100, vec![0.6, 0.8])],
-        }];
-        let v: serde_json::Value =
-            serde_json::from_str(&sample_size_curve_spec(&scenarios, &PlotOptions::default()))
-                .unwrap();
-        let line = &v["layer"][0];
-        assert_eq!(line["encoding"]["color"]["field"], json!("target"));
-        assert_eq!(line["encoding"]["strokeDash"]["field"], json!("target"));
-        // No pinned colour domain: hosts relabel the `target` data values, so an
-        // engine-token domain would no longer match the data and lines would lose
-        // their colour. Vega derives the domain from the (relabelled) data.
-        assert!(line["encoding"]["color"]["scale"].is_null());
     }
 
     /// `x_divisor > 1`: x field is `n_unit = n / divisor` with no title (the
@@ -1169,35 +1052,25 @@ mod power_at_n_color_tests {
     }
 
     #[test]
-    fn bars_color_by_effect_even_single_scenario() {
-        let scenarios = vec![bars_scenario("only", vec![0.5, 0.9])];
-        let v: serde_json::Value =
-            serde_json::from_str(&power_at_n_spec(&scenarios, &PlotOptions::default())).unwrap();
-        let bar = &v["layer"][0];
-        assert_eq!(bar["mark"], json!("bar"));
-        assert_eq!(bar["encoding"]["color"]["field"], json!("target"));
-        // No pinned colour domain (host relabels the `target` data values); a token
-        // domain would null out every bar's fill. See the curve test for the rationale.
-        assert!(bar["encoding"]["color"]["scale"].is_null());
-    }
-
-    #[test]
     fn bars_shade_scenarios_bold_to_faint_in_host_order() {
+        // Host order deliberately differs from mean-power order (doomer has the
+        // lowest power but comes first), so a mean-power sort would reorder it.
         let scenarios = vec![
+            bars_scenario("doomer", vec![0.4, 0.5]),
             bars_scenario("optimistic", vec![0.9, 0.95]),
             bars_scenario("realistic", vec![0.7, 0.8]),
-            bars_scenario("doomer", vec![0.4, 0.5]),
         ];
         let v: serde_json::Value =
             serde_json::from_str(&power_at_n_spec(&scenarios, &PlotOptions::default())).unwrap();
         let bar = &v["layer"][0];
         let fo = &bar["encoding"]["fillOpacity"];
         assert_eq!(fo["field"], json!("scenario"));
-        // Host order preserved (NOT mean-power sorted).
-        assert_eq!(fo["sort"], json!(["optimistic", "realistic", "doomer"]));
-        let range = fo["scale"]["range"].as_array().unwrap();
-        assert_eq!(range[0], json!(1.0));
-        assert_eq!(range[2], json!(0.4));
+        assert_eq!(fo["sort"], json!(["doomer", "optimistic", "realistic"]));
+        assert_eq!(fo["scale"]["range"], json!([1.0, 0.7, 0.4]));
+        assert_eq!(
+            bar["encoding"]["yOffset"]["sort"],
+            json!(["doomer", "optimistic", "realistic"])
+        );
         // Effect colour still present.
         assert_eq!(bar["encoding"]["color"]["field"], json!("target"));
     }
@@ -1214,14 +1087,6 @@ mod power_at_n_color_tests {
         let bar = &v["spec"]["layer"][0];
         assert!(bar["encoding"].get("fillOpacity").is_none());
         assert_eq!(bar["encoding"]["color"]["field"], json!("target"));
-    }
-
-    #[test]
-    fn single_scenario_has_no_fillopacity() {
-        let scenarios = vec![bars_scenario("only", vec![0.5, 0.9])];
-        let v: serde_json::Value =
-            serde_json::from_str(&power_at_n_spec(&scenarios, &PlotOptions::default())).unwrap();
-        assert!(v["layer"][0]["encoding"].get("fillOpacity").is_none());
     }
 
     #[test]

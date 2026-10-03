@@ -205,49 +205,6 @@ fn effect_sizes_indexed_by_design_matrix_column_not_formula_order() {
     assert_eq!(s.effect_sizes, vec![0.0, 0.4, 0.3, 0.5]);
 }
 
-#[test]
-fn projects_factor_with_three_levels() {
-    let mut spec = simple_spec();
-    spec.formula = "y = x1 + group".into();
-    spec.predictors = vec![
-        PredictorSpec {
-            name: "x1".into(),
-            pinned: false,
-            kind: VarKind::Normal,
-        },
-        PredictorSpec {
-            name: "group".into(),
-            pinned: false,
-            kind: VarKind::Factor {
-                levels: vec!["A".into(), "B".into(), "C".into()],
-                proportions: vec![0.4, 0.3, 0.3],
-                reference: "A".into(),
-                sampled_proportions: None,
-            },
-        },
-    ];
-    spec.effects = vec![
-        EffectAssignment {
-            name: "x1".into(),
-            size: 0.5,
-        },
-        EffectAssignment {
-            name: "group[B]".into(),
-            size: 0.2,
-        },
-        EffectAssignment {
-            name: "group[C]".into(),
-            size: 0.4,
-        },
-    ];
-    let s = build_linear_spec(&spec).unwrap().pop().unwrap();
-    assert_eq!(s.n_non_factor, 1);
-    assert_eq!(s.n_factor_dummies, 2);
-    assert_eq!(s.factor_n_levels, vec![3]);
-    assert_eq!(s.factor_proportions, vec![0.4, 0.3, 0.3]);
-    assert_eq!(s.effect_sizes, vec![0.0, 0.5, 0.2, 0.4]);
-}
-
 /// A reference-level contrast (`group[A] − group[B]`, A reference) collapses to a
 /// Marginal on `group[B]`; if a coefficient test already requested that Marginal,
 /// the two must dedup rather than reach the contract validator as a "duplicate
@@ -409,64 +366,66 @@ fn scenario_normal_only_residual_pool_without_df_is_accepted() {
 
 #[test]
 fn builtin_preset_scenario_payloads_still_build() {
-    // The three shipped presets (residual_df 10/8/5, armed residual pools)
-    // all pass the df bound — mirrors configs/scenarios.json after host
-    // name → code encoding.
+    // Every shipped preset in configs/scenarios.json, encoded the way hosts
+    // encode it (names → integer codes through the engine's code tables), must
+    // pass the scenario guards (df bound, binary-swap reject) and build. The RE
+    // knobs are mixed-model-only; hosts zero them for a model without random
+    // effects, as here.
+    use engine_spec_builder::project_contract::{DIST_CODES, RESIDUAL_CODES};
+    use serde_json::Value;
+
+    let presets: Value =
+        serde_json::from_str(include_str!("../../../configs/scenarios.json")).unwrap();
+    let presets = presets.as_object().expect("scenarios.json is an object");
+    assert!(!presets.is_empty());
+    let f64_of = |v: &Value| v.as_f64().unwrap();
+    let encode = |table: &[(&str, i32)], names: &Value| -> Vec<i32> {
+        names
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| {
+                let n = n.as_str().unwrap();
+                table
+                    .iter()
+                    .find(|(name, _)| *name == n)
+                    .unwrap_or_else(|| panic!("no code for {n:?}"))
+                    .1
+            })
+            .collect()
+    };
+
     let mut spec = simple_spec();
-    spec.scenarios = vec![
-        ScenarioInput {
-            name: "optimistic".into(),
-            heterogeneity: 0.0,
-            heteroskedasticity_ratio: 1.0,
-            correlation_noise_sd: 0.0,
-            distribution_change_prob: 0.0,
-            new_distributions: vec![2, 3, 5], // right_skewed, left_skewed, uniform
-            residual_change_prob: 0.0,
-            residual_dists: vec![4, 2], // high_kurtosis, right_skewed
-            residual_df: 10.0,
-            sampled_factor_proportions: false,
-            truth_start: false,
+    spec.scenarios = presets
+        .iter()
+        .map(|(name, p)| ScenarioInput {
+            name: name.clone(),
+            heterogeneity: f64_of(&p["heterogeneity"]),
+            heteroskedasticity_ratio: f64_of(&p["heteroskedasticity_ratio"]),
+            correlation_noise_sd: f64_of(&p["correlation_noise_sd"]),
+            distribution_change_prob: f64_of(&p["distribution_change_prob"]),
+            new_distributions: encode(DIST_CODES, &p["new_distributions"]),
+            residual_change_prob: f64_of(&p["residual_change_prob"]),
+            residual_dists: encode(RESIDUAL_CODES, &p["residual_dists"]),
+            residual_df: f64_of(&p["residual_df"]),
+            sampled_factor_proportions: p["sampled_factor_proportions"].as_bool().unwrap(),
+            truth_start: p["truth_start"].as_bool().unwrap(),
             random_effect_dist: 0,
             random_effect_df: 0.0,
             icc_noise_sd: 0.0,
-        },
-        ScenarioInput {
-            name: "realistic".into(),
-            heterogeneity: 0.2,
-            heteroskedasticity_ratio: 2.0,
-            correlation_noise_sd: 0.15,
-            distribution_change_prob: 0.5,
-            new_distributions: vec![2, 3, 5],
-            residual_change_prob: 0.5,
-            residual_dists: vec![4, 2],
-            residual_df: 8.0,
-            sampled_factor_proportions: true,
-            truth_start: false,
-            random_effect_dist: 0,
-            random_effect_df: 0.0,
-            icc_noise_sd: 0.0,
-        },
-        ScenarioInput {
-            name: "doomer".into(),
-            heterogeneity: 0.4,
-            heteroskedasticity_ratio: 4.0,
-            correlation_noise_sd: 0.3,
-            distribution_change_prob: 0.8,
-            new_distributions: vec![2, 3, 5],
-            residual_change_prob: 0.8,
-            residual_dists: vec![4, 2],
-            residual_df: 5.0,
-            sampled_factor_proportions: true,
-            truth_start: false,
-            random_effect_dist: 0,
-            random_effect_df: 0.0,
-            icc_noise_sd: 0.0,
-        },
-    ];
-    let specs = build_linear_spec(&spec).unwrap();
-    assert_eq!(specs.len(), 3);
-    assert_eq!(specs[0].scenario.name, "optimistic");
-    assert_eq!(specs[2].scenario.residual_df, 5.0);
+        })
+        .collect();
+    let specs = build_linear_spec(&spec).expect("every shipped preset must build");
+    assert_eq!(specs.len(), presets.len());
+    for (s, (name, p)) in specs.iter().zip(presets) {
+        assert_eq!(&s.scenario.name, name);
+        assert_eq!(s.scenario.residual_df, f64_of(&p["residual_df"]), "{name}");
+        assert_eq!(
+            s.scenario.truth_start,
+            p["truth_start"].as_bool().unwrap(),
+            "{name}"
+        );
+    }
 }
 
 #[test]

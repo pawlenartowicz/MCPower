@@ -3,7 +3,7 @@
 Tests:
   1. Default (no set_tests) → wire targets=["overall"], report_overall=True,
      contrast_pairs=[] (linear family default).
-  2. set_tests("all") explicit → same as default for linear.
+  2. set_tests("all") explicit → omnibus + every β, in formula order.
   3. set_tests("x1") → just Marginal(x1).
   4. set_tests("all, -x2") → all-but-x2.
   5. set_tests("all-posthoc") on a 3-level treatment factor →
@@ -15,9 +15,7 @@ Tests:
      → mixed selection round-trips.
   10. Unknown name raises ValueError.
   11. all-contrasts emits posthoc_requests (one per factor).
-  12. all-posthoc is an alias for all-contrasts.
-  13. all-contrasts on a model with no factors raises ValueError.
-  14. all-contrasts + "all" → posthoc_requests and omnibus + every β.
+  12. all-contrasts on a model with no factors raises ValueError.
 """
 
 from __future__ import annotations
@@ -51,7 +49,7 @@ def _make_ols_with_treatment(named_levels=True):
         labels = ["placebo", "low_dose", "high_dose"]
         m._registry._factors["treatment"]["level_labels"] = labels
         m._registry._factors["treatment"]["reference_level"] = "placebo"
-        # Reset applied so _resolve_tests sees the registry in its final state.
+        # Keep applied so the target_test resolution sees the patched registry.
         m._applied = True
         # Also need to populate effect sizes for the dummies after re-expansion.
         # The effects after apply are treatment[1], treatment[2] (integer dummy names).
@@ -128,19 +126,18 @@ def test_default_no_set_tests_is_family_default():
 
 
 # ---------------------------------------------------------------------------
-# 2. set_tests("all") → same as default for linear
+# 2. set_tests("all") → omnibus + every β
 # ---------------------------------------------------------------------------
 
 
-def test_set_tests_all_equals_default():
-    """set_tests('all') is equivalent to the family default for linear."""
+def test_set_tests_all_expands_every_beta():
+    """set_tests('all') expands to the omnibus plus every β in formula order
+    (unlike the family default, which sends the ["overall"] sentinel)."""
     m = MCPower("y = x1 + x2")
     m.set_effects("x1=0.5, x2=0.3")
     payload = _get_wire_payload(m, target_test="all")
-    # "all" expands to "overall" + every beta → targets=["x1","x2"],
-    # report_overall=True, contrast_pairs=[].
     assert payload["report_overall"] is True
-    assert set(payload["targets"]) == {"x1", "x2"}
+    assert payload["targets"] == ["x1", "x2"]
     assert payload["contrast_pairs"] == []
 
 
@@ -171,8 +168,7 @@ def test_set_tests_all_minus_x2():
     m.set_effects("x1=0.5, x2=0.3")
     payload = _get_wire_payload(m, target_test="all, -x2")
     assert payload["report_overall"] is True
-    assert "x1" in payload["targets"]
-    assert "x2" not in payload["targets"]
+    assert payload["targets"] == ["x1"]
     assert payload["contrast_pairs"] == []
 
 
@@ -276,18 +272,17 @@ def test_set_tests_unknown_name_raises():
     """Unknown effect name in target_test raises ValueError."""
     m = MCPower("y = x1 + x2")
     m.set_effects("x1=0.5, x2=0.3")
-    m._apply()
-    with pytest.raises(ValueError, match="Unknown test name"):
-        m._resolve_tests("x3_nonexistent")
+    with pytest.raises(ValueError, match="Unknown test name 'x3_nonexistent'"):
+        _get_wire_payload(m, target_test="x3_nonexistent")
 
 
 def test_set_tests_unknown_exclusion_raises():
     """Excluding a name that's not in the expanded set raises ValueError."""
     m = MCPower("y = x1 + x2")
     m.set_effects("x1=0.5, x2=0.3")
-    m._apply()
-    with pytest.raises(ValueError, match="Exclusion"):
-        m._resolve_tests("x1, -x2")  # x2 not in the explicit set (only x1)
+    with pytest.raises(ValueError, match="Exclusion '-x2' does not match"):
+        # x2 is not in the explicit set (only x1).
+        _get_wire_payload(m, target_test="x1, -x2")
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +321,7 @@ def test_removed_set_tests_raises_instructive_error():
 
 
 # ---------------------------------------------------------------------------
-# 11–14. all-contrasts keyword (new) and alias / error cases
+# 11–12. all-contrasts keyword and error case
 # ---------------------------------------------------------------------------
 
 
@@ -349,14 +344,6 @@ def test_all_contrasts_two_factors_emits_two_requests():
     assert factors == {"drug", "gender"}
     assert payload["contrast_pairs"] == []
     assert payload["targets"] == []
-
-
-def test_all_posthoc_is_alias_for_all_contrasts():
-    """all-posthoc and all-contrasts produce identical posthoc_requests."""
-    m = _make_ols_with_treatment(named_levels=True)
-    a = _get_wire_payload(m, target_test="all-posthoc")
-    b = _get_wire_payload(m, target_test="all-contrasts")
-    assert a["posthoc_requests"] == b["posthoc_requests"]
 
 
 def test_all_contrasts_no_factor_errors():
@@ -414,18 +401,14 @@ def test_glmm_default_suppresses_overall():
 
 def test_lme_explicit_overall_raises():
     """Explicit target_test='overall' on a mixed model raises ValueError."""
-    m = _make_lme()
-    m._apply()
     with pytest.raises(ValueError, match="not available for mixed-effects"):
-        m._resolve_tests("overall")
+        _get_wire_payload(_make_lme(), target_test="overall")
 
 
 def test_lme_y_alias_overall_raises():
     """The dep-var/'y' alias for the omnibus is rejected on a mixed model too."""
-    m = _make_lme()
-    m._apply()
     with pytest.raises(ValueError, match="not available for mixed-effects"):
-        m._resolve_tests("y")
+        _get_wire_payload(_make_lme(), target_test="y")
 
 
 def test_glmm_all_drops_overall_keeps_betas():

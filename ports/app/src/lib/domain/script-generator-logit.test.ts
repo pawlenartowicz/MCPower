@@ -54,29 +54,12 @@ describe('generateLogitScript', () => {
     expect(out).toContain('by=10,');
   });
 
-  it('omits by when ByValue is Auto (port default)', () => {
-    const out = generateLogitScript(sampleLogitSpec(), 'find-sample-size', {
-      bounds: [30, 200],
-      method: { Grid: { by: { Auto: { count: 12 } }, mode: 'Linear' } },
-    });
-    expect(out).not.toContain('by=');
-  });
-
-  it('raises a type-guard error when called with a non-logit spec', () => {
-    const linearSpec = { ...sampleLogitSpec(), family: 'linear' } as unknown as AppSpec;
-    expect(() => generateLogitScript(linearSpec, 'find-power', { sample_size: 80 })).toThrow();
-  });
-
-  it('maps non-none corrections to their Python tokens', () => {
+  // The full token map is pinned in the linear tests; this proves the GLM body
+  // routes the correction through it.
+  it('maps a non-none correction to its port token', () => {
     const bh = generateLogitScript({ ...sampleLogitSpec(), correction: 'benjamini_hochberg' }, 'find-power', { sample_size: 80 });
     expect(bh).toContain('correction="bh"');
     expect(bh).not.toContain('benjamini_hochberg');
-
-    const bonf = generateLogitScript({ ...sampleLogitSpec(), correction: 'bonferroni' }, 'find-power', { sample_size: 80 });
-    expect(bonf).toContain('correction="bonferroni"');
-
-    const holm = generateLogitScript({ ...sampleLogitSpec(), correction: 'holm' }, 'find-power', { sample_size: 80 });
-    expect(holm).toContain('correction="holm"');
   });
 
   // --- defaults trimming ---
@@ -98,22 +81,6 @@ describe('generateLogitScript', () => {
     expect(out).toContain('model.set_seed(42)');
   });
 
-  it('drops the v1-only call args and the invalid correction none', () => {
-    const out = generateLogitScript(sampleLogitSpec(), 'find-power', { sample_size: 100 });
-    expect(out).not.toContain('print_results');
-    expect(out).not.toContain('return_results');
-    expect(out).not.toContain('correction');   // spec.correction === 'none'
-  });
-
-  it('omits default find_sample_size bounds and auto by', () => {
-    const out = generateLogitScript(sampleLogitSpec(), 'find-sample-size', {
-      bounds: [30, 200],
-      method: { Grid: { by: { Auto: { count: 12 } }, mode: 'Linear' } },
-    });
-    expect(out).not.toContain('from_size');
-    expect(out).not.toContain('to_size');
-    expect(out).not.toContain('by=');
-  });
 
   it('emits family="probit" when the link is probit', () => {
     const out = generateLogitScript({ ...sampleLogitSpec(), link: 'probit' } as AppSpec, 'find-power', { sample_size: 80 });

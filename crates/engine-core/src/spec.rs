@@ -1,8 +1,8 @@
 //! Engine spec: error types, outcome kind / estimator axes, progress sink, POD types.
 //!
-//! These types form the wire format consumed by `engine-py` (msgpack) and
-//! the eventual `engine-r`. No PyO3 / numpy types appear here — engine-core
-//! is host-agnostic.
+//! Hosts never send these types: every port sends a msgpack
+//! `SimulationContract`, which `contract_adapter` lowers to a `SimulationSpec`.
+//! No PyO3 / numpy types appear here — engine-core is host-agnostic.
 
 pub use engine_contract::{
     CorrectionMethod, DfMethod, Distribution, EstimatorSpec, LinkKind, OutcomeKind, ResidualDist,
@@ -370,10 +370,10 @@ pub struct SimulationSpec {
     /// contract `nagq`; the eligibility backstop already ran in `validate()`.
     #[serde(default = "default_nagq_spec")]
     pub nagq: u8,
-    /// Baseline intercept used by GLM data-gen and surfaced to result
-    /// formatters. The kernel does NOT consume this in the linear-predictor
-    /// computation — that comes from `effect_sizes[0]` instead. It exists as
-    /// metadata; OLS specs typically carry 0.0, Logit specs carry `logit(p)`.
+    /// Baseline intercept as metadata only: no engine code reads it. The
+    /// kernel takes the baseline from `effect_sizes[0]` (the adapter folds the
+    /// contract intercept there). OLS specs typically carry 0.0, Logit specs
+    /// carry `logit(p)`.
     pub intercept: f64,
     #[serde(default)]
     pub posthoc: Vec<PosthocSpec>,
@@ -617,63 +617,21 @@ pub(crate) mod tests {
     pub(crate) fn minimal_ols_spec() -> SimulationSpec {
         SimulationSpec {
             n_non_factor: 2,
-            n_factor_dummies: 0,
             correlation: vec![1.0, 0.3, 0.3, 1.0],
             var_types: vec![Distribution::Normal, Distribution::Normal],
-            var_pinned: vec![],
             var_params: vec![0.0, 0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
             effect_sizes: vec![0.5, 0.3],
             target_indices: vec![0, 1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: WaldSe::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
+    /// Lossless serde roundtrip of a spec with every `ScenarioPerturbations`
+    /// field and the optional flags set. JSON is the format this type actually
+    /// travels in: `bin/throughput.rs --dump-cases` writes specs that the wasm
+    /// bench (`engine-wasm` `bench_run_pass`) reads back with `serde_json`.
     #[test]
-    fn spec_msgpack_roundtrip() {
-        let spec = minimal_ols_spec();
-        let bytes = rmp_serde::to_vec(&spec).expect("encode");
-        let back: SimulationSpec = rmp_serde::from_slice(&bytes).expect("decode");
-        assert_eq!(spec, back);
-    }
-
-    #[test]
-    fn spec_msgpack_roundtrip_with_perturbed_scenario() {
+    fn spec_json_roundtrip_with_every_scenario_field() {
         let mut spec = minimal_ols_spec();
         spec.scenario = ScenarioPerturbations {
             name: "realistic".into(),
@@ -691,29 +649,18 @@ pub(crate) mod tests {
             residual_df: 8.0,
             sampled_factor_proportions: true,
             truth_start: true,
-            lme: None,
+            lme: Some(LmeScenarioPerturbations {
+                random_effect_dist: ResidualDist::HighKurtosis,
+                random_effect_df: 5.0,
+                icc_noise_sd: 0.1,
+            }),
         };
         spec.heteroskedasticity_driver = Some(1);
-        let bytes = rmp_serde::to_vec(&spec).expect("encode");
-        let back: SimulationSpec = rmp_serde::from_slice(&bytes).expect("decode");
+        spec.report_overall = true;
+        spec.factor_sampled = vec![Some(false), Some(true)];
+        let json = serde_json::to_string(&spec).expect("encode");
+        let back: SimulationSpec = serde_json::from_str(&json).expect("decode");
         assert_eq!(spec, back);
-    }
-
-    #[test]
-    fn spec_uses_typed_enums_for_var_types_residual_correction() {
-        let mut spec = minimal_ols_spec();
-        spec.var_types = vec![Distribution::Normal, Distribution::Binary];
-        spec.residual_dist = ResidualDist::Normal;
-        spec.correction_method = CorrectionMethod::Bonferroni;
-        // Use to_vec_named so the byte-window scan can find the snake_case
-        // variant tags. Equality below works with either encoding.
-        let bytes = rmp_serde::to_vec_named(&spec).expect("encode");
-        let back: SimulationSpec = rmp_serde::from_slice(&bytes).expect("decode");
-        assert_eq!(spec, back);
-        assert!(bytes
-            .windows(b"bonferroni".len())
-            .any(|w| w == b"bonferroni"));
-        assert!(bytes.windows(b"normal".len()).any(|w| w == b"normal"));
     }
 
     #[test]
@@ -740,46 +687,6 @@ pub(crate) mod tests {
             s.is_optimistic(),
             "allocation mode must not affect the fast-path predicate"
         );
-    }
-
-    #[test]
-    fn report_overall_roundtrips() {
-        let mut spec = minimal_ols_spec();
-        // helper explicitly sets report_overall = false; round-trip flips it.
-        assert!(!spec.report_overall);
-        spec.report_overall = true;
-        let bytes = rmp_serde::to_vec(&spec).expect("encode");
-        let back: SimulationSpec = rmp_serde::from_slice(&bytes).expect("decode");
-        assert_eq!(spec, back);
-        assert!(back.report_overall);
-    }
-
-    #[test]
-    fn batch_result_has_overall_field() {
-        // Compile-time check that the field exists with the documented type.
-        let br = BatchResult {
-            uncorrected: vec![],
-            corrected: vec![],
-            posthoc_unc: vec![],
-            posthoc_cor: vec![],
-            converged: vec![],
-            boundary_hit: vec![],
-            pinned_components: vec![],
-            joint_unc: vec![],
-            joint_cor: vec![],
-            overall: vec![],
-            factor_excluded: vec![],
-            tau_squared_hat: vec![],
-            shape: ResultShape {
-                n_sims: 0,
-                n_sample_sizes: 0,
-                n_targets: 0,
-                posthoc_blocks: vec![],
-                n_factors: 0,
-                n_variance_components: 0,
-            },
-        };
-        assert!(br.overall.is_empty());
     }
 
     #[test]
@@ -823,17 +730,5 @@ pub(crate) mod tests {
             ..Default::default()
         };
         assert!(!s3.is_optimistic());
-    }
-
-    #[test]
-    fn factor_sampled_defaults_empty_and_roundtrips() {
-        // Empty (default, absent in older payloads) ⇒ every factor inherits the
-        // scenario-level sampled_factor_proportions ⇒ byte-identical to pre-feature.
-        let mut spec = minimal_ols_spec();
-        assert_eq!(spec.factor_sampled, Vec::<Option<bool>>::new());
-        spec.factor_sampled = vec![Some(false), Some(true)];
-        let bytes = rmp_serde::to_vec_named(&spec).unwrap();
-        let back: SimulationSpec = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(spec.factor_sampled, back.factor_sampled);
     }
 }

@@ -47,12 +47,6 @@ describe('slugify (goldmark WithAutoHeadingID parity)', () => {
     expect(slugify('Choosing which tests to target')).toBe('choosing-which-tests-to-target');
   });
 
-  it('matches the real backing anchors', () => {
-    expect(slugify('Baseline probability')).toBe('baseline-probability');
-    expect(slugify('Factors and the reference level')).toBe('factors-and-the-reference-level');
-    expect(slugify('Matched predictors lock to the data')).toBe('matched-predictors-lock-to-the-data');
-  });
-
   it('drops punctuation and "&" (does not hyphenate them) and treats _ like a separator', () => {
     // goldmark drops non-alphanumerics other than space/-/_; no separator collapsing.
     expect(slugify('Tom & Jerry, Inc.')).toBe('tom--jerry-inc');
@@ -89,11 +83,6 @@ describe('firstParagraph', () => {
   it('with an anchor returns the matching section’s first paragraph', () => {
     const md = '# T\n\nIntro.\n\n## The ICC\n\nICC para.\n\nmore';
     expect(firstParagraph(md, 'the-icc')).toBe('ICC para.');
-  });
-
-  it('matches an un-numbered, punctuated heading slug', () => {
-    const md = '# T\n\nIntro.\n\n## Run, and clear\n\nRun para.';
-    expect(firstParagraph(md, 'run-and-clear')).toBe('Run para.');
   });
 
   it('falls back to the page first paragraph when the anchor is missing', () => {

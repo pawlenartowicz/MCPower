@@ -11,7 +11,7 @@ def add_boundary_hit_rates(result: Dict[str, Any]) -> Dict[str, Any]:
     multi-scenario envelope).
 
     ``boundary_hit`` arrives from msgpack as a nested list of shape
-    ``(n_sims, n_sample_sizes)`` (uint8 values 0/1/2), or a 1-D list, or absent.
+    ``(n_sims, n_sample_sizes)`` (uint8 values 0/1/2), or absent.
 
     Rates are returned as lists of floats (one per sample size), matching the
     shape of ``convergence_rate``. For OLS/Logit models ``boundary_hit`` is
@@ -31,10 +31,6 @@ def add_boundary_hit_rates(result: Dict[str, Any]) -> Dict[str, Any]:
         result["boundary_hit_rate_tau_zero"] = [0.0] * n_ss
         result["boundary_hit_rate_high_tau"] = [0.0] * n_ss
         return result
-
-    # Normalise to list-of-rows; a 1-D list is a single sample-size column.
-    if not isinstance(bh[0], (list, tuple)):
-        bh = [[v] for v in bh]
 
     n_sims = len(bh)
     n_ss = len(bh[0])

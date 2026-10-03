@@ -36,36 +36,6 @@ fn linear_appspec_round_trips_through_json() {
     assert_eq!(re, raw);
 }
 
-#[test]
-fn family_tag_is_lowercase_linear() {
-    use engine_app_spec::{AppSpec, LinearSpec, ParsedFormula, TestSelection};
-    use engine_contract::CorrectionMethod;
-    let spec = AppSpec::Linear(LinearSpec {
-        parsed_formula: ParsedFormula {
-            outcome: "y".into(),
-            predictors: vec!["x1".into()],
-            interaction_terms: vec![],
-        },
-        var_types: vec![],
-        effects: vec![],
-        correlations: None,
-        alpha: 0.05,
-        target_power: 0.8,
-        n_sims: 100,
-        seed: 1,
-        tests: TestSelection::All,
-        correction: CorrectionMethod::None,
-        scenarios: vec![],
-        csv: None,
-        report_overall: false,
-        contrasts: vec![],
-        test_formula: None,
-        outcome_options: None,
-    });
-    let s = serde_json::to_string(&spec).unwrap();
-    assert!(s.contains(r#""family":"linear""#), "got: {s}");
-}
-
 // The UI-overhaul wire fields round-trip with the exact JSON shapes the app's
 // TS adapter emits: numeric `distribution`, factor `factor_labels` /
 // `sampled_proportions`, `outcome_options`, and named extra groupings.

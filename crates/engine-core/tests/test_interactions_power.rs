@@ -13,11 +13,11 @@
 //!   effect_sizes = [intercept(0.0), x1, x2, x3, x1:x2:x3]
 //!   target_indices = [4]
 
+mod common;
+
 use engine_core::run_batch;
-use engine_core::spec::HeteroskedasticityCoeffs;
 use engine_core::{
-    ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, Distribution, EstimatorSpec,
-    OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
+    ClusterSizing, ClusterSpec, Distribution, EstimatorSpec, OutcomeKind, SimulationSpec,
 };
 
 /// Base spec: 2 continuous predictors + their 2-way interaction (4 kernel cols).
@@ -25,52 +25,16 @@ use engine_core::{
 fn ols_interaction_spec(effect_sizes: Vec<f64>) -> SimulationSpec {
     SimulationSpec {
         n_non_factor: 2,
-        n_factor_dummies: 0,
         // 2×2 identity correlation matrix (flat column-major)
         correlation: vec![1.0, 0.0, 0.0, 1.0],
         var_types: vec![Distribution::Normal, Distribution::Normal],
-        var_pinned: vec![],
         var_params: vec![0.0, 0.0],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
-        upload_data: vec![],
-        upload_data_shape: (0, 0),
-        bootstrap_frame_map: vec![],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         effect_sizes,
         // kernel col 3 = x1:x2 = 1 + n_non_factor(2) + n_factor_dummies(0) + 0
         target_indices: vec![3],
-        contrast_pairs: vec![],
-        interactions: vec![vec![1, 2]], // col 3 = col1 * col2
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
+        interactions: vec![vec![1, 2]],
         max_failed_fraction: 1.0,
-        cluster: None,
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     }
 }
 
@@ -157,6 +121,15 @@ fn logit_interaction_runs_and_converges() {
         n_converged > 270,
         "most logit fits should converge (>270/300), got {n_converged}"
     );
+
+    // The interaction column carries its log-odds effect through the IRLS fit:
+    // a zero-filled or misindexed product column leaves power near α.
+    let hits = result.uncorrected.iter().filter(|&&v| v == 1).count();
+    let power = hits as f64 / n_sims as f64;
+    assert!(
+        power > 0.5,
+        "logit interaction power should be high for β=0.5 at N=500, got {power:.3}"
+    );
 }
 
 /// Test 4: Three-way interaction x1:x2:x3 materialises and can be targeted.
@@ -165,7 +138,7 @@ fn logit_interaction_runs_and_converges() {
 ///   col 0=intercept, col1=x1, col2=x2, col3=x3, col4=x1:x2:x3
 ///   target_indices=[4]
 ///
-/// Asserts the result buffer has the right shape, confirming the column is
+/// Asserts high power on the targeted 3-way column, confirming the column is
 /// created and indexed correctly.
 #[test]
 fn three_way_interaction_materialises_and_targets() {
@@ -186,26 +159,14 @@ fn three_way_interaction_materialises_and_targets() {
     let n_sims: u32 = 200;
     let result = run_batch(&spec, &[400], n_sims, 42, None).unwrap();
 
-    // Buffer shape: n_sims=200, n_sample_sizes=1, n_targets=1 → 200 entries
-    assert_eq!(
-        result.uncorrected.len(),
-        200,
-        "3-way interaction buffer should have 200 entries (200 sims × 1 sample-size × 1 target)"
-    );
-    // Sanity: all entries are 0 or 1
-    for &v in &result.uncorrected {
-        assert!(v == 0 || v == 1, "unexpected value {v} in uncorrected");
-    }
-
-    // Discriminating power floor on the 3-way target (index 0 in the 1-target, 1-sample-size
-    // buffer: sim * n_sample_sizes(1) * n_targets(1) + 0 + 0 = sim).
-    // β=0.5 at N=400 with orthogonal normal predictors gives power near 1.0;
-    // > 0.1 is deliberately conservative so a mutation that zero-fills the
-    // interaction target (the ONLY 3-way path) is caught without pinning a brittle value.
+    // Power on the 3-way target (1 target × 1 sample size ⇒ one flag per sim).
+    // β=0.5 at N=400 with orthogonal normal predictors gives power near 1.0, so
+    // a zero-filled or misindexed 3-way product column (the ONLY 3-way path)
+    // falls far below the floor.
     let hits = result.uncorrected.iter().filter(|&&v| v == 1).count();
     let power = hits as f64 / n_sims as f64;
     assert!(
-        power > 0.1,
+        power > 0.8,
         "3-way interaction power should be well above zero for β=0.5 at N=400, got {power:.3}"
     );
 }

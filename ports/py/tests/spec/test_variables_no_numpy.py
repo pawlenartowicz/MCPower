@@ -12,7 +12,7 @@ def test_effect_sizes_is_plain_list():
     assert all(type(v) is float for v in es)
 
 
-def test_set_correlation_builds_identity_list():
+def test_set_correlation_builds_identity_list():  # APIC-58
     reg = VariableRegistry("y ~ x1 + x2 + x3")
     reg.set_correlation("x1", "x2", 0.4)
     m = reg.get_correlation_matrix()

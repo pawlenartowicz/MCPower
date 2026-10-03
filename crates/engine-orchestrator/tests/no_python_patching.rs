@@ -6,7 +6,7 @@ mod common;
 
 use common::{lme_spec, logit_spec};
 use engine_contract::{ClusterSizing, ClusterSpec, EstimatorSpec, OutcomeKind};
-use engine_orchestrator::{find_power, CancellationToken};
+use engine_orchestrator::{find_power, CancellationToken, EstimatorExtras};
 use engine_spec_builder::build_contract;
 
 #[test]
@@ -65,5 +65,10 @@ fn no_python_mle() {
         pr.convergence_rate > 0.9,
         "mle convergence {}",
         pr.convergence_rate
+    );
+    assert!(
+        matches!(pr.estimator_extras, EstimatorExtras::Mle { .. }),
+        "expected Mle estimator_extras, got {:?}",
+        pr.estimator_extras
     );
 }

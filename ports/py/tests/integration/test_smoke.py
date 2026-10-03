@@ -21,7 +21,6 @@ import pytest
 
 from mcpower import _engine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: minimal scenarios payload built via the engine contract builder
 # ---------------------------------------------------------------------------
@@ -64,18 +63,18 @@ def _ols_scenarios_bytes(n_predictors: int = 1) -> bytes:
 
 
 def test_e3_set_n_threads_double_set_raises():
-    """set_n_threads must be called before any engine invocation; a second
-    call once the pool is initialized must raise ``ValueError``.
+    """set_n_threads must be called before any engine invocation; a call once
+    the pool is initialized must raise ``ValueError``.
 
-    NOTE: The rayon pool is global to the loaded extension module, so this
-    test interferes with all subsequent tests in the same process — once you
-    call set_n_threads(2) the pool is fixed for the test session. We run in
-    a single process and validate the guard fires whenever the pool has been
-    initialized (lazily by prior find_power calls, or explicitly).
+    The rayon pool is global to the loaded extension module and is
+    initialized lazily by the first engine call, so the test makes one
+    find_power call itself first (it must not depend on test order) and never
+    resizes the pool for the rest of the session.
     """
-    from mcpower._engine import set_n_threads
+    from mcpower._engine import find_power, set_n_threads
 
-    with pytest.raises(ValueError):
+    find_power(_ols_scenarios_bytes(), 50, 10, _BASE_SEED)
+    with pytest.raises(ValueError, match="already initialized"):
         set_n_threads(4)
 
 
@@ -95,10 +94,11 @@ def test_e4_progress_callback_called_with_counts():
 
     find_power(_ols_scenarios_bytes(), 100, 100, _BASE_SEED, cb)
     assert calls, "progress callback never invoked"
-    # total must match n_sims; current must be non-decreasing and bounded.
-    for current, total in calls:
-        assert total == 100
-        assert 0 <= current <= 100
+    # total is n_sims on every call, and completion (current == total) is
+    # reported. Parallel workers may deliver the cumulative counts out of
+    # order, so no ordering is asserted.
+    assert all(total == 100 for _, total in calls)
+    assert max(current for current, _ in calls) == 100
 
 
 def test_e4_progress_cancel_returns_false_raises_keyboard_interrupt():
@@ -144,7 +144,5 @@ def test_e5_boundary_hit_ols_find_power():
     bh = scenario["boundary_hit"]
     assert isinstance(bh, list), "boundary_hit must be a nested list (not a numpy array)"
     assert len(bh) == n_sims, f"expected {n_sims} rows, got {len(bh)}"
-    assert all(
-        isinstance(row, list) and len(row) == 1 for row in bh
-    ), "each row must be a 1-element list (n_sample_sizes=1)"
+    assert all(isinstance(row, list) and len(row) == 1 for row in bh), "each row must be a 1-element list (n_sample_sizes=1)"
     assert all(v == 0 for row in bh for v in row), "OLS boundary_hit must be all zeros"

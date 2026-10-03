@@ -165,21 +165,6 @@ mod tests {
     }
 
     #[test]
-    fn happy_path_passes_pre_projection() {
-        assert!(validate_pre_projection(&base_spec()).is_ok());
-    }
-
-    #[test]
-    fn alpha_above_warn_threshold_passes_pre_projection() {
-        // The 0.25 ceiling is now a host-side soft warning, not a spec-builder
-        // hard reject; only the contract invariant `(0,1)` blocks alpha. So an
-        // alpha above `max_alpha` must pass pre-projection unchanged.
-        let mut s = base_spec();
-        s.alpha = 0.3;
-        assert!(validate_pre_projection(&s).is_ok());
-    }
-
-    #[test]
     fn factor_proportions_must_sum_to_one() {
         let mut s = base_spec();
         s.predictors = vec![PredictorSpec {

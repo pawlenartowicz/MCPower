@@ -79,11 +79,8 @@ describe('valueToLabel', () => {
 // ---------------------------------------------------------------------------
 
 describe('uploadedColumnByName', () => {
-    it('returns empty Map for null', () => {
+    it('returns empty Map for null or undefined', () => {
         expect(uploadedColumnByName(null).size).toBe(0);
-    });
-
-    it('returns empty Map for undefined', () => {
         expect(uploadedColumnByName(undefined).size).toBe(0);
     });
 
@@ -104,15 +101,6 @@ describe('uploadedColumnByName', () => {
         expect(m.get('group')?.labels).toEqual(['A', 'B', 'C']);
         expect(m.get('treated')?.col_type).toBe('binary');
         expect(m.get('treated')?.values).toEqual([0, 1, 1]);
-    });
-
-    it('does not include columns for unrecognised names', () => {
-        const csvData: CsvData = {
-            mode: 'partial',
-            n_rows: 1,
-            columns: [{ name: 'x', col_type: 'continuous', values: [1], labels: [] }],
-        };
-        expect(uploadedColumnByName(csvData).has('y')).toBe(false);
     });
 });
 

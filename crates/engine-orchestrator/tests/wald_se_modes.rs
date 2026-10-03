@@ -1,10 +1,10 @@
 //! End-to-end gate for the `WaldSe` mode switch on the clustered-binary GLMM.
 //!
-//! `WaldSe::Hessian` (the default) sources the per-fit Wald SE from the
-//! FD-Hessian covariance (glmer `use.hessian = TRUE`), which is ≥ the
-//! `WaldSe::Rx` Schur SE — so the Wald test is at least as conservative and
-//! Hessian power must NOT exceed Rx power. Both runs share data/seed, so the
-//! comparison is paired (only the SE denominator differs).
+//! `WaldSe::Hessian` sources the per-fit Wald SE from the FD-Hessian covariance
+//! (glmer `use.hessian = TRUE`), which is ≥ the default `WaldSe::Rx` Schur SE —
+//! so the Wald test is at least as conservative and Hessian power must NOT
+//! exceed Rx power. Both runs share data/seed, so the comparison is paired
+//! (only the SE denominator differs).
 
 mod common;
 use common::logit_spec;
@@ -65,8 +65,12 @@ fn glmm_find_power_hessian_more_conservative_than_rx() {
         .1
         .power_uncorrected[0];
 
+    // Recorded literals at (seed=2137, N=120, n_sims=200). Paired data, so no
+    // Monte-Carlo slack: an unwired `wald_se` would make the two equal.
+    assert_eq!(p_rx, 0.3);
+    assert_eq!(p_h, 0.275);
     assert!(
-        p_h <= p_rx + 0.02,
-        "hessian power {p_h} should not exceed rx power {p_rx}"
+        p_h < p_rx,
+        "hessian power {p_h} must sit below rx power {p_rx}"
     );
 }

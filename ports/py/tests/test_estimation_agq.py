@@ -46,8 +46,9 @@ def test_agq_ineligible_design_warns_and_falls_back_to_laplace():
     # a usable result computed at agq=1 (Laplace).
     m = MCPower("y ~ x1", family="logit").set_effects("x1=0.5").set_baseline_probability(0.3)
     with pytest.warns(UserWarning, match="is not available for this design"):
-        result = m.find_power(50, n_sims=50, agq=5, verbose=False)
-    assert result["power_uncorrected"][0][0] is not None
+        result = m.find_power(50, n_sims=50, seed=2137, agq=5, verbose=False)
+    laplace = m.find_power(50, n_sims=50, seed=2137, agq=1, verbose=False)
+    assert result["power_uncorrected"] == laplace["power_uncorrected"]
 
 
 def test_agq_eligible_reaches_contract_and_changes_result():
@@ -69,9 +70,7 @@ def test_agq_eligible_reaches_contract_and_changes_result():
 
     m = _glmm()
     payload = m._to_linear_spec_dict(["optimistic"], nagq=5)
-    outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
-        m._encode_outcome_and_clusters()
-    )
+    outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = m._encode_outcome_and_clusters()
     names, contracts_bytes, _skeleton_json = _engine.build_contract_from_spec(
         json.dumps(payload),
         outcome_kind_wire,

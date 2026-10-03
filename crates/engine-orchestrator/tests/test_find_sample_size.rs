@@ -3,8 +3,27 @@ use common::{minimal_ols_contract, minimal_ols_contract_labelled};
 
 use engine_orchestrator::{
     find_sample_size, merge_sample_size_results, single_core_find_sample_size, ByValue,
-    CancellationToken, CrossingFit, GridMode, ProgressEvent, ProgressSink, SampleSizeMethod,
+    CancellationToken, CrossingFit, GridMode, OrchestratorError, ProgressEvent, ProgressSink,
+    SampleSizeMethod, SampleSizeResult, ScenarioResult,
 };
+
+/// Grid whose interior brackets the 0.8 crossing of `minimal_ols_contract`
+/// (β = 0.5 crosses near N ≈ 30), so the crossing fit is `Fitted`, not
+/// `AtOrBelowMin`.
+const INTERIOR_CROSSING_BOUNDS: (usize, usize) = (10, 60);
+
+fn interior_crossing_method() -> SampleSizeMethod {
+    SampleSizeMethod::Grid {
+        by: ByValue::Fixed(10),
+        mode: GridMode::Linear,
+    }
+}
+
+fn is_empty_contracts_error(
+    r: &Result<ScenarioResult<SampleSizeResult>, OrchestratorError>,
+) -> bool {
+    matches!(r, Err(OrchestratorError::InvalidScenarios(m)) if m.contains("empty"))
+}
 
 // Dispatch-twin: empty contracts must be rejected on both sample-size entry
 // points, mirroring find_power_rejects_empty_scenarios.
@@ -15,7 +34,8 @@ fn find_sample_size_rejects_empty_scenarios() {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
-    assert!(find_sample_size(&[], 0.8, (50, 200), 25, method, 1, 0, None, &cancel).is_err());
+    let r = find_sample_size(&[], 0.8, (50, 200), 25, method, 1, 0, None, &cancel);
+    assert!(is_empty_contracts_error(&r), "{r:?}");
 }
 
 #[test]
@@ -25,9 +45,8 @@ fn single_core_find_sample_size_rejects_empty_scenarios() {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
-    assert!(
-        single_core_find_sample_size(&[], 0.8, (50, 200), 25, method, 1, 0, None, &cancel).is_err()
-    );
+    let r = single_core_find_sample_size(&[], 0.8, (50, 200), 25, method, 1, 0, None, &cancel);
+    assert!(is_empty_contracts_error(&r), "{r:?}");
 }
 
 // Dispatch-twin: a pre-set cancel flag must short-circuit the grid loop on both
@@ -114,115 +133,66 @@ fn grid_first_achieved_none_when_target_unreachable() {
     assert_eq!(ssr.first_achieved, vec![None]);
 }
 
+/// Dispatch twins: at the same seed, `find_sample_size` (`run_batch`) and
+/// `single_core_find_sample_size` (`run_batch_st`) walk the same per-sim seeds at
+/// every grid point, so the whole result (grid, counts, first-N, crossing fits)
+/// must be bit-identical. Thread-count invariance itself is owned by engine-core
+/// (`run_batch_bit_identical_1_vs_n_threads`).
 #[test]
-fn find_sample_size_is_deterministic_across_thread_counts() {
-    let c1 = minimal_ols_contract_labelled("first");
-    let c2 = minimal_ols_contract_labelled("second");
-    let contracts = vec![c1, c2];
-
-    let pool1 = rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build()
-        .unwrap();
-    let pool_auto = rayon::ThreadPoolBuilder::new().build().unwrap();
+fn single_core_find_sample_size_is_bit_identical_to_find_sample_size() {
+    let contracts = vec![
+        minimal_ols_contract_labelled("first"),
+        minimal_ols_contract_labelled("second"),
+    ];
     let cancel = CancellationToken::new();
-
-    // Grid mode for predictable iteration count.
     let method = SampleSizeMethod::Grid {
         by: ByValue::Fixed(50),
         mode: GridMode::Linear,
     };
 
-    let r1 = pool1
-        .install(|| {
-            find_sample_size(
-                &contracts,
-                0.8,
-                (50, 200),
-                64,
-                method,
-                1,
-                2137,
-                None,
-                &cancel,
-            )
-        })
-        .unwrap();
-    let r_auto = pool_auto
-        .install(|| {
-            find_sample_size(
-                &contracts,
-                0.8,
-                (50, 200),
-                64,
-                method,
-                1,
-                2137,
-                None,
-                &cancel,
-            )
-        })
-        .unwrap();
+    let mc = find_sample_size(
+        &contracts,
+        0.8,
+        (50, 200),
+        64,
+        method,
+        1,
+        2137,
+        None,
+        &cancel,
+    )
+    .expect("ok");
+    let sc = single_core_find_sample_size(
+        &contracts,
+        0.8,
+        (50, 200),
+        64,
+        method,
+        1,
+        2137,
+        None,
+        &cancel,
+    )
+    .expect("ok");
 
-    // Vacuous-green guards: verify output is well-formed and non-degenerate.
-    assert_eq!(r_auto.scenarios.len(), 2);
-    for (_, ssr) in &r_auto.scenarios {
-        assert!(!ssr.grid_or_trace.is_empty());
-        assert!(ssr
-            .grid_or_trace
-            .iter()
-            .all(|pr| pr.power_uncorrected.iter().all(|p| p.is_finite())));
+    assert_eq!(mc.scenarios.len(), 2);
+    for (_, ssr) in &mc.scenarios {
+        let grid_ns: Vec<usize> = ssr.grid_or_trace.iter().map(|pr| pr.n).collect();
+        assert_eq!(grid_ns, vec![50, 100, 150, 200]);
+        let n_targets = ssr.grid_or_trace[0].target_indices.len();
+        // Catches the vec![] stub: one joint entry per target, each a grid point.
+        assert_eq!(ssr.first_joint_achieved.len(), n_targets);
+        for n in ssr.first_joint_achieved.iter().flatten() {
+            assert!(grid_ns.contains(n), "first_joint_achieved {n} off-grid");
+        }
+        // Crossing-fit shapes mirror the empirical vectors.
+        assert_eq!(ssr.fitted.len(), ssr.first_achieved.len());
+        assert_eq!(ssr.fitted_joint.len(), ssr.first_joint_achieved.len());
     }
-
-    // Determinism gate: results must be bit-equal regardless of thread count.
     assert_eq!(
-        r1, r_auto,
-        "find_sample_size must be bit-equal across thread counts"
+        mc, sc,
+        "dispatch twins must be bit-identical at the same seed"
     );
-}
-
-#[test]
-fn single_core_find_sample_size_matches_find_sample_size_shape() {
-    // single_core_find_sample_size returns the same ScenarioResult<SampleSizeResult>
-    // shape as the multi-core find_sample_size (same scenarios, label, grid length
-    // + n's, first_achieved length, target_power). RNG paths are not bit-equal
-    // across worker counts, so only the shape is asserted.
-    let contracts = vec![minimal_ols_contract()];
-    let cancel = CancellationToken::new();
-    let method = SampleSizeMethod::Grid {
-        by: ByValue::Fixed(50),
-        mode: GridMode::Linear,
-    };
-
-    let mc =
-        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel).expect("ok");
-    let sc =
-        single_core_find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel)
-            .expect("ok");
-
-    assert_eq!(mc.scenarios.len(), sc.scenarios.len());
-    assert_eq!(
-        mc.scenarios[0].0, sc.scenarios[0].0,
-        "scenario label parity"
-    );
-    let (mc_ssr, sc_ssr) = (&mc.scenarios[0].1, &sc.scenarios[0].1);
-    let mc_ns: Vec<usize> = mc_ssr.grid_or_trace.iter().map(|pr| pr.n).collect();
-    let sc_ns: Vec<usize> = sc_ssr.grid_or_trace.iter().map(|pr| pr.n).collect();
-    assert_eq!(mc_ns, sc_ns, "grid n's parity");
-    assert_eq!(mc_ssr.first_achieved.len(), sc_ssr.first_achieved.len());
-    approx::assert_relative_eq!(mc_ssr.target_power, sc_ssr.target_power);
-    // Catches the vec![] stub: length must match target count, not be zero.
-    assert_eq!(
-        sc_ssr.first_joint_achieved.len(),
-        sc_ssr.grid_or_trace[0].target_indices.len(),
-        "first_joint_achieved must match target count (not the vec![] stub)"
-    );
-    // Crossing-fit shapes mirror the empirical vectors on BOTH twin paths.
-    assert_eq!(mc_ssr.fitted.len(), mc_ssr.first_achieved.len());
-    assert_eq!(sc_ssr.fitted.len(), sc_ssr.first_achieved.len());
-    assert_eq!(mc_ssr.fitted_joint.len(), mc_ssr.first_joint_achieved.len());
-    assert_eq!(sc_ssr.fitted_joint.len(), sc_ssr.first_joint_achieved.len());
-    assert_eq!(mc_ssr.cluster_atom, sc_ssr.cluster_atom, "atom parity");
 }
 
 #[test]
@@ -233,16 +203,12 @@ fn fitted_shapes_and_in_grid_consistency() {
     // headline and CI bounds bracketing n_star.
     let contracts = vec![minimal_ols_contract()];
     let cancel = CancellationToken::new();
-    let method = SampleSizeMethod::Grid {
-        by: ByValue::Fixed(50),
-        mode: GridMode::Linear,
-    };
     let r = find_sample_size(
         &contracts,
         0.8,
-        (50, 200),
+        INTERIOR_CROSSING_BOUNDS,
         200,
-        method,
+        interior_crossing_method(),
         1,
         13,
         None,
@@ -252,7 +218,11 @@ fn fitted_shapes_and_in_grid_consistency() {
     let ssr = &r.scenarios[0].1;
     assert_eq!(ssr.fitted.len(), ssr.first_achieved.len());
     assert_eq!(ssr.fitted_joint.len(), ssr.first_joint_achieved.len());
-    assert!(!ssr.fitted.is_empty(), "anti-vacuity: targets exist");
+    assert!(
+        matches!(ssr.fitted[0], CrossingFit::Fitted { .. }),
+        "anti-vacuity: the grid must bracket the crossing, got {:?}",
+        ssr.fitted[0]
+    );
     assert_eq!(ssr.cluster_atom, 1, "unclustered atom");
     for cf in ssr.fitted.iter().chain(ssr.fitted_joint.iter()) {
         if let CrossingFit::Fitted {
@@ -263,7 +233,7 @@ fn fitted_shapes_and_in_grid_consistency() {
         } = cf
         {
             assert!(
-                (50.0..=200.0).contains(n_star),
+                (10.0..=60.0).contains(n_star),
                 "n_star within the grid, got {n_star}"
             );
             let na = *n_achievable as f64;
@@ -289,16 +259,12 @@ fn merge_of_single_part_reproduces_fit_exactly() {
     // recompute must be value-identical — fit included.
     let contracts = vec![minimal_ols_contract()];
     let cancel = CancellationToken::new();
-    let method = SampleSizeMethod::Grid {
-        by: ByValue::Fixed(50),
-        mode: GridMode::Linear,
-    };
     let part = single_core_find_sample_size(
         &contracts,
         0.8,
-        (50, 200),
+        INTERIOR_CROSSING_BOUNDS,
         200,
-        method,
+        interior_crossing_method(),
         1,
         13,
         None,
@@ -307,7 +273,13 @@ fn merge_of_single_part_reproduces_fit_exactly() {
     .expect("ok");
     let merged = merge_sample_size_results(std::slice::from_ref(&part)).expect("merge ok");
     let (p, m) = (&part.scenarios[0].1, &merged.scenarios[0].1);
-    assert!(!p.fitted.is_empty(), "anti-vacuity: fit was computed");
+    // Anti-vacuity: a real interior crossing, so the interpolation and the
+    // Wilson-band CI are recomputed (not just the AtOrBelowMin short-cut).
+    assert!(
+        matches!(p.fitted[0], CrossingFit::Fitted { .. }),
+        "the grid must bracket the crossing, got {:?}",
+        p.fitted[0]
+    );
     assert_eq!(p.first_achieved, m.first_achieved);
     assert_eq!(p.first_joint_achieved, m.first_joint_achieved);
     assert_eq!(
@@ -358,6 +330,10 @@ fn grid_find_sample_size_progress_npoint_per_grid_point_and_zero_sentinel() {
     )
     .expect("ok");
     assert_eq!(sink.npoint, 4, "one NPointCompleted per grid point (4)");
+    assert!(
+        !sink.sims_n.is_empty(),
+        "grid search must emit SimsCompleted"
+    );
     assert!(
         sink.sims_n.iter().all(|&n| n == 0),
         "Grid find_sample_size SimsCompleted must carry the n=0 sentinel, got {:?}",
@@ -456,36 +432,6 @@ fn grid_progress_total_counts_fits_across_scenarios_and_grid() {
         st_sink.ticks
     );
     assert_eq!(st_sink.ticks.last().map(|&(c, _)| c), Some(200));
-}
-
-#[test]
-fn first_joint_achieved_shape_and_grid_point_membership() {
-    // first_joint_achieved has one entry per target (k = 1..=n_targets),
-    // and every Some(n) must be a grid point. No strict monotonicity asserted
-    // (MC noise can cause ties/inversions on a coarse grid).
-    let contracts = vec![minimal_ols_contract()];
-    let cancel = CancellationToken::new();
-    let method = SampleSizeMethod::Grid {
-        by: ByValue::Fixed(50),
-        mode: GridMode::Linear,
-    };
-    let result =
-        find_sample_size(&contracts, 0.8, (50, 200), 25, method, 1, 13, None, &cancel).expect("ok");
-
-    let ssr = &result.scenarios[0].1;
-    let n_targets = ssr.grid_or_trace[0].target_indices.len();
-    assert_eq!(
-        ssr.first_joint_achieved.len(),
-        n_targets,
-        "first_joint_achieved must have one entry per target"
-    );
-    let grid_ns: Vec<usize> = ssr.grid_or_trace.iter().map(|pr| pr.n).collect();
-    for n in ssr.first_joint_achieved.iter().flatten() {
-        assert!(
-            grid_ns.contains(n),
-            "first_joint_achieved N must be a grid point, got {n}"
-        );
-    }
 }
 
 #[test]

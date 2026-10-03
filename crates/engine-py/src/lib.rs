@@ -7,11 +7,10 @@
 //! `debug_bridge.rs` on the R side.
 //!
 //! Translation rules:
-//!   - `SimulationSpec` arrives as a msgpack-encoded byte buffer (the Python
-//!     frontend assembles the dict and calls `msgpack.packb(spec)`).
-//!   - Per-scenario simulation specs are bundled into a msgpack
-//!     `[(label, spec_dict, base_seed), ...]` payload and dispatched to the
-//!     Rust orchestrator via `find_power` / `find_sample_size`.
+//!   - Contracts arrive as a msgpack-encoded `Vec<SimulationContract>`, one
+//!     per scenario (`decode_contracts`), and are dispatched to the Rust
+//!     orchestrator via `find_power` / `find_sample_size`, which lower each
+//!     contract to the kernel's `SimulationSpec` internally.
 //!   - Progress / cancel flows through a Python callable
 //!     `fn(current: int, total: int) -> bool`.
 //!
@@ -197,11 +196,6 @@ fn _engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_power, m)?)?;
     m.add_function(wrap_pyfunction!(find_sample_size, m)?)?;
     m.add_function(wrap_pyfunction!(set_n_threads, m)?)?;
-    #[cfg(feature = "test-bridge")]
-    m.add_function(wrap_pyfunction!(
-        spec_builder_bridge::build_contract_from_json,
-        m
-    )?)?;
     #[cfg(feature = "test-bridge")]
     m.add_function(wrap_pyfunction!(panic_for_test, m)?)?;
     m.add_function(wrap_pyfunction!(

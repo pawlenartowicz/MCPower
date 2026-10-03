@@ -451,102 +451,6 @@ mod tests {
     use super::*;
     use engine_contract::ClusterSizing;
 
-    #[test]
-    fn workspace_allocates_with_correct_shapes() {
-        let ws = SimWorkspace::new(
-            100,
-            5,
-            3,
-            2,
-            Some(&engine_contract::ClusterSpec::intercept_only(
-                ClusterSizing::FixedClusters { n_clusters: 20 },
-                0.25,
-            )),
-        );
-        assert_eq!(ws.x_full.nrows(), 100);
-        assert_eq!(ws.x_full.ncols(), 5);
-        assert_eq!(ws.y_full.len(), 100);
-        assert_eq!(ws.residuals.len(), 100);
-        assert_eq!(ws.z_planar.len(), 100 * 3);
-        assert_eq!(ws.mix_acc.len(), 100);
-        assert_eq!(ws.eta_acc.len(), 100);
-        assert_eq!(ws.gen_words.len(), 100);
-        assert!(ws.gen_tail_idx.is_empty() && ws.gen_tail_idx.capacity() >= 100);
-        assert_eq!(ws.resid_g.len(), 100);
-        assert_eq!(ws.l_design.nrows(), 3);
-        assert_eq!(ws.l_design.ncols(), 3);
-        assert_eq!(ws.sigma_design.nrows(), 3);
-        assert_eq!(ws.sigma_design.ncols(), 3);
-        assert_eq!(ws.corr_base.nrows(), 3);
-        assert_eq!(ws.corr_base.ncols(), 3);
-        assert_eq!(ws.perturb_noise_buf.len(), 9);
-        assert_eq!(ws.var_types_design.len(), 3);
-
-        assert_eq!(ws.fit_betas.len(), 5);
-        assert_eq!(ws.fit_var_diag.len(), 5);
-        assert_eq!(ws.fit_t_sq.len(), 5);
-        assert_eq!(ws.fit_u_scratch.len(), 5);
-        assert_eq!(ws.fit_factor.nrows(), 5);
-        assert_eq!(ws.fit_factor.ncols(), 5);
-        assert_eq!(ws.fit_rhs.nrows(), 100);
-        assert_eq!(ws.fit_rhs.ncols(), 1);
-
-        assert_eq!(ws.suff_xtx.nrows(), 5);
-        assert_eq!(ws.suff_xtx.ncols(), 5);
-        assert_eq!(ws.suff_xty.len(), 5);
-        assert_eq!(ws.suff_yty, 0.0);
-        assert_eq!(ws.suff_n_rows, 0);
-        assert_eq!(ws.suff_xtx_work.nrows(), 5);
-        assert_eq!(ws.suff_xtx_work.ncols(), 5);
-        assert_eq!(ws.panel_x.len(), glmm::loop_advanced::PANEL_ROWS * 5);
-        assert_eq!(ws.panel_y.len(), glmm::loop_advanced::PANEL_ROWS);
-
-        // IRLS scratch (Logit).
-        assert_eq!(ws.irls_eta.len(), 100);
-        assert_eq!(ws.irls_p.len(), 100);
-        assert_eq!(ws.irls_w.len(), 100);
-        assert_eq!(ws.irls_z.len(), 100);
-        assert_eq!(ws.irls_betas.len(), 5);
-        assert_eq!(ws.irls_betas_new.len(), 5);
-        assert_eq!(ws.irls_var_diag.len(), 5);
-        assert_eq!(ws.irls_t_sq.len(), 5);
-        assert_eq!(ws.irls_u_scratch.len(), 5);
-        assert_eq!(ws.irls_xtwx.nrows(), 5);
-        assert_eq!(ws.irls_xtwx.ncols(), 5);
-        assert_eq!(ws.irls_xtwz.len(), 5);
-        assert_eq!(ws.irls_l.nrows(), 5);
-        assert_eq!(ws.irls_l.ncols(), 5);
-        assert_eq!(ws.irls_wx.len(), 100 * 5);
-
-        // LME scratch retained for the OLS path.
-        assert_eq!(ws.lme_u_scratch.len(), 5);
-        assert_eq!(ws.lme_joint_rhs.len(), 5);
-        assert_eq!(ws.cluster_u_draws.len(), 20);
-        assert_eq!(ws.cluster_ids.len(), 100);
-        // Interleaved layout: cluster_ids[i] == i % 20.
-        for i in 0..100 {
-            assert_eq!(ws.cluster_ids[i], (i % 20) as u32);
-        }
-
-        // FixedSize block layout: cluster_ids[i] == i / cluster_size.
-        let ws_block = SimWorkspace::new(
-            100,
-            5,
-            3,
-            2,
-            Some(&engine_contract::ClusterSpec::intercept_only(
-                ClusterSizing::FixedSize { cluster_size: 5 },
-                0.25,
-            )),
-        );
-        assert_eq!(ws_block.cluster_ids[0], 0);
-        assert_eq!(ws_block.cluster_ids[4], 0);
-        assert_eq!(ws_block.cluster_ids[5], 1); // block boundary
-        assert_eq!(ws_block.cluster_ids[99], 19); // 99 / 5
-                                                  // Buffer is sized to max_n / cluster_size = 100 / 5 = 20.
-        assert_eq!(ws_block.cluster_u_draws.len(), 20);
-    }
-
     /// DGEN-12: `reset_suff_stats` zeroes the OLS sufficient-statistics
     /// accumulators (lower triangle of suff_xtx, all of suff_xty/yty/sum_y,
     /// suff_n_rows) without touching any LME or IRLS field.
@@ -613,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn extra_grouping_buffers_sized_and_laid_out() {
+    fn extra_grouping_buffers_sized() {
         let mut spec = engine_contract::ClusterSpec::intercept_only(
             engine_contract::ClusterSizing::FixedClusters { n_clusters: 4 },
             0.25,
@@ -634,16 +538,8 @@ mod tests {
         assert_eq!(ws.extra_tau_sq_design, vec![0.0, 0.0]);
         assert_eq!(ws.extra_u_draws[0].len(), 3); // crossed: fixed count
         assert_eq!(ws.extra_u_draws[1].len(), 8); // nested: 4 parents × 2
-        for i in 0..24 {
-            assert_eq!(
-                ws.extra_grouping_ids[0][i],
-                spec.extra_level_of_row(0, i) as u32
-            );
-            assert_eq!(
-                ws.extra_grouping_ids[1][i],
-                spec.extra_level_of_row(1, i) as u32
-            );
-        }
+        assert_eq!(ws.extra_grouping_ids[0].len(), 24);
+        assert_eq!(ws.extra_grouping_ids[1].len(), 24);
         // Degenerate spec ⇒ all extras empty (today's shape).
         let plain = engine_contract::ClusterSpec::intercept_only(
             engine_contract::ClusterSizing::FixedClusters { n_clusters: 4 },

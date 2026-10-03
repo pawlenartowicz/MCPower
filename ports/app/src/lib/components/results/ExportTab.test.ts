@@ -27,7 +27,8 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 const { finalizeMock, embedPrintMock } = vi.hoisted(() => {
   const finalizeMock = vi.fn();
   const viewFinalizeMock = vi.fn();
-  const toImageURLMock = vi.fn(async () => 'data:image/png;base64,abc=');
+  // Base64 of the 8-byte PNG signature.
+  const toImageURLMock = vi.fn(async () => 'data:image/png;base64,iVBORw0KGgo=');
   const toSVGMock = vi.fn(async () => '<svg></svg>');
   const embedPrintMock = vi.fn(async () => ({
     view: {
@@ -148,25 +149,9 @@ describe('ExportTab — format and scale UI', () => {
     await fireEvent.change(formatSelect, { target: { value: 'svg' } });
     expect(queryByTestId('export-scale-input')).toBeNull();
   });
-
-  it('shows the scale input again when PNG is re-selected', async () => {
-    const { getByTestId } = render(ExportTab, { props: { tab: makeTab(PLOTS) } });
-    const formatSelect = getByTestId('export-format-select') as HTMLSelectElement;
-    await fireEvent.change(formatSelect, { target: { value: 'svg' } });
-    await fireEvent.change(formatSelect, { target: { value: 'png' } });
-    expect(getByTestId('export-scale-input')).toBeTruthy();
-  });
 });
 
 describe('ExportTab — block selector', () => {
-  it('shows a block selector with one option for single-block runs', () => {
-    const { getByTestId } = render(ExportTab, { props: { tab: makeTab(PLOTS) } });
-    const sel = getByTestId('export-block-select') as HTMLSelectElement;
-    expect(sel).toBeTruthy();
-    expect(sel.options.length).toBe(1);
-    expect(sel.value).toBe('power');
-  });
-
   it('shows all blocks in the selector for multi-block runs', () => {
     const { getByTestId } = render(ExportTab, { props: { tab: makeTab(MULTI_PLOTS) } });
     const sel = getByTestId('export-block-select') as HTMLSelectElement;
@@ -215,8 +200,7 @@ describe('ExportTab — save path (PNG)', () => {
     const [path, bytes] = writeFileMock.mock.calls[0] as unknown as [string, Uint8Array];
     expect(path).toBe('/tmp/mcpower-plot.png');
     expect(bytes).toBeInstanceOf(Uint8Array);
-    // 'abc=' base64 decodes to 1 byte (0x69)
-    expect(bytes.length).toBeGreaterThan(0);
+    expect(Array.from(bytes)).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     expect(finalizeMock).toHaveBeenCalledOnce();
   });
 

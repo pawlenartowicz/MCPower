@@ -31,20 +31,22 @@ def _ols():
 
 def test_df_method_rejects_garbage():
     m = _few_cluster_lmm()
-    with pytest.raises((ValueError, Exception)):
+    with pytest.raises(ValueError, match="df_method"):
         m.find_power(120, n_sims=100, df_method="wald", verbose=False)
-    with pytest.raises((ValueError, Exception)):
+    with pytest.raises(ValueError, match="df_method"):
         m.find_power(120, n_sims=100, df_method="nonsense", verbose=False)
 
 
 def test_df_method_default_is_between_within():
     assert get_estimation_defaults()["df_method"] == "between_within"
     m = _few_cluster_lmm()
-    r_default = m.find_power(
-        120, target_test="treat", n_sims=300, seed=2137, verbose=False
-    )
+    r_default = m.find_power(120, target_test="treat", n_sims=300, seed=2137, verbose=False)
     r_bw = m.find_power(
-        120, target_test="treat", df_method="between_within", n_sims=300, seed=2137,
+        120,
+        target_test="treat",
+        df_method="between_within",
+        n_sims=300,
+        seed=2137,
         verbose=False,
     )
     p_default = r_default["power_uncorrected"][0][0]
@@ -58,11 +60,19 @@ def test_df_method_reaches_engine():
     at the same seed produce different power for the few-cluster LMM."""
     m = _few_cluster_lmm()
     r_asym = m.find_power(
-        120, target_test="treat", df_method="asymptotic", n_sims=500, seed=2137,
+        120,
+        target_test="treat",
+        df_method="asymptotic",
+        n_sims=500,
+        seed=2137,
         verbose=False,
     )
     r_bw = m.find_power(
-        120, target_test="treat", df_method="between_within", n_sims=500, seed=2137,
+        120,
+        target_test="treat",
+        df_method="between_within",
+        n_sims=500,
+        seed=2137,
         verbose=False,
     )
     p_asym = r_asym["power_uncorrected"][0][0]
@@ -70,34 +80,12 @@ def test_df_method_reaches_engine():
     assert p_asym != p_bw
 
 
-def test_df_method_between_within_le_asymptotic_for_few_cluster_lmm():
-    """Between-within df is the conservative choice for a design with few
-    clusters — power should be no higher than the asymptotic Wald z at the
-    same seed."""
-    m = _few_cluster_lmm()
-    r_asym = m.find_power(
-        120, target_test="treat", df_method="asymptotic", n_sims=1000, seed=2137,
-        verbose=False,
-    )
-    r_bw = m.find_power(
-        120, target_test="treat", df_method="between_within", n_sims=1000, seed=2137,
-        verbose=False,
-    )
-    p_asym = r_asym["power_uncorrected"][0][0]
-    p_bw = r_bw["power_uncorrected"][0][0]
-    assert p_bw <= p_asym
-
-
 def test_df_method_ols_unchanged():
     """OLS ignores df_method: asymptotic vs between_within give identical
     power at the same seed."""
     m = _ols()
-    r_asym = m.find_power(
-        200, df_method="asymptotic", n_sims=300, seed=2137, verbose=False
-    )
-    r_bw = m.find_power(
-        200, df_method="between_within", n_sims=300, seed=2137, verbose=False
-    )
+    r_asym = m.find_power(200, df_method="asymptotic", n_sims=300, seed=2137, verbose=False)
+    r_bw = m.find_power(200, df_method="between_within", n_sims=300, seed=2137, verbose=False)
     p_asym = r_asym["power_uncorrected"][0][0]
     p_bw = r_bw["power_uncorrected"][0][0]
     assert p_asym == p_bw

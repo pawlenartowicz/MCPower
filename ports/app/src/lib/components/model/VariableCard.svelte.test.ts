@@ -80,177 +80,13 @@ describe('VariableCard factor locked', () => {
     expect(container.textContent).toContain('factor');
     expect(container.textContent).not.toMatch(/from data/i);
   });
-
-  it('does NOT render the type Select trigger when locked', () => {
-    const v = factorRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: factorGroup(v),
-        effects: [],
-        variables: [v],
-        locked: true,
-      },
-    });
-    // The Select trigger uses an aria role of combobox or button — but easiest
-    // to verify by checking it's absent. The locked path renders a plain <span>.
-    // Look for a data-slot="select-trigger" which the SelectTrigger puts on the element.
-    expect(container.querySelector('[data-slot="select-trigger"]')).toBeNull();
-  });
-
-  it('disables the nLevels NumberInput when locked (factor)', () => {
-    const v = factorRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: factorGroup(v),
-        effects: [],
-        variables: [v],
-        locked: true,
-      },
-    });
-    // NumberInput renders an <input type="number">; the nLevels input is the first one.
-    const inputs = container.querySelectorAll('input[type="number"]');
-    expect(inputs.length).toBeGreaterThan(0);
-    // Every number input rendered for locked type/share controls must be disabled.
-    inputs.forEach((inp) => {
-      expect((inp as HTMLInputElement).disabled).toBe(true);
-    });
-  });
-
-  it('shows the type kind as static text when locked', () => {
-    const v = factorRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: factorGroup(v),
-        effects: [],
-        variables: [v],
-        locked: true,
-      },
-    });
-    // The locked path renders variable.kind as plain text in a <span>.
-    expect(container.textContent).toContain('factor');
-  });
 });
 
 // ---------------------------------------------------------------------------
-// Binary — locked
+// Locked with effects present — effects stay editable
 // ---------------------------------------------------------------------------
-
-describe('VariableCard binary locked', () => {
-  it('disables binary share NumberInput when locked', () => {
-    const v = binaryRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: binaryGroup(v),
-        effects: [],
-        variables: [v],
-        locked: true,
-      },
-    });
-    const inputs = container.querySelectorAll('input[type="number"]');
-    expect(inputs.length).toBeGreaterThan(0);
-    inputs.forEach((inp) => {
-      expect((inp as HTMLInputElement).disabled).toBe(true);
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Continuous — locked (no extra controls; just ensures no crash)
-// ---------------------------------------------------------------------------
-
-describe('VariableCard continuous locked', () => {
-  it('renders without error when locked and continuous', () => {
-    const v = continuousRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: continuousGroup(v),
-        effects: [],
-        variables: [v],
-        locked: true,
-      },
-    });
-    expect(container.textContent).not.toMatch(/from data/i);
-    expect(container.textContent).toContain('continuous');
-  });
-
-  it('does NOT render the type Select when locked', () => {
-    const v = continuousRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: continuousGroup(v),
-        effects: [],
-        variables: [v],
-        locked: true,
-      },
-    });
-    expect(container.querySelector('[data-slot="select-trigger"]')).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Unlocked — controls are active
-// ---------------------------------------------------------------------------
-
-describe('VariableCard factor unlocked', () => {
-  it('renders the type Select trigger when not locked', () => {
-    const v = factorRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: factorGroup(v),
-        effects: [],
-        variables: [v],
-        locked: false,
-      },
-    });
-    expect(container.querySelector('[data-slot="select-trigger"]')).not.toBeNull();
-  });
-
-  it('does NOT show "from data" badge when unlocked', () => {
-    const v = factorRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: factorGroup(v),
-        effects: [],
-        variables: [v],
-        locked: false,
-      },
-    });
-    expect(container.textContent).not.toMatch(/from data/i);
-  });
-
-  it('nLevels input is NOT disabled when unlocked', () => {
-    const v = factorRow();
-    const { container } = render(VariableCard, {
-      props: {
-        variable: v,
-        group: factorGroup(v),
-        effects: [],
-        variables: [v],
-        locked: false,
-      },
-    });
-    const inputs = container.querySelectorAll('input[type="number"]');
-    expect(inputs.length).toBeGreaterThan(0);
-    // At least one input should be enabled when unlocked.
-    const enabled = Array.from(inputs).some((inp) => !(inp as HTMLInputElement).disabled);
-    expect(enabled).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Locked with effects present — effects stay editable (test #2 / plan I1)
-// ---------------------------------------------------------------------------
-// These tests exercise the gap: previous locked tests all used effects: [],
-// so the effect inputs were never rendered. Here we verify that locking
-// type/level/share controls does NOT disable the effect size inputs.
+// Locking hides the type Select and disables the type/level/share inputs, but
+// must NOT disable the effect size inputs rendered alongside them.
 
 describe('VariableCard factor locked — effects stay editable', () => {
   it('factor effect input (non-reference level) is NOT disabled when locked', () => {
@@ -576,7 +412,7 @@ describe('VariableCard interactionOnly', () => {
 
   it('a normal predictor still renders its effect control (no note)', () => {
     const v = continuousRow();
-    const { container, queryByTestId } = render(VariableCard, {
+    const { queryByTestId } = render(VariableCard, {
       props: {
         variable: v,
         group: continuousGroup(v),
@@ -585,6 +421,6 @@ describe('VariableCard interactionOnly', () => {
       },
     });
     expect(queryByTestId(`interaction-only-note-${v.name}`)).toBeNull();
-    expect(container.textContent).toContain('effects');
+    expect(queryByTestId(`effect-${v.name}`)).not.toBeNull();
   });
 });

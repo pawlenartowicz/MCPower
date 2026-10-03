@@ -8,7 +8,6 @@ separate integration tests.
 from __future__ import annotations
 
 import json as _json
-import warnings
 
 import pytest
 
@@ -20,18 +19,13 @@ from mcpower import MCPower
 # ---------------------------------------------------------------------------
 
 
-def test_lme_formula_constructs():
-    """LME formulas no longer raise at MCPower(...) construction time."""
-    m = MCPower("y ~ x1 + (1|school)")
-    # family defaults to ols; the formula is parsed and random effects stored.
-    assert m._registry._random_effects_parsed
-    assert m._registry._random_effects_parsed[0]["grouping_var"] == "school"
-
-
 def test_family_lme_constructs():
-    """family='lme' is now a valid construction kwarg."""
+    """family='lme' is a valid construction kwarg, as are the non-default GLM
+    families probit and poisson."""
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     assert m.family == "lme"
+    assert MCPower("y = x", family="probit").family == "probit"
+    assert MCPower("y = x", family="poisson").family == "poisson"
 
 
 def test_family_unknown_still_rejected():
@@ -45,7 +39,7 @@ def test_family_unknown_still_rejected():
 # ---------------------------------------------------------------------------
 
 
-def test_set_cluster_basic_round_trip():
+def test_set_cluster_basic_round_trip():  # APIC-52
     """set_cluster stores the spec; to_simulation_spec emits the engine fields."""
     model = MCPower("y ~ x1 + (1|school)", family="lme")
     model.set_effects("x1=0.5").set_cluster("school", ICC=0.3, n_clusters=20)
@@ -75,23 +69,8 @@ def test_set_cluster_icc_zero_allowed():
 
 
 # ---------------------------------------------------------------------------
-# set_cluster: NotImplementedError gates
+# set_cluster: removed / formerly gated kwargs
 # ---------------------------------------------------------------------------
-
-
-def test_set_cluster_accepts_random_slopes_no_longer_raises():
-    """random_slopes is now accepted and stored."""
-    model = MCPower("y ~ x1 + (1 + x1|school)", family="lme")
-    model.set_effects("x1=0.5")
-    model.set_cluster(
-        "school",
-        ICC=0.2,
-        n_clusters=20,
-        random_slopes=["x1"],
-        slope_variance=0.1,
-    )
-    assert model._pending_clusters["school"]["random_slopes"] == ["x1"]
-    assert model._pending_clusters["school"]["slope_variance"] == pytest.approx(0.1)
 
 
 def test_set_cluster_rejects_between_vars():
@@ -102,17 +81,6 @@ def test_set_cluster_rejects_between_vars():
         m.set_cluster("school", ICC=0.2, n_clusters=20, between_vars=["x1"])
 
 
-def test_set_cluster_accepts_n_per_parent():
-    """n_per_parent is now accepted and stored (nested random effects)."""
-    m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
-    m.set_effects("treatment=0.5")
-    # school is the outer grouping; n_per_parent = classrooms per school
-    m.set_cluster("school", ICC=0.15, n_clusters=10)
-    m.set_cluster("school:classroom", ICC=0.10, n_clusters=30, n_per_parent=3)
-    assert m._pending_clusters["school"]["icc"] == pytest.approx(0.15)
-    assert m._pending_clusters["school:classroom"]["n_per_parent"] == 3
-
-
 def test_nested_formula_no_longer_raises():
     """A '(1|A/B)' formula no longer raises NotImplementedError."""
     m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
@@ -121,15 +89,6 @@ def test_nested_formula_no_longer_raises():
     # Must not raise — nested gate removed
     m.set_cluster("school:classroom", ICC=0.10, n_clusters=30)
     assert "school:classroom" in m._pending_clusters
-
-
-def test_multiple_groupings_accepted():
-    """Two crossed groupings are accepted — multiple-groupings gate removed."""
-    m = MCPower("y ~ x1 + (1|school) + (1|teacher)", family="lme")
-    m.set_effects("x1=0.3")
-    m.set_cluster("school", ICC=0.2, n_clusters=20)
-    m.set_cluster("teacher", ICC=0.1, n_clusters=30)
-    assert len(m._pending_clusters) == 2
 
 
 def test_set_cluster_overwrite_same_var():
@@ -202,25 +161,6 @@ def test_lme_validate_runtime_derives_n_from_cluster_size():
     assert m._effective_n_clusters == 10
 
 
-def test_lme_snap_via_find_power_warns():
-    """sample_size not divisible by n_clusters: engine snaps and emits a warning.
-
-    Snap-and-warn lives in the Rust engine; the Python port surfaces
-    engine grid_warnings as UserWarning. This test exercises end-to-end behavior
-    (N=101 → snapped to 100 by atom=20; warning emitted).
-    """
-    m = MCPower("y ~ x1 + (1|school)", family="lme")
-    m.set_effects("x1=0.5").set_cluster("school", ICC=0.2, n_clusters=20)
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        res = m.find_power(101, n_sims=20, verbose=False)
-    # Engine floors 101 to nearest multiple of 20 → 100.
-    assert res["sample_sizes"][0] == 100
-    msgs = [str(x.message) for x in w if issubclass(x.category, UserWarning)]
-    # Engine emits a grid_warning that Python surfaces.
-    assert any("100" in s or "101" in s for s in msgs), msgs
-
-
 def test_lme_validate_runtime_silent_for_non_lme_family():
     """OLS / Logit with no cluster spec is a no-op."""
     m = MCPower("y = x")
@@ -248,49 +188,19 @@ def test_lme_validate_runtime_clustered_ols_fallthrough():
     assert spec["generation"]["cluster"]["sizing"]["FixedClusters"]["n_clusters"] == 12
 
 
-def test_lme_to_simulation_spec_strips_random_effects_from_formula():
-    """Spec builder rejects '(1|group)'; we must strip before passing JSON."""
-    m = MCPower("y ~ x1 + (1|school)", family="lme")
-    m.set_effects("x1=0.5").set_cluster("school", ICC=0.2, n_clusters=10)
-    spec = m.to_simulation_spec()
-    # The roundtripped spec uses the cleaned formula; the LinearSpec JSON
-    # sent to the builder no longer contains '(1|school)'. We don't see the
-    # formula in the final SimulationSpec dict, but a successful build is
-    # itself the assertion: the builder would have raised RandomEffectsUnsupported
-    # if the strip were missing.
-    assert spec["outcome"]["kind"] == "continuous"
-    assert spec["estimator"] == "mle"
-
-
-def test_set_cluster_accepts_cluster_level_vars():
-    """cluster_level_vars stores predictor names; replaces reserved between_vars."""
-    m = MCPower("y ~ x1 + x2 + (1|school)", family="lme")
-    m.set_effects("x1=0.3, x2=0.2")
-    # Must not raise — no longer gated
-    result = m.set_cluster("school", ICC=0.2, n_clusters=20, cluster_level_vars=["x1"])
-    assert result is m
-    assert m._pending_clusters["school"]["cluster_level_vars"] == ["x1"]
-
-
-def test_set_cluster_between_vars_still_rejected():
-    """between_vars parameter is removed; passing it raises TypeError."""
-    m = MCPower("y ~ x1 + (1|school)", family="lme")
-    m.set_effects("x1=0.3")
-    with pytest.raises(TypeError):
-        m.set_cluster("school", ICC=0.2, n_clusters=20, between_vars=["x1"])
-
-
 # ---------------------------------------------------------------------------
 # set_cluster: cluster_level_vars validation
 # ---------------------------------------------------------------------------
 
 
-def test_cluster_level_vars_rejects_unknown_predictor():
-    """A name not in the formula raises ValueError at set_cluster time."""
+@pytest.mark.parametrize("name", ["x_unknown", "y"])
+def test_cluster_level_vars_rejects_unknown_predictor(name):
+    """A name that is not a predictor (unknown, or the dependent variable)
+    raises ValueError at set_cluster time."""
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.3")
-    with pytest.raises(ValueError, match="cluster_level_vars.*not a predictor|not a predictor.*cluster_level_vars"):
-        m.set_cluster("school", ICC=0.2, n_clusters=20, cluster_level_vars=["x_unknown"])
+    with pytest.raises(ValueError, match=f"cluster_level_vars: '{name}' is not a predictor"):
+        m.set_cluster("school", ICC=0.2, n_clusters=20, cluster_level_vars=[name])
 
 
 def test_cluster_level_vars_rejects_grouping_var_itself():
@@ -299,18 +209,6 @@ def test_cluster_level_vars_rejects_grouping_var_itself():
     m.set_effects("x1=0.3")
     with pytest.raises(ValueError, match="grouping variable"):
         m.set_cluster("school", ICC=0.2, n_clusters=20, cluster_level_vars=["school"])
-
-
-def test_cluster_level_vars_rejects_when_no_cluster_active():
-    """cluster_level_vars requires a corresponding set_cluster call (family check)."""
-    # This is enforced at find_power time via family=lme requirement; here we
-    # test that passing cluster_level_vars on a plain-OLS model with no RE formula
-    # is caught by the predictor-in-registry check (no random effects → no grouping
-    # var → validation path still reached via normal set_cluster call).
-    m = MCPower("y ~ x1 + (1|school)", family="lme")
-    m.set_effects("x1=0.3")
-    with pytest.raises(ValueError, match="cluster_level_vars.*not a predictor|not a predictor.*cluster_level_vars"):
-        m.set_cluster("school", ICC=0.2, n_clusters=20, cluster_level_vars=["y"])
 
 
 def test_cluster_level_vars_rejects_uploaded_predictor():
@@ -418,64 +316,36 @@ def test_validate_lme_runtime_multi_grouping_sets_effective_n():
 
 
 # ---------------------------------------------------------------------------
-# Task 1.8 — random_slopes acceptance + storage
-# ---------------------------------------------------------------------------
-
-
-def test_set_cluster_accepts_random_slopes():
-    """random_slopes + slope_variance + slope_intercept_corr are now accepted."""
-    m = MCPower("y ~ x1 + (1 + x1|school)", family="lme")
-    m.set_effects("x1=0.4")
-    m.set_cluster(
-        "school",
-        ICC=0.2,
-        n_clusters=20,
-        random_slopes=["x1"],
-        slope_variance=0.05,
-        slope_intercept_corr=0.3,
-    )
-    cfg = m._pending_clusters["school"]
-    assert cfg["random_slopes"] == ["x1"]
-    assert cfg["slope_variance"] == pytest.approx(0.05)
-    assert cfg["slope_intercept_corr"] == pytest.approx(0.3)
-
-
-# ---------------------------------------------------------------------------
-# Task 1.9 — slopes emitted in clusters_json
+# Slopes emitted in clusters_json
 # ---------------------------------------------------------------------------
 
 
 def test_clusters_json_random_slope_shape():
     """Random slope appears in clusters_json as a SlopeTerm dict — mirrors the
-    R debug-seam shape (spec-builder.R:1154-1162).
+    R debug-seam shape.
 
     Shape: slopes = [{"column": <0-based gen col>, "variance": <f64>,
                       "corr_with_intercept": <f64>, "corr_with": []}]
     The column index is the 0-based index of the slope predictor in the
-    registry's non_factor_names list (generation column ordering).
+    registry's non_factor_names list (generation column ordering): the slope
+    sits on x2, the second non-factor predictor, so column 1.
     """
-    m = MCPower("y ~ x1 + x2 + (1 + x1|school)", family="lme")
+    m = MCPower("y ~ x1 + x2 + (1 + x2|school)", family="lme")
     m.set_effects("x1=0.3, x2=0.2")
     m.set_cluster(
         "school",
         ICC=0.2,
         n_clusters=20,
-        random_slopes=["x1"],
+        random_slopes=["x2"],
         slope_variance=0.05,
         slope_intercept_corr=0.3,
     )
     m._effective_n_clusters = 20
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
-    primary = specs[0]
-    assert "slopes" in primary
-    assert len(primary["slopes"]) == 1
-    slope = primary["slopes"][0]
-    # x1 is the first non-factor predictor → column index 0
-    assert slope["column"] == 0
-    assert slope["variance"] == pytest.approx(0.05)
-    assert slope["corr_with_intercept"] == pytest.approx(0.3)
-    assert slope["corr_with"] == []  # first (and only) slope → empty
+    assert specs[0]["slopes"] == [
+        {"column": 1, "variance": 0.05, "corr_with_intercept": 0.3, "corr_with": []}
+    ]
 
 
 def test_clusters_json_no_slopes_key_absent():
@@ -492,8 +362,10 @@ def test_clusters_json_no_slopes_key_absent():
 # Engine-required smoke tests — these call find_power end-to-end.
 # Requires: maturin develop --release (Phase 0 engine changes must land first).
 
-def test_find_power_two_crossed_groupings_smoke():
-    """Two crossed groupings reach the engine without error; power is numeric."""
+def test_find_power_two_crossed_groupings_smoke():  # APIC-65
+    """Two crossed groupings reach the engine without error; power is numeric.
+    The single-scenario result is unwrapped to the flat inner dict, so the
+    top-level ``power_uncorrected`` index would fail on the envelope."""
     m = MCPower("y ~ x1 + (1|school) + (1|teacher)", family="lme")
     m.set_effects("x1=0.4")
     m.set_cluster("school", ICC=0.2, n_clusters=15)

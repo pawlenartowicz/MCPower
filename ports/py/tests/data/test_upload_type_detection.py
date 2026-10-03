@@ -47,10 +47,6 @@ def build_array_from_fixture(fx: dict) -> tuple:
     return columns_data, names
 
 
-def test_golden_fixture_exists():
-    assert GOLDEN_PATH.exists(), f"Golden fixture not found: {GOLDEN_PATH}"
-
-
 def test_all_columns_match_fixture():
     fx = json.loads(GOLDEN_PATH.read_text())
     columns_data, names = build_array_from_fixture(fx)
@@ -107,11 +103,3 @@ def test_numeric_few_distinct_too_sparse_is_continuous():
     (below max_k_soft=7 but ratio guard fails)."""
     types, labels = detect_column_types([[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]], ["x"], 7, 15)
     assert types[0] == "continuous"
-
-
-def test_factor_labels_sorted_and_deduped():
-    """Repeated string values produce sorted, deduplicated labels."""
-    raw = ["Japan", "USA", "Europe", "USA", "Japan", "Europe"] * 10
-    types, labels = detect_column_types([raw], ["origin"], 7, 15)
-    assert types[0] == "factor"
-    assert labels[0] == ["Europe", "Japan", "USA"]

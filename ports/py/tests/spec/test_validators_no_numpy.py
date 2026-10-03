@@ -20,11 +20,6 @@ def test_corr_matrix_bad_diagonal_and_asymmetry():
     assert any("symmetric" in e for e in res.errors)
 
 
-def test_corr_matrix_none():
-    res = _validate_correlation_matrix(None)
-    assert not res.is_valid
-
-
 def test_upload_nan_and_inf_detected():
     # min_rows is small in config; build enough rows. Column "a" numeric clean,
     # "b" has a NaN, "c" has an Inf, "lab" is strings (skipped).

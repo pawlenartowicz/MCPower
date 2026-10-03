@@ -14,10 +14,9 @@ name = "_engine"
 crate-type = ["cdylib"]
 
 [features]
-# `test-bridge` exposes the raw `build_contract_from_json` back-door for
-# Python tests. The release wheel must not enable it — keeping the symbol
-# out of production avoids locking the raw `SimulationContract` shape into
-# the public surface.
+# `test-bridge` exposes the `panic_for_test` seam for Python tests. The
+# release wheel must not enable it — keeping test-only symbols out of the
+# public surface.
 test-bridge = []
 
 [dependencies]

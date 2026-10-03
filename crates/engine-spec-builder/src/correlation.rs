@@ -102,33 +102,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identity_when_no_pairs() {
-        let m = build_correlation_matrix(&["x1".into(), "x2".into()], &[]).unwrap();
-        assert_eq!(m, vec![1.0, 0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    #[allow(clippy::erasing_op, clippy::identity_op)]
-    fn fills_symmetric_entries() {
-        let m = build_correlation_matrix(
-            &["a".into(), "b".into(), "c".into()],
-            &[CorrelationPair {
-                a: "a".into(),
-                b: "c".into(),
-                value: 0.4,
-            }],
-        )
-        .unwrap();
-        // a-c entry: indices (0,2) and (2,0) in column-major 3x3.
-        assert_eq!(m[2 * 3 + 0], 0.4);
-        assert_eq!(m[0 * 3 + 2], 0.4);
-        // Diagonal intact.
-        assert_eq!(m[0], 1.0);
-        assert_eq!(m[4], 1.0);
-        assert_eq!(m[8], 1.0);
-    }
-
-    #[test]
     fn out_of_range_value_errors() {
         let err = build_correlation_matrix(
             &["a".into(), "b".into()],

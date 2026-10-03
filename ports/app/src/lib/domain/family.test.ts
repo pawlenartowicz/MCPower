@@ -64,10 +64,9 @@ describe('family domain', () => {
     expect(defaultFamilyConfig('regression').tests).toEqual({ kind: 'all' });
   });
 
-  it('ANOVA default uses effects-kind tests and reports overall', () => {
+  it('ANOVA default uses effects-kind tests with no variables', () => {
     const cfg = defaultFamilyConfig('anova');
     expect(cfg.tests).toEqual({ kind: 'effects', names: [] });
-    expect(cfg.reportOverall).toBe(true);
     expect(cfg.variables).toEqual([]);
   });
 

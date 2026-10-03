@@ -27,8 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .spec.parsers import _parser
 from .spec.scenario_config import get_default_scenario_config
-from .spec.spec_builder import build_linear_spec, build_scenario_dict
-from .spec.test_selector import overall_test_available, resolve_tests
+from .spec.spec_builder import build_linear_spec
 from .spec.validators import (
     _validate_alpha,
     _validate_correction_method,
@@ -842,20 +841,6 @@ class MCPower:
             nagq = 1
         return wald_se, nagq, df_method
 
-    def _resolve_tests(self, target_test: str) -> Dict[str, Any]:
-        """Parse a ``target_test`` DSL string into the wire dict.
-
-        Thin wrapper over :func:`mcpower.spec.test_selector.resolve_tests`,
-        which holds the selection-DSL logic.
-        """
-        return resolve_tests(
-            target_test,
-            self._registry,
-            overall_available=overall_test_available(
-                self.estimator, self._registry
-            ),
-        )
-
     def upload_data(
         self,
         data: Any,
@@ -1584,12 +1569,6 @@ class MCPower:
     # ------------------------------------------------------------------
     # Spec construction
     # ------------------------------------------------------------------
-
-    def _scenario_dict(self, scenario_name: str) -> Dict[str, Any]:
-        """Build the ``ScenarioPerturbations`` dict for ``scenario_name``:
-        residual-distribution overrides, random-effect distribution knobs, and
-        ICC noise, sourced from ``self._scenario_configs``."""
-        return build_scenario_dict(scenario_name, self._scenario_configs)
 
     def _to_linear_spec_dict(
         self,
@@ -2406,10 +2385,7 @@ class MCPower:
                 self._check_result_failure_threshold(scenario_dict)
             return
 
-        cr = result.get("convergence_rate")
-        if cr is None:
-            # Non-LME result or empty run: no failure tracking.
-            return
+        cr = result["convergence_rate"]
         _check_failure_threshold(
             convergence_rate=list(cr),
             boundary_hit_rate_tau_zero=result.get("boundary_hit_rate_tau_zero", [0.0] * len(cr)),

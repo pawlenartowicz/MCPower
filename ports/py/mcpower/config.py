@@ -24,10 +24,6 @@ def get_estimation_defaults() -> Dict[str, Any]:
     return get_config()["estimation"]
 
 
-def get_benchmarks() -> Dict[str, Any]:
-    return get_config()["benchmarks"]
-
-
 def get_limits() -> Dict[str, Any]:
     return get_config()["limits"]
 

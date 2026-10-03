@@ -21,10 +21,3 @@ def test_continuous_interaction_runs_and_targets():
     # floor so a broken interaction target (wrong column, dropped effect) fails where
     # the old tautological `0<=p<=1` passed.
     assert 0.9 < power_row[0] <= 1.0, f"interaction power: {power_row[0]}"
-
-
-def test_interaction_effect_name_is_listed():
-    m = MCPower("y = x1 * x2").set_effects({"x1": 0.3, "x2": 0.2, "x1:x2": 0.4})
-    # the colon name is a first-class effect name
-    names = m._registry.effect_names  # introspection used by validation/reporting
-    assert "x1:x2" in names

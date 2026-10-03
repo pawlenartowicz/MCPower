@@ -4,13 +4,11 @@
 //! `test_interactions_power.rs`) and call `generate_sim_data` to obtain
 //! a single generated row-block, then compute moments over many rows.
 
+mod common;
+
 use engine_core::data_gen::generate_sim_data;
-use engine_core::spec::HeteroskedasticityCoeffs;
 use engine_core::workspace::SimWorkspace;
-use engine_core::{
-    CorrectionMethod, CritValues, Distribution, EstimatorSpec, OutcomeKind, ResidualDist,
-    ScenarioPerturbations, SimulationSpec,
-};
+use engine_core::{Distribution, SimulationSpec};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,50 +91,14 @@ fn uploaded_data_spec(
     effect_sizes[1] = 0.5; // some effect on col 1 — just for valid spec
     SimulationSpec {
         n_non_factor,
-        n_factor_dummies: 0,
         correlation,
         var_types,
-        var_pinned: vec![],
         var_params,
         upload_normal,
         upload_normal_shape,
-        upload_data: vec![],
-        upload_data_shape: (0, 0),
-        bootstrap_frame_map: vec![],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         effect_sizes,
-        target_indices: vec![1],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
         max_failed_fraction: 1.0,
-        cluster: None,
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     }
 }
 
@@ -340,50 +302,14 @@ fn b3_uploaded_binary_correlation_attenuated() {
     effect_sizes[2] = 0.3;
     let spec = SimulationSpec {
         n_non_factor: n_nf,
-        n_factor_dummies: 0,
         correlation: corr,
         var_types: vec![Distribution::UploadedBinary, Distribution::UploadedData],
-        var_pinned: vec![],
         var_params: vec![0.3, 0.0],
         upload_normal,
         upload_normal_shape: (U as u32, n_nf),
-        upload_data: vec![],
-        upload_data_shape: (0, 0),
-        bootstrap_frame_map: vec![],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         effect_sizes,
-        target_indices: vec![1],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
         max_failed_fraction: 1.0,
-        cluster: None,
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     };
 
     // Collect 4000 paired rows (same x_full per sim) for stable sample correlation.

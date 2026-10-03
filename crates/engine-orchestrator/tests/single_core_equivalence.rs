@@ -1,39 +1,14 @@
-//! Verifies single_core_find_power matches find_power within MC noise after
-//! pooling (statistical equivalence, not bit-equal — RNG paths intentionally
-//! differ across worker counts).
+//! N-worker `single_core_find_power` + `merge_power_results` against the
+//! multi-core `find_power`. Splitting the sims across workers gives each worker
+//! its own seed, so the pooled result matches only within MC noise: these tests
+//! pin shape and pooling, not numeric equality. (At one worker and the same seed
+//! the twins are bit-identical; see `test_find_power.rs`.)
 
 use engine_orchestrator::{
     find_power, merge_power_results, single_core_find_power, CancellationToken,
 };
 
 mod common;
-
-#[test]
-fn single_core_find_power_signature_and_smoke() {
-    let contracts = vec![common::marginal_plus_contrast_contract()];
-    let cancel = CancellationToken::new();
-    let r = single_core_find_power(&contracts, 100, 200, 42, None, &cancel).unwrap();
-    assert_eq!(r.scenarios.len(), 1);
-    let pr = &r.scenarios[0].1;
-    assert_eq!(pr.n, 100);
-    assert_eq!(pr.n_sims, 200);
-    // The fixture carries a marginal AND a contrast, so the counter vector is
-    // sized marginals + contrasts — `target_indices.len()` alone would let a
-    // dropped contrast tail pass silently.
-    let n_entries = pr.target_indices.len() + pr.contrast_pairs.len();
-    assert_eq!(pr.success_counts_uncorrected.len(), n_entries);
-    // Counts must reproduce the rates exactly (no accidental zeroing).
-    for t in 0..n_entries {
-        let expected = pr.success_counts_uncorrected[t] as f64 / pr.n_sims as f64;
-        assert!(
-            (expected - pr.power_uncorrected[t]).abs() < 1e-12,
-            "rate/count mismatch at t={t}: count={}, n_sims={}, rate={}",
-            pr.success_counts_uncorrected[t],
-            pr.n_sims,
-            pr.power_uncorrected[t]
-        );
-    }
-}
 
 #[test]
 fn merged_identical_scenarios_are_bit_identical() {
@@ -73,8 +48,8 @@ fn merged_identical_scenarios_are_bit_identical() {
 fn merged_four_workers_matches_find_power_shape() {
     // MERGE-01: a 4-worker single_core_find_power + merge produces a ScenarioResult
     // with the *same shape* as the multi-core find_power (same scenarios, label
-    // order, n, pooled n_sims, target_indices, power-vector length). RNG paths are
-    // intentionally NOT bit-equal across worker counts (dispatch design D-A), so the
+    // order, n, pooled n_sims, target_indices, power-vector length). Per-worker
+    // seeds make the N-worker split NOT bit-equal (dispatch design D-A), so the
     // numeric power *agreement* is a statistical equivalence property — L3 seed, not
     // an L1/L2 mechanic — and is deliberately not asserted here.
     let contracts = vec![common::minimal_ols_contract()];
@@ -127,17 +102,19 @@ fn merged_four_workers_matches_find_power_shape() {
         mg_pr.target_indices.len(),
         "merged success_counts_uncorrected length must equal target count"
     );
-    // Mechanical: histogram bucket sum == pooled n_sims (every sim in exactly one bucket).
-    if !mg_pr.success_count_histogram_uncorrected.is_empty() {
-        assert_eq!(
-            mg_pr
-                .success_count_histogram_uncorrected
-                .iter()
-                .sum::<u64>(),
-            mg_pr.n_sims,
-            "histogram bucket sum must equal pooled n_sims"
-        );
-    }
+    // Mechanical: every worker emits its joint histogram (targets + 1 buckets) and
+    // the pooled buckets sum to the pooled n_sims (every sim in exactly one bucket).
+    let hist = &mg_pr.success_count_histogram_uncorrected;
+    assert_eq!(
+        hist.len(),
+        mg_pr.target_indices.len() + 1,
+        "merged histogram must carry targets + 1 buckets"
+    );
+    assert_eq!(
+        hist.iter().sum::<u64>(),
+        1600,
+        "histogram bucket sum must equal pooled n_sims"
+    );
 }
 
 /// M2: a crossed+nested (general lmm path) contract flows identically through

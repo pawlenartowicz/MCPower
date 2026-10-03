@@ -10,9 +10,11 @@ vi.mock('@tauri-apps/plugin-store', () => ({
   Store: {
     load: vi.fn(async (path: string) => {
       if (!stores.has(path)) {
+        // Backed by a Map so save→load is a real round trip by key.
+        const data = new Map<string, unknown>();
         stores.set(path, {
-          get: vi.fn(async () => undefined),
-          set: vi.fn(async () => undefined),
+          get: vi.fn(async (k: string) => data.get(k)),
+          set: vi.fn(async (k: string, v: unknown) => void data.set(k, v)),
           save: vi.fn(async () => undefined),
         });
       }
@@ -46,11 +48,9 @@ describe('per-family persistence', () => {
 
   it('loadFamily returns persisted config', async () => {
     const cfg = { ...defaultFamilyConfig('regression'), formula: 'y ~ x1 + x2' };
-    // First save so the store entry is created in our mock map.
     await saveFamily('regression', cfg);
-    // Override the get mock to return the stored config.
-    stores.get('per-family/regression.json')!.get.mockResolvedValueOnce(cfg);
-    const out = await loadFamily('regression');
-    expect(out).toEqual(cfg);
+    expect(await loadFamily('regression')).toEqual(cfg);
+    // Families keep separate files: another family's load does not see it.
+    expect(await loadFamily('anova')).toBeNull();
   });
 });

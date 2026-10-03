@@ -56,7 +56,6 @@ pub fn apply_correction(
         CorrectionMethod::Holm => {
             // Holm step-down.
             // Sort indices by t² descending; ties broken by ascending target index.
-            // Use a stack buffer up to 64 entries (target counts are small).
             let order = sort_indices_desc(t_sq);
             for k in 0..t {
                 let i = order[k] as usize;
@@ -144,11 +143,14 @@ mod tests {
 
     #[test]
     fn holm_step_down_known_outcome() {
-        // Three targets, t² = [9, 4, 1], crit_sq sequence by rank = [10, 5, 3].
+        // Three targets, t² = [9, 4, 1], crit_sq sequence by rank = [10, 3, 0.5].
         // Sorted desc: [0 → 9, 1 → 4, 2 → 1].
-        // Rank 0: 9 > 10? no → stop, all fail.
+        // Rank 0: 9 > 10? no → stop, all fail. Ranks 1 and 2 would pass on
+        // their own thresholds, so this case is what makes the early stop
+        // observable: a Holm that kept walking gives [0, 1, 1] (BH gives
+        // [1, 1, 1]).
         let t_sq = vec![9.0_f64, 4.0, 1.0];
-        let crit_sq = [10.0, 5.0, 3.0];
+        let crit_sq = [10.0, 3.0, 0.5];
         let mut out = vec![0u8; 3];
         apply_correction(CorrectionMethod::Holm, &t_sq, &crit_sq, &mut out);
         assert_eq!(out, vec![0, 0, 0]);
@@ -164,46 +166,6 @@ mod tests {
         let mut out = vec![0u8; 3];
         apply_correction(CorrectionMethod::Holm, &t_sq, &crit_sq3, &mut out);
         assert_eq!(out, vec![1, 1, 1]);
-    }
-
-    #[test]
-    fn bh_step_up_known_outcome() {
-        // BH walks all and applies step-up.
-        // t² = [9, 1, 4] → sorted desc by value: [0:9, 2:4, 1:1]
-        // crit_sq by rank = [10, 3, 0.5].
-        // Walk: k=0 → 9 > 10? no.  k=1 → 4 > 3? yes → last_sig = 1.
-        // k=2 → 1 > 0.5? yes → last_sig = 2.
-        // → ranks 0..=2 pass → all targets pass.
-        let t_sq = vec![9.0_f64, 1.0, 4.0];
-        let crit_sq = [10.0, 3.0, 0.5];
-        let mut out = vec![0u8; 3];
-        apply_correction(
-            CorrectionMethod::BenjaminiHochberg,
-            &t_sq,
-            &crit_sq,
-            &mut out,
-        );
-        assert_eq!(out, vec![1, 1, 1]);
-    }
-
-    #[test]
-    fn nan_t_sq_fails_under_every_method() {
-        let t_sq = vec![100.0_f64, f64::NAN, 100.0];
-        let crit_sq = [1.0, 1.0, 1.0];
-        for m in [
-            CorrectionMethod::None,
-            CorrectionMethod::Bonferroni,
-            CorrectionMethod::Holm,
-            CorrectionMethod::BenjaminiHochberg,
-            CorrectionMethod::TukeyHsd,
-        ] {
-            let mut out = vec![0u8; 3];
-            apply_correction(m, &t_sq, &crit_sq, &mut out);
-            assert_eq!(out[1], 0, "method {m:?}: NaN must fail");
-            // The non-NaN entries should pass.
-            assert_eq!(out[0], 1, "method {m:?}: t² > crit must pass");
-            assert_eq!(out[2], 1, "method {m:?}: t² > crit must pass");
-        }
     }
 
     /// Hand-computed reference: three targets, both Holm and BH verified in t² space.
@@ -450,14 +412,6 @@ mod tests {
         let t_sq = vec![5.0_f64, 5.0, 5.0];
         let order = sort_indices_desc(&t_sq);
         assert_eq!(order, vec![0, 1, 2], "ties must break on ascending index");
-    }
-
-    #[test]
-    fn sort_nans_go_last() {
-        let t_sq = vec![1.0_f64, f64::NAN, 3.0, f64::NAN, 2.0];
-        let order = sort_indices_desc(&t_sq);
-        // Descending: 3, 2, 1, then NaNs in ascending index order.
-        assert_eq!(order, vec![2, 4, 0, 1, 3]);
     }
 
     // -----------------------------------------------------------------

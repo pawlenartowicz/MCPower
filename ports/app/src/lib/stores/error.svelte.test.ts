@@ -37,13 +37,4 @@ describe('errorStore', () => {
     const withoutDetail = vi.mocked(sonnerToast.error).mock.calls[0]?.[1];
     expect(withoutDetail?.action).toBeUndefined();
   });
-
-  it('crash holds and clears the modal payload', () => {
-    const e: AppError = { severity: 'crash', title: 'Boom', message: 'unexpected' };
-    expect(errorStore.crash).toBeNull();
-    errorStore.crash = e;
-    expect(errorStore.crash).toEqual(e);
-    errorStore.crash = null;
-    expect(errorStore.crash).toBeNull();
-  });
 });

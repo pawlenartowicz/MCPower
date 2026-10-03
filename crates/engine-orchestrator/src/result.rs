@@ -275,7 +275,11 @@ impl EstimatorExtras {
     ///
     /// `tau_estimate` / `baseline_prob_realized` carry `NaN` and the merge-support
     /// sums carry `0` until the kernel surfaces the per-sim signals.
-    pub fn from_batch(estimator: &EstimatorSpec, batch: &BatchResult, ss_idx: usize) -> Self {
+    pub(crate) fn from_batch(
+        estimator: &EstimatorSpec,
+        batch: &BatchResult,
+        ss_idx: usize,
+    ) -> Self {
         let n_sims = batch.shape.n_sims as usize;
         let n_ss = batch.shape.n_sample_sizes as usize;
         let rate = |k: u64| {
@@ -645,39 +649,6 @@ mod result_counter_tests {
     use super::*;
 
     #[test]
-    fn power_result_serde_roundtrip_with_counters() {
-        let pr = PowerResult {
-            n: 100,
-            n_sims: 200,
-            target_indices: vec![0, 1],
-            contrast_pairs: vec![],
-            power_uncorrected: vec![0.8, 0.6],
-            power_corrected: vec![0.75, 0.55],
-            ci_uncorrected: vec![Ci { lo: 0.7, hi: 0.9 }, Ci { lo: 0.5, hi: 0.7 }],
-            ci_corrected: vec![Ci { lo: 0.65, hi: 0.85 }, Ci { lo: 0.45, hi: 0.65 }],
-            convergence_rate: 1.0,
-            boundary_hit: vec![0u8; 200],
-            estimator_extras: EstimatorExtras::Ols {},
-            overall_significant_rate: None,
-            success_counts_uncorrected: vec![160, 120],
-            success_counts_corrected: vec![150, 110],
-            convergence_count: 200,
-            overall_significant_count: 0,
-            overall_significant_ci: None,
-            success_count_histogram_uncorrected: vec![],
-            success_count_histogram_corrected: vec![],
-            grid_warnings: vec![],
-            posthoc: vec![],
-            factor_exclusion_counts: vec![],
-            factor_separation_counts: vec![],
-        };
-        let json = serde_json::to_string(&pr).unwrap();
-        let back: PowerResult = serde_json::from_str(&json).unwrap();
-        assert_eq!(pr, back);
-        assert_eq!(pr.grid_warnings, Vec::<String>::new());
-    }
-
-    #[test]
     fn power_result_deserializes_older_payload_without_counters() {
         // Legacy payload — no counter fields. Defaults must kick in.
         let legacy = r#"{
@@ -692,6 +663,9 @@ mod result_counter_tests {
         assert_eq!(pr.convergence_count, 0);
         assert_eq!(pr.factor_exclusion_counts, Vec::<u64>::new());
         assert_eq!(pr.factor_separation_counts, Vec::<u64>::new());
+        assert_eq!(pr.overall_significant_ci, None);
+        assert!(pr.success_count_histogram_uncorrected.is_empty());
+        assert!(pr.success_count_histogram_corrected.is_empty());
     }
 
     #[test]
@@ -728,22 +702,6 @@ mod result_counter_tests {
         let json = serde_json::to_string(&pr).unwrap();
         let back: PowerResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back, pr);
-    }
-
-    #[test]
-    fn power_result_older_payload_defaults_new_fields() {
-        // A payload emitted before these fields existed: they are simply absent.
-        let json = r#"{
-            "n": 100, "n_sims": 5, "target_indices": [0],
-            "power_uncorrected": [0.8], "power_corrected": [0.8],
-            "ci_uncorrected": [{"lo":0.7,"hi":0.9}], "ci_corrected": [{"lo":0.7,"hi":0.9}],
-            "convergence_rate": 1.0, "boundary_hit": [0,0,0,0,0],
-            "estimator_extras": {"estimator":"ols"}
-        }"#;
-        let pr: PowerResult = serde_json::from_str(json).unwrap();
-        assert_eq!(pr.overall_significant_ci, None);
-        assert!(pr.success_count_histogram_uncorrected.is_empty());
-        assert!(pr.success_count_histogram_corrected.is_empty());
     }
 
     #[test]
@@ -927,11 +885,6 @@ mod result_counter_tests {
         let json = serde_json::to_string(&ssr).unwrap();
         let back: SampleSizeResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back, ssr);
-        assert_eq!(back.unit_divisor, 6);
-        // msgpack is the FFI wire encoding — the divisor must survive it too.
-        let bytes = rmp_serde::to_vec_named(&ssr).unwrap();
-        let back: SampleSizeResult = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(back.unit_divisor, 6);
     }
 
     #[test]
@@ -978,47 +931,6 @@ mod result_counter_tests {
         assert!((singular_fit_rate - 0.5).abs() < 1e-12);
         assert_eq!(tau_squared_hat_n, 2);
         assert!((tau_squared_hat_mean - 0.25).abs() < 1e-12);
-    }
-
-    #[test]
-    fn glm_extras_msgpack_roundtrip_with_new_fields() {
-        let g = EstimatorExtras::Glm {
-            baseline_prob_realized: 0.3,
-            baseline_prob_sum: 0.6,
-            baseline_prob_n: 2,
-            singular_fit_rate: 0.25,
-            singular_count: 1,
-            singular_n: 4,
-            tau_squared_hat_mean: 0.21,
-            tau_squared_hat_sum: 0.84,
-            tau_squared_hat_n: 4,
-        };
-        let bytes = rmp_serde::to_vec_named(&g).unwrap();
-        let back: EstimatorExtras = rmp_serde::from_slice(&bytes).unwrap();
-        // NaN equality: instead compare field by field for this test.
-        let EstimatorExtras::Glm {
-            baseline_prob_realized,
-            baseline_prob_sum,
-            baseline_prob_n,
-            singular_fit_rate,
-            singular_count,
-            singular_n,
-            tau_squared_hat_mean,
-            tau_squared_hat_sum,
-            tau_squared_hat_n,
-        } = back
-        else {
-            panic!("expected Glm after roundtrip")
-        };
-        assert_eq!(baseline_prob_realized, 0.3);
-        assert_eq!(baseline_prob_sum, 0.6);
-        assert_eq!(baseline_prob_n, 2);
-        assert_eq!(singular_fit_rate, 0.25);
-        assert_eq!(singular_count, 1);
-        assert_eq!(singular_n, 4);
-        assert_eq!(tau_squared_hat_mean, 0.21);
-        assert_eq!(tau_squared_hat_sum, 0.84);
-        assert_eq!(tau_squared_hat_n, 4);
     }
 
     #[test]

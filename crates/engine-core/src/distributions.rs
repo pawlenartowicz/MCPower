@@ -116,44 +116,32 @@ mod tests {
 
     #[test]
     fn phi_monotone_non_decreasing() {
-        // Φ is monotonically non-decreasing across the real line.
-        let mut prev = phi(-10.0);
-        let mut z = -10.0;
-        while z <= 10.0 {
+        // Φ is monotonically non-decreasing across the real line and stays in
+        // [0, 1] (which keeps `marginal_uniform = a + (b − a)·Φ` inside [a, b]).
+        let mut prev = phi(-12.0);
+        let mut z = -12.0;
+        while z <= 12.0 {
             let cur = phi(z);
             assert!(cur >= prev, "phi not monotone at z={z}: {cur} < {prev}");
+            assert!(
+                (0.0..=1.0).contains(&cur),
+                "phi({z}) = {cur} outside [0, 1]"
+            );
             prev = cur;
             z += 0.1;
         }
     }
 
     #[test]
-    fn marginal_uniform_in_range_and_monotone() {
-        // marginal_uniform(z,a,b) lies in [a,b] for any finite z (Φ ∈ (0,1))
-        // and is monotonically non-decreasing in z — deterministic properties
-        // of the copula transform, not statistical content.
-        let (a, b) = (-1.0, 3.0);
-        let mut prev = marginal_uniform(-12.0, a, b);
-        let mut z = -12.0;
-        while z <= 12.0 {
-            let u = marginal_uniform(z, a, b);
-            assert!(u >= a && u <= b, "uniform {u} outside [{a},{b}] at z={z}");
-            assert!(
-                u >= prev,
-                "marginal_uniform not monotone at z={z}: {u} < {prev}"
-            );
-            prev = u;
-            z += 0.1;
-        }
-    }
-
-    #[test]
     fn sample_t_degenerate_df_safe() {
+        // A degenerate df (0 or NaN) falls back to exactly one standard-normal
+        // draw from the same stream.
         let mut rng = SimRng::new(1, 1);
+        let mut reference = SimRng::new(1, 1);
         let x = sample_t(&mut rng, 0.0);
-        assert!(x.is_finite());
+        assert_eq!(x, reference.next_normal() as f64);
         let y = sample_t(&mut rng, f64::NAN);
-        assert!(y.is_finite());
+        assert_eq!(y, reference.next_normal() as f64);
     }
 
     // -----------------------------------------------------------------

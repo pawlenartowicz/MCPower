@@ -53,13 +53,6 @@ describe('VegaChart', () => {
     expect(passedSpec.mark).toBe('bar'); // engine encoding preserved
   });
 
-  it('exposes the testid container', () => {
-    const { getByTestId } = render(VegaChart, {
-      props: { spec: '{"mark":"bar"}', testid: 'curve-view' },
-    });
-    expect(getByTestId('curve-view')).toBeTruthy();
-  });
-
   it('warns (with the testid) on a malformed spec instead of failing silently', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     render(VegaChart, { props: { spec: '{not valid json', testid: 'bad-view' } });

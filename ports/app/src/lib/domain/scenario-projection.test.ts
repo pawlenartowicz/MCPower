@@ -4,13 +4,13 @@ import {
   DIST_CODE,
   RESIDUAL_CODE,
   RE_DIST_CODE,
-  UNSUPPORTED_RESIDUAL_IN_SCENARIOS,
   projectScenario,
 } from './scenario-projection';
 
-// These tables are the parity guard: they MUST equal Python's `_DIST_CODE` /
-// `_RESIDUAL_CODE` (model.py) verbatim, or app scenario numbers silently diverge
-// from Python at equal X.Y. Pinned here against the Python constants.
+// These tables are the parity guard: they MUST equal the engine's `DIST_CODES` /
+// `RESIDUAL_CODES` (engine-spec-builder `project_contract.rs`, which Python
+// reads via `get_dist_codes()` / `get_residual_codes()`) verbatim, or app
+// scenario numbers silently diverge from Python at equal X.Y.
 describe('scenario code tables match Python constants', () => {
   it('DIST_CODE matches Python _DIST_CODE', () => {
     expect(DIST_CODE).toEqual({
@@ -36,10 +36,6 @@ describe('scenario code tables match Python constants', () => {
     });
   });
 
-  it('UNSUPPORTED_RESIDUAL_IN_SCENARIOS is empty (all five canonical names now supported)', () => {
-    expect([...UNSUPPORTED_RESIDUAL_IN_SCENARIOS]).toEqual([]);
-  });
-
   it('RE_DIST_CODE encodes the two UI-exposed RE distributions', () => {
     expect(RE_DIST_CODE).toEqual({ normal: 0, heavy_tailed: 1 });
   });
@@ -63,7 +59,7 @@ function cfg(overrides: Partial<ScenarioConfig> = {}): ScenarioConfig {
   };
 }
 
-describe('projectScenario (mirrors Python _scenario_dict)', () => {
+describe('projectScenario (mirrors Python build_scenario_dict)', () => {
   it('carries all wire fields verbatim, hoists lme fields, drops the lme sub-object', () => {
     const wire = projectScenario(cfg());
     expect(wire).toEqual({
@@ -120,11 +116,6 @@ describe('projectScenario (mirrors Python _scenario_dict)', () => {
   it('encodes new_distributions through _DIST_CODE', () => {
     const wire = projectScenario(cfg({ new_distributions: ['right_skewed', 'left_skewed', 'uniform'] }));
     expect(wire.new_distributions).toEqual([2, 3, 5]);
-  });
-
-  it('encodes residual_dists through canonical RESIDUAL_CODE table', () => {
-    const wire = projectScenario(cfg({ residual_dists: ['high_kurtosis', 'right_skewed'] }));
-    expect(wire.residual_dists).toEqual([4, 2]);
   });
 
   it('encodes all five canonical residual distributions', () => {

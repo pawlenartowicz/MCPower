@@ -48,19 +48,62 @@ fn minimal_mixed(cluster_dim: ClusterDim) -> MixedSpec {
     }
 }
 
+// The Mixed wire shape the app's TS adapter emits round-trips exactly. Every
+// skip-when-default field carries a non-default value so it must survive:
+// tagged cluster_dim / outcome / relation, both slope lists, the knobs.
 #[test]
-fn mixed_appspec_serde_roundtrips_with_tagged_cluster_dim() {
-    let spec = AppSpec::Mixed(minimal_mixed(ClusterDim::NClusters { value: 20 }));
-    let json = serde_json::to_string(&spec).unwrap();
-    // family tag is lowercase; cluster_dim is internally tagged on "kind".
-    assert!(json.contains("\"family\":\"mixed\""), "got: {json}");
-    assert!(json.contains("\"kind\":\"n_clusters\""), "got: {json}");
-    assert!(json.contains("\"value\":20"), "got: {json}");
-    let back: AppSpec = serde_json::from_str(&json).unwrap();
-    assert!(
-        matches!(back, AppSpec::Mixed(_)),
-        "expected Mixed after roundtrip, got: {back:?}"
-    );
+fn mixed_appspec_round_trips_through_json() {
+    let raw = serde_json::json!({
+        "family": "mixed",
+        "parsed_formula": {
+            "outcome": "y",
+            "predictors": ["x1", "x2"],
+            "interaction_terms": []
+        },
+        "var_types": [
+            { "kind": "numeric", "name": "x1" },
+            { "kind": "numeric", "name": "x2" }
+        ],
+        "effects": [
+            { "name": "x1", "value": 0.3 },
+            { "name": "x2", "value": 0.2 }
+        ],
+        "correlations": null,
+        "alpha": 0.05,
+        "target_power": 0.8,
+        "n_sims": 800,
+        "seed": 2137,
+        "tests": { "kind": "all" },
+        "correction": "none",
+        "wald_se": "hessian",
+        "df_method": "asymptotic",
+        "scenarios": [],
+        "csv": null,
+        "report_overall": true,
+        "contrasts": [],
+        "cluster_name": "school",
+        "icc": 0.2,
+        "cluster_dim": { "kind": "n_clusters", "value": 20 },
+        "cluster_level_vars": ["x2"],
+        "extra_groupings": [{
+            "tau_squared": 0.1,
+            "relation": { "kind": "crossed", "n_clusters": 8 },
+            "cluster_name": "teacher",
+            "slopes": [
+                { "predictor_name": "x1", "slope_variance": 0.07, "slope_intercept_corr": -0.3 }
+            ]
+        }],
+        "slopes": [
+            { "predictor_name": "x1", "slope_variance": 0.05, "slope_intercept_corr": -0.2 }
+        ],
+        "outcome": { "kind": "binary", "baseline_probability": 0.3, "link": "probit" },
+        "agq": 5,
+        "sample_size_unit": "clusters"
+    });
+    let spec: AppSpec = serde_json::from_value(raw.clone()).expect("decode");
+    assert!(matches!(spec, AppSpec::Mixed(_)), "got: {spec:?}");
+    let re = serde_json::to_value(&spec).expect("encode");
+    assert_eq!(re, raw);
 }
 
 #[test]
@@ -84,6 +127,9 @@ fn assemble_mixed_emits_one_cluster_with_mle_and_tau_from_icc() {
     assert_eq!(contracts.len(), 1);
     let c = &contracts[0];
     assert_eq!(c.estimator, engine_contract::EstimatorSpec::Mle);
+    // Gaussian outcome: continuous with a zero intercept (no baseline transform).
+    assert_eq!(c.outcome.kind, engine_contract::OutcomeKind::Continuous);
+    assert_eq!(c.outcome.intercept, 0.0);
     let cl = c.generation.cluster.as_ref().expect("cluster present");
     match &cl.sizing {
         engine_contract::ClusterSizing::FixedClusters { n_clusters } => assert_eq!(*n_clusters, 20),
@@ -211,9 +257,10 @@ fn run_find_sample_size_cluster_size_succeeds_atom_snapped() {
         .expect("cluster_size + find_sample_size now supported");
     let (_, ss) = &res.scenarios[0];
     let ns: Vec<usize> = ss.grid_or_trace.iter().map(|p| p.n).collect();
-    assert!(
-        ns.iter().all(|&n| n % 30 == 0),
-        "grid N's must be multiples of cluster_size 30: {ns:?}"
+    assert_eq!(
+        ns,
+        [150, 180, 210, 240],
+        "grid N's must be multiples of cluster_size 30 from the 5-cluster floor"
     );
 }
 
@@ -239,9 +286,10 @@ fn run_single_core_find_sample_size_cluster_size_atom_snapped() {
             .expect("cluster_size + single_core_find_sample_size supported");
     let (_, ss) = &res.scenarios[0];
     let ns: Vec<usize> = ss.grid_or_trace.iter().map(|p| p.n).collect();
-    assert!(
-        ns.iter().all(|&n| n % 30 == 0),
-        "grid N's must be multiples of cluster_size 30 on the single-core path: {ns:?}"
+    assert_eq!(
+        ns,
+        [150, 180, 210, 240],
+        "grid N's must be multiples of cluster_size 30 on the single-core path"
     );
 }
 
@@ -257,9 +305,10 @@ fn run_find_power_cluster_size_runs_as_fixed_size() {
     let res = run_find_power(&spec, 180, &NullEmitter, &cancel).expect("find_power ok");
     assert_eq!(res.scenarios.len(), 1);
     let (_, pr) = &res.scenarios[0];
+    assert_eq!(pr.n, 180, "N stays on the 30-row cluster grid");
+    assert_eq!(pr.n_sims, 20, "the spec's n_sims ran");
     assert_eq!(pr.target_indices.len(), pr.power_uncorrected.len());
     assert!(!pr.target_indices.is_empty());
-    assert!(pr.n_sims > 0, "n_sims must be positive, got {}", pr.n_sims);
 }
 
 /// End-to-end pin for the B3 fix: an actual `run_find_power` call (the real

@@ -12,10 +12,11 @@
 //! Covers both mixed arms: a Gaussian LMM (`Mle`) and a clustered logistic GLMM
 //! (`Glm` + cluster) — the two paths that feed the carry.
 
+mod common;
+
 use engine_core::batch::{run_batch, run_batch_st, set_n_threads};
 use engine_core::spec::{
-    BatchResult, ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, Distribution,
-    EstimatorSpec, HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations,
+    BatchResult, ClusterSizing, ClusterSpec, Distribution, EstimatorSpec, OutcomeKind,
     SimulationSpec,
 };
 
@@ -38,40 +39,13 @@ fn mixed_spec(estimator: EstimatorSpec, outcome_kind: OutcomeKind) -> Simulation
     effect_sizes[2] = 0.4;
     SimulationSpec {
         n_non_factor: k as u32,
-        n_factor_dummies: 0,
         correlation,
         var_types: vec![Distribution::Normal; k],
-        var_pinned: vec![],
         var_params: vec![0.0; k],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
-        upload_data: vec![],
-        upload_data_shape: (0, 0),
-        bootstrap_frame_map: vec![],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         effect_sizes,
         target_indices: vec![1, 2],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
         outcome_kind,
-        link: None,
         estimator,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
         max_failed_fraction: 0.5,
         cluster: Some(ClusterSpec {
             sizing: ClusterSizing::FixedClusters { n_clusters: 20 },
@@ -79,14 +53,7 @@ fn mixed_spec(estimator: EstimatorSpec, outcome_kind: OutcomeKind) -> Simulation
             slopes: vec![],
             extra_groupings: vec![],
         }),
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     }
 }
 

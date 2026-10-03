@@ -46,8 +46,12 @@ matching message.  A soft-error (unknown name, etc.) is not a raised exception �
 
 ## Port consumption
 
-**Python:** `mcpower/ports/py/tests/test_formula_fixtures.py` — parametrised pytest, run as part
+**Python:** `mcpower/ports/py/tests/spec/test_formula_fixtures.py` — parametrised pytest, run as part
 of the standard `python -m pytest mcpower/ports/py/tests/` invocation.
+
+**Rust (engine-spec-builder):** `mcpower/crates/engine-spec-builder/tests/formula_fixtures.rs` —
+exact equality of the serde-derived `ParsedFormula` (the R bridge wire) and of the bridge-shaped
+assignment projection.
 
 Other ports (R, WASM, Tauri) should each add a parallel test driver that reads the same
 `cases.json` / `assignments/*.json` files and calls their local binding of `parse_formula` /

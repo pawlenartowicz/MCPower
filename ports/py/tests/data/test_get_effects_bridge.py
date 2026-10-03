@@ -60,24 +60,7 @@ def _build_contracts() -> bytes:
     return contracts_bytes
 
 
-# ── Main test ────────────────────────────────────────────────────────────────
-
-def test_fit_uploaded_data_returns_dict():
-    """``fit_uploaded_data`` returns a dict with betas, design_columns,
-    converged, targets, variance_components, sigma_sq_hat, re_corr."""
-    contracts_bytes = _build_contracts()
-    out = _engine.fit_uploaded_data(
-        contracts_bytes, 0, _SEED, _DESIGN, _NROW, _NCOL, _OUTCOME, None
-    )
-    assert isinstance(out, dict)
-    assert "betas" in out
-    assert "design_columns" in out
-    assert "converged" in out
-    assert "targets" in out
-    assert "variance_components" in out
-    assert "sigma_sq_hat" in out
-    assert "re_corr" in out
-
+# ── Tests ────────────────────────────────────────────────────────────────────
 
 def test_fit_uploaded_data_lme_debug_fields_ols():
     """OLS path: variance_components and re_corr are empty lists; sigma_sq_hat
@@ -125,35 +108,28 @@ def test_fit_uploaded_data_beta_recovery():
 
 
 def test_fit_uploaded_data_targets_structure():
-    """Each target dict has the expected keys and reasonable values."""
+    """The ``targets: ["overall"]`` sentinel without the omnibus yields one
+    marginal t-test on the x slope: df = n - p = 3, critical value t(0.975, 3)."""
     contracts_bytes = _build_contracts()
     out = _engine.fit_uploaded_data(
         contracts_bytes, 0, _SEED, _DESIGN, _NROW, _NCOL, _OUTCOME, None
     )
     targets = out["targets"]
-    assert isinstance(targets, list)
-    assert len(targets) >= 1
-
-    for t in targets:
-        assert isinstance(t, dict)
-        for key in (
-            "target_index", "target_label", "beta", "se",
-            "statistic", "statistic_kind", "critical_value",
-            "alpha", "df", "two_sided",
-        ):
-            assert key in t, f"Missing key {key!r} in target dict"
-        assert t["statistic_kind"] in ("t", "f", "wald_chi2", "z")
-        assert t["two_sided"] is True
-        assert t["alpha"] == pytest.approx(0.05)
-
-
-def test_fit_uploaded_data_without_clusters():
-    """Passing ``cluster_ids=None`` is accepted without error."""
-    contracts_bytes = _build_contracts()
-    out = _engine.fit_uploaded_data(
-        contracts_bytes, 0, _SEED, _DESIGN, _NROW, _NCOL, _OUTCOME, None
-    )
-    assert out["converged"] is True
+    assert len(targets) == 1
+    t = targets[0]
+    assert set(t) == {
+        "target_index", "target_label", "beta", "se",
+        "statistic", "statistic_kind", "critical_value",
+        "alpha", "df", "two_sided",
+    }
+    assert t["target_index"] == 1
+    assert t["target_label"] == "col_1"
+    assert t["beta"] == pytest.approx(2.0, abs=1e-6)
+    assert t["statistic_kind"] == "t"
+    assert t["df"] == [3.0]
+    assert t["critical_value"] == pytest.approx(3.182446305284263, rel=1e-9)
+    assert t["alpha"] == pytest.approx(0.05)
+    assert t["two_sided"] is True
 
 
 def test_fit_uploaded_data_rejects_bad_shape():

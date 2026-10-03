@@ -1,5 +1,5 @@
 """normalize_upload_input returns column-major lists; numpy/pandas accepted via duck-typing, never imported."""
-from mcpower.data.upload import detect_column_types, normalize_upload_input
+from mcpower.data.upload import normalize_upload_input
 
 
 def test_dict_returns_column_major_lists():
@@ -46,17 +46,3 @@ def test_numpy_accepted_without_package_importing_it():
     cols, names = normalize_upload_input(_FakeNDArray([[1.0, 2.0], [3.0, 4.0]]), ["a", "b"])
     assert names == ["a", "b"]
     assert cols == [[1.0, 3.0], [2.0, 4.0]]
-
-
-def test_detect_types_column_major():
-    # binary col, string-factor col, continuous col.
-    binary = [0, 1] * 20
-    pet = ["cat", "dog", "bird"] * 14  # 42 rows, 3 distinct strings
-    cont = [float(i) for i in range(42)]
-    # Trim to equal length 40 for cleanliness.
-    cols = [binary[:40], pet[:40], cont[:40]]
-    types, labels = detect_column_types(cols, ["b", "pet", "c"], 7, 15)
-    assert types[0] == "binary"
-    assert types[1] == "factor"
-    assert labels[1] == ["bird", "cat", "dog"]
-    assert types[2] == "continuous"

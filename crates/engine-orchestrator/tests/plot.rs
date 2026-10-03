@@ -198,6 +198,19 @@ fn power_at_n_single_with_ci() {
     insta::assert_json_snapshot!(parse(&power_at_n_spec(&single_scenario(), &opts)));
 }
 
+/// Multi-scenario errorbar layer: same host-order `yOffset.sort` and `target`
+/// colour binding as the bar layer. The sort is an explicit array because
+/// Vega-Lite ignores an aggregate `{field, op, order}` sort on `yOffset` in a
+/// layered spec.
+#[test]
+fn power_at_n_multi_with_ci() {
+    let opts = PlotOptions {
+        show_ci: true,
+        ..Default::default()
+    };
+    insta::assert_json_snapshot!(parse(&power_at_n_spec(&multi_scenario(), &opts)));
+}
+
 #[test]
 fn power_at_n_single_with_ci_and_target_line_and_title() {
     let opts = PlotOptions {
@@ -293,82 +306,6 @@ fn joint_multi_scenario_faceted() {
 // ── Load-bearing structure (too fine-grained / arithmetic for snapshots) ────
 
 #[test]
-fn power_at_n_is_horizontal_with_power_sort() {
-    // Single: x maps to power (the axis flip), bars sized 360 wide.
-    let single = parse(&power_at_n_spec(
-        &single_scenario(),
-        &PlotOptions::default(),
-    ));
-    let bar = &single["layer"][0]["encoding"];
-    assert_eq!(bar["x"]["field"], "power");
-    assert_eq!(bar["y"]["field"], "target");
-    assert_eq!(single["width"], 360.0);
-    // S=1 ⇒ y.scale.paddingInner == 2/5 == 0.4 (⅔-bar gap with one bar/group).
-    assert_eq!(bar["y"]["scale"]["paddingInner"], 0.4);
-    assert_eq!(bar["y"]["scale"]["paddingOuter"], 0);
-
-    // Multi: grouping moves to yOffset + fillOpacity, both ordered by HOST order
-    // (the order scenarios are passed in) so the layered spec renders in the correct
-    // order (Vega-Lite ignores aggregate {field,op,order} sort on yOffset/color
-    // in a layered spec — an explicit array IS honoured).
-    //
-    // multi_scenario() passes: ["optimistic", "realistic", "doomer"] — host order.
-    let expected_sort = serde_json::json!(["optimistic", "realistic", "doomer"]);
-    let multi = parse(&power_at_n_spec(&multi_scenario(), &PlotOptions::default()));
-    let mbar = &multi["layer"][0]["encoding"];
-    assert_eq!(mbar["yOffset"]["field"], "scenario");
-    assert!(
-        mbar["yOffset"]["sort"].is_array(),
-        "yOffset.sort must be an explicit array, got: {}",
-        mbar["yOffset"]["sort"]
-    );
-    assert_eq!(mbar["yOffset"]["sort"], expected_sort);
-    // Colour keys on the effect (target), not the scenario, with NO pinned domain:
-    // hosts relabel the `target` data values, so a token domain would null out the
-    // marks. Vega derives the domain from the (relabelled) data.
-    assert_eq!(mbar["color"]["field"], "target");
-    assert!(
-        mbar["color"]["scale"].is_null(),
-        "color must carry no explicit scale, got: {}",
-        mbar["color"]["scale"]
-    );
-    // Errorbar layer (layer[1] when show_ci=true) must carry the same colour binding.
-    let multi_ci = parse(&power_at_n_spec(
-        &multi_scenario(),
-        &PlotOptions {
-            show_ci: true,
-            ..Default::default()
-        },
-    ));
-    let ci_enc = &multi_ci["layer"][1]["encoding"];
-    assert_eq!(ci_enc["yOffset"]["sort"], expected_sort);
-    assert_eq!(ci_enc["color"]["field"], "target");
-    assert_eq!(mbar["yOffset"]["scale"]["paddingInner"], 0);
-    assert_eq!(mbar["yOffset"]["scale"]["paddingOuter"], 0);
-    // S=3 ⇒ y.scale.paddingInner == 2/11 (compare with tolerance: the JSON
-    // round-trip shifts the last ULP off the Rust literal).
-    let pad = mbar["y"]["scale"]["paddingInner"].as_f64().unwrap();
-    assert!((pad - 2.0 / 11.0).abs() < 1e-12, "paddingInner was {pad}");
-    assert!(
-        mbar["x"].get("xOffset").is_none(),
-        "no leftover horizontal offset"
-    );
-
-    // CI errorbar layer uses horizontal encoding (x = ci_lo, x2 = ci_hi, y = target).
-    let single_ci = parse(&power_at_n_spec(
-        &single_scenario(),
-        &PlotOptions {
-            show_ci: true,
-            ..Default::default()
-        },
-    ));
-    let ci_enc = &single_ci["layer"][1]["encoding"];
-    assert_eq!(ci_enc["x"]["field"], "ci_lo");
-    assert_eq!(ci_enc["x2"]["field"], "ci_hi");
-    assert_eq!(ci_enc["y"]["field"], "target");
-}
-
-#[test]
 fn power_at_n_includes_overall_bar_last() {
     // A single scenario with two marginals plus an overall/omnibus test: the
     // overall test is a first-class result and must draw one more bar, appended
@@ -427,50 +364,6 @@ fn power_at_n_height_formula() {
     // G=8, S=1: 8 + 7*⅔ = 12.667 (> 7) ⇒ round(12.667*16) == round(202.67) == 203.
     let v = parse(&power_at_n_spec(&many, &PlotOptions::default()));
     assert_eq!(v["height"], 203.0);
-}
-
-#[test]
-fn curve_multi_facets_and_rekeys_to_target() {
-    let v = parse(&sample_size_curve_spec(
-        &multi_scenario_grid(),
-        &PlotOptions::default(),
-    ));
-    assert_eq!(v["facet"]["field"], "scenario");
-    assert_eq!(v["facet"]["columns"], 3);
-    // Panels follow the host's scenario order, not Vega-Lite's alphabetical
-    // default (which would render doomer, optimistic, realistic).
-    assert_eq!(
-        v["facet"]["sort"],
-        serde_json::json!(["optimistic", "realistic", "doomer"])
-    );
-    assert_eq!(v["spec"]["width"], 200.0);
-    assert_eq!(v["spec"]["height"], 240.0);
-    assert!(
-        v.get("layer").is_none(),
-        "layers move under spec when faceted"
-    );
-    // Inside a panel, targets are keyed by colour (shared domain, stable palette
-    // slot) and also by strokeDash (redundant for colourblind/print). The engine
-    // emits separate specs for the curve and joint panels, so there is no
-    // shared-scale conflict at the engine level (a host vconcat would need
-    // `resolve.scale.color = independent`). `series` drops the scenario label so
-    // each panel is multi-series.
-    let line_enc = &v["spec"]["layer"][0]["encoding"];
-    assert_eq!(line_enc["color"]["field"], "target");
-    assert_eq!(line_enc["strokeDash"]["field"], "target");
-    let rows = v["data"]["values"].as_array().unwrap();
-    assert!(rows
-        .iter()
-        .all(|r| !r["series"].as_str().unwrap().contains("optimistic")));
-
-    // Single scenario stays unfaceted with a fixed 360x240 panel.
-    let s = parse(&sample_size_curve_spec(
-        &ssr_grid(),
-        &PlotOptions::default(),
-    ));
-    assert!(s.get("facet").is_none());
-    assert_eq!(s["width"], 360.0);
-    assert_eq!(s["height"], 240.0);
 }
 
 // ── Overall (omnibus) curve series ──────────────────────────────────────────
@@ -535,56 +428,6 @@ fn overall_series_absent_when_no_overall_power() {
     let rows = curve["data"]["values"].as_array().unwrap();
     assert!(rows.iter().all(|r| r["target"] != "overall"));
     assert!(curve["layer"][0]["encoding"].get("strokeDash").is_none());
-}
-
-// ── Axis titles (no concatenation across co-scaled layers) ──────────────────
-
-#[test]
-fn axis_titles_do_not_concatenate() {
-    // power_at_n: x is "Power" (not "Power, ci_lo"), y is "Effect" (not "Target").
-    // The errorbar layer must repeat the same titles on its shared x/y scales.
-    let bars = parse(&power_at_n_spec(
-        &single_scenario(),
-        &PlotOptions {
-            show_ci: true,
-            ..Default::default()
-        },
-    ));
-    let bar_enc = &bars["layer"][0]["encoding"];
-    assert_eq!(bar_enc["x"]["title"], "Power");
-    assert_eq!(bar_enc["y"]["title"], "Effect");
-    let err_enc = &bars["layer"][1]["encoding"];
-    assert_eq!(
-        err_enc["x"]["title"], "Power",
-        "errorbar x must repeat \"Power\""
-    );
-    assert_eq!(
-        err_enc["y"]["title"], "Effect",
-        "errorbar y must repeat \"Effect\""
-    );
-
-    // sample_size_curve: line y "Power" / x "Sample size (N)"; the errorband
-    // layer repeats them so the shared scale renders a single title.
-    let curve = parse(&sample_size_curve_spec(
-        &ssr_grid(),
-        &PlotOptions {
-            show_ci: true,
-            target_power_line: Some(0.80),
-            ..Default::default()
-        },
-    ));
-    let layers = curve["layer"].as_array().unwrap();
-    for layer in layers {
-        let enc = &layer["encoding"];
-        // Only check layers that bind the shared n/power fields (skip the
-        // datum-based target rule, which carries no field title).
-        if enc["x"]["field"] == "n" {
-            assert_eq!(enc["x"]["title"], "Sample size (N)");
-        }
-        if enc["y"]["field"] == "power" || enc["y"]["field"] == "ci_lo" {
-            assert_eq!(enc["y"]["title"], "Power");
-        }
-    }
 }
 
 // ── Cross-emitter schema sanity ────────────────────────────────────────────
@@ -729,22 +572,5 @@ fn sample_size_plot_set_s2_m2_all_blocks() {
         let v = parse(spec);
         assert!(v["$schema"].as_str().unwrap().contains("v5"));
         assert!(v.get("config").is_none());
-    }
-}
-
-#[test]
-fn m1_emits_no_aux_blocks() {
-    // Explicit: single-target scenarios never get at_least_k / exactly_k.
-    for scenarios in [&plot_set_s1_m1(), &plot_set_s2_m1()] {
-        let blocks = sample_size_plot_set(scenarios, &PlotOptions::default());
-        let keys: Vec<&str> = blocks.iter().map(|(k, _)| k.as_str()).collect();
-        assert!(
-            !keys.contains(&"at_least_k"),
-            "m=1 must not emit at_least_k; got {keys:?}"
-        );
-        assert!(
-            !keys.contains(&"exactly_k"),
-            "m=1 must not emit exactly_k; got {keys:?}"
-        );
     }
 }

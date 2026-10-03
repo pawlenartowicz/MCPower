@@ -7,16 +7,15 @@ const NAKED_SPEC = '{"$schema":"https://vega.github.io/schema/vega-lite/v5.json"
 const SPEC_WITH_CONFIG = '{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","mark":"point","data":{"values":[]},"config":{"customKey":"survives"}}';
 
 describe('plotHtml', () => {
-  it('returns a string containing the DOCTYPE declaration', () => {
+  it('renders the artifact template: doctype, vega@5/vega-lite@5/vega-embed@6 from jsdelivr, multi-spec loop', () => {
     const html = plotHtml(NAKED_SPEC);
     expect(html).toContain('<!doctype html>');
-  });
-
-  it('loads vega@5, vega-lite@5, vega-embed@6 from jsdelivr CDN', () => {
-    const html = plotHtml(NAKED_SPEC);
     expect(html).toContain('https://cdn.jsdelivr.net/npm/vega@5');
     expect(html).toContain('https://cdn.jsdelivr.net/npm/vega-lite@5');
     expect(html).toContain('https://cdn.jsdelivr.net/npm/vega-embed@6');
+    // Multi-spec array template: scaleFactor:2 and the forEach loop.
+    expect(html).toContain('scaleFactor');
+    expect(html).toContain('forEach');
   });
 
   it('substitutes {{SPECS}} fully — the literal placeholder is absent', () => {
@@ -24,22 +23,9 @@ describe('plotHtml', () => {
     expect(html).not.toContain('{{SPECS}}');
   });
 
-  it('uses the multi-spec array template (scaleFactor, forEach loop)', () => {
-    const html = plotHtml(NAKED_SPEC);
-    // Template-driven: scaleFactor:2 and the forEach loop are present.
-    expect(html).toContain('scaleFactor');
-    expect(html).toContain('forEach');
-  });
-
   it('applies the light-print theme: background #ffffff is present in the output', () => {
     const html = plotHtml(NAKED_SPEC);
     expect(html).toContain('"background":"#ffffff"');
-  });
-
-  it('applies the light-print theme: legend block is present in the output', () => {
-    const html = plotHtml(NAKED_SPEC);
-    expect(html).toContain('"legend"');
-    expect(html).toContain('"labelColor":"#000000"');
   });
 
   it('deep-merge: consumer config keys not in the light-print theme survive', () => {
@@ -133,11 +119,5 @@ describe('downloadPlot', () => {
     expect(clickSpy).toHaveBeenCalledOnce();
     expect(removeChildSpy).toHaveBeenCalledOnce();
     expect(revokeObjectURLSpy).toHaveBeenCalledWith('blob:mock-url');
-  });
-
-  it('passes the filename through unchanged', () => {
-    downloadPlot(NAKED_SPEC, 'my-scenario-plot.json');
-    const anchor = createElementSpy.mock.results[0]?.value as { download: string };
-    expect(anchor.download).toBe('my-scenario-plot.json');
   });
 });

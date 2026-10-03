@@ -3,15 +3,19 @@
 Mirrors the correction= pattern: validated at find_power entry, normalised in
 spec_builder, forwarded into LinearSpec → project_contract. Only affects the
 clustered-binary GLMM estimator (WaldSe::affects); the OLS/LMM paths ignore it.
+Which mode is more conservative is engine math, pinned in
+engine-orchestrator's wald_se_modes tests; here only the port wiring is proven.
 """
 
 from __future__ import annotations
 
+import json
 import warnings
 
+import msgpack
 import pytest
 
-from mcpower import MCPower
+from mcpower import MCPower, _engine
 
 
 def _glmm():
@@ -24,8 +28,14 @@ def _glmm():
     )
 
 
-def test_wald_se_default_is_rx_and_hessian_more_conservative():
+def test_wald_se_default_is_rx_and_hessian_reaches_engine():
     m = _glmm()
+    # "hessian" lands on the contract unchanged.
+    payload = m._to_linear_spec_dict(["optimistic"], wald_se="hessian")
+    names, contracts_bytes, _skeleton = _engine.build_contract_from_spec(json.dumps(payload), *m._encode_outcome_and_clusters())
+    contract = msgpack.unpackb(contracts_bytes, raw=False)[names.index("optimistic")]
+    assert contract["wald_se"] == "hessian"
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         # Default (no kwarg) must equal explicit "rx" — the 1.1.0 fastmode default.
@@ -37,14 +47,13 @@ def test_wald_se_default_is_rx_and_hessian_more_conservative():
     p_rx = r_rx["power_uncorrected"][0][0]
     # Default is rx: same seed/data ⇒ identical power.
     assert p_default == p_rx
-    # Hessian is at least as conservative as rx (equal or lower power);
-    # allow 0.05 tolerance for Monte Carlo noise at n_sims=400.
-    assert p_h <= p_rx + 0.05
+    # find_power forwards the kwarg: the hessian SE changes the seeded result.
+    assert p_h != p_rx
 
 
 def test_wald_se_rejects_garbage():
     m = _glmm()
-    with pytest.raises((ValueError, Exception)):
+    with pytest.raises(ValueError, match="wald_se"):
         m.find_power(200, n_sims=100, wald_se="asymp", verbose=False)
-    with pytest.raises((ValueError, Exception)):
+    with pytest.raises(ValueError, match="wald_se"):
         m.find_power(200, n_sims=100, wald_se="nonsense", verbose=False)

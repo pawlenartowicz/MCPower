@@ -34,7 +34,6 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 wasm-bindgen-test  = "0.3"
-engine-contract    = { path = "../engine-contract" }
 
 # wasm-pack --profiling defaults wasm-opt to ['-O'] WITHOUT -g, which strips the
 # wasm name section despite the profile's documented intent (wasm-pack #797) —

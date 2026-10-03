@@ -13,7 +13,7 @@ ASSIGN = sorted((ROOT / "assignments").glob("*.json"))
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
-def test_formula_fixture(case):
+def test_formula_fixture(case):  # APIC-20 ('=' separator: case 009_equals_separator)
     formula = case["formula"]
     if "error" in case:
         with pytest.raises(ValueError, match=case["error"]):

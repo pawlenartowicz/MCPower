@@ -10,14 +10,18 @@ from __future__ import annotations
 
 import warnings
 
-import pytest
-
 from mcpower import MCPower
-
 
 # ---------------------------------------------------------------------------
 # find_power: engine snaps N and emits a warning
 # ---------------------------------------------------------------------------
+
+
+def _snap_warnings(caught):
+    """The engine's cluster-atom snap warning, as surfaced by the port."""
+    return [
+        str(w.message) for w in caught if issubclass(w.category, UserWarning) and "not a multiple of the cluster atom" in str(w.message)
+    ]
 
 
 def test_find_power_snaps_sample_size_for_lme():
@@ -30,7 +34,9 @@ def test_find_power_snaps_sample_size_for_lme():
     # Engine floors to the nearest multiple of n_clusters (atom=10).
     assert res["sample_sizes"][0] == 90
     # The engine emits a grid_warning that Python surfaces as a UserWarning.
-    assert any("90" in str(w.message) or "95" in str(w.message) for w in caught if issubclass(w.category, UserWarning))
+    snaps = _snap_warnings(caught)
+    assert len(snaps) == 1
+    assert "95" in snaps[0] and "using 90" in snaps[0]
 
 
 def test_find_power_no_warn_when_divisible():
@@ -42,21 +48,7 @@ def test_find_power_no_warn_when_divisible():
         res = model.find_power(100, n_sims=20, verbose=False)
     # N=100 is a multiple of 10 — no snap, no warning.
     assert res["sample_sizes"][0] == 100
-    snap_warns = [w for w in caught if issubclass(w.category, UserWarning)]
-    # Should have no snap-related warnings (no grid_warnings from engine).
-    snap_warns_msg = [w for w in snap_warns if "not evenly divisible" in str(w.message).lower() or "lowered" in str(w.message).lower() or "snapped" in str(w.message).lower()]
-    assert len(snap_warns_msg) == 0
-
-
-def test_find_power_snap_floors_not_rounds():
-    """N=99, n_clusters=10 → floors to 90, not rounds to 100."""
-    model = MCPower("y ~ x1 + (1|school)", family="lme")
-    model.set_effects("x1=0.5").set_cluster("school", ICC=0.3, n_clusters=10)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        res = model.find_power(99, n_sims=20, verbose=False)
-    # 99 // 10 * 10 = 90 (floor), not 100 (round up).
-    assert res["sample_sizes"][0] == 90
+    assert _snap_warnings(caught) == []
 
 
 def test_snap_does_not_apply_to_ols():
@@ -66,10 +58,7 @@ def test_snap_does_not_apply_to_ols():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         res = model.find_power(95, n_sims=20, verbose=False)
-    snap_warns = [w for w in caught if issubclass(w.category, UserWarning)
-                  and ("not evenly divisible" in str(w.message).lower()
-                       or "lowered" in str(w.message).lower())]
-    assert len(snap_warns) == 0
+    assert _snap_warnings(caught) == []
     assert res["sample_sizes"][0] == 95
 
 
@@ -109,8 +98,7 @@ def test_find_sample_size_result_carries_fitted_keys():
     """
     model = MCPower("y ~ x1 + x2")
     model.set_effects("x1=0.5, x2=0.3")
-    res = model.find_sample_size(from_size=40, to_size=300, by=20,
-                                 n_sims=400, verbose=False)
+    res = model.find_sample_size(from_size=40, to_size=300, by=20, n_sims=400, verbose=False)
     fitted = res.get("fitted")
     fitted_joint = res.get("fitted_joint")
     cluster_atom = res.get("cluster_atom")
@@ -120,17 +108,11 @@ def test_find_sample_size_result_carries_fitted_keys():
     assert cluster_atom is not None, "cluster_atom key missing from result"
 
     n_targets = len(res["target_indices"])
-    assert len(fitted) == n_targets, (
-        f"fitted has {len(fitted)} entries but n_targets={n_targets}"
-    )
+    assert len(fitted) == n_targets, f"fitted has {len(fitted)} entries but n_targets={n_targets}"
     for pos, f in fitted.items():
-        assert f.get("status") in _ALLOWED_STATUSES, (
-            f"fitted[{pos}] status {f.get('status')!r} not in {_ALLOWED_STATUSES}"
-        )
+        assert f.get("status") in _ALLOWED_STATUSES, f"fitted[{pos}] status {f.get('status')!r} not in {_ALLOWED_STATUSES}"
 
-    assert len(fitted_joint) == len(res.get("first_joint_achieved", {})), (
-        "fitted_joint length does not match first_joint_achieved"
-    )
+    assert len(fitted_joint) == len(res.get("first_joint_achieved", {})), "fitted_joint length does not match first_joint_achieved"
     assert cluster_atom == 1, f"expected cluster_atom=1 for OLS, got {cluster_atom}"
 
 
@@ -145,14 +127,11 @@ def test_clustered_find_sample_size_cluster_atom_and_n_achievable_alignment():
     model.set_effects("x1=0.5").set_cluster("school", ICC=0.3, cluster_size=cluster_size)
     res = model.find_sample_size(from_size=60, to_size=300, by=20, n_sims=50, verbose=False)
 
-    assert res.get("cluster_atom") == cluster_size, (
-        f"cluster_atom={res.get('cluster_atom')}, expected {cluster_size}"
-    )
+    assert res.get("cluster_atom") == cluster_size, f"cluster_atom={res.get('cluster_atom')}, expected {cluster_size}"
     fitted = res.get("fitted") or {}
     for pos, f in fitted.items():
         if f.get("status") == "fitted":
             n_achievable = f["n_achievable"]
             assert n_achievable % cluster_size == 0, (
-                f"fitted[{pos}].n_achievable={n_achievable} not divisible by "
-                f"cluster_atom={cluster_size}"
+                f"fitted[{pos}].n_achievable={n_achievable} not divisible by cluster_atom={cluster_size}"
             )

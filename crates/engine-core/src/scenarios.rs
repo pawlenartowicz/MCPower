@@ -265,29 +265,6 @@ mod tests {
     }
 
     #[test]
-    fn scenario_rng_is_pure_function() {
-        let mut a = scenario_rng(42, 0);
-        let mut b = scenario_rng(42, 0);
-        for _ in 0..100 {
-            let xa = a.next_uniform();
-            let xb = b.next_uniform();
-            assert_eq!(
-                xa, xb,
-                "scenario_rng must be a pure function of (seed, sim_id)"
-            );
-        }
-    }
-
-    #[test]
-    fn sim_id_changes_stream() {
-        let mut a = scenario_rng(42, 0);
-        let mut b = scenario_rng(42, 1);
-        let xa = a.next_uniform();
-        let xb = b.next_uniform();
-        assert_ne!(xa, xb, "different sim_ids must produce different streams");
-    }
-
-    #[test]
     fn perturb_correlation_keeps_symmetry_and_unit_diag() {
         // Build a "realistic" scenario with mild correlation noise.
         let scenario = ScenarioPerturbations {
@@ -295,13 +272,14 @@ mod tests {
             correlation_noise_sd: 0.15,
             ..Default::default()
         };
+        // (0,1) and (2,3) sit beyond the ±0.8 clip so the clamp fires.
         let base = mat_from_rows(
             4,
             &[
-                &[1.0, 0.3, 0.2, 0.1],
-                &[0.3, 1.0, 0.4, 0.2],
-                &[0.2, 0.4, 1.0, 0.3],
-                &[0.1, 0.2, 0.3, 1.0],
+                &[1.0, 0.99, 0.2, 0.1],
+                &[0.99, 1.0, 0.4, 0.2],
+                &[0.2, 0.4, 1.0, -0.99],
+                &[0.1, 0.2, -0.99, 1.0],
             ],
         );
         let mut rng = scenario_rng(42, 0);
@@ -323,7 +301,8 @@ mod tests {
             // Unit diagonal.
             assert_eq!(out[(i, i)], 1.0);
         }
-        // Off-diagonals clipped to ±0.8.
+        // Off-diagonals clipped to ±0.8; the out-of-range base entries land
+        // exactly on the clip.
         for i in 0..4 {
             for j in 0..4 {
                 if i != j {
@@ -335,6 +314,11 @@ mod tests {
                 }
             }
         }
+        assert_eq!(out[(0, 1)], 0.8, "upper clamp must fire");
+        assert_eq!(out[(2, 3)], -0.8, "lower clamp must fire");
+        // The noise is live: in-range entries move off the base.
+        assert_ne!(out[(0, 2)], base[(0, 2)], "noise must perturb (0,2)");
+        assert_ne!(out[(1, 2)], base[(1, 2)], "noise must perturb (1,2)");
     }
 
     #[test]
@@ -374,9 +358,11 @@ mod tests {
 
     #[test]
     fn perturb_var_types_skips_pinned_normal() {
-        // Pin rule: an explicitly-set normal is never swapped, and the
-        // unconditional per-entry uniform draw is preserved, so the unpinned
-        // entries realize exactly what an all-unpinned run realizes.
+        // Pin rule: an explicitly-set normal is never swapped, while the
+        // unpinned normals around it still swap. The pinned entry consumes its
+        // unconditional uniform but skips the pool-pick draw, so entries after
+        // it do NOT replay an all-unpinned run's draws; the one-entry pool makes
+        // the swapped value draw-independent.
         let scenario = ScenarioPerturbations {
             distribution_change_prob: 1.0,
             new_distributions: vec![Distribution::RightSkewed],

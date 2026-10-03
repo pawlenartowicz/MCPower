@@ -45,12 +45,6 @@ pub use engine_contract::{
 /// of truth for default scenario configs — never duplicated in a port.
 pub const SCENARIOS_CONFIG_JSON: &str = include_str!("../../../configs/scenarios.json");
 
-/// Raw embedded scenario defaults (alias/flat/object-keyed). Hosts parse this
-/// string; the engine does not consume it in production yet (app 2.x will).
-pub fn scenarios() -> &'static str {
-    SCENARIOS_CONFIG_JSON
-}
-
 #[cfg(test)]
 mod scenarios_embed_tests {
     use serde_json::Value;
@@ -78,23 +72,5 @@ mod scenarios_embed_tests {
                 "{name}: legacy alias must not appear in residual_dists"
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod config_embed_tests {
-    #[test]
-    fn embedded_config_validates() {
-        let cfg = super::config();
-        assert_eq!(cfg.report.format.power_decimals_long, 1);
-        assert_eq!(
-            cfg.report.overall_label_by_estimator.get("ols").unwrap(),
-            "Overall F"
-        );
-        assert_eq!(cfg.limits.min_rows_per_cluster, 2);
-        assert_eq!(cfg.limits.min_clusters, 5);
-        assert_eq!(cfg.simulation.cluster_auto_count, 12);
-        assert_eq!(cfg.limits.reliable_rows_per_cluster, 5);
-        assert_eq!(cfg.limits.recommended_rows_per_cluster, 10);
     }
 }

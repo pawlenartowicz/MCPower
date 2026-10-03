@@ -107,6 +107,8 @@ describe('ProgressAggregator — native-semantics reconstruction', () => {
     for (let i = 1; i < counts.length; i++) expect(counts[i]!).toBeGreaterThanOrEqual(counts[i - 1]!);
     expect(counts.at(-1)).toBe(1600);
 
+    // Each worker envelope carries its own `completed`; those are absorbed and
+    // only finish() emits the single terminal event.
     expect(events.filter((e) => e.kind === 'completed')).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ kind: 'completed' });
   });
@@ -129,14 +131,5 @@ describe('ProgressAggregator — native-semantics reconstruction', () => {
     // Worker 1 finishes its whole share → pool total reached.
     agg.workerDone(1);
     expect(events.at(-1)).toMatchObject({ kind: 'sims_completed', completed: 1200, total: 1200 });
-  });
-
-  it('per-worker completed events are absorbed (no duplicate terminal)', () => {
-    const { events, sink } = collect();
-    const agg = new ProgressAggregator(800, [400, 400], 80, sink);
-    powerEnvelope(400, 1).forEach((e) => agg.workerEvent(0, e)); // includes a per-worker `completed`
-    powerEnvelope(400, 1).forEach((e) => agg.workerEvent(1, e));
-    agg.finish();
-    expect(events.filter((e) => e.kind === 'completed')).toHaveLength(1);
   });
 });

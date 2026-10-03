@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { correlatableVariables, pearson, allContinuousUploaded } from './correlations';
+import {
+    allContinuousUploaded,
+    correlatableVariables,
+    correlationDisplayValue,
+    pearson,
+} from './correlations';
 import type { VariableRow } from './family';
 import type { CsvData } from './app-spec';
 
@@ -44,14 +49,6 @@ describe('correlatableVariables', () => {
         expect(result[1]!.idx).toBe(3); // y is at index 3
     });
 
-    it('an uploaded factor has kind==="factor" and is excluded by R1', () => {
-        // Part 1 contract: uploaded factors have kind === 'factor'
-        const uploadedFactor: VariableRow = { name: 'cyl', kind: 'factor', nLevels: 3, levelProportions: [1 / 3, 1 / 3, 1 / 3] };
-        const csvData = makeCsvData(['cyl'], ['factor']);
-        const result = correlatableVariables([contX, uploadedFactor], csvData, 'none');
-        expect(result.map((e) => e.row.name)).toEqual(['x']);
-    });
-
     describe('strict mode (R2)', () => {
         it('removes uploaded continuous variables in strict mode', () => {
             const csvData = makeCsvData(['x'], ['continuous']);
@@ -61,25 +58,11 @@ describe('correlatableVariables', () => {
             expect(result.map((e) => e.row.name)).toEqual(['z']);
         });
 
-        it('keeps uploaded continuous variables in partial mode', () => {
+        it('keeps uploaded continuous variables in partial and none modes', () => {
             const csvData = makeCsvData(['x'], ['continuous']);
             const vars: VariableRow[] = [contX, contZ];
-            const result = correlatableVariables(vars, csvData, 'partial');
-            expect(result.map((e) => e.row.name)).toEqual(['x', 'z']);
-        });
-
-        it('keeps uploaded continuous variables in none mode', () => {
-            const csvData = makeCsvData(['x'], ['continuous']);
-            const vars: VariableRow[] = [contX, contZ];
-            const result = correlatableVariables(vars, csvData, 'none');
-            expect(result.map((e) => e.row.name)).toEqual(['x', 'z']);
-        });
-
-        it('returns empty when all continuous vars are uploaded in strict mode', () => {
-            const csvData = makeCsvData(['x', 'y'], ['continuous', 'continuous']);
-            const vars: VariableRow[] = [contX, contY];
-            const result = correlatableVariables(vars, csvData, 'strict');
-            expect(result).toHaveLength(0);
+            expect(correlatableVariables(vars, csvData, 'partial').map((e) => e.row.name)).toEqual(['x', 'z']);
+            expect(correlatableVariables(vars, csvData, 'none').map((e) => e.row.name)).toEqual(['x', 'z']);
         });
     });
 
@@ -87,13 +70,6 @@ describe('correlatableVariables', () => {
         const vars: VariableRow[] = [contX, contY, binB];
         const result = correlatableVariables(vars, null, 'strict');
         expect(result.map((e) => e.row.name)).toEqual(['x', 'y']);
-    });
-
-    it('idx maps correctly with mixed kinds', () => {
-        // [contX(0), binB(1), contY(2), factF(3), contZ(4)]
-        const vars: VariableRow[] = [contX, binB, contY, factF, contZ];
-        const result = correlatableVariables(vars, null, 'none');
-        expect(result.map((e) => e.idx)).toEqual([0, 2, 4]);
     });
 });
 
@@ -106,12 +82,6 @@ describe('allContinuousUploaded', () => {
         // contZ is not in the uploaded dataset; the strict-mode message must NOT fire
         const csvData = makeCsvData([], []);
         expect(allContinuousUploaded([contZ], csvData)).toBe(false);
-    });
-
-    it('strict mode + one continuous generated + zero uploaded → false', () => {
-        // csvData has no continuous columns — contZ is generated, not uploaded
-        const csvData = makeCsvData(['other'], ['binary']);
-        expect(allContinuousUploaded([contZ, binB], csvData)).toBe(false);
     });
 
     it('strict mode + all continuous uploaded → true (show "In strict mode…")', () => {
@@ -161,15 +131,9 @@ describe('pearson', () => {
         expect(r).toBeCloseTo(9 / Math.sqrt(84), 10);
     });
 
-    it('zero-variance array a → 0', () => {
+    it('zero variance in either or both arrays → 0', () => {
         expect(pearson([3, 3, 3], [1, 2, 3])).toBe(0);
-    });
-
-    it('zero-variance array b → 0', () => {
         expect(pearson([1, 2, 3], [5, 5, 5])).toBe(0);
-    });
-
-    it('both zero-variance → 0', () => {
         expect(pearson([2, 2, 2], [7, 7, 7])).toBe(0);
     });
 
@@ -187,69 +151,44 @@ describe('pearson', () => {
 });
 
 // ---------------------------------------------------------------------------
-// R3 measured display default (tested via displayValue logic inline)
+// correlationDisplayValue — R3 measured display default
 // ---------------------------------------------------------------------------
 
-describe('R3 measured display default — pure logic (no component render)', () => {
-    // We test the logic that backs displayValue: in partial mode, when stored = 0
-    // and both vars are uploaded-continuous, the pearson value is shown.
-    // We call pearson directly (the actual display path in the component does the same).
-
-    function simulateDisplayValue(
-        storedCorr: number,
-        mode: 'none' | 'partial' | 'strict',
-        colI: { col_type: string; values: number[] } | undefined,
-        colJ: { col_type: string; values: number[] } | undefined,
-    ): number {
-        // Mirrors CorrelationsEditor.svelte displayValue() logic
-        if (mode !== 'partial' || storedCorr !== 0) return storedCorr;
-        if (!colI || !colJ) return storedCorr;
-        if (colI.col_type !== 'continuous' || colJ.col_type !== 'continuous') return storedCorr;
-        return pearson(colI.values, colJ.values);
-    }
-
-    const colA = { col_type: 'continuous', values: [1, 2, 3, 4, 5] };
-    const colB = { col_type: 'continuous', values: [5, 4, 3, 2, 1] };
-    const expectedR = -1; // perfectly anti-correlated
+describe('correlationDisplayValue (R3 measured display default)', () => {
+    // a and b are perfectly anti-correlated uploaded continuous columns; c is a
+    // binary column correlated with a, so a measured r would be non-zero.
+    const csvData: CsvData = {
+        mode: 'partial',
+        n_rows: 5,
+        columns: [
+            { name: 'a', col_type: 'continuous', values: [1, 2, 3, 4, 5], labels: [] },
+            { name: 'b', col_type: 'continuous', values: [5, 4, 3, 2, 1], labels: [] },
+            { name: 'c', col_type: 'binary', values: [0, 0, 1, 1, 1], labels: [] },
+        ],
+    };
 
     it('partial mode + stored=0 + both uploaded-continuous → measured r shown', () => {
-        const displayed = simulateDisplayValue(0, 'partial', colA, colB);
-        expect(displayed).toBeCloseTo(expectedR, 10);
+        expect(correlationDisplayValue(0, 'partial', csvData, 'a', 'b')).toBeCloseTo(-1, 10);
     });
 
     it('none mode + stored=0 → shows 0, not measured r', () => {
-        const displayed = simulateDisplayValue(0, 'none', colA, colB);
-        expect(displayed).toBe(0);
+        expect(correlationDisplayValue(0, 'none', csvData, 'a', 'b')).toBe(0);
     });
 
     it('strict mode + stored=0 → shows 0, not measured r', () => {
-        const displayed = simulateDisplayValue(0, 'strict', colA, colB);
-        expect(displayed).toBe(0);
+        expect(correlationDisplayValue(0, 'strict', csvData, 'a', 'b')).toBe(0);
     });
 
     it('partial mode + stored non-zero → shows stored value, not measured r', () => {
-        const displayed = simulateDisplayValue(0.5, 'partial', colA, colB);
-        expect(displayed).toBe(0.5);
+        expect(correlationDisplayValue(0.5, 'partial', csvData, 'a', 'b')).toBe(0.5);
     });
 
     it('partial mode + stored=0 + one var is not uploaded → shows 0', () => {
-        const displayed = simulateDisplayValue(0, 'partial', colA, undefined);
-        expect(displayed).toBe(0);
+        expect(correlationDisplayValue(0, 'partial', csvData, 'a', 'generated')).toBe(0);
     });
 
     it('partial mode + stored=0 + one var is binary (not continuous) → shows 0', () => {
-        const binaryCol = { col_type: 'binary', values: [0, 1, 0, 1, 0] };
-        const displayed = simulateDisplayValue(0, 'partial', colA, binaryCol);
-        expect(displayed).toBe(0);
-    });
-
-    it('cfg.correlations[i][j] stays 0 (measured value never written)', () => {
-        // This is the key invariant: displayValue reads but does NOT write.
-        // We verify by confirming the stored value is unchanged after computing display.
-        const storedMatrix: number[][] = [[1, 0], [0, 1]];
-        simulateDisplayValue(storedMatrix[0]![1]!, 'partial', colA, colB);
-        // matrix must be unchanged
-        expect(storedMatrix[0]![1]!).toBe(0);
-        expect(storedMatrix[1]![0]!).toBe(0);
+        expect(correlationDisplayValue(0, 'partial', csvData, 'a', 'c')).toBe(0);
+        expect(correlationDisplayValue(0, 'partial', csvData, 'c', 'a')).toBe(0);
     });
 });

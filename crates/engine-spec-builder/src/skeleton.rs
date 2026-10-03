@@ -62,6 +62,22 @@ mod tests {
         })
         .unwrap();
         assert_eq!(s, r#"{"kind":"factor_level","factor":"group","level":2}"#);
+        let s = serde_json::to_string(&EffectDescriptor::Interaction {
+            components: vec![
+                EffectDescriptor::Continuous {
+                    predictor: "x1".into(),
+                },
+                EffectDescriptor::FactorLevel {
+                    factor: "group".into(),
+                    level: 2,
+                },
+            ],
+        })
+        .unwrap();
+        assert_eq!(
+            s,
+            r#"{"kind":"interaction","components":[{"kind":"continuous","predictor":"x1"},{"kind":"factor_level","factor":"group","level":2}]}"#
+        );
     }
 
     #[test]

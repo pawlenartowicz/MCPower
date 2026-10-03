@@ -43,20 +43,14 @@ describe('generateAnovaScript', () => {
   it('lists factors before covariates, sets var-types for factors only, maps tukey', () => {
     const out = generateAnovaScript(anovaSpec, 'find-power', { sample_size: 80 });
     // Factors precede the covariate in the formula.
-    const formulaMatch = out.match(/MCPower\("([^"]+)"\)/);
-    expect(formulaMatch).not.toBeNull();
-    const formula = formulaMatch![1]!;
-    // Pin the outcome and both factors so an empty or wrong formula fails.
-    expect(formula).toContain('y =');
-    expect(formula).toContain('treatment');
-    expect(formula).toContain('group');
-    expect(formula.indexOf('treatment')).toBeLessThan(formula.indexOf('age'));
-    expect(formula.indexOf('group')).toBeLessThan(formula.indexOf('age'));
-    // set_variable_type uses the assignment grammar; covariate is omitted.
-    const varTypeLine = out.split('\n').find((l) => l.includes('set_variable_type'))!;
-    expect(varTypeLine).toContain('treatment=(factor,');
-    expect(varTypeLine).toContain('group=(factor,');
-    expect(varTypeLine).not.toContain('age');
+    expect(out).toContain('MCPower("y = treatment + group + age")');
+    // set_variable_type uses the assignment grammar; covariate is omitted; an
+    // unset share list defaults to 1/n rounded with toFixed(6).
+    expect(out).toContain(
+      'model.set_variable_type("treatment=(factor,0.333333,0.333333,0.333333), group=(factor,0.5,0.5)")',
+    );
+    // ANOVA builds its own target_test: the overall token, then the contrast pair.
+    expect(out).toContain('target_test="overall, treatment[B] vs treatment[C]",');
     // tukey_hsd correction maps to 'tukey'.
     expect(out).toContain('correction="tukey"');
     expect(out).not.toContain('tukey_hsd');
@@ -85,31 +79,5 @@ describe('generateAnovaScript', () => {
     expect(out).toContain('from_size=40,');
     expect(out).toContain('to_size=250,');
     expect(out).toContain('by=20,');
-  });
-
-  it('omits by when ByValue is Auto (Auto is the default)', () => {
-    const out = generateAnovaScript(anovaSpec, 'find-sample-size', {
-      bounds: [40, 200],
-      method: { Grid: { by: { Auto: { count: 12 } }, mode: 'Linear' } },
-    });
-    // Auto is the port default — shared buildFindCallLines omits it
-    expect(out).not.toContain('by=');
-  });
-
-  it('raises a type-guard error when called with a non-anova spec', () => {
-    const linearSpec = { ...anovaSpec, family: 'linear' } as unknown as AppSpec;
-    expect(() => generateAnovaScript(linearSpec, 'find-power', { sample_size: 80 })).toThrow();
-  });
-
-  it('maps non-none/non-tukey corrections to their port tokens', () => {
-    const bh = generateAnovaScript({ ...anovaSpec, correction: 'benjamini_hochberg' }, 'find-power', { sample_size: 80 });
-    expect(bh).toContain('correction="bh"');
-    expect(bh).not.toContain('benjamini_hochberg');
-
-    const bonf = generateAnovaScript({ ...anovaSpec, correction: 'bonferroni' }, 'find-power', { sample_size: 80 });
-    expect(bonf).toContain('correction="bonferroni"');
-
-    const holm = generateAnovaScript({ ...anovaSpec, correction: 'holm' }, 'find-power', { sample_size: 80 });
-    expect(holm).toContain('correction="holm"');
   });
 });

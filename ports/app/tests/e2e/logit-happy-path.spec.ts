@@ -38,6 +38,7 @@ test('logit find-power happy path renders bars and table baseline', async ({ pag
   // surfaces "baseline prob (realized) = NN.N%" when the estimator is glm (the adapter
   // maps Binary regression → AppSpec::Logit → glm estimator).
   await expect(page.getByText(/baseline prob \(realized\)/i)).toBeVisible();
-  // Confirm a numeric value follows the label (not just a label with empty/missing value).
-  await expect(page.getByText(/baseline prob \(realized\)/i)).toContainText(/\d/);
+  // The mock echoes spec.baseline_probability as the realized baseline, so the
+  // 0.3 typed above must reach the AppSpec and come back as 30.0%.
+  await expect(page.getByText(/baseline prob \(realized\)/i)).toContainText('30.0%');
 });

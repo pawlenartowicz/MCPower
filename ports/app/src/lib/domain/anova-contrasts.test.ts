@@ -29,12 +29,15 @@ describe('regenAutoContrasts', () => {
   it('drops contrasts whose level no longer exists, keeps manual valid ones', () => {
     const cfg = cfgWith([{ name: 'F1', nLevels: 3 }]);
     regenAutoContrasts(cfg, 'F1:3');
-    cfg.contrasts.push({ positiveName: 'F1[1]', negativeName: 'F1[2]', enabled: true });
+    // Manual pairs the auto set never generates (reversed order): one stays
+    // live after the shrink, one references the dropped level.
+    cfg.contrasts.push({ positiveName: 'F1[2]', negativeName: 'F1[1]', enabled: false });
+    cfg.contrasts.push({ positiveName: 'F1[3]', negativeName: 'F1[1]', enabled: true });
     (cfg.variables[0] as any).nLevels = 2;
     regenAutoContrasts(cfg, 'F1:2');
-    const pairs = cfg.contrasts.map((c) => `${c.positiveName}-${c.negativeName}`);
-    expect(pairs).not.toContain('F1[1]-F1[3]');
-    expect(pairs).not.toContain('F1[2]-F1[3]');
-    expect(pairs).toContain('F1[1]-F1[2]');
+    expect(cfg.contrasts).toEqual([
+      { positiveName: 'F1[1]', negativeName: 'F1[2]', enabled: true },
+      { positiveName: 'F1[2]', negativeName: 'F1[1]', enabled: false },
+    ]);
   });
 });

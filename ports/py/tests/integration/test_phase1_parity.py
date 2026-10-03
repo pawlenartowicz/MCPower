@@ -7,8 +7,6 @@ the FFI boundary because Python may derive base_seed differently from Rust.
 
 import math
 
-import pytest
-
 from mcpower import MCPower
 
 
@@ -66,7 +64,7 @@ def test_lme_parity():
     # intercept → len 1); each rate in [0, 1].
     brc = fx["boundary_rate_per_component"]
     assert isinstance(brc, list), f"expected list, got {type(brc)}"
-    assert len(brc) >= 1, "expected at least one component for random-intercept LME"
+    assert len(brc) == 1, f"expected one component for random-intercept LME, got {brc}"
     assert all(0.0 <= r <= 1.0 for r in brc), f"rates out of [0,1]: {brc}"
 
 

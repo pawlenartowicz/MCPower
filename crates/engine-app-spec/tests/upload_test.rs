@@ -258,15 +258,16 @@ fn f2_get_effects_with_binary_predictor() {
     );
     let x_cont_effect = effects.iter().find(|e| e.name == "x_cont").expect("x_cont");
     let x_bin_effect = effects.iter().find(|e| e.name == "x_bin").expect("x_bin");
-    // x_cont drives y; x_bin is orthogonal → β_bin ≈ 0
+    // y = 3·x_cont exactly, so the fit is exact: z-scored y on z-scored x_cont
+    // has slope 1, and x_bin carries nothing once x_cont is in the model.
     assert!(
-        x_cont_effect.value.abs() > 0.5,
-        "x_cont should have non-trivial slope, got {}",
+        (x_cont_effect.value - 1.0).abs() < 1e-9,
+        "x_cont standardized slope must be 1, got {}",
         x_cont_effect.value
     );
     assert!(
-        x_bin_effect.value.abs() < 0.3,
-        "x_bin slope should be near 0, got {}",
+        x_bin_effect.value.abs() < 1e-9,
+        "x_bin slope must be 0, got {}",
         x_bin_effect.value
     );
 }
@@ -610,9 +611,9 @@ fn f2_get_effects_with_factor_predictor() {
         "g[treatA] should have a large positive effect, got {}",
         treat_a.value
     );
-    // treatB has zero effect; β_treatB should be near zero.
+    // treatB shares ctrl's mean exactly (noiseless), so its dummy slope is 0.
     assert!(
-        treat_b.value.abs() < 0.1,
+        treat_b.value.abs() < 1e-9,
         "g[treatB] should be near zero, got {}",
         treat_b.value
     );

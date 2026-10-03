@@ -14,7 +14,13 @@ vi.mock('$lib/domain/app-spec-adapter', () => ({
   familyConfigToAppSpec: vi.fn(),
 }));
 
+// Native export: the save dialog returns a path, the fs plugin receives the file.
+vi.mock('@tauri-apps/plugin-dialog', () => ({ save: vi.fn(async () => '/tmp/run-1.json') }));
+vi.mock('@tauri-apps/plugin-fs', () => ({ writeTextFile: vi.fn(async () => undefined) }));
+
 import { routeMenuEvent } from './menu';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { uiStore } from '$lib/stores/ui.svelte';
 import { sharedPrefs } from '$lib/stores/shared-prefs.svelte';
 import { runStore } from '$lib/stores/run.svelte';
@@ -140,9 +146,27 @@ describe('routeMenuEvent — run shortcuts', () => {
 });
 
 describe('routeMenuEvent — export results', () => {
-  it('file.export_results route exists and does not throw', () => {
-    // jsdom has no @tauri-apps; the dynamic import will fail but the error is
-    // caught and logged. The router itself should not throw.
-    expect(() => routeMenuEvent('file.export_results')).not.toThrow();
+  it('file.export_results writes the active tab as JSON to the chosen path', async () => {
+    runStore.pushTab({
+      label: 'Run 1',
+      kind: 'find-power',
+      spec: { family: 'linear' },
+      sample_size: 120,
+      effect_names: ['x1'],
+      result: { scenarios: [] },
+    } as unknown as Parameters<typeof runStore.pushTab>[0]);
+    routeMenuEvent('file.export_results');
+    await vi.waitFor(() => expect(writeTextFile).toHaveBeenCalled());
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: 'run-1.json' }));
+    const [path, text] = vi.mocked(writeTextFile).mock.calls[0]!;
+    expect(path).toBe('/tmp/run-1.json');
+    expect(JSON.parse(text as string)).toEqual({
+      label: 'Run 1',
+      kind: 'find-power',
+      spec: { family: 'linear' },
+      sample_size: 120,
+      effect_names: ['x1'],
+      result: { scenarios: [] },
+    });
   });
 });

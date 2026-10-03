@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 ///   * `effects` map effect *names* (e.g. `"x1"`, `"x1:x2"`, `"group[3]"`)
 ///     to coefficients. The builder validates that every parsed effect has
 ///     an entry.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct LinearSpec {
     /// R-style formula: `"y = x1 + x2 + x1:x2"` or `"y ~ x1 + x2"`.
     pub formula: String,
@@ -100,7 +100,7 @@ fn default_nagq_input() -> u8 {
 }
 
 /// One all-pairwise post-hoc request for a single factor.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PosthocRequest {
     /// Factor predictor name to run all-pairwise post-hoc on.
     pub factor: String,
@@ -110,7 +110,7 @@ pub struct PosthocRequest {
 }
 
 /// One declared predictor: its `name` and distribution/factor `kind`.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PredictorSpec {
     /// Predictor name as written in the formula.
     pub name: String,
@@ -125,7 +125,7 @@ pub struct PredictorSpec {
 }
 
 /// A predictor's data-generating kind: a synthetic distribution or a `Factor`.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VarKind {
     Normal,
@@ -149,14 +149,14 @@ pub enum VarKind {
 }
 
 /// One effect-name → coefficient-size assignment.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct EffectAssignment {
     pub name: String,
     pub size: f64,
 }
 
 /// A pairwise correlation `value` between non-factor predictors `a` and `b`.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CorrelationPair {
     pub a: String,
     pub b: String,
@@ -176,14 +176,14 @@ pub use engine_contract::CorrectionMethod as Correction;
 /// (`SimulationSpec.var_types` / `var_params`), or is `None` for the linear
 /// predictor Xβ. The variance ratio λ is scenario-only — there is no model
 /// pin. The `None` default is scenario-driven, lp-based het.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct HeteroskedasticityInput {
     #[serde(default)]
     pub driver_var_index: Option<u32>,
 }
 
 /// Residual error-term distribution, and whether the user pinned it.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ResidualSpec {
     /// Canonical name: "normal", "right_skewed", "left_skewed",
     /// "high_kurtosis", or "uniform" (the `RESIDUAL_CODES` table). No df —
@@ -234,17 +234,17 @@ pub struct UploadColumn {
 }
 
 /// An uploaded predictor frame: faithfulness `mode`, row count, and typed columns.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct UploadInput {
     pub mode: UploadMode,
     pub n_rows: u32,
     pub columns: Vec<UploadColumn>,
 }
 
-/// Mirrors Python's `_scenario_dict` output (model.py), which has
-/// already encoded the two distribution lists to integer codes via
-/// `_DIST_CODE` (for `new_distributions`) and `_RESIDUAL_CODE`
-/// (for `residual_dists`). The builder copies these integers straight into
+/// Mirrors Python's `build_scenario_dict` output (spec/spec_builder.py), which has
+/// already encoded the two distribution lists to integer codes via the engine's
+/// `DIST_CODES` (for `new_distributions`) and `RESIDUAL_CODES`
+/// (for `residual_dists`) tables. The builder copies these integers straight into
 /// `ScenarioPerturbations` — no name → code translation happens in Rust.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ScenarioInput {
@@ -290,67 +290,6 @@ pub struct ScenarioInput {
 mod tests {
     use super::*;
 
-    fn sample_linear_spec() -> LinearSpec {
-        LinearSpec {
-            formula: "y = x1 + x2".into(),
-            predictors: vec![
-                PredictorSpec {
-                    name: "x1".into(),
-                    pinned: false,
-                    kind: VarKind::Normal,
-                },
-                PredictorSpec {
-                    name: "x2".into(),
-                    pinned: false,
-                    kind: VarKind::Binary { proportion: 0.3 },
-                },
-            ],
-            effects: vec![
-                EffectAssignment {
-                    name: "x1".into(),
-                    size: 0.5,
-                },
-                EffectAssignment {
-                    name: "x2".into(),
-                    size: 0.3,
-                },
-            ],
-            correlations: vec![CorrelationPair {
-                a: "x1".into(),
-                b: "x2".into(),
-                value: 0.2,
-            }],
-            alpha: 0.05,
-            correction: Correction::Bonferroni,
-            targets: vec!["overall".into()],
-            heteroskedasticity: HeteroskedasticityInput::default(),
-            residual: ResidualSpec::default(),
-            max_failed_fraction: 0.1,
-            scenarios: vec![],
-            test_formula: None,
-            report_overall: false,
-            contrast_pairs: vec![],
-            posthoc_requests: vec![],
-            upload: None,
-            cluster_level_vars: vec![],
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-        }
-    }
-
-    #[test]
-    fn linear_spec_json_roundtrip() {
-        let spec = sample_linear_spec();
-        let json = serde_json::to_string(&spec).expect("encode");
-        let back: LinearSpec = serde_json::from_str(&json).expect("decode");
-        // Compare a few representative fields rather than implementing PartialEq.
-        assert_eq!(spec.formula, back.formula);
-        assert_eq!(spec.predictors.len(), back.predictors.len());
-        assert_eq!(spec.predictors[0].name, back.predictors[0].name);
-        assert_eq!(spec.correction, back.correction);
-    }
-
     #[test]
     fn scenario_input_sampled_factor_proportions_defaults_false_when_absent() {
         // Hosts that predate the knob omit the key; serde must fill `false` (exact).
@@ -371,8 +310,8 @@ mod tests {
 
     #[test]
     fn linear_spec_deserializes_posthoc_requests() {
-        // Minimal valid LinearSpec JSON (mirrors sample_linear_spec) plus
-        // posthoc_requests so we confirm the new field round-trips via JSON.
+        // Minimal host-style LinearSpec JSON plus posthoc_requests; an absent
+        // `posthoc_alpha` deserializes to None.
         let json = r#"{
             "formula": "y = x1 + x2",
             "predictors": [
@@ -399,35 +338,4 @@ mod tests {
         assert_eq!(spec.posthoc_requests[0].factor, "dose_group");
         assert_eq!(spec.posthoc_requests[0].posthoc_alpha, None);
     }
-
-    #[test]
-    fn linear_spec_without_posthoc_requests_defaults_to_empty() {
-        // Existing fixtures that omit `posthoc_requests` must still deserialize.
-        let spec = sample_linear_spec();
-        let json = serde_json::to_string(&spec).expect("encode");
-        // Strip posthoc_requests from JSON to simulate an old-style payload.
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let mut map = v.as_object().unwrap().clone();
-        map.remove("posthoc_requests");
-        let stripped = serde_json::to_string(&map).unwrap();
-        let back: LinearSpec = serde_json::from_str(&stripped).unwrap();
-        assert!(back.posthoc_requests.is_empty());
-    }
-
-    #[test]
-    fn factor_kind_json_shape() {
-        let kind = VarKind::Factor {
-            levels: vec!["A".into(), "B".into(), "C".into()],
-            proportions: vec![0.5, 0.3, 0.2],
-            reference: "A".into(),
-            sampled_proportions: None,
-        };
-        let json = serde_json::to_string(&kind).unwrap();
-        assert!(json.contains("\"kind\":\"factor\""));
-        assert!(json.contains("\"reference\":\"A\""));
-    }
-
-    // The `Correction::code()` ↔ Python `_CORRECTION_CODE` mapping is now
-    // covered by `engine_contract::test_spec::correction_codes_match_spec_builder_mapping`
-    // (the enum is re-exported from the contract — see `Correction` above).
 }

@@ -12,8 +12,8 @@ import pytest
 from mcpower.output.tables import build_rows
 from mcpower.spec.variables import VariableRegistry, _resolve_reference
 
-
 # ── reference-by-value resolution ──────────────────────────────────────────
+
 
 def test_reference_string_matches_label_exactly():
     assert _resolve_reference("6", ["4", "6", "8"]) == "6"
@@ -50,22 +50,6 @@ def test_set_variable_type_stores_resolved_reference_and_full_levels():
 
 # ── skeleton → display name rendering ──────────────────────────────────────
 
-def test_build_rows_renders_string_data_labels():
-    # origin with data labels; baseline "Europe" (index 0), dummies Japan/USA.
-    meta = {
-        "effect_skeleton": [
-            {"kind": "intercept"},
-            {"kind": "factor_level", "factor": "origin", "level": 1},
-            {"kind": "factor_level", "factor": "origin", "level": 2},
-        ],
-        "factors": {"origin": {"baseline": "Europe",
-                               "levels": ["Europe", "Japan", "USA"]}},
-    }
-    rows = build_rows([1, 2], meta)
-    assert rows[0] == {"kind": "factor_header", "label": "origin", "baseline": "Europe"}
-    assert rows[1] == {"kind": "factor_level", "label": "Japan", "factor": "origin", "pos": 0}
-    assert rows[2] == {"kind": "factor_level", "label": "USA", "factor": "origin", "pos": 1}
-
 
 def test_build_rows_renders_numeric_labels_and_interaction():
     # cyl[6] (numeric label) + the continuous×factor interaction x1:cyl[6]
@@ -75,9 +59,10 @@ def test_build_rows_renders_numeric_labels_and_interaction():
             {"kind": "intercept"},
             {"kind": "continuous", "predictor": "x1"},
             {"kind": "factor_level", "factor": "cyl", "level": 1},
-            {"kind": "interaction", "components": [
-                {"kind": "continuous", "predictor": "x1"},
-                {"kind": "factor_level", "factor": "cyl", "level": 1}]},
+            {
+                "kind": "interaction",
+                "components": [{"kind": "continuous", "predictor": "x1"}, {"kind": "factor_level", "factor": "cyl", "level": 1}],
+            },
         ],
         "factors": {"cyl": {"baseline": "4", "levels": ["4", "6", "8"]}},
     }
@@ -102,6 +87,7 @@ def test_build_rows_falls_back_to_integers_without_labels():
 
 
 # ── end-to-end: uploaded factor labels reach the rendered table ────────────
+
 
 def test_uploaded_factor_renders_data_labels_end_to_end():
     from mcpower import MCPower

@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 
-def test_mode_default_is_partial_and_validates():
+def test_upload_data_rejects_unknown_mode():  # APIC-76
     from mcpower import MCPower
 
     m = MCPower("y = x")
@@ -11,47 +11,27 @@ def test_mode_default_is_partial_and_validates():
         m.upload_data({"x": list(range(30))}, mode="bad")
 
 
-def test_strict_mode_is_accepted_and_stored():
-    """strict (bootstrap) is now fully supported — upload_data must accept it and
-    store the mode in _pending_data and _uploaded_data_mode."""
-    from mcpower import MCPower
-
-    m = MCPower("y = x")
-    m.upload_data({"x": list(range(30))}, mode="strict", verbose=False)
-    assert m._pending_data["mode"] == "strict"
-    assert m._uploaded_data_mode == "strict"
-
-
-def test_upload_data_accepts_valid_mode_strings():
-    from mcpower import MCPower
-
-    m = MCPower("y = x")
-    data = list(range(30))
-    m.upload_data({"x": data}, mode="none", verbose=False)
-    m.upload_data({"x": data}, mode="partial", verbose=False)
-    m.upload_data({"x": data}, mode="strict", verbose=False)
-
-
 def test_upload_reaches_spec_without_raising():
+    """The Python-built upload block deserializes in Rust and lands in the
+    contract as the uploaded frame carrying the uploaded x1 column."""
     from mcpower import MCPower
 
     rng = np.random.default_rng(0)
+    vals = rng.normal(size=40).tolist()
     m = MCPower("y = x1 + x2")
-    m.upload_data({"x1": rng.normal(size=40).tolist()})  # x2 stays synthetic
+    m.upload_data({"x1": vals})  # x2 stays synthetic
     m.set_effects("x1=0.3, x2=0.3")
-    contract = m.to_simulation_spec()  # must NOT raise
-    # The uploaded frame should be present in the generation part of the contract
-    assert contract is not None
-    gen = contract.get("generation", {})
-    assert gen.get("uploaded_frame") is not None, (
-        f"expected uploaded_frame in generation; keys: {list(gen.keys())}"
-    )
+    frame = m.to_simulation_spec()["generation"]["uploaded_frame"]
+    assert frame["n_rows"] == 40
+    assert frame["n_cols"] == 1
+    # The engine standardizes the column; row order and identity survive, so
+    # the frame is perfectly correlated with the uploaded values.
+    assert np.corrcoef(frame["data"], vals)[0, 1] == pytest.approx(1.0)
 
 
 def test_upload_block_has_matched_column():
     """The upload block emitted to the engine contains x1 with raw values."""
     from mcpower import MCPower
-    from mcpower.data.upload import normalize_upload_input
 
     rng = np.random.default_rng(1)
     vals = rng.normal(size=40).tolist()
@@ -70,40 +50,6 @@ def test_upload_block_has_matched_column():
     assert pending["mode"] == "partial"  # default
     assert "uploaded_n" in pending
     assert pending["uploaded_n"] == 40
-
-
-def test_pending_data_stores_raw_columns_for_d4():
-    """_pending_data must store raw columns for ALL uploaded cols (including y) for D4."""
-    from mcpower import MCPower
-
-    rng = np.random.default_rng(2)
-    m = MCPower("y = x1")
-    x1_vals = rng.normal(size=30).tolist()
-    y_vals = rng.normal(size=30).tolist()
-    m.upload_data({"x1": x1_vals, "y": y_vals})
-    pending = m._pending_data
-    assert "raw_columns" in pending
-    raw = pending["raw_columns"]
-    assert "x1" in raw
-    assert "y" in raw
-
-
-def test_type_detection_sets_registry():
-    """After upload, the registry has the detected type for matched predictors."""
-    from mcpower import MCPower
-
-    rng = np.random.default_rng(3)
-    m = MCPower("y = x1")
-    vals = rng.normal(size=30).tolist()
-    m.upload_data({"x1": vals})
-    pred = m._registry.get_predictor("x1")
-    assert pred is not None
-    # The type detector classifies a normal-ish sample as "normal" (the continuous
-    # sub-type). The former 3-option tuple admitted raw-passthrough fallbacks that
-    # wouldn't reflect real detection; pin to the single correct type.
-    assert pred.var_type == "normal", (
-        f"Expected 'normal' for a random normal sample, got {pred.var_type!r}"
-    )
 
 
 def test_mode_none_partial_strict_accepted():

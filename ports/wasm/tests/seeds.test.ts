@@ -40,8 +40,9 @@ describe('poolSize routing heuristic', () => {
     expect(route({ caseClass: 'ols', n: 10000, nSims: 1000 })).toBe(8);
   });
 
-  // Class weights: the score is linear in the weight, so at a fixed n x nSims
-  // the class alone walks a run up the ladder.
+  // Class weights: the score is linear in the weight. Pin each weight exactly at
+  // the top breakpoint: n x nSims = 1.2e7 / weight scores 1.2e7 (→ 12), one sim
+  // fewer scores 1.2e7 − weight (→ 8). Any other weight flips one of the two.
   it.each<[CaseClass, number]>([
     ['ols', 1],
     ['glm', 2],
@@ -50,11 +51,9 @@ describe('poolSize routing heuristic', () => {
     ['glmm_slopes', 128],
     ['glmm_crossed_nested', 256],
   ])('case %s carries weight %d', (caseClass, weight) => {
-    // n x nSims = 1e4 keeps every product inside the ladder's range.
-    const workers = route({ caseClass, n: 100, nSims: 100 });
-    const score = 100 * 100 * weight;
-    const expected = score < 2e5 ? 1 : score < 3e6 ? 4 : score < 1.2e7 ? 8 : 12;
-    expect(workers).toBe(expected);
+    const atRung = 1.2e7 / weight;
+    expect(route({ caseClass, n: 1, nSims: atRung })).toBe(12);
+    expect(route({ caseClass, n: 1, nSims: atRung - 1 })).toBe(8);
   });
 
   // Scenarios multiply the score by their count, not a flat x2 — three

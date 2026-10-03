@@ -50,25 +50,6 @@ fn sample_linear_spec() -> AppSpec {
     })
 }
 
-// `assemble_spec` Linear behavior is shared by the Tauri and WASM ports; the WASM
-// single-core path mirrors this when it lands.
-#[test]
-fn assemble_linear_returns_one_contract_when_no_scenario() {
-    let spec = sample_linear_spec();
-    let contracts = engine_app_spec::assemble_spec(&spec).expect("assemble should succeed");
-    assert_eq!(
-        contracts.len(),
-        1,
-        "exactly one contract expected with empty scenarios"
-    );
-    // Sanity: the contract was assembled (has non-zero coefficients)
-    let contract = &contracts[0];
-    assert!(
-        !contract.outcome.coefficients.is_empty(),
-        "assembled contract should have outcome coefficients"
-    );
-}
-
 #[test]
 fn assemble_linear_forwards_report_overall_true() {
     // When the AppSpec sets report_overall = true, the assembled contract
@@ -81,9 +62,10 @@ fn assemble_linear_forwards_report_overall_true() {
     let spec = AppSpec::Linear(linear);
     let contracts = engine_app_spec::assemble_spec(&spec).expect("assemble");
     let targets = &contracts[0].test.targets;
-    let has_omnibus = targets.iter().any(|t| {
-        matches!(t, engine_contract::TestTarget::Joint { terms } if terms.iter().all(|n| *n >= 1))
-    });
+    // x1 and x2 sit at design positions 1 and 2 (0 is the intercept).
+    let has_omnibus = targets
+        .iter()
+        .any(|t| matches!(t, engine_contract::TestTarget::Joint { terms } if *terms == [1, 2]));
     assert!(
         has_omnibus,
         "expected a Joint omnibus target; got {targets:?}"
@@ -125,20 +107,6 @@ fn assemble_linear_forwards_test_formula_as_reduced_design() {
         "reduced test model must have fewer terms than generation: test={}, generation={}",
         design_test.terms.len(),
         contract.design_generation.terms.len()
-    );
-}
-
-#[test]
-fn assemble_linear_propagates_alpha_and_targets() {
-    let spec = sample_linear_spec();
-    let contracts = engine_app_spec::assemble_spec(&spec).expect("assemble should succeed");
-    let contract = &contracts[0];
-    // alpha is preserved
-    assert_eq!(contract.test.alpha, 0.05);
-    // With TestSelection::All + 2 predictors, there should be target entries
-    assert!(
-        !contract.test.targets.is_empty(),
-        "assembled contract should have test targets"
     );
 }
 

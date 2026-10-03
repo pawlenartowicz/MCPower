@@ -12,18 +12,9 @@ vi.mock('$lib/stores/parsed-formula.svelte', async (importOriginal) => {
   };
 });
 
-import canonical from '$configs/formula-fixtures/canonical-suite.json';
-import { toWireParsed } from '$lib/stores/parsed-formula.svelte';
-import {
-  contrastNames,
-  effectGroups,
-  effectNames,
-  effectRows,
-  presetsFor,
-  reconcileTestSelection,
-} from './effect-names';
-import { defaultFamilyConfig, type VariableRow } from './family';
 import { BENCHMARKS } from '$lib/configs/app-config';
+import { effectGroups, effectNames, presetsFor, reconcileTestSelection } from './effect-names';
+import { defaultFamilyConfig, type VariableRow } from './family';
 
 describe('effectNames', () => {
   it('generates numeric placeholder level names without L prefix', () => {
@@ -58,10 +49,6 @@ describe('presetsFor', () => {
     expect(vals([], 'x1:x2')).toEqual(BENCHMARKS.odds);
   });
 
-  it('poisson reuses the same odds triple as rate-ratio anchors (no new constants)', () => {
-    expect(presetsFor('x', cont, true).map((p) => p.value)).toEqual(BENCHMARKS.odds);
-  });
-
   it('keeps the continuous/Cohen split when useOddsPresets is unset (linear, probit)', () => {
     // Probit's β is Cohen's-d scale, so it takes the same split a linear
     // outcome would — the caller never passes useOddsPresets=true for probit.
@@ -70,35 +57,7 @@ describe('presetsFor', () => {
   });
 });
 
-describe('contrastNames', () => {
-  it('generates all pairwise contrasts for numeric placeholder levels', () => {
-    const cfg = {
-      ...defaultFamilyConfig('regression'),
-      formula: 'y ~ group',
-      variables: [{ kind: 'factor' as const, name: 'group', nLevels: 3 }],
-    };
-    expect(contrastNames(cfg)).toEqual([
-      'group[1] − group[2]',
-      'group[1] − group[3]',
-      'group[2] − group[3]',
-    ]);
-  });
-});
-
-describe('effectRows', () => {
-  it('marks first level as reference, rest as non-reference, reference first', () => {
-    const cfg = {
-      ...defaultFamilyConfig('regression'),
-      formula: 'y ~ treatment',
-      variables: [{ kind: 'factor' as const, name: 'treatment', nLevels: 3 }],
-    };
-    expect(effectRows(cfg)).toEqual([
-      { name: 'treatment[1]', isReference: true },
-      { name: 'treatment[2]', isReference: false },
-      { name: 'treatment[3]', isReference: false },
-    ]);
-  });
-
+describe('effectGroups — factor reference row', () => {
   it('uses explicit referenceLevel when set', () => {
     const cfg = {
       ...defaultFamilyConfig('regression'),
@@ -112,7 +71,7 @@ describe('effectRows', () => {
         },
       ],
     };
-    expect(effectRows(cfg)).toEqual([
+    expect(effectGroups(cfg).variables[0]!.rows).toEqual([
       { name: 'origin[USA]', isReference: true },
       { name: 'origin[Japan]', isReference: false },
       { name: 'origin[Europe]', isReference: false },
@@ -139,44 +98,10 @@ describe('effectRows', () => {
         },
       ],
     };
-    expect(effectRows(cfg)).toEqual([
+    expect(effectGroups(cfg).variables[0]!.rows).toEqual([
       { name: 'sex[1]', isReference: true },
       { name: 'sex[f]', isReference: false },
       { name: 'sex[m]', isReference: false },
-    ]);
-  });
-
-  it('marks continuous predictors as non-reference', () => {
-    const cfg = {
-      ...defaultFamilyConfig('regression'),
-      formula: 'y ~ age',
-      variables: [{ kind: 'continuous' as const, name: 'age' }],
-    };
-    expect(effectRows(cfg)).toEqual([{ name: 'age', isReference: false }]);
-  });
-
-  it('includes interaction terms as non-reference', () => {
-    const cfg = {
-      ...defaultFamilyConfig('regression'),
-      formula: 'y ~ a + b + a:b',
-      variables: [
-        { kind: 'continuous' as const, name: 'a' },
-        { kind: 'continuous' as const, name: 'b' },
-      ],
-    };
-    const rows = effectRows(cfg);
-    expect(rows).toContainEqual({ name: 'a:b', isReference: false });
-  });
-
-  it('for anova family, emits all factor levels without interaction terms', () => {
-    const cfg = {
-      ...defaultFamilyConfig('anova'),
-      formula: '',
-      variables: [{ kind: 'factor' as const, name: 'group', nLevels: 2 }],
-    };
-    expect(effectRows(cfg)).toEqual([
-      { name: 'group[1]', isReference: true },
-      { name: 'group[2]', isReference: false },
     ]);
   });
 });
@@ -234,21 +159,6 @@ describe('factor interaction expansion', () => {
       ],
     };
     expect(effectNames(cfg)).toEqual(['x1', 'x2', 'x1:x2']);
-  });
-
-  it('effectRows: factor interaction rows are per-level and non-reference', () => {
-    const cfg = {
-      ...defaultFamilyConfig('regression'),
-      formula: 'y ~ x1 + group + x1:group',
-      variables: [
-        { kind: 'continuous' as const, name: 'x1' },
-        { kind: 'factor' as const, name: 'group', nLevels: 3 },
-      ],
-    };
-    const rows = effectRows(cfg);
-    expect(rows).toContainEqual({ name: 'x1:group[2]', isReference: false });
-    expect(rows).toContainEqual({ name: 'x1:group[3]', isReference: false });
-    expect(rows.some((r) => r.name === 'x1:group')).toBe(false);
   });
 
   it('effectNames: honours referenceLevel when expanding factor interactions', () => {
@@ -464,7 +374,12 @@ describe('interaction-only variables', () => {
     const g = effectGroups(cfg);
     expect(g.variables).toHaveLength(1);
     expect(g.variables[0]!.interactionOnly).toBe(false);
-    expect(g.variables[0]!.rows.length).toBeGreaterThan(0);
+    expect(g.variables[0]!.rows).toEqual([
+      { name: 'group[1]', isReference: true },
+      { name: 'group[2]', isReference: false },
+      { name: 'group[3]', isReference: false },
+    ]);
+    expect(g.interactions).toEqual([]);
   });
 });
 
@@ -505,39 +420,4 @@ describe('reconcileTestSelection', () => {
     reconcileTestSelection(cfg, ['g[1]', 'g[2]', 'g[3]']);
     expect(cfg.contrasts).toEqual([{ positiveName: 'g[2]', negativeName: 'g[3]', enabled: true }]);
   });
-});
-
-// Only include fixed-effect cases where all main terms precede all interaction
-// terms in the canonical fixed_effects list (i.e. no interleaving).
-// toWireParsed splits terms into predictors + interaction_terms; the derived
-// reconstruction below only matches canonical when that ordering holds.
-const fixedCases = (canonical as any).cases.filter((c: any) => {
-  if (!c.expected || c.expected.random_effects.length !== 0) return false;
-  const fe: string[] = c.expected.fixed_effects;
-  const firstInteraction = fe.findIndex((f: string) => f.includes(':'));
-  if (firstInteraction === -1) return true; // no interactions — always fine
-  return fe.slice(firstInteraction).every((f: string) => f.includes(':')); // mains first
-});
-
-describe('canonical fixed-effect derivation', () => {
-  for (const c of fixedCases) {
-    it(`${c.id}: interaction strings + predictors match canonical`, () => {
-      const terms = c.expected.fixed_effects.map((fe: string) =>
-        fe.includes(':')
-          ? { kind: 'interaction', vars: fe.split(':') }
-          : { kind: 'main', name: fe },
-      );
-      const wire = toWireParsed({
-        dependent: c.expected.outcome,
-        predictors: [],
-        terms,
-        random_effects: [],
-      } as any);
-      const derived = [
-        ...c.expected.fixed_effects.filter((f: string) => !f.includes(':')),
-        ...wire.interaction_terms.map((v: string[]) => v.join(':')),
-      ];
-      expect(derived).toEqual(c.expected.fixed_effects);
-    });
-  }
 });

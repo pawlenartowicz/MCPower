@@ -1,8 +1,8 @@
 """Spec builders: project MCPower state into the Rust ``LinearSpec`` JSON.
 
 Extracted free-function form of the scenario/linear-spec serialisers;
-``MCPower._scenario_dict`` / ``MCPower._to_linear_spec_dict`` are thin wrappers
-that pass the needed ``self.*`` fields in as arguments.
+``MCPower._to_linear_spec_dict`` is a thin wrapper that passes the needed
+``self.*`` fields in as arguments.
 """
 
 import warnings
@@ -100,9 +100,9 @@ def build_linear_spec(
     residual_pinned: bool = False,
     alpha: float,
     correction: Optional[str],
-    wald_se: Optional[str] = None,
+    wald_se: str,
     nagq: int = 1,
-    df_method: Optional[str] = None,
+    df_method: str,
     target_test: Optional[str],
     test_formula: Optional[str],
     pending_data: Optional[Dict[str, Any]],
@@ -229,29 +229,20 @@ def build_linear_spec(
     correction_key = (correction or "none").lower().replace("-", "_").replace(" ", "_")
     correction_wire = get_correction_aliases().get(correction_key, correction_key)
 
-    # wald_se: None falls back to the config `estimation.wald_se` default (the
-    # cross-port home — no hardcoded per-port default; mirrors R's
-    # .wald_se_for_rust). "hessian" and "rx" (opt-in speed knob) are the valid
-    # wire values, normalised to canonical snake_case. Validation already ran
-    # in _validate_wald_se_arg; this mirrors the correction normalisation
-    # pattern.
-    if wald_se is None:
-        from ..config import get_estimation_defaults
-
-        wald_se = get_estimation_defaults()["wald_se"]
+    # wald_se: the caller (`MCPower._to_linear_spec_dict`) has already resolved
+    # None to the config `estimation.wald_se` default. "hessian" and "rx"
+    # (opt-in speed knob) are the valid wire values, normalised to canonical
+    # snake_case. Validation already ran in _validate_wald_se_arg; this mirrors
+    # the correction normalisation pattern.
     wald_se_wire = wald_se.lower().replace("-", "_").replace(" ", "_")
 
-    # df_method: same fallback/normalisation pattern as wald_se.
-    # "between_within" (between-within denominator df for mixed fits, the
-    # default) or "asymptotic" (Wald z) are the valid wire values; validation
-    # already ran in _validate_df_method_arg.
-    if df_method is None:
-        from ..config import get_estimation_defaults
-
-        df_method = get_estimation_defaults()["df_method"]
+    # df_method: same normalisation pattern as wald_se (the caller resolves the
+    # `estimation.df_method` default). "between_within" (between-within
+    # denominator df for mixed fits, the default) or "asymptotic" (Wald z) are
+    # the valid wire values; validation already ran in _validate_df_method_arg.
     df_method_wire = df_method.lower().replace("-", "_").replace(" ", "_")
 
-    # Scenarios — pre-encode through `_scenario_dict` so the integer
+    # Scenarios — pre-encode through `build_scenario_dict` so the integer
     # code translation matches the existing Python projection exactly.
     scenarios = [build_scenario_dict(name, scenario_configs) for name in scenario_names]
     # RE knobs (random_effect_dist/df, icc_noise_sd) are LME-only: the

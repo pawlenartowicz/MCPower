@@ -30,6 +30,8 @@ pub mod posthoc;
 pub mod rng;
 pub mod scenarios;
 pub mod spec;
+#[cfg(test)]
+mod test_support;
 pub mod workspace;
 
 pub use batch::{run_batch, run_batch_st, set_n_threads};

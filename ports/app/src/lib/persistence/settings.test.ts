@@ -1,10 +1,6 @@
 /**
- * Unit tests for settings persistence.
- *
- * NOTE: The timer-based test ("setting theme = 'dark' results in a saveSettings call within 250ms")
- * is skipped here. It requires a Svelte rune store + fake timers in jsdom, which is tricky to set
- * up without Svelte's test renderer. The persistence layer itself (loadSettings/saveSettings) is
- * fully covered below.
+ * Unit tests for settings persistence: loadSettings/saveSettings, plus the
+ * shared-prefs rune store's hydrate and debounced save.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -46,6 +42,7 @@ describe('settings persistence', () => {
     mockGet.mockResolvedValueOnce(snap);
     const out = await loadSettings();
     expect(out).toEqual(snap);
+    expect(mockGet).toHaveBeenCalledWith('snapshot');
   });
 
   it('saveSettings calls set then save', async () => {
@@ -68,27 +65,20 @@ describe('settings persistence', () => {
     expect(mockSave).toHaveBeenCalled();
   });
 
-  it('nThreads round-trips: null (all cores) and a positive integer both persist', async () => {
+  it('sharedPrefs hydrates nThreads from the snapshot and saves a change back to null (all cores)', async () => {
+    mockGet.mockResolvedValue({ nThreads: 4 });
     mockSet.mockResolvedValue(undefined);
     mockSave.mockResolvedValue(undefined);
+    // A fresh store instance, so it hydrates from the snapshot mocked above.
+    vi.resetModules();
+    const { sharedPrefs } = await import('$lib/stores/shared-prefs.svelte');
+    await vi.waitFor(() => expect(sharedPrefs.ready).toBe(true));
+    expect(sharedPrefs.nThreads).toBe(4);
 
-    // null → persisted as null
-    await saveSettings({
-      theme: 'light', fontSize: 14, splitterFraction: 0.33,
-      modelExpanded: true, runExpanded: false, correlationsExpanded: false,
-      uploadExpanded: false, activePane: 'config', scenariosEnabled: false,
-      scriptLanguage: 'python', nThreads: null,
-    });
-    expect(mockSet).toHaveBeenLastCalledWith('snapshot', expect.objectContaining({ nThreads: null }));
-
-    // integer → persisted as integer
-    await saveSettings({
-      theme: 'light', fontSize: 14, splitterFraction: 0.33,
-      modelExpanded: true, runExpanded: false, correlationsExpanded: false,
-      uploadExpanded: false, activePane: 'config', scenariosEnabled: false,
-      scriptLanguage: 'python', nThreads: 4,
-    });
-    expect(mockSet).toHaveBeenLastCalledWith('snapshot', expect.objectContaining({ nThreads: 4 }));
+    sharedPrefs.nThreads = null;
+    await vi.waitFor(() =>
+      expect(mockSet).toHaveBeenCalledWith('snapshot', expect.objectContaining({ nThreads: null })),
+    );
   });
 
   it('reports a background error when the store save fails (instead of silently losing it)', async () => {

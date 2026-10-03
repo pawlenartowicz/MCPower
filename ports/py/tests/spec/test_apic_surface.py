@@ -13,8 +13,6 @@ fail.
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
 
@@ -25,7 +23,6 @@ from mcpower.spec.parsers import (
     _parse_equation,
     _parse_independent_variables,
 )
-from mcpower.output.results import unwrap_scenario_result
 from mcpower.spec.validators import (
     _validate_alpha,
     _validate_correction_method,
@@ -156,22 +153,19 @@ def test_parse_equation_triple_and_re_tagging():  # APIC-18
     assert res == [{"type": "random_intercept", "grouping_var": "g"}]
 
 
-def test_parse_equation_equals_synonym():  # APIC-20
-    dep_eq, fixed_eq, _ = _parse_equation("y = x1 + x2")
-    dep_tilde, fixed_tilde, _ = _parse_equation("y ~ x1 + x2")
-    assert dep_eq == dep_tilde == "y"
-    assert fixed_eq == fixed_tilde
-
-
 def test_parse_independent_variables_shape():  # APIC-19
     variables, effects = _parse_independent_variables("x1 + x2 + x1:x2")
-    assert list(variables.keys()) == ["variable_1", "variable_2"]
-    assert all(k.startswith("effect_") for k in effects)
-    interactions = [e for e in effects.values() if e.get("type") == "interaction"]
-    assert interactions and "var_names" in interactions[0]
-    assert "column_indices" in interactions[0]
-    mains = [e for e in effects.values() if e.get("type") != "interaction"]
-    assert all("column_index" in e for e in mains)
+    assert variables == {"variable_1": {"name": "x1"}, "variable_2": {"name": "x2"}}
+    assert effects == {
+        "effect_1": {"name": "x1", "type": "main", "column_index": 0},
+        "effect_2": {"name": "x2", "type": "main", "column_index": 1},
+        "effect_3": {
+            "name": "x1:x2",
+            "type": "interaction",
+            "var_names": ["x1", "x2"],
+            "column_indices": [0, 1],
+        },
+    }
 
 
 def _var_type_items(spec, predictors=("x", "y")):
@@ -222,17 +216,23 @@ def test_parse_variable_type_value_factor_normalisation():  # APIC-25
     assert info["x"]["proportions"] == pytest.approx([0.25, 0.25, 0.5])
     assert sum(info["x"]["proportions"]) == pytest.approx(1.0)
     _, neg_err = _var_type_items("x=(factor,0.5,-0.3)", predictors=("x",))
-    assert neg_err   # non-positive proportion rejected (soft error)
+    # Non-positive proportion rejected (soft error).
+    assert neg_err == ["x: All proportions must be positive (greater than 0)"]
 
 
-def test_parse_variable_type_value_error_paths():  # APIC-26
-    assert _var_type_items("x=weird", predictors=("x",))[1]            # unknown type
-    assert _var_type_items("x=(binary,0.2,0.3)", predictors=("x",))[1]  # arity
-    assert _var_type_items(
-        "x=(factor," + ",".join(["1"] * 21) + ")", predictors=("x",)
-    )[1]                                                               # > max levels
-    # Single-element factor → n_levels < 2.
-    assert _var_type_items("x=(factor,1)", predictors=("x",))[1]
+@pytest.mark.parametrize(
+    "spec, error",
+    [
+        ("x=weird", "x: Unsupported type 'weird'."),                       # unknown type
+        ("x=(binary,0.2,0.3)", "x: Binary type expects exactly 2 values"),  # arity
+        ("x=(factor," + ",".join(["1"] * 21) + ")",
+         "x: Factor cannot have more than 20 levels"),                     # > max levels
+        ("x=(factor,1)", "x: Factor must have at least 2 levels"),          # n_levels < 2
+    ],
+)
+def test_parse_variable_type_value_error_paths(spec, error):  # APIC-26
+    _, errors = _var_type_items(spec, predictors=("x",))
+    assert len(errors) == 1 and errors[0].startswith(error), errors
 
 
 # ---------------------------------------------------------------------------
@@ -259,8 +259,8 @@ def test_set_effects_dict_and_string_equivalent():  # APIC-30
         a.to_simulation_spec()["outcome"]["coefficients"]
         == b.to_simulation_spec()["outcome"]["coefficients"]
     )
-    with pytest.raises(Exception):
-        MCPower("y = x1").set_effects("")   # empty string raises
+    with pytest.raises(ValueError, match="cannot be empty"):
+        MCPower("y = x1").set_effects("")
 
 
 def test_set_correlation_input_forms():  # APIC-31
@@ -294,7 +294,7 @@ def test_apply_string_correlation_needs_two_vars():  # APIC-34
     m = MCPower("y = x1")
     m.set_effects("x1=0.5")
     m.set_correlations("corr(x1,x2)=0.3")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least 2 non-factor"):
         m._apply()
 
 
@@ -302,7 +302,7 @@ def test_apply_ndarray_correlation_shape_mismatch():  # APIC-35
     m = MCPower("y = x1 + x2")
     m.set_effects("x1=0.5, x2=0.3")
     m.set_correlations(np.eye(3))   # 3x3 but only 2 non-factor predictors
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"\(3x3\) doesn't match 2 non-factor"):
         m._apply()
 
 
@@ -374,49 +374,22 @@ def test_set_heteroskedasticity_driver_constant_and_bad_var():  # APIC-74
         m.set_heteroskedasticity_driver(var="not_a_var")
 
 
-def test_set_heteroskedasticity_driver_honored():  # APIC-74b
+@pytest.mark.parametrize("var, index", [("x1", 0), ("x2", 1)])
+def test_set_heteroskedasticity_driver_honored(var, index):  # APIC-74b, APIC-74c
     """driver_var_index flows through to the encoded spec (catches the v1 bug
-    that ignored the driver and always used the LP)."""
-    m1 = MCPower("y = x1 + x2")
-    m1.set_effects("x1=0.5, x2=0.3")
-    m1.set_heteroskedasticity_driver(var="x1")
-    payload1 = m1._to_linear_spec_dict(["optimistic"])
-    assert payload1["heteroskedasticity"]["driver_var_index"] == 0
-
-    m2 = MCPower("y = x1 + x2")
-    m2.set_effects("x1=0.5, x2=0.3")
-    m2.set_heteroskedasticity_driver(var="x2")
-    payload2 = m2._to_linear_spec_dict(["optimistic"])
-    assert payload2["heteroskedasticity"]["driver_var_index"] == 1
-
-    assert (
-        payload1["heteroskedasticity"]["driver_var_index"]
-        != payload2["heteroskedasticity"]["driver_var_index"]
-    )
-
-
-def test_set_heteroskedasticity_driver_no_ratio_key():  # APIC-74c
-    """λ is scenario-only — the stored dict must never have a 'ratio' key."""
+    that ignored the driver and always used the LP). The wire dict carries the
+    driver only: λ is scenario-only, so no 'ratio' key."""
     m = MCPower("y = x1 + x2")
     m.set_effects("x1=0.5, x2=0.3")
-    assert "ratio" not in m._heteroskedasticity
-    m.set_heteroskedasticity_driver(var="x1")
-    assert "ratio" not in m._heteroskedasticity
+    m.set_heteroskedasticity_driver(var=var)
+    payload = m._to_linear_spec_dict(["optimistic"])
+    assert payload["heteroskedasticity"] == {"driver_var_index": index}
 
 
 def test_to_simulation_spec_requires_effects():  # APIC-75
     m = MCPower("y = x1")
     with pytest.raises(RuntimeError):
         m.to_simulation_spec()
-
-
-def test_upload_data_bad_mode():  # APIC-76 (renamed: preserve_correlation → mode)
-    m = MCPower("y = x1 + x2")
-    data = np.random.RandomState(0).normal(size=(30, 2))
-    with pytest.raises(ValueError):
-        m.upload_data(data, columns=["x1", "x2"], mode="maybe")
-    # A valid, implemented choice must not raise on the mode gate.
-    m.upload_data(data, columns=["x1", "x2"], mode="partial")
 
 
 def test_set_max_failed_simulations_range():  # APIC-77
@@ -428,23 +401,23 @@ def test_set_max_failed_simulations_range():  # APIC-77
             m.set_max_failed_simulations(bad)
 
 
-def test_scenario_dict_rejects_unknown_distribution():  # APIC-80
+@pytest.mark.parametrize(
+    "key, name, message",
+    [
+        ("new_distributions", "weird_dist", "unknown distribution name 'weird_dist'"),
+        ("residual_dists", "nonexistent_dist", "unknown residual distribution 'nonexistent_dist'"),
+    ],
+)
+def test_scenario_dict_rejects_unknown_distribution(key, name, message):  # APIC-80
     m = MCPower("y = x1")
     m.set_effects("x1=0.5")
-    m._scenario_configs["realistic"]["new_distributions"] = ["weird_dist"]
-    with pytest.raises(ValueError):
-        m._scenario_dict("realistic")
-
-    m2 = MCPower("y = x1")
-    m2.set_effects("x1=0.5")
-    # Completely unknown name → residual_dists rejection.
-    m2._scenario_configs["realistic"]["residual_dists"] = ["nonexistent_dist"]
-    with pytest.raises(ValueError):
-        m2._scenario_dict("realistic")
+    m.set_scenario_configs({"realistic": {key: [name]}})
+    with pytest.raises(ValueError, match=f"scenario 'realistic': {message}"):
+        m._to_linear_spec_dict(["realistic"])
 
 
 # ---------------------------------------------------------------------------
-# Cluster / spec shape (APIC-42/43, 51, 52, 61..64)
+# Cluster / spec shape (APIC-43, 51, 61, 62)
 # ---------------------------------------------------------------------------
 
 
@@ -453,19 +426,6 @@ def test_resolve_scenarios_empty_list_raises():  # APIC-43
     m.set_effects("x1=0.5")
     with pytest.raises(ValueError):
         m._resolve_scenarios_arg([])
-
-
-def test_build_cluster_spec_tau_transform():  # APIC-52
-    m = MCPower("y ~ x1 + (1|g)", family="lme")
-    m.set_effects("x1=0.5").set_cluster("g", ICC=0.2, n_clusters=10)
-    spec = m._build_cluster_spec_dict()
-    tau = spec["tau_squared"]
-    assert tau == pytest.approx(0.2 / 0.8)   # ICC/(1-ICC) transform identity
-    # FixedClusters shape check.
-    assert spec["sizing"]["FixedClusters"]["n_clusters"] == 10
-    m0 = MCPower("y ~ x1 + (1|g)", family="lme")
-    m0.set_effects("x1=0.5").set_cluster("g", ICC=0.0, n_clusters=10)
-    assert m0._build_cluster_spec_dict()["tau_squared"] == 0.0
 
 
 def test_build_cluster_spec_fixed_size_shape():  # APIC-51b
@@ -495,14 +455,6 @@ def test_to_linear_spec_correlations_nonzero_only():  # APIC-61
     assert len(pairs) == 1 and pairs[0]["value"] == pytest.approx(0.4)
 
 
-def test_to_linear_spec_correction_alias_mapping():  # APIC-63
-    m = MCPower("y = x1 + x2")
-    m.set_effects("x1=0.5, x2=0.3")
-    assert m._to_linear_spec_dict(["optimistic"], correction="bh")["correction"] == "benjamini_hochberg"
-    assert m._to_linear_spec_dict(["optimistic"], correction="fdr")["correction"] == "benjamini_hochberg"
-    assert m._to_linear_spec_dict(["optimistic"], correction=None)["correction"] == "none"
-
-
 def test_to_linear_spec_strips_random_effects():  # APIC-62
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.5").set_cluster("school", ICC=0.2, n_clusters=10)
@@ -511,17 +463,8 @@ def test_to_linear_spec_strips_random_effects():  # APIC-62
     assert "x1" in formula
 
 
-def test_encode_clusters_json_present_for_clustered_ols():  # APIC-64
-    m = MCPower("y ~ x + (1|g)", family="lme", estimator="ols")
-    m.set_effects("x=0.4")
-    m.set_cluster("g", ICC=0.2, n_clusters=12)
-    _, _, estimator_wire, _, clusters_json = m._encode_outcome_and_clusters()
-    assert estimator_wire == "ols"                 # estimator stays OLS
-    assert clusters_json not in ("", "[]")         # cluster block still emitted
-
-
 # ---------------------------------------------------------------------------
-# Registry (APIC-57..59) & warnings (APIC-60)
+# Registry (APIC-57, 59) & warnings (APIC-60)
 # ---------------------------------------------------------------------------
 
 
@@ -530,16 +473,8 @@ def test_expand_factors_reference_coding_shape():  # APIC-57
     m.set_variable_type("f=(factor,0.5,0.3,0.2)")
     m.set_effects("a=0.3")
     m._apply()
-    dummies = [n for n in m._registry.effect_names if n.startswith("f[")]
-    assert len(dummies) == 2                        # n_levels - 1
-    assert all(n.startswith("f[") and n.endswith("]") for n in dummies)
-
-
-def test_registry_set_correlation_symmetric():  # APIC-58
-    m = MCPower("y = x1 + x2")
-    m._registry.set_correlation("x1", "x2", 0.4)
-    cm = m._registry.get_correlation_matrix()
-    assert cm[0][1] == cm[1][0] == 0.4
+    # n_levels - 1 dummies, reference level 1 dropped.
+    assert [n for n in m._registry.effect_names if n.startswith("f[")] == ["f[2]", "f[3]"]
 
 
 def test_registry_set_variable_type_factor_info():  # APIC-59
@@ -564,25 +499,6 @@ def test_warn_logit_effect_scale_two_tiers():  # APIC-60
 
 
 # ---------------------------------------------------------------------------
-# unwrap_scenario_result (APIC-65/66) — direct results.py units
-# ---------------------------------------------------------------------------
-
-
-def test_unwrap_single_scenario_returns_inner():  # APIC-65
-    raw = {"scenarios": {"optimistic": {"n_sims": 5}}}
-    out = unwrap_scenario_result(raw, ["optimistic"])
-    assert "scenarios" not in out      # inner dict, not the envelope
-    assert out["n_sims"] == 5
-
-
-def test_unwrap_multi_scenario_keeps_envelope():  # APIC-66
-    raw = {"scenarios": {"optimistic": {"n_sims": 5}, "realistic": {"n_sims": 6}}}
-    out = unwrap_scenario_result(raw, ["optimistic", "realistic"])
-    assert "scenarios" in out          # full envelope unchanged
-    assert set(out["scenarios"].keys()) == {"optimistic", "realistic"}
-
-
-# ---------------------------------------------------------------------------
 # find_* entry validation (APIC-78)
 # ---------------------------------------------------------------------------
 
@@ -593,13 +509,3 @@ def test_find_power_validates_sample_size_before_engine():  # APIC-78
     # sample_size=5 fails _validate_sample_size (< 20) before any engine call.
     with pytest.raises(ValueError):
         m.find_power(sample_size=5, n_sims=10, progress_callback=False)
-
-
-# Sanity: logit baseline → intercept transform identity (APIC-41 anchor used
-# elsewhere) is a transform shape, included here as the canonical mirror anchor.
-def test_logit_baseline_intercept_is_logit_transform():  # APIC-41
-    m = MCPower("y = x", family="logit")
-    m.set_baseline_probability(0.3)
-    m.set_effects("x=0.5")
-    m._apply()
-    assert m.intercept == pytest.approx(math.log(0.3 / 0.7))

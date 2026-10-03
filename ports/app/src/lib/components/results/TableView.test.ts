@@ -79,6 +79,13 @@ function makeSampleSizeTab(
   } as RunTab;
 }
 
+/** Trimmed cell texts of every body row of the table with the given testid. */
+function bodyRows(getByTestId: (id: string) => HTMLElement, testid: string): string[][] {
+  return [...getByTestId(testid).querySelectorAll('tbody tr')].map((tr) =>
+    [...tr.querySelectorAll('td')].map((td) => td.textContent?.trim() ?? ''),
+  );
+}
+
 describe('TableView — find-sample-size marginal table (A4)', () => {
   it('renders Effect | Required N (no Power at N / Target / ✓✗ columns)', () => {
     const tab = makeSampleSizeTab([100, 150]);
@@ -101,26 +108,29 @@ describe('TableView — find-sample-size marginal table (A4)', () => {
   });
 
   it('adds a First N achieving all targets footer line', () => {
-    const tab = makeSampleSizeTab([100, 150]);
-    const { getByText } = render(TableView, { props: { tab } });
-    expect(getByText(/First N achieving all targets/i)).toBeTruthy();
+    const footerValue = (firstAchieved: (number | null)[]) => {
+      const { getByText, unmount } = render(TableView, {
+        props: { tab: makeSampleSizeTab(firstAchieved) },
+      });
+      const value = getByText(/First N achieving all targets/i).querySelector('span')?.textContent;
+      unmount();
+      return value;
+    };
+    // The slowest target's required N …
+    expect(footerValue([100, 150])).toBe('150');
+    // … or "≥ ceiling" when any target never reached the target power.
+    expect(footerValue([100, null])).toBe('≥ 150');
   });
 
   it('shows ≥ ceiling for an unachieved target instead of a bare — in the Required N column', () => {
     // Grid is n=50,100,150 → ceiling=150; target b (null) → "≥ 150"
     const tab = makeSampleSizeTab([100, null]);
-    const { getAllByText, getByText } = render(TableView, { props: { tab } });
-    // "≥ 150" appears in both the table row and the footer — at least one match is expected.
-    expect(getAllByText('≥ 150').length).toBeGreaterThanOrEqual(1);
-    // Required N for achieved target shows its value, not a dash.
-    expect(getByText('100')).toBeTruthy();
-  });
-
-  it('does not render the joint required-N table (that lives in JointDistTab)', () => {
-    const tab = makeSampleSizeTab([100, 150]);
-    const { queryByText } = render(TableView, { props: { tab } });
-    expect(queryByText(/Joint detection/i)).toBeNull();
-    expect(queryByText(/of 2 tests/)).toBeNull();
+    const { getByTestId } = render(TableView, { props: { tab } });
+    // Effect | Required N | 95% CI (no fit → CI "—").
+    expect(bodyRows(getByTestId, 'sample-size-table')).toEqual([
+      ['a', '100', '—'],
+      ['b', '≥ 150', '—'],
+    ]);
   });
 });
 
@@ -176,8 +186,14 @@ describe('TableView — find-power table still works', () => {
       scenarios: [['default', result]],
     } as RunTab;
     const { getByTestId, getByText } = render(TableView, { props: { tab } });
-    expect(getByTestId('summary-table')).toBeTruthy();
     expect(getByText('95% CI')).toBeTruthy();
+    // Overall row first, then one row per target. target_indices are β̂-column
+    // indices (intercept at 0), so idx 1 → effect_names[0] = 'a', idx 2 → 'b'.
+    expect(bodyRows(getByTestId, 'summary-table')).toEqual([
+      ['Overall F', '80', '60.0%', '[50.0, 70.0]', '80% ✗'],
+      ['a', '80', '72.0%', '[62.0, 82.0]', '80% ✗'],
+      ['b', '80', '65.0%', '[55.0, 75.0]', '80% ✗'],
+    ]);
   });
 });
 
@@ -246,14 +262,6 @@ describe('TableView — model-based crossing fit display', () => {
     const { getAllByText, queryByTestId } = render(TableView, { props: { tab } });
     expect(getAllByText('100').length).toBeGreaterThanOrEqual(1);
     expect(queryByTestId('non-monotone-warning')).toBeNull();
-  });
-
-  it('missing fitted (older payload): falls back silently to first_achieved', () => {
-    // No fitted field → behaves exactly like pre-fitting payloads.
-    const tab = makeSampleSizeTab([100, 150]);
-    const { getAllByText } = render(TableView, { props: { tab } });
-    expect(getAllByText('100').length).toBeGreaterThanOrEqual(1);
-    expect(getAllByText('150').length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -340,19 +348,27 @@ describe('TableView — multi-scenario find-power layout (B4)', () => {
       sample_size: 80,
       effect_names: ['a', 'b'],
       result: optimistic, // baseline scenario's result
+      // The baseline is not first: Δ must follow REPORT_CONFIG's preferred
+      // baseline label ('optimistic'), not the first scenario.
       scenarios: [
-        ['optimistic', optimistic],
         ['doomer', doomer],
+        ['optimistic', optimistic],
       ],
     } as RunTab;
     const { getByTestId, getByText } = render(TableView, { props: { tab } });
-    expect(getByTestId('summary-table')).toBeTruthy();
     // Per-scenario column headers (the multi layout) + the Δ column.
-    expect(getByText('optimistic')).toBeTruthy();
-    expect(getByText('doomer')).toBeTruthy();
-    expect(getByText('Δ')).toBeTruthy();
+    const headers = [...getByTestId('summary-table').querySelectorAll('thead th')].map((th) =>
+      th.textContent?.trim(),
+    );
+    expect(headers).toEqual(['Effect', 'doomer', 'optimistic', 'Δ', 'Target']);
     // The multi layout drops the single-scenario "95% CI" column.
     expect(() => getByText('95% CI')).toThrow();
+    // Δ = worst scenario − baseline (optimistic); Target is judged on the baseline.
+    expect(bodyRows(getByTestId, 'summary-table')).toEqual([
+      ['Overall F', '60.0%', '60.0%', '+0.0pp', '80% ✗'],
+      ['a', '55.0%', '85.0%', '-30.0pp', '80% ✓'],
+      ['b', '40.0%', '78.0%', '-38.0pp', '80% ✗'],
+    ]);
   });
 });
 

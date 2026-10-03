@@ -44,9 +44,9 @@ def _parse_equation(equation: str) -> Tuple[str, str, List[Dict[str, Any]]]:
     The fixed-formula string is the canonical Rust-produced shape:
     ``"x1+x2+x1:x2"`` (no spaces; ``+`` between terms; ``:`` for interactions).
     """
-    # Tolerate `=` as a synonym for `~` (legacy v1 convenience) — the Rust
-    # parser only accepts `~`. Rewriting at the boundary keeps the grammar
-    # single-sourced in Rust.
+    # Tolerate `=` as a synonym for `~` (legacy v1 convenience). The Rust
+    # parser accepts `=` itself (formula corpus row `009_equals_separator`),
+    # so this rewrite is a no-op normalisation kept for v1 parity.
     rewritten = equation.replace("=", "~", 1) if "~" not in equation and "=" in equation else equation
 
     out = _engine.parse_formula(rewritten)

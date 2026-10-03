@@ -713,6 +713,12 @@ mod tests {
             "\"wald_chi2\""
         );
         assert_eq!(serde_json::to_string(&StatisticKind::Z).unwrap(), "\"z\"");
+        // `as_str` is the cross-port code every host surfaces; it must spell
+        // the same strings as the serde form.
+        assert_eq!(StatisticKind::T.as_str(), "t");
+        assert_eq!(StatisticKind::F.as_str(), "f");
+        assert_eq!(StatisticKind::WaldChi2.as_str(), "wald_chi2");
+        assert_eq!(StatisticKind::Z.as_str(), "z");
     }
 
     #[test]
@@ -721,14 +727,6 @@ mod tests {
         assert_eq!(s, "{\"route\":\"simulated\"}");
         let back: DispatchRoute = serde_json::from_str(&s).unwrap();
         assert_eq!(back, DispatchRoute::Simulated);
-    }
-
-    #[test]
-    fn stage_mask_constructors() {
-        let all = StageMask::all();
-        assert!(all.input && all.data && all.dispatch && all.stats && all.crit);
-        let none = StageMask::none();
-        assert!(!none.input && !none.data && !none.dispatch && !none.stats && !none.crit);
     }
 
     /// DBG-04: the declared stage set is exactly five flags
@@ -753,10 +751,16 @@ mod tests {
             "StageMask::all() must set every flag"
         );
 
+        let none = StageMask::none();
+        assert!(
+            !none.input && !none.data && !none.dispatch && !none.stats && !none.crit,
+            "StageMask::none() must clear every flag"
+        );
+
         // No `power` flag exists: DebugReport.power is derived, gated on
         // stats && crit, never a StageMask field. Round-trip the mask through
         // JSON and confirm the key set is exactly the five frozen names.
-        let json = serde_json::to_value(StageMask::none()).unwrap();
+        let json = serde_json::to_value(none).unwrap();
         let obj = json
             .as_object()
             .expect("StageMask serialises to a JSON object");
@@ -767,18 +771,6 @@ mod tests {
             !obj.contains_key("power"),
             "no `power` flag is allowed on StageMask"
         );
-    }
-
-    #[test]
-    fn matrix_roundtrips_msgpack() {
-        let m = Matrix {
-            data: vec![1.0, 2.0, 3.0, 4.0],
-            nrow: 2,
-            ncol: 2,
-        };
-        let bytes = rmp_serde::to_vec(&m).unwrap();
-        let back: Matrix = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(m, back);
     }
 
     #[test]
@@ -838,19 +830,5 @@ mod tests {
         let json = serde_json::to_string(&report).unwrap();
         let back2: DebugReport = serde_json::from_str(&json).unwrap();
         assert_eq!(report, back2);
-    }
-
-    #[test]
-    fn debug_report_all_none_roundtrips() {
-        let empty = DebugReport {
-            input: None,
-            data: None,
-            dispatch: None,
-            stats: None,
-            crit: None,
-            power: None,
-        };
-        let back: DebugReport = rmp_serde::from_slice(&rmp_serde::to_vec(&empty).unwrap()).unwrap();
-        assert_eq!(empty, back);
     }
 }

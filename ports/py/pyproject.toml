@@ -72,8 +72,8 @@ plot = [
 manifest-path = "../../crates/engine-py/Cargo.toml"
 python-source = "."
 module-name = "mcpower._engine"
-# `test-bridge` exposes the raw `build_contract_from_json` back-door used by
-# `tests/test_contract_bridge.py`. Release builds drop this feature so the
+# `test-bridge` exposes the `panic_for_test` seam used by
+# `tests/integration/test_report_hint.py`. Release builds drop this feature so the
 # symbol disappears from PyPI wheels — strip `test-bridge` from the line below
 # when cutting a release build.
 features = ["pyo3/extension-module", "test-bridge"]

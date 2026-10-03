@@ -1,15 +1,16 @@
-//! For each of two contracts (Glm, Mle), runs `find_power` twice with
-//! identical inputs but different rayon thread-pool sizes (1 vs auto).
-//! Asserts the results are bit-equal — proving the worker-count invariance
-//! contract that every port relies on.
+//! Monte-Carlo path gates for the GLM / GLMM / LMM estimators through
+//! `find_power` and the single-core + merge path: same-seed reproducibility of
+//! an unclustered logit run, and the estimator-extras wiring (including the
+//! NaN placeholders) through both dispatch twins. Thread-count invariance is
+//! owned by engine-core (`run_batch_bit_identical_1_vs_n_threads`,
+//! `tests/warmstart_determinism.rs`).
 
 mod common;
 
 use common::{lme_spec, logit_spec};
-use engine_contract::{ClusterSizing, ClusterSpec, EstimatorSpec, OutcomeKind, SimulationContract};
+use engine_contract::{ClusterSizing, ClusterSpec, EstimatorSpec, OutcomeKind};
 use engine_orchestrator::{
     find_power, merge_power_results, single_core_find_power, CancellationToken, EstimatorExtras,
-    PowerResult, ScenarioResult,
 };
 use engine_spec_builder::build_contract;
 
@@ -17,59 +18,28 @@ const N: usize = 200;
 const N_SIMS: usize = 800;
 const BASE_SEED: u64 = 2137;
 
-fn run_with(
-    contracts: &[SimulationContract],
-    n_threads: Option<usize>,
-) -> ScenarioResult<PowerResult> {
-    let cancel = CancellationToken::new();
-    let mut builder = rayon::ThreadPoolBuilder::new();
-    if let Some(n) = n_threads {
-        builder = builder.num_threads(n);
-    }
-    let pool = builder.build().expect("rayon pool");
-    pool.install(|| {
-        find_power(contracts, N, N_SIMS, BASE_SEED, None, &cancel).expect("find_power ok")
-    })
-}
-
-/// Bit-equal comparison that doesn't trip on NaN self-inequality.
-///
-/// `f64::PartialEq` propagates IEEE-754's `NaN != NaN`, which makes a direct
-/// `assert_eq!` on `ScenarioResult` spuriously fail whenever a result field
-/// (e.g. `Glm::baseline_prob_realized` or `Mle::tau_estimate`) is
-/// `NaN` in both runs. The orchestrator's *contract* surface is the msgpack
-/// byte encoding, and msgpack encodes NaN to a
-/// fixed bit pattern — so encoding both runs and comparing the byte vectors
-/// is the true "bit-equal across worker counts" check.
-fn assert_bit_equal_across_workers(contracts: Vec<SimulationContract>) {
-    let r_auto = run_with(&contracts, None);
-    let r_one = run_with(&contracts, Some(1));
-    let bytes_auto = rmp_serde::to_vec(&r_auto).expect("encode r_auto");
-    let bytes_one = rmp_serde::to_vec(&r_one).expect("encode r_one");
-    assert_eq!(
-        bytes_auto, bytes_one,
-        "find_power must be bit-equal across worker counts (num_threads=auto vs 1) — \
-         msgpack-encoded ScenarioResult bytes differ"
-    );
-    assert_eq!(r_auto.scenarios.len(), 1);
-}
-
+/// Two `find_power` calls with identical inputs (unclustered logit, IRLS path)
+/// must be bit-identical. Compared as msgpack bytes because the Glm extras
+/// carry a NaN placeholder (`baseline_prob_realized`) and `NaN != NaN` would
+/// fail a direct `assert_eq!`; msgpack encodes NaN to a fixed bit pattern.
 #[test]
-fn mc_path_exit_gate_glm() {
+fn find_power_logit_is_bit_identical_at_fixed_seed() {
     let contracts = build_contract(&logit_spec(), OutcomeKind::Binary, None, None, -0.5, vec![])
         .expect("build_contract glm");
-    // Sanity-check the estimator_extras variant before paying for the full
-    // two-pool run.
     let cancel = CancellationToken::new();
-    let r = find_power(&contracts, N, N_SIMS, BASE_SEED, None, &cancel).expect("find_power ok");
-    let (_, pr) = &r.scenarios[0];
+    let r1 = find_power(&contracts, N, N_SIMS, BASE_SEED, None, &cancel).expect("find_power ok");
+    let r2 = find_power(&contracts, N, N_SIMS, BASE_SEED, None, &cancel).expect("find_power ok");
+    let (_, pr) = &r1.scenarios[0];
     assert!(
         matches!(pr.estimator_extras, EstimatorExtras::Glm { .. }),
         "expected Glm estimator_extras, got {:?}",
         pr.estimator_extras
     );
-
-    assert_bit_equal_across_workers(contracts);
+    assert_eq!(
+        rmp_serde::to_vec(&r1).expect("encode r1"),
+        rmp_serde::to_vec(&r2).expect("encode r2"),
+        "same-seed logit find_power must be bit-identical"
+    );
 }
 
 /// GLMM end-to-end: a clustered-logit contract (Glm + random intercept) routes
@@ -94,7 +64,7 @@ fn find_power_clustered_logit_surfaces_glm_extras() {
     )
     .expect("build_contract clustered glm");
 
-    // Smaller workload than the bit-equality gates above: GLMM runs a joint
+    // Smaller workload than the same-seed gate above: GLMM runs a joint
     // BOBYQA per (sim, N), so 64 sims at N=120 keeps this fast in debug while
     // still converging enough fits to populate the extras.
     let cancel = CancellationToken::new();
@@ -280,33 +250,4 @@ fn mle_tau_estimate_nan_pre_zero_post_through_merge() {
         *tau_estimate, 0.0,
         "post-merge tau_estimate must be exactly 0.0, got {tau_estimate}"
     );
-}
-
-#[test]
-fn mc_path_exit_gate_mle() {
-    let contracts = build_contract(
-        &lme_spec(),
-        OutcomeKind::Continuous,
-        None,
-        Some(EstimatorSpec::Mle),
-        0.0,
-        vec![ClusterSpec {
-            sizing: ClusterSizing::FixedClusters { n_clusters: 20 },
-            tau_squared: 0.3,
-            slopes: vec![],
-            extra_groupings: vec![],
-        }],
-    )
-    .expect("build_contract mle");
-
-    let cancel = CancellationToken::new();
-    let r = find_power(&contracts, N, N_SIMS, BASE_SEED, None, &cancel).expect("find_power ok");
-    let (_, pr) = &r.scenarios[0];
-    assert!(
-        matches!(pr.estimator_extras, EstimatorExtras::Mle { .. }),
-        "expected Mle estimator_extras, got {:?}",
-        pr.estimator_extras
-    );
-
-    assert_bit_equal_across_workers(contracts);
 }

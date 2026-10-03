@@ -598,9 +598,9 @@ dependencies = [
 
 [[package]]
 name = "glmm"
-version = "0.3.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5790e9f7784c69295f511f232c8c6d3885cd8e13f8a17461c244ff9fe524636"
+checksum = "dcad75fd2d6297d20d111712f7e9f0e5265385dc6c36a168e6aa6f8dc8704954"
 dependencies = [
  "bobyqa 0.3.0",
  "faer",
@@ -1079,9 +1079,9 @@ dependencies = [
 
 [[package]]
 name = "rand_philox"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fd5ca897f8b5e3e5bc0d388d9a408605ec8ac3615ff79f556177c1e473b48e4"
+checksum = "58bdd129512111be1936edc001113ba844f0fd1aa58b34b2752af62454788805"
 
 [[package]]
 name = "raw-cpuid"

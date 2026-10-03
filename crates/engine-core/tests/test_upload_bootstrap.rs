@@ -8,13 +8,11 @@
 //! `data_gen.rs`'s test module and `test_upload_norta.rs`) and call
 //! `generate_sim_data` to obtain a row-block, then inspect `ws.x_full`.
 
+mod common;
+
 use engine_core::data_gen::generate_sim_data;
-use engine_core::spec::HeteroskedasticityCoeffs;
 use engine_core::workspace::SimWorkspace;
-use engine_core::{
-    CorrectionMethod, CritValues, Distribution, EstimatorSpec, OutcomeKind, ResidualDist,
-    ScenarioPerturbations, SimulationSpec,
-};
+use engine_core::{Distribution, SimulationSpec};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,51 +33,17 @@ fn strict_2cont_spec(frame: &[[f64; 2]]) -> SimulationSpec {
     }
     SimulationSpec {
         n_non_factor: 2,
-        n_factor_dummies: 0,
         correlation: vec![1.0, 0.0, 0.0, 1.0],
         var_types: vec![Distribution::UploadedData, Distribution::UploadedData],
-        var_pinned: vec![],
         var_params: vec![0.0, 0.0],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
         upload_data,
         upload_data_shape: (u as u32, 2),
         bootstrap_frame_map: vec![Some(0), Some(1)],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         // β layout: intercept, x1, x2.
         effect_sizes: vec![0.0, 0.5, 0.3],
         target_indices: vec![1, 2],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
         max_failed_fraction: 1.0,
-        cluster: None,
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     }
 }
 
@@ -176,52 +140,18 @@ fn strict_cont_plus_factor_spec(frame: &[[f64; 2]]) -> SimulationSpec {
     }
     // n_pred = intercept(1) + non_factor(1) + factor_dummies(2) = 4.
     SimulationSpec {
-        n_non_factor: 1,
+        // correlation: base 1×1 identity (one continuous column)
         n_factor_dummies: 2,
-        correlation: vec![1.0], // 1×1 identity (one continuous column)
         var_types: vec![Distribution::UploadedData],
-        var_pinned: vec![],
-        var_params: vec![0.0],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
         upload_data,
         upload_data_shape: (u as u32, 2),
         bootstrap_frame_map: vec![Some(0), Some(1)],
-        between_var_indices: vec![],
         factor_n_levels: vec![3],
         factor_proportions: vec![0.5, 0.3, 0.2],
-        factor_sampled: Vec::new(),
         // β layout: intercept, x_cont, dummy0, dummy1.
         effect_sizes: vec![0.0, 0.5, 0.0, 0.0],
-        target_indices: vec![1],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
         max_failed_fraction: 1.0,
-        cluster: None,
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     }
 }
 
@@ -310,52 +240,18 @@ fn strict_bootstrap_factor_reexpands_level() {
 fn strict_cont_plus_binary_spec(upload_data: Vec<f64>, u: usize, p: f64) -> SimulationSpec {
     SimulationSpec {
         n_non_factor: 2,
-        n_factor_dummies: 0,
         // 2×2 identity — continuous correlation, unused on bootstrap path.
         correlation: vec![1.0, 0.0, 0.0, 1.0],
         var_types: vec![Distribution::UploadedData, Distribution::UploadedBinary],
-        var_pinned: vec![],
         var_params: vec![0.0, p],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
         upload_data,
         upload_data_shape: (u as u32, 2),
         bootstrap_frame_map: vec![Some(0), Some(1)],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         // β layout: intercept, x_cont, x_bin.
         effect_sizes: vec![0.0, 0.5, 0.3],
         target_indices: vec![1, 2],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
         max_failed_fraction: 1.0,
-        cluster: None,
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     }
 }
 

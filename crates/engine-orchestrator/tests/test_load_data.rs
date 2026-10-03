@@ -307,4 +307,14 @@ fn load_data_wald_se_override_hessian_ge_rx_same_betas() {
             tr.se
         );
     }
+    // The override must reach the SE kernel: an ignored `wald_se` would return
+    // identical SEs under both modes and pass every check above.
+    assert!(
+        ld_rx
+            .targets
+            .iter()
+            .zip(&ld_hess.targets)
+            .any(|(tr, th)| th.se > tr.se + 1e-6),
+        "hessian SE must differ from rx SE for at least one target"
+    );
 }

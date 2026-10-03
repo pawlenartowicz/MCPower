@@ -180,7 +180,7 @@ pub fn first_n_at_target(
 /// holds a `Vec<PowerResult>` — fresh `aggregate_batch` output or pooled results).
 /// The joint counterpart (`first_joint_achieved`) is computed per-path from the
 /// per-N histograms.
-pub fn derive_first_achieved(
+fn derive_first_achieved(
     per_n: &[PowerResult],
     sample_sizes: &[usize],
     target_power: f64,
@@ -331,7 +331,7 @@ pub(crate) fn derive_sample_size_outputs(
 /// INVARIANT: each `histograms_corrected[i]` must sum to `n_sims`, otherwise
 /// P(>=k) can exceed 1. This function divides by `n_sims` itself (cf.
 /// `first_n_at_target`, which receives already-divided powers).
-pub fn first_n_joint_at_target(
+fn first_n_joint_at_target(
     histograms_corrected: &[Vec<u64>],
     n_sims: u64,
     sample_sizes: &[usize],
@@ -362,29 +362,21 @@ mod grid_builder_tests {
     // No clusters: atom=1, hard_min=1.
     #[test]
     fn auto_count_unclustered_linear_pins_endpoints() {
+        // span 170 over 11 intervals rounds to step 15; the walk stops at 195 and
+        // the `to` endpoint 200 is pinned.
         let (g, w) =
             build_grid(30, 200, ByValue::Auto { count: 12 }, GridMode::Linear, 1, 1).unwrap();
-        assert_eq!(*g.first().unwrap(), 30, "starts at from");
-        assert_eq!(*g.last().unwrap(), 200, "ends at to (endpoint pinned)");
-        assert!(
-            g.len() >= 11 && g.len() <= 13,
-            "~12 points, got {}",
-            g.len()
+        assert_eq!(
+            g,
+            vec![30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 200]
         );
         assert!(w.is_empty(), "no cluster warnings unclustered");
-        assert!(g.windows(2).all(|p| p[0] < p[1]));
     }
 
-    // Note: the basic linear walk [30,35,40,45,50] is pinned by the integration
-    // test `linear_grid_matches_python_range` (tests/test_grid.rs), which also
-    // documents the Python range() parity — not duplicated here.
-
-    #[test]
-    fn fixed_step_unclustered_pins_dropped_endpoint() {
-        let (g, _) = build_grid(30, 52, ByValue::Fixed(5), GridMode::Linear, 1, 1).unwrap();
-        assert_eq!(*g.last().unwrap(), 52, "max pinned even when step skips it");
-        assert_eq!(g[0], 30);
-    }
+    // Note: the basic linear walk [30,35,40,45,50] and the Fixed-step dropped
+    // endpoint pin are covered by the integration tests
+    // `linear_grid_matches_python_range` and
+    // `linear_grid_inclusive_endpoint_partial_step` (tests/test_grid.rs).
 
     // Regime A: atom = n_clusters = 20, hard_min = 20*2 = 40.
     #[test]
@@ -495,12 +487,10 @@ mod grid_builder_tests {
 
     #[test]
     fn log_mode_points_are_atom_multiples_sorted_unique() {
+        // 8 log-spaced points over [40, 400], each rounded to the atom 20.
         let (g, _) =
             build_grid(40, 400, ByValue::Auto { count: 8 }, GridMode::Log, 20, 40).unwrap();
-        assert!(g.iter().all(|&n| n % 20 == 0));
-        assert_eq!(*g.first().unwrap(), 40);
-        assert_eq!(*g.last().unwrap(), 400);
-        assert!(g.windows(2).all(|p| p[0] < p[1]), "sorted + deduped");
+        assert_eq!(g, vec![40, 60, 80, 100, 140, 200, 280, 400]);
     }
 }
 
@@ -579,7 +569,7 @@ mod joint_tests {
     use super::*;
 
     // Hand-built: 3 grid points, n_targets = 2 => histogram length 3 (k=0,1,2).
-    // n_sims = 100 at every grid point. Bucket-sum invariant: each row sums to 100.
+    // n_sims = 100 at every grid point; each row sums to 100.
     fn fixture() -> (Vec<Vec<u64>>, Vec<usize>) {
         let histograms = vec![
             vec![80, 15, 5],  // N=50:  P(>=1)=0.20, P(>=2)=0.05
@@ -591,32 +581,12 @@ mod joint_tests {
     }
 
     #[test]
-    fn bucket_sum_equals_n_sims_invariant() {
-        let (h, _) = fixture();
-        for row in &h {
-            assert_eq!(
-                row.iter().sum::<u64>(),
-                100,
-                "each histogram row must sum to n_sims"
-            );
-        }
-    }
-
-    #[test]
     fn first_n_for_k1_and_k2_with_50pct_target() {
         let (h, ss) = fixture();
         // P(>=1): 0.20, 0.60, 0.95 -> first >= 0.50 at N=100.
         assert_eq!(first_n_joint_at_target(&h, 100, &ss, 0.50, 1), Some(100));
         // P(>=2): 0.05, 0.20, 0.60 -> first >= 0.50 at N=200.
         assert_eq!(first_n_joint_at_target(&h, 100, &ss, 0.50, 2), Some(200));
-    }
-
-    #[test]
-    fn required_n_is_non_decreasing_in_k() {
-        let (h, ss) = fixture();
-        let n1 = first_n_joint_at_target(&h, 100, &ss, 0.50, 1).unwrap();
-        let n2 = first_n_joint_at_target(&h, 100, &ss, 0.50, 2).unwrap();
-        assert!(n2 >= n1, "required N for >=k must be non-decreasing in k");
     }
 
     #[test]

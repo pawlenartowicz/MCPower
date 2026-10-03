@@ -91,8 +91,8 @@ jobs:
 
       # Strip `test-bridge` from the release wheel: it stays in pyproject's
       # default `[tool.maturin] features` so dev CI (`maturin develop`) keeps
-      # building the build_contract_from_json / panic_for_test back-doors, but
-      # the published wheel must not carry them (spec A1.1). maturin unions CLI
+      # building the panic_for_test back-door, but
+      # the published wheel must not carry it. maturin unions CLI
       # features with the pyproject list, so it cannot subtract — edit the file.
       - name: Strip test-bridge feature for release build
         shell: bash

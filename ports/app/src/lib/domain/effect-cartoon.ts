@@ -217,7 +217,7 @@ export function groupedColumns(
 
 // 2×2 cell means [00, A, B, A+B+int] and the no-interaction reference A+B (the
 // gap between the 4th mean and ref is the interaction).
-export function twoByTwo(
+function twoByTwo(
   betaA: number,
   betaB: number,
   interactionBeta: number,
@@ -250,7 +250,7 @@ export function gridColumns(
 }
 
 // group0 (binary=0): slope contBeta; group1 (binary=1): slope contBeta+interactionBeta.
-export function twoSlopes(
+function twoSlopes(
   contBeta: number,
   interactionBeta: number,
 ): { slope0: number; slope1: number } {

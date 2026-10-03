@@ -185,106 +185,60 @@ fn debug_report_asymptotic_mixed_reports_z_and_empty_df() {
 const SEED: u64 = 2137;
 const N_SIMS: usize = 300;
 
+/// Target power from both dispatch twins; `single_core_find_power` walks the
+/// same per-sim seed chain as `find_power` (`run_batch_st` vs `run_batch`), so
+/// the two must agree bit-for-bit.
+fn twin_power(c: &SimulationContract) -> f64 {
+    let cancel = CancellationToken::new();
+    let mc = find_power(std::slice::from_ref(c), N, N_SIMS, SEED, None, &cancel)
+        .unwrap()
+        .scenarios[0]
+        .1
+        .power_uncorrected[0];
+    let sc = single_core_find_power(std::slice::from_ref(c), N, N_SIMS, SEED, None, &cancel)
+        .unwrap()
+        .scenarios[0]
+        .1
+        .power_uncorrected[0];
+    assert_eq!(mc, sc, "dispatch twins must agree on {:?}", c.df_method);
+    mc
+}
+
+/// Recorded literals at (seed=2137, N=120, n_sims=300). The between-within
+/// literal sits strictly below the asymptotic one: the wider t(112) threshold
+/// reached the decision. An unwired `df_method` would make the two equal.
 #[test]
 fn find_power_between_within_never_exceeds_asymptotic_mle() {
-    let cancel = CancellationToken::new();
     let bw = bw_mle_contract();
     let mut asymp = bw.clone();
     asymp.df_method = DfMethod::Asymptotic;
 
-    let p_bw = find_power(&[bw], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
-    let p_asymp = find_power(&[asymp], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
+    let p_bw = twin_power(&bw);
+    let p_asymp = twin_power(&asymp);
 
-    // Recorded literal for the asymptotic mixed build at (seed=2137, N=120,
-    // n_sims=300) — a larger between-within crit can only lower power, so
-    // this literal is also the upper bound the BW run is checked against.
     assert_eq!(p_asymp, 0.9166666666666666);
+    assert_eq!(p_bw, 0.9133333333333333);
     assert!(
-        p_bw <= p_asymp,
-        "between-within power {p_bw} must not exceed asymptotic power {p_asymp}"
+        p_bw < p_asymp,
+        "between-within power {p_bw} must sit below asymptotic power {p_asymp}"
     );
 }
 
-#[test]
-fn single_core_find_power_between_within_never_exceeds_asymptotic_mle() {
-    let cancel = CancellationToken::new();
-    let bw = bw_mle_contract();
-    let mut asymp = bw.clone();
-    asymp.df_method = DfMethod::Asymptotic;
-
-    let p_bw = single_core_find_power(&[bw], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
-    let p_asymp = single_core_find_power(&[asymp], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
-
-    // single_core_find_power uses run_batch_st over the SAME per-sim seed
-    // chain as find_power, so it reproduces the exact multi-core literal.
-    assert_eq!(p_asymp, 0.9166666666666666);
-    assert!(
-        p_bw <= p_asymp,
-        "between-within power {p_bw} must not exceed asymptotic power {p_asymp}"
-    );
-}
-
+/// Clustered-GLM counterpart: t(110) between-within threshold vs Wald z.
 #[test]
 fn find_power_between_within_never_exceeds_asymptotic_glm_cluster() {
-    let cancel = CancellationToken::new();
     let bw = bw_glm_cluster_contract();
     let mut asymp = bw.clone();
     asymp.df_method = DfMethod::Asymptotic;
 
-    let p_bw = find_power(&[bw], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
-    let p_asymp = find_power(&[asymp], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
+    let p_bw = twin_power(&bw);
+    let p_asymp = twin_power(&asymp);
 
+    assert_eq!(p_asymp, 0.31);
+    assert_eq!(p_bw, 0.30333333333333334);
     assert!(
-        p_bw <= p_asymp,
-        "between-within power {p_bw} must not exceed asymptotic power {p_asymp}"
-    );
-}
-
-#[test]
-fn single_core_find_power_between_within_never_exceeds_asymptotic_glm_cluster() {
-    let cancel = CancellationToken::new();
-    let bw = bw_glm_cluster_contract();
-    let mut asymp = bw.clone();
-    asymp.df_method = DfMethod::Asymptotic;
-
-    let p_bw = single_core_find_power(&[bw], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
-    let p_asymp = single_core_find_power(&[asymp], N, N_SIMS, SEED, None, &cancel)
-        .unwrap()
-        .scenarios[0]
-        .1
-        .power_uncorrected[0];
-
-    assert!(
-        p_bw <= p_asymp,
-        "between-within power {p_bw} must not exceed asymptotic power {p_asymp}"
+        p_bw < p_asymp,
+        "between-within power {p_bw} must sit below asymptotic power {p_asymp}"
     );
 }
 

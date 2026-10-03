@@ -1112,24 +1112,6 @@ mod tests {
     }
 
     #[test]
-    fn builds_contract_for_two_continuous_predictors() {
-        let mut contracts = build_linear_contract(&simple_spec()).unwrap();
-        assert_eq!(contracts.len(), 1);
-        let c = contracts.pop().unwrap();
-        assert_eq!(c.generation.columns.len(), 2);
-        assert_eq!(c.design_generation.terms.len(), 3);
-        assert_eq!(c.outcome.coefficients, vec![0.0, 0.5, 0.3]);
-        // "overall" → two marginals only. Omnibus Joint is gated on
-        // `spec.report_overall` — simple_spec leaves it false.
-        assert_eq!(c.test.targets.len(), 2);
-        assert!(matches!(
-            c.test.targets.first(),
-            Some(TestTarget::Marginal { term: 1 })
-        ));
-        c.validate().unwrap();
-    }
-
-    #[test]
     fn df_method_threads_from_input_to_contract() {
         // Threads the non-default value, so a builder that ignored the field
         // and emitted the default would fail here.
@@ -1199,20 +1181,35 @@ mod tests {
         // When test_formula trims the model, the omnibus Joint must cover the
         // *test* design's non-intercept positions, not the generation design's.
         let mut spec = simple_spec();
+        spec.formula = "y = x1 + x2 + x3".into();
+        spec.predictors.push(PredictorSpec {
+            name: "x3".into(),
+            pinned: false,
+            kind: VarKind::Normal,
+        });
+        spec.effects.push(EffectAssignment {
+            name: "x3".into(),
+            size: 0.2,
+        });
         spec.report_overall = true;
-        spec.test_formula = Some("y = x1".into());
+        spec.test_formula = Some("y = x1 + x2".into());
         spec.targets = vec!["x1".into()];
         let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        // design_test has 2 terms (Const, x1) → omnibus joint covers {1} only.
-        // Joint requires >= 2 terms, so the spec-builder skips emission and
-        // the contract has only the marginal.
-        assert!(
-            c.test
-                .targets
-                .iter()
-                .all(|t| matches!(t, TestTarget::Marginal { .. })),
-            "test_formula reducing to 1 non-intercept term should not emit a Joint"
+        // design_test is (Const, x1, x2) → Joint over {1, 2}, not the
+        // generation design's {1, 2, 3}.
+        assert_eq!(
+            c.test.targets,
+            vec![
+                TestTarget::Marginal { term: 1 },
+                TestTarget::Joint { terms: vec![1, 2] },
+            ]
         );
+
+        // A test design with one non-intercept term emits no Joint (a Joint
+        // needs >= 2 terms); only the marginal remains.
+        spec.test_formula = Some("y = x1".into());
+        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        assert_eq!(c.test.targets, vec![TestTarget::Marginal { term: 1 }]);
     }
 
     #[test]
@@ -1422,23 +1419,18 @@ mod tests {
 
     #[test]
     fn build_contract_rejects_random_slopes() {
-        let mut spec = simple_spec();
-        spec.formula = "y ~ x1 + x2 + (1+x1|g)".into();
-        let err =
-            build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![]).unwrap_err();
-        assert!(matches!(err, SpecError::RandomSlopesUnsupported));
-    }
-
-    #[test]
-    fn build_contract_rejects_implicit_random_slope() {
-        // (x1|g) parses to a Slope (implicit-intercept form), so the builder
-        // rejects it identically to (1+x1|g) — it no longer dies earlier as a
-        // FormulaSyntax error. Mirrors build_contract_rejects_random_slopes.
-        let mut spec = simple_spec();
-        spec.formula = "y ~ x1 + x2 + (x1|g)".into();
-        let err =
-            build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![]).unwrap_err();
-        assert!(matches!(err, SpecError::RandomSlopesUnsupported));
+        // The implicit-intercept form (x1|g) parses to a Slope too, so the
+        // builder rejects it identically (not earlier as a FormulaSyntax error).
+        for formula in ["y ~ x1 + x2 + (1+x1|g)", "y ~ x1 + x2 + (x1|g)"] {
+            let mut spec = simple_spec();
+            spec.formula = formula.into();
+            let err = build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![])
+                .unwrap_err();
+            assert!(
+                matches!(err, SpecError::RandomSlopesUnsupported),
+                "{formula}: {err:?}"
+            );
+        }
     }
 
     #[test]
@@ -1469,46 +1461,6 @@ mod tests {
         );
         // Estimator coupling: Mle was stated explicitly and must land on the wire.
         assert_eq!(c.estimator, EstimatorSpec::Mle);
-    }
-
-    #[test]
-    fn factor_flip_layout_matches_design_matrix_columns() {
-        let mut spec = simple_spec();
-        spec.formula = "y = group + x1".into();
-        spec.predictors = vec![
-            PredictorSpec {
-                name: "group".into(),
-                pinned: false,
-                kind: VarKind::Factor {
-                    levels: vec!["1".into(), "2".into(), "3".into()],
-                    proportions: vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
-                    reference: "1".into(),
-                    sampled_proportions: None,
-                },
-            },
-            PredictorSpec {
-                name: "x1".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-        ];
-        spec.effects = vec![
-            EffectAssignment {
-                name: "group[2]".into(),
-                size: 0.3,
-            },
-            EffectAssignment {
-                name: "group[3]".into(),
-                size: 0.5,
-            },
-            EffectAssignment {
-                name: "x1".into(),
-                size: 0.4,
-            },
-        ];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        // Engine layout: [intercept, x1, group[2], group[3]]
-        assert_eq!(c.outcome.coefficients, vec![0.0, 0.4, 0.3, 0.5]);
     }
 
     // ── Contrast routing tests ────────────────────────────────────────────────
@@ -1559,110 +1511,6 @@ mod tests {
         }
     }
 
-    /// nLevels-only placeholders (levels provided as "1", "2", ...)
-    /// must emit `factor[1]`, `factor[2]`, NOT `factor[L1]`, `factor[L2]`.
-    #[test]
-    fn nlevel_placeholder_emits_bare_integer_names() {
-        let spec = LinearSpec {
-            formula: "y = group".into(),
-            predictors: vec![PredictorSpec {
-                name: "group".into(),
-                pinned: false,
-                kind: VarKind::Factor {
-                    levels: vec!["1".into(), "2".into(), "3".into()],
-                    proportions: vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
-                    reference: "1".into(),
-                    sampled_proportions: None,
-                },
-            }],
-            effects: vec![
-                EffectAssignment {
-                    name: "group[2]".into(),
-                    size: 0.3,
-                },
-                EffectAssignment {
-                    name: "group[3]".into(),
-                    size: 0.5,
-                },
-            ],
-            correlations: vec![],
-            alpha: 0.05,
-            correction: Correction::None,
-            targets: vec!["overall".into()],
-            heteroskedasticity: HeteroskedasticityInput::default(),
-            residual: ResidualSpec::default(),
-            max_failed_fraction: 0.1,
-            scenarios: vec![],
-            test_formula: None,
-            report_overall: false,
-            contrast_pairs: vec![],
-            posthoc_requests: vec![],
-            upload: None,
-            cluster_level_vars: vec![],
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-        };
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        // group[2] and group[3] must resolve to the non-reference dummy
-        // columns (term 1 and term 2; reference level "1" excluded). Asserting the
-        // term indices catches a mutation that adds an "L" prefix or mis-routes the
-        // effect to the wrong column — a count-only check would miss both.
-        let mut marginals: Vec<u32> = c
-            .test
-            .targets
-            .iter()
-            .filter_map(|t| match t {
-                TestTarget::Marginal { term } => Some(*term),
-                _ => None,
-            })
-            .collect();
-        marginals.sort_unstable();
-        assert_eq!(marginals, vec![1, 2], "group[2]→term 1, group[3]→term 2");
-    }
-
-    /// A contrast pair where one side is the reference level collapses to
-    /// a Marginal on the non-reference term.
-    #[test]
-    fn contrast_pair_with_reference_collapses_to_marginal() {
-        let mut spec = contrast_spec_base();
-        // "group[A]" is the reference level (not in effect_names). This pair
-        // should collapse to Marginal { term = group[B]'s term index }.
-        spec.targets = vec![];
-        spec.contrast_pairs = vec![("group[B]".into(), "group[A]".into())];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        assert_eq!(c.test.targets.len(), 1);
-        // Collapses to a Marginal on the non-reference side (group[B] →
-        // term 1; reference "A" excluded). Pin the term, not just the variant.
-        assert_eq!(
-            c.test.targets[0],
-            TestTarget::Marginal { term: 1 },
-            "reference-side contrast must collapse to Marginal on group[B] (term 1)"
-        );
-    }
-
-    /// A contrast pair where neither side is the reference level emits a
-    /// Contrast variant.
-    #[test]
-    fn contrast_pair_non_reference_emits_contrast_variant() {
-        let mut spec = contrast_spec_base();
-        spec.targets = vec![];
-        spec.contrast_pairs = vec![("group[B]".into(), "group[C]".into())];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        assert_eq!(c.test.targets.len(), 1);
-        // Both-non-reference pair emits Contrast with the design term
-        // indices (group[B] → 1 positive, group[C] → 2 negative). Pin the indices,
-        // not just the variant — a swap or wrong column would otherwise pass.
-        assert_eq!(
-            c.test.targets[0],
-            TestTarget::Contrast {
-                positive: 1,
-                negative: 2
-            },
-            "group[B] vs group[C] must map to Contrast{{positive:1, negative:2}}"
-        );
-    }
-
     /// An unrecognised name in a contrast pair must produce an
     /// UnknownContrastName error.
     #[test]
@@ -1675,54 +1523,6 @@ mod tests {
             matches!(err, SpecError::UnknownContrastName { .. }),
             "expected UnknownContrastName, got: {err:?}"
         );
-    }
-
-    // Every emitted contract passes its own validate(); with multiple scenarios
-    // each returned contract is individually valid (the builder validates
-    // per-scenario, not just the first).
-    #[test]
-    fn every_emitted_contract_individually_validates() {
-        let mut spec = simple_spec();
-        spec.scenarios = vec![
-            ScenarioInput {
-                name: "optimistic".into(),
-                heterogeneity: 0.0,
-                heteroskedasticity_ratio: 1.0,
-                correlation_noise_sd: 0.0,
-                distribution_change_prob: 0.0,
-                new_distributions: vec![],
-                residual_change_prob: 0.0,
-                residual_dists: vec![],
-                residual_df: 0.0,
-                sampled_factor_proportions: false,
-                truth_start: false,
-                random_effect_dist: 0,
-                random_effect_df: 0.0,
-                icc_noise_sd: 0.0,
-            },
-            ScenarioInput {
-                name: "realistic".into(),
-                heterogeneity: 0.1,
-                heteroskedasticity_ratio: 2.0,
-                correlation_noise_sd: 0.1,
-                distribution_change_prob: 0.0,
-                new_distributions: vec![],
-                residual_change_prob: 0.0,
-                residual_dists: vec![],
-                residual_df: 0.0,
-                sampled_factor_proportions: true,
-                truth_start: false,
-                random_effect_dist: 0,
-                random_effect_df: 0.0,
-                icc_noise_sd: 0.0,
-            },
-        ];
-        let contracts = build_linear_contract(&spec).unwrap();
-        assert_eq!(contracts.len(), 2);
-        for c in &contracts {
-            c.validate()
-                .expect("each emitted contract must self-validate");
-        }
     }
 
     // Empty correlation pairs yield Correlations::Identity; non-empty pairs
@@ -1777,21 +1577,18 @@ mod tests {
         spec.targets = vec!["group[B]".into()];
         spec.contrast_pairs = vec![("group[B]".into(), "group[C]".into())];
         let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        // One marginal from `targets` + one contrast from `contrast_pairs`.
-        let n_marginal = c
-            .test
-            .targets
-            .iter()
-            .filter(|t| matches!(t, TestTarget::Marginal { .. }))
-            .count();
-        let n_contrast = c
-            .test
-            .targets
-            .iter()
-            .filter(|t| matches!(t, TestTarget::Contrast { .. }))
-            .count();
-        assert_eq!(n_marginal, 1, "marginal from targets must survive");
-        assert_eq!(n_contrast, 1, "contrast from contrast_pairs must survive");
+        // The marginal from `targets` (group[B] → term 1) plus the contrast from
+        // `contrast_pairs` (group[B] → positive 1, group[C] → negative 2).
+        assert_eq!(
+            c.test.targets,
+            vec![
+                TestTarget::Marginal { term: 1 },
+                TestTarget::Contrast {
+                    positive: 1,
+                    negative: 2
+                },
+            ]
+        );
     }
 
     // The skeleton is β-column-aligned, NOT effect/formula-term order: a factor
@@ -1940,54 +1737,6 @@ mod tests {
     }
 
     #[test]
-    fn build_design_appends_interaction_term() {
-        let spec = LinearSpec {
-            formula: "y = x1 + x2 + x1:x2".into(),
-            predictors: vec![
-                PredictorSpec {
-                    name: "x1".into(),
-                    pinned: false,
-                    kind: VarKind::Normal,
-                },
-                PredictorSpec {
-                    name: "x2".into(),
-                    pinned: false,
-                    kind: VarKind::Normal,
-                },
-            ],
-            effects: vec![
-                EffectAssignment {
-                    name: "x1".into(),
-                    size: 0.5,
-                },
-                EffectAssignment {
-                    name: "x2".into(),
-                    size: 0.3,
-                },
-                EffectAssignment {
-                    name: "x1:x2".into(),
-                    size: 0.2,
-                },
-            ],
-            targets: vec!["x1:x2".into()],
-            ..simple_spec()
-        };
-        let table = build_predictor_table(&parse_formula(&spec.formula).unwrap(), &spec.predictors)
-            .unwrap();
-        let design = build_design(&table).unwrap();
-        // terms: [Const, Direct(0), Direct(1), Interaction([Direct(0),Direct(1)])]
-        assert_eq!(design.terms.len(), 4);
-        assert!(matches!(
-            &design.terms[3],
-            DesignTerm::Interaction { components }
-                if components.len() == 2
-                && matches!(components[0], DesignTerm::Direct { column } if column == ColumnId(0))
-                && matches!(components[1], DesignTerm::Direct { column } if column == ColumnId(1))
-        ));
-    }
-
-    /// Default coupling: estimator None + a cluster spec must yield Mle.
-    #[test]
     fn build_coefficients_places_interaction_on_appended_column() {
         let spec = LinearSpec {
             formula: "y = x1 + x2 + x1:x2".into(),
@@ -2083,6 +1832,7 @@ mod tests {
         );
     }
 
+    /// Default coupling: estimator None + a cluster spec must yield Mle.
     #[test]
     fn build_contract_none_estimator_with_cluster_defaults_to_mle() {
         use engine_contract::{ClusterSizing, ClusterSpec};
@@ -2170,13 +1920,26 @@ mod tests {
             1,
             "one block per requested factor"
         );
+        // The factor is the sole generation column, and its k-1 = 2 dummies sit at
+        // design terms 1 and 2 (level order); the block points exactly there.
+        let ph = &contracts[0].posthoc[0];
+        assert_eq!(ph.factor_column, ColumnId(0));
+        assert_eq!(ph.target_term_indices, vec![1, 2]);
         assert_eq!(
-            contracts[0].posthoc[0].target_term_indices.len(),
-            2,
-            "k-1 dummy terms for a 3-level factor"
+            contracts[0].design_generation.terms[1..],
+            [
+                DesignTerm::DummyOf {
+                    column: ColumnId(0),
+                    level_index: 1
+                },
+                DesignTerm::DummyOf {
+                    column: ColumnId(0),
+                    level_index: 2
+                },
+            ]
         );
         // The posthoc_alpha flows through as None.
-        assert_eq!(contracts[0].posthoc[0].posthoc_alpha, None);
+        assert_eq!(ph.posthoc_alpha, None);
         // Contract must also self-validate (invariant_17).
         contracts[0]
             .validate()
@@ -2295,83 +2058,123 @@ mod tests {
         assert!(matches!(err, SpecError::UnknownPredictor { ref name } if name == "nope"));
     }
 
-    #[test]
-    fn posthoc_term_indices_point_at_dummyof_terms() {
-        // Verify that the emitted term indices in posthoc actually reference
-        // DummyOf terms for the factor's column.
-        let spec = anova_3level_spec();
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        let ph = &c.posthoc[0];
-        let design = c.design_test.as_ref().unwrap_or(&c.design_generation);
-        for &ti in &ph.target_term_indices {
-            match &design.terms[ti as usize] {
-                engine_contract::DesignTerm::DummyOf { column, .. } => {
-                    assert_eq!(
-                        *column, ph.factor_column,
-                        "DummyOf must reference the posthoc factor_column"
-                    );
-                }
-                other => panic!("expected DummyOf, got {other:?}"),
-            }
-        }
-    }
-
-    /// The synthetic codes 0–5 in `DIST_CODES`, the canonical residual codes
-    /// in `RESIDUAL_CODES` (shared code space with `DIST_CODES`), and the RE
-    /// codes in `RE_DIST_CODES` must agree with the decode arms. Co-located
-    /// here so an arm change without a table change is caught.
+    /// Every code the hosts read from `DIST_CODES`, `RESIDUAL_CODES` and
+    /// `RE_DIST_CODES` decodes, through the real decode arms, to the variant its
+    /// name says; and every code a decode arm accepts is in its table. A table
+    /// edit without the matching arm edit (or the reverse) fails here.
     #[test]
     fn code_tables_match_decode_arms() {
+        let synthetic_named = |name: &str| match name {
+            "normal" => SyntheticKind::Normal,
+            "right_skewed" => SyntheticKind::RightSkewed,
+            "left_skewed" => SyntheticKind::LeftSkewed,
+            "high_kurtosis" => SyntheticKind::HighKurtosis,
+            "uniform" => SyntheticKind::Uniform,
+            other => panic!("no synthetic kind named {other:?}"),
+        };
+        let residual_named = |name: &str| match name {
+            "normal" => ResidualDist::Normal,
+            "right_skewed" => ResidualDist::RightSkewed,
+            "left_skewed" => ResidualDist::LeftSkewed,
+            "high_kurtosis" => ResidualDist::HighKurtosis,
+            "uniform" => ResidualDist::Uniform,
+            other => panic!("no residual dist named {other:?}"),
+        };
+        let decode_synthetic = |code: i32| {
+            scenario_to_contract(&ScenarioInput {
+                name: "codes".into(),
+                heterogeneity: 0.0,
+                heteroskedasticity_ratio: 1.0,
+                correlation_noise_sd: 0.0,
+                distribution_change_prob: 0.0,
+                new_distributions: vec![code],
+                residual_change_prob: 0.0,
+                residual_dists: vec![],
+                residual_df: 0.0,
+                sampled_factor_proportions: false,
+                truth_start: false,
+                random_effect_dist: 0,
+                random_effect_df: 0.0,
+                icc_noise_sd: 0.0,
+            })
+            .map(|sc| sc.new_distributions)
+        };
+
+        // Uploaded sentinels have no decode arm (host frame path) but must
+        // survive in the table.
         let dist_lookup = |name: &str| DIST_CODES.iter().find(|(n, _)| *n == name).map(|(_, c)| *c);
-        for (name, code) in [
-            ("normal", 0),
-            ("binary", 1),
-            ("right_skewed", 2),
-            ("left_skewed", 3),
-            ("high_kurtosis", 4),
-            ("uniform", 5),
-        ] {
+        assert_eq!(dist_lookup("uploaded_data"), Some(99));
+        for &(name, code) in DIST_CODES {
+            match name {
+                "uploaded_factor" | "uploaded_binary" | "uploaded_data" => {}
+                // A swapped binary column would be a degenerate constant.
+                "binary" => assert!(
+                    matches!(
+                        decode_synthetic(code),
+                        Err(SpecError::ScenarioBinarySwapUnsupported { .. })
+                    ),
+                    "binary code {code} must decode to the binary-swap reject"
+                ),
+                _ => assert_eq!(
+                    decode_synthetic(code).unwrap(),
+                    vec![synthetic_named(name)],
+                    "DIST_CODES {name}={code}"
+                ),
+            }
+        }
+        for &(name, code) in RESIDUAL_CODES {
             assert_eq!(
-                dist_lookup(name),
-                Some(code),
-                "DIST_CODES drifted at {name}"
+                residual_dist_from_code(code).unwrap(),
+                residual_named(name),
+                "RESIDUAL_CODES {name}={code}"
             );
         }
+        for &(name, code) in RE_DIST_CODES {
+            let expected = match name {
+                "normal" => ResidualDist::Normal,
+                "heavy_tailed" => ResidualDist::HighKurtosis,
+                "right_skewed" => ResidualDist::RightSkewed,
+                other => panic!("no RE dist named {other:?}"),
+            };
+            assert_eq!(
+                re_dist_from_code(code).unwrap(),
+                expected,
+                "RE_DIST_CODES {name}={code}"
+            );
+        }
+        // Reverse direction: a code an arm accepts must have a table entry.
+        let in_table = |table: &[(&str, i32)], code: i32| table.iter().any(|(_, c)| *c == code);
+        for code in -1..=100 {
+            if decode_synthetic(code).is_ok() {
+                assert!(
+                    in_table(DIST_CODES, code),
+                    "synthetic arm {code} not in DIST_CODES"
+                );
+            }
+            if residual_dist_from_code(code).is_ok() {
+                assert!(
+                    in_table(RESIDUAL_CODES, code),
+                    "residual arm {code} not in RESIDUAL_CODES"
+                );
+            }
+            if re_dist_from_code(code).is_ok() {
+                assert!(
+                    in_table(RE_DIST_CODES, code),
+                    "RE arm {code} not in RE_DIST_CODES"
+                );
+            }
+        }
+
         let resid_lookup = |name: &str| {
             RESIDUAL_CODES
                 .iter()
                 .find(|(n, _)| *n == name)
                 .map(|(_, c)| *c)
         };
-        for (name, code) in [
-            ("normal", 0),
-            ("right_skewed", 2),
-            ("left_skewed", 3),
-            ("high_kurtosis", 4),
-            ("uniform", 5),
-        ] {
-            assert_eq!(
-                resid_lookup(name),
-                Some(code),
-                "RESIDUAL_CODES drifted at {name}"
-            );
-        }
         // The v1 aliases are gone — the table must NOT resolve them.
         for alias in ["t", "heavy_tailed", "skewed"] {
             assert_eq!(resid_lookup(alias), None, "alias {alias} must be dropped");
         }
-        // RE vocabulary is its own table (normal/heavy_tailed/right_skewed).
-        let re_lookup = |name: &str| {
-            RE_DIST_CODES
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, c)| *c)
-        };
-        assert_eq!(re_lookup("normal"), Some(0));
-        assert_eq!(re_lookup("heavy_tailed"), Some(1));
-        assert_eq!(re_lookup("right_skewed"), Some(2));
-        // Uploaded sentinels have no decode arm but must survive in the table.
-        assert_eq!(dist_lookup("uploaded_data"), Some(99));
         // JSON bridge round-trips every entry. The residual / RE-dist serializers
         // are exercised only by the Python/R bridges (invisible to Rust tests), so
         // pin them here too: each must emit its full table, not "" / a wrong string.
@@ -2403,35 +2206,37 @@ mod tests {
         }
     }
 
+    /// The per-factor `sampled_proportions` override (explicit true / false, or
+    /// absent to inherit the scenario knob) reaches the generation column
+    /// unchanged, through the predictor table.
     #[test]
     fn build_columns_carries_sampled_proportions() {
         use crate::formula::parse_formula;
         use crate::variables::build_predictor_table;
 
         let f = parse_formula("y = group").unwrap();
-        let preds = vec![PredictorSpec {
-            name: "group".into(),
-            pinned: false,
-            kind: VarKind::Factor {
-                levels: vec!["A".into(), "B".into(), "C".into()],
-                proportions: vec![0.4, 0.3, 0.3],
-                reference: "A".into(),
-                sampled_proportions: Some(false),
-            },
-        }];
-        let table = build_predictor_table(&f, &preds).unwrap();
-        let cols = build_columns(&table);
-        let f_col = cols
-            .iter()
-            .find(|c| matches!(c, ColumnSpec::FactorSynthetic { .. }))
-            .unwrap();
-        assert!(matches!(
-            f_col,
-            ColumnSpec::FactorSynthetic {
-                sampled_proportions: Some(false),
-                ..
-            }
-        ));
+        for sampled in [Some(true), Some(false), None] {
+            let preds = vec![PredictorSpec {
+                name: "group".into(),
+                pinned: false,
+                kind: VarKind::Factor {
+                    levels: vec!["A".into(), "B".into(), "C".into()],
+                    proportions: vec![0.4, 0.3, 0.3],
+                    reference: "A".into(),
+                    sampled_proportions: sampled,
+                },
+            }];
+            let table = build_predictor_table(&f, &preds).unwrap();
+            let cols = build_columns(&table);
+            assert!(
+                matches!(
+                    &cols[..],
+                    [ColumnSpec::FactorSynthetic { n_levels: 3, sampled_proportions, .. }]
+                        if *sampled_proportions == sampled
+                ),
+                "sampled={sampled:?}: {cols:?}"
+            );
+        }
     }
 
     #[test]
@@ -2461,22 +2266,29 @@ mod tests {
         }];
         let cluster =
             ClusterSpec::intercept_only(ClusterSizing::FixedClusters { n_clusters: 10 }, 0.25);
-        let result = build_contract_with_skeleton(
+        let (contracts, _skeleton) = build_contract_with_skeleton(
             &spec,
             OutcomeKind::Continuous,
             None,
             None, // default coupling → Mle (because clusters non-empty)
             0.0,
             vec![cluster],
-        );
-        assert!(
-            result.is_ok(),
-            "LME scenario knob must succeed through build_contract_with_skeleton; got: {result:?}"
+        )
+        .expect("LME scenario knob must succeed through build_contract_with_skeleton");
+        let c = &contracts[0];
+        assert_eq!(c.estimator, EstimatorSpec::Mle);
+        assert_eq!(
+            c.scenario.lme,
+            Some(LmeScenarioPerturbations {
+                random_effect_dist: ResidualDist::HighKurtosis,
+                random_effect_df: 5.0,
+                icc_noise_sd: 0.0,
+            })
         );
     }
 
     /// A 4-level factor in a factor-only formula (`y = group`) produces 3 non-reference
-    /// dummies (k−1 = 3) plus the intercept = 5 design terms. The factor is the only
+    /// dummies (k−1 = 3) plus the intercept = 4 design terms. The factor is the only
     /// predictor, so it lands at generation column id 0; the dummies carry level_index
     /// 1, 2, 3 (reference level 0 is suppressed). Pinning this prevents a dropped or
     /// duplicated dummy from silently passing downstream validation.

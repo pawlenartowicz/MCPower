@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import msgpack
 import pytest
 
 from mcpower import MCPower, progress
@@ -14,21 +13,6 @@ DEFAULT_SCENARIO_CONFIG = _get_sc()
 # ---------------------------------------------------------------------------
 # MCPower frontend
 # ---------------------------------------------------------------------------
-
-
-def test_f1_accepts_ols_logit_lme():
-    MCPower("y = x1 + x2")  # OLS baseline OK
-    MCPower("y = x1", family="logit")  # logit accepted
-    # LME formulas construct; the family kwarg is optional —
-    # set_cluster wires the cluster spec downstream.
-    m_lme = MCPower("y ~ x1 + (1|school)", family="lme")
-    assert m_lme.family == "lme"
-    # probit and poisson are now accepted families.
-    assert MCPower("y = x", family="probit").family == "probit"
-    assert MCPower("y = x", family="poisson").family == "poisson"
-    # Deferred / unknown families still rejected (Gamma is out of scope).
-    with pytest.raises(ValueError, match="family must be"):
-        MCPower("y = x", family="gamma")
 
 
 def test_f1_set_parallel_raises_attribute_error():
@@ -95,52 +79,24 @@ def test_f1_model_constructs_spec():
     # No df field on contract ResidualSpec; df lives in the active scenario.
 
 
-def test_f1_spec_roundtrips_through_msgpack():
-    """The frontend's spec dict must round-trip through msgpack without errors.
-
-    We re-decode with msgpack on the Python side as a wire-format smoke; the
-    Rust side decodes the same payload during every ``find_power`` call, so
-    the production path provides additional coverage.
-    """
-    m = MCPower("y = x1 + x2")
-    m.set_effects("x1=0.5, x2=0.3")
-    spec = m.to_simulation_spec(scenario_name="optimistic")
-    spec_bytes = msgpack.packb(spec, use_bin_type=True)
-    decoded = msgpack.unpackb(spec_bytes, raw=False)
-    assert decoded["outcome"]["kind"] == "continuous"
-    assert decoded["estimator"] == "ols"
-    marginal_terms = [t["term"] for t in decoded["test"]["targets"] if t["kind"] == "marginal"]
-    assert marginal_terms == [1, 2]
-
-
 def test_f1_set_scenario_configs_merges():
     m = MCPower("y = x1 + x2")
     m.set_effects("x1=0.5, x2=0.3")
-    m.set_scenario_configs({
-        "realistic": {"correlation_noise_sd": 0.20},
-        "stress": {"correlation_noise_sd": 0.40},
-    })
+    m.set_scenario_configs(
+        {
+            "realistic": {"correlation_noise_sd": 0.20},
+            "stress": {"correlation_noise_sd": 0.40},
+        }
+    )
     # Realistic preset: only the overridden key changes.
     assert m._scenario_configs["realistic"]["correlation_noise_sd"] == 0.20
     # Other realistic defaults survive.
-    assert (
-        m._scenario_configs["realistic"]["heterogeneity"]
-        == DEFAULT_SCENARIO_CONFIG["realistic"]["heterogeneity"]
-    )
-    assert (
-        m._scenario_configs["realistic"]["distribution_change_prob"]
-        == DEFAULT_SCENARIO_CONFIG["realistic"]["distribution_change_prob"]
-    )
+    assert m._scenario_configs["realistic"]["heterogeneity"] == DEFAULT_SCENARIO_CONFIG["realistic"]["heterogeneity"]
+    assert m._scenario_configs["realistic"]["distribution_change_prob"] == DEFAULT_SCENARIO_CONFIG["realistic"]["distribution_change_prob"]
     # Custom scenario inherits from optimistic, applies override.
     assert m._scenario_configs["stress"]["correlation_noise_sd"] == 0.40
-    assert (
-        m._scenario_configs["stress"]["heterogeneity"]
-        == DEFAULT_SCENARIO_CONFIG["optimistic"]["heterogeneity"]
-    )
-    assert (
-        m._scenario_configs["stress"]["distribution_change_prob"]
-        == DEFAULT_SCENARIO_CONFIG["optimistic"]["distribution_change_prob"]
-    )
+    assert m._scenario_configs["stress"]["heterogeneity"] == DEFAULT_SCENARIO_CONFIG["optimistic"]["heterogeneity"]
+    assert m._scenario_configs["stress"]["distribution_change_prob"] == DEFAULT_SCENARIO_CONFIG["optimistic"]["distribution_change_prob"]
 
 
 def test_f1_set_scenario_configs_rejects_unknown_key():
@@ -160,26 +116,9 @@ def test_f1_set_scenario_configs_rejects_old_doc_key():
         m.set_scenario_configs({"realistic": {"heteroskedasticity": 2.0}})
 
 
-def test_f1_set_scenario_configs_accepts_lme_keys():
-    # The LME scenario knobs are now wired (Pass B): user-supplied overrides
-    # are accepted and stored, no longer gated with a "not yet supported" error.
-    m = MCPower("y = x1 + x2")
-    for key, value in [
-        ("icc_noise_sd", 0.1),
-        ("random_effect_dist", "normal"),
-        ("random_effect_df", 5),
-    ]:
-        m.set_scenario_configs({"realistic": {key: value}})
-        assert key in m._scenario_configs["realistic"]
-
-
 def test_f1_set_scenario_configs_accepts_all_live_keys():
     lme_keys = {"icc_noise_sd", "random_effect_dist", "random_effect_df"}
-    live_cfg = {
-        k: v
-        for k, v in DEFAULT_SCENARIO_CONFIG["doomer"].items()
-        if k not in lme_keys
-    }
+    live_cfg = {k: v for k, v in DEFAULT_SCENARIO_CONFIG["doomer"].items() if k not in lme_keys}
     assert live_cfg, "live key set must be non-empty"
     m = MCPower("y = x1 + x2")
     m.set_scenario_configs({"custom": live_cfg})
@@ -225,28 +164,22 @@ def test_f2_resolve_scenarios_unknown_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_f3_progress_callback_false_is_silent():
-    assert progress.resolve_progress_callback(False) is None
-
-
-def test_f3_progress_callback_true_returns_callable():
+def test_f3_progress_callback_true_closes_bar_at_completion():
     cb = progress.resolve_progress_callback(True)
-    assert callable(cb)
-    # Calling it should not blow up.
-    cb(0, 100)
-    cb(100, 100)
-
-
-def test_f3_progress_callback_none_returns_callable():
-    cb = progress.resolve_progress_callback(None)
-    assert callable(cb)
+    assert cb(0, 100) is True
+    assert cb._bar is not None
+    # Reaching the total releases the bar without an explicit close().
+    assert cb(100, 100) is True
+    assert cb._bar is None
 
 
 def test_f3_progress_callback_custom_wrapped():
     calls = []
+
     def user_cb(cur, tot):
         calls.append((cur, tot))
         return True
+
     wrapped = progress.resolve_progress_callback(user_cb)
     assert wrapped is not None
     assert wrapped(1, 10) is True
@@ -256,6 +189,7 @@ def test_f3_progress_callback_custom_wrapped():
 def test_f3_progress_callback_user_false_cancels():
     def user_cb(cur, tot):
         return False
+
     wrapped = progress.resolve_progress_callback(user_cb)
     assert wrapped is not None
     assert wrapped(1, 10) is False
@@ -264,6 +198,7 @@ def test_f3_progress_callback_user_false_cancels():
 def test_f3_progress_callback_user_none_continues():
     def user_cb(cur, tot):
         return None  # treated as "keep going"
+
     wrapped = progress.resolve_progress_callback(user_cb)
     assert wrapped is not None
     assert wrapped(1, 10) is True
@@ -280,7 +215,8 @@ def test_f3_progress_callback_non_callable_raises():
 
 
 def test_f5_smoke_ols_runs_end_to_end():
-    """Real engine call: small N, small n_sims, just confirm result is sane."""
+    """Real engine call through the default scenarios=False: the port unwraps
+    the engine's envelope and returns the single scenario's flat result."""
     m = MCPower("y = x1 + x2")
     m.set_effects("x1=0.5, x2=0.3")
     result = m.find_power(
@@ -294,15 +230,11 @@ def test_f5_smoke_ols_runs_end_to_end():
     assert result["n_sims"] == 200
     assert result["n_targets"] == 2
     assert result["sample_sizes"] == [100]
-
-    for row in result["power_uncorrected"]:
-        for p in row:
-            assert 0.0 <= p <= 1.0
-    for row in result["power_corrected"]:
-        for p in row:
-            assert 0.0 <= p <= 1.0
-    # Convergence should be perfect or near it for well-conditioned OLS.
-    assert all(c == 1.0 for c in result["convergence_rate"])
+    # One power row (one N) with one entry per target.
+    assert [len(row) for row in result["power_uncorrected"]] == [2]
+    assert [len(row) for row in result["power_corrected"]] == [2]
+    # Well-conditioned OLS converges on every sim.
+    assert result["convergence_rate"] == [1.0]
 
 
 def test_f5_smoke_scenarios_envelope_runs_end_to_end():

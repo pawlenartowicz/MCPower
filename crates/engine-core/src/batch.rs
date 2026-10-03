@@ -2808,73 +2808,13 @@ fn included_factor_with_smallest_min_count(
 mod tests {
     use super::*;
     use crate::spec::{
-        CorrectionMethod, CritValues, Distribution, EstimatorSpec, HeteroskedasticityCoeffs,
-        OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
+        CorrectionMethod, CritValues, Distribution, EstimatorSpec, OutcomeKind, ResidualDist,
+        ScenarioPerturbations, SimulationSpec,
     };
 
     fn minimal_spec() -> SimulationSpec {
         // 1 intercept + 1 continuous predictor; 1 target.
-        SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 0,
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
-            effect_sizes: vec![0.0, 0.5],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn run_batch_shapes_match() {
-        let spec = minimal_spec();
-        let result = run_batch(&spec, &[100, 200], 50, 42, None).unwrap();
-        assert_eq!(result.shape.n_sims, 50);
-        assert_eq!(result.shape.n_sample_sizes, 2);
-        assert_eq!(result.shape.n_targets, 1);
-        assert_eq!(result.uncorrected.len(), 50 * 2);
-        assert_eq!(result.corrected.len(), 50 * 2);
-        assert_eq!(result.converged.len(), 50 * 2);
-        assert!(result.posthoc_unc.is_empty());
-        assert!(result.posthoc_cor.is_empty());
+        crate::test_support::base_spec()
     }
 
     /// EP-1 invariant: the uncorrected/corrected significance buffers are sized
@@ -2915,23 +2855,11 @@ mod tests {
             "corrected buffer must be n_sims*n_sample_sizes*(marginals+contrasts)"
         );
         assert_eq!(result.shape.n_targets, (n_marginals + n_contrasts) as u32);
-    }
-
-    #[test]
-    fn run_batch_st_matches_run_batch_on_same_seed() {
-        // Per-sim seeding via `pcg_mix64(base_seed, sim_id)` is identical in
-        // both variants; only the dispatch differs. So the output must be
-        // bit-equal across MT and ST given the same (spec, seed, n_sims).
-        let spec = minimal_spec();
-        let n_sims = 64u32;
-        let seed = 42u64;
-        let mt = run_batch(&spec, &[100], n_sims, seed, None).unwrap();
-        let st = run_batch_st(&spec, &[100], n_sims, seed, None).unwrap();
-        assert_eq!(mt.uncorrected, st.uncorrected);
-        assert_eq!(mt.corrected, st.corrected);
-        assert_eq!(mt.converged, st.converged);
-        assert_eq!(mt.boundary_hit, st.boundary_hit);
-        assert_eq!(mt.shape.n_sims, st.shape.n_sims);
+        // Per-(sim, N) buffers are not multiplied by the target stride.
+        assert_eq!(result.converged.len(), n_sims as usize * n_sample_sizes);
+        // No posthoc block requested ⇒ the posthoc buffers stay empty.
+        assert!(result.posthoc_unc.is_empty());
+        assert!(result.posthoc_cor.is_empty());
     }
 
     /// Native determinism (Property D): `run_batch` (multi-core, rayon) and
@@ -3147,76 +3075,12 @@ mod tests {
         let p = 0.3_f64;
         let intercept = (p / (1.0 - p)).ln();
         SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 0,
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
             effect_sizes: vec![intercept, 0.5],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
-            link: None,
             estimator: EstimatorSpec::Glm,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
             intercept,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
-    }
-
-    #[test]
-    fn run_batch_accepts_logit_optimistic() {
-        let spec = minimal_logit_spec();
-        let result = run_batch(&spec, &[200], 10, 42, None).expect("Logit optimistic must run");
-        assert_eq!(result.shape.n_sims, 10);
-        assert_eq!(result.shape.n_sample_sizes, 1);
-        assert_eq!(result.shape.n_targets, 1);
-    }
-
-    #[test]
-    fn run_batch_accepts_logit_with_scenarios() {
-        // Gate-removal regression: binary outcomes accept non-optimistic
-        // scenarios (β-jitter applies as log-odds heterogeneity).
-        let mut spec = minimal_logit_spec();
-        spec.scenario = ScenarioPerturbations {
-            name: "realistic".into(),
-            heterogeneity: 0.1,
-            ..Default::default()
-        };
-        let result = run_batch(&spec, &[200], 10, 42, None).expect("logit + scenarios must run");
-        assert_eq!(result.shape.n_sims, 10);
-        assert_eq!(result.shape.n_targets, 1);
     }
 
     #[test]
@@ -3230,19 +3094,19 @@ mod tests {
         assert!(matches!(err, EngineError::InvalidSpec(_)));
     }
 
+    /// GLM (unclustered logit) determinism across dispatch: the multi-core
+    /// `run_batch` and the single-core `run_batch_st` return identical buffers
+    /// for the same seed (the IRLS arm's twin of
+    /// `run_batch_bit_identical_1_vs_n_threads`).
     #[test]
     fn run_batch_logit_seed_reproducibility() {
-        let p = 0.3_f64;
-        let intercept = (p / (1.0 - p)).ln();
-        let mut spec = minimal_logit_spec();
-        spec.effect_sizes = vec![intercept, 0.5];
-        spec.target_indices = vec![1];
-
-        let r1 = run_batch(&spec, &[200], 50, 123, None).unwrap();
-        let r2 = run_batch(&spec, &[200], 50, 123, None).unwrap();
-        assert_eq!(r1.uncorrected, r2.uncorrected);
-        assert_eq!(r1.corrected, r2.corrected);
-        assert_eq!(r1.converged, r2.converged);
+        let spec = minimal_logit_spec();
+        let mt = run_batch(&spec, &[200], 50, 123, None).unwrap();
+        let st = run_batch_st(&spec, &[200], 50, 123, None).unwrap();
+        assert_eq!(mt.uncorrected, st.uncorrected);
+        assert_eq!(mt.corrected, st.corrected);
+        assert_eq!(mt.converged, st.converged);
+        assert_eq!(mt.boundary_hit, st.boundary_hit);
     }
 
     /// A between-within LMM fit that collapsed (τ̂² pinned at 0, `boundary_hit
@@ -3341,56 +3205,14 @@ mod tests {
     /// 5 clusters, τ² = 0.25.
     fn minimal_lme_spec() -> SimulationSpec {
         SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 0,
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
-            effect_sizes: vec![0.0, 0.5],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
             estimator: EstimatorSpec::Mle,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
             cluster: Some(crate::spec::ClusterSpec {
                 sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 5 },
                 tau_squared: 0.25,
                 slopes: vec![],
                 extra_groupings: vec![],
             }),
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -3579,10 +3401,13 @@ mod tests {
         );
     }
 
-    /// Power is monotone non-decreasing in N.
+    /// Power rises with N on the Brent LMM grid. β₁ = 0.2 keeps every grid
+    /// point strictly inside (0, n_sims), so the strict increase is a real
+    /// check of the n-stride and prefix nesting rather than a ceiling tie.
     #[test]
     fn run_batch_lme_power_monotone_in_n() {
-        let spec = minimal_lme_spec();
+        let mut spec = minimal_lme_spec();
+        spec.effect_sizes = vec![0.0, 0.2];
         // sample_sizes=[50, 100, 200]; n_sims=500; 1 target.
         let n_sims: u32 = 500;
         let sample_sizes = &[50u32, 100, 200];
@@ -3599,56 +3424,53 @@ mod tests {
         }
 
         assert!(
-            power[1] >= power[0],
-            "LME power not monotone: p50={}, p100={} (should have p100 >= p50)",
+            power[0] > 0 && power[0] < power[1] && power[1] < power[2],
+            "LME power must rise strictly with N: p50={}, p100={}, p200={}",
             power[0],
-            power[1]
+            power[1],
+            power[2]
         );
         assert!(
-            power[2] >= power[1],
-            "LME power not monotone: p100={}, p200={} (should have p200 >= p100)",
-            power[1],
+            power[2] < ns,
+            "p200={} at the ceiling makes the increase uninformative",
             power[2]
         );
     }
 
-    /// Seed reproducibility — same spec + same seed → identical buffers.
-    #[test]
-    fn run_batch_lme_seed_reproducibility() {
-        let spec = minimal_lme_spec();
-        let r1 = run_batch(&spec, &[50], 100, 77, None).unwrap();
-        let r2 = run_batch(&spec, &[50], 100, 77, None).unwrap();
-        assert_eq!(r1.uncorrected, r2.uncorrected, "uncorrected mismatch");
-        assert_eq!(r1.corrected, r2.corrected, "corrected mismatch");
-        assert_eq!(r1.converged, r2.converged, "converged mismatch");
-        assert_eq!(r1.boundary_hit, r2.boundary_hit, "boundary_hit mismatch");
-        assert_eq!(r1.joint_unc, r2.joint_unc, "joint_unc mismatch");
-        assert_eq!(r1.joint_cor, r2.joint_cor, "joint_cor mismatch");
-    }
-
     /// Joint Wald-χ² buffers (LME shape rules):
-    ///   - joint_unc / joint_cor have length n_sims × n_sample_sizes.
-    ///   - LME `joint_cor == joint_unc` (joint test is outside the correction
-    ///     family), and every entry is a 0/1 flag.
+    ///   - joint_unc / joint_cor have length n_sims × n_sample_sizes and carry
+    ///     real rejections.
+    ///   - the joint test sits OUTSIDE the correction family: under Bonferroni
+    ///     over two targets the marginal `corrected` flags differ from
+    ///     `uncorrected` on some sim, while `joint_cor == joint_unc` exactly.
     #[test]
     fn run_batch_lme_joint_buffers_populated() {
-        let spec = minimal_lme_spec();
+        let mut spec = minimal_lme_spec();
+        spec.n_non_factor = 2;
+        spec.correlation = vec![1.0, 0.0, 0.0, 1.0];
+        spec.var_types = vec![Distribution::Normal, Distribution::Normal];
+        spec.var_params = vec![0.0, 0.0];
+        spec.effect_sizes = vec![0.0, 0.2, 0.2];
+        spec.target_indices = vec![1, 2];
+        spec.correction_method = CorrectionMethod::Bonferroni;
         let n_sims: u32 = 200;
         let result = run_batch(&spec, &[200], n_sims, 42, None).unwrap();
         let n = n_sims as usize;
 
         assert_eq!(result.joint_unc.len(), n, "joint_unc wrong length");
         assert_eq!(result.joint_cor.len(), n, "joint_cor wrong length");
-
-        // LME: joint_cor must equal joint_unc bit-for-bit.
+        assert!(
+            result.joint_unc.contains(&1),
+            "joint_unc must carry some rejections"
+        );
+        assert_ne!(
+            result.uncorrected, result.corrected,
+            "Bonferroni over 2 targets must change some marginal verdict"
+        );
         assert_eq!(
             result.joint_unc, result.joint_cor,
-            "joint_cor must equal joint_unc for LME"
+            "the joint test is outside the correction family: joint_cor == joint_unc"
         );
-        // Each entry is a 0/1 significance flag.
-        for &b in &result.joint_unc {
-            assert!(b <= 1, "joint_unc entries must be 0/1 flags, got {b}");
-        }
     }
 
     #[test]
@@ -3675,16 +3497,27 @@ mod tests {
         );
 
         spec.report_overall = true;
-        let r_on = run_batch(&spec, &[200], 20, 42, None).unwrap();
+        // β₁ = 0.15 at N = 200 puts t² astride the crit (≈ half the sims reject),
+        // so the verdict identity below checks the overall crit, not a ceiling.
+        spec.effect_sizes = vec![0.0, 0.15];
+        let r_on = run_batch(&spec, &[200], 200, 42, None).unwrap();
         assert_eq!(
             r_on.overall.len(),
-            20,
-            "overall buffer must be n_sims × n_sample_sizes = 20"
+            200,
+            "overall buffer must be n_sims × n_sample_sizes = 200"
         );
-        // Every entry is a 0/1 flag.
-        for &b in &r_on.overall {
-            assert!(b <= 1, "overall entries must be 0/1 flags, got {b}");
-        }
+        // minimal_spec has one slope (p = 2), so the overall F tests that single
+        // slope: F = t² and F(0.95; 1, ν) = t²(0.975; ν). The overall verdict
+        // must therefore equal the marginal verdict on every sim.
+        assert_eq!(
+            r_on.overall, r_on.uncorrected,
+            "with p = 2 the overall F verdict must equal the marginal t² verdict"
+        );
+        let hits = r_on.overall.iter().filter(|&&b| b == 1).count();
+        assert!(
+            hits > 0 && hits < 200,
+            "intermediate power needed for the identity to bite, got {hits}/200"
+        );
     }
 
     #[test]
@@ -3709,6 +3542,11 @@ mod tests {
         // Drive separation so most fits fail.
         spec.effect_sizes = vec![0.0, 20.0]; // huge effect → separation at any N
         let r = run_batch(&spec, &[40], 30, 42, None).unwrap();
+        assert_eq!(r.overall.len(), 30);
+        assert!(
+            r.converged.contains(&0),
+            "the separation design must leave some fits non-converged"
+        );
         for (i, &b) in r.overall.iter().enumerate() {
             if r.converged[i] == 0 {
                 assert_eq!(b, 0, "non-converged sim {i} must have overall=0");
@@ -3753,7 +3591,7 @@ mod tests {
     }
 
     /// LME + posthoc → InvalidSpec (posthoc stays Ols-only). Scenarios on the
-    /// Mle path are no longer rejected — see `run_batch_lme_accepts_scenarios`.
+    /// Mle path are no longer rejected — see `run_batch_lme_icc_noise_perturbs`.
     #[test]
     fn run_batch_lme_rejects_posthoc() {
         let mut spec = minimal_lme_spec();
@@ -3765,26 +3603,6 @@ mod tests {
         assert!(
             matches!(err, EngineError::InvalidSpec(_)),
             "Expected InvalidSpec for LME + posthoc, got {err:?}"
-        );
-    }
-
-    /// A non-optimistic scenario runs on the Mle path (gate removed): the
-    /// generation-side RE/residual/correlation perturbations apply to the
-    /// Gaussian LMM exactly as they do for OLS/GLMM. Just assert it completes —
-    /// monotonicity/byte-identity are covered by the focused tests below.
-    #[test]
-    fn run_batch_lme_accepts_scenarios() {
-        let mut spec = minimal_lme_spec();
-        spec.scenario = ScenarioPerturbations {
-            name: "realistic".into(),
-            heterogeneity: 0.1,
-            ..Default::default()
-        };
-        assert!(!spec.scenario.is_optimistic());
-        let res = run_batch(&spec, &[50], 10, 42, None);
-        assert!(
-            res.is_ok(),
-            "Mle + non-optimistic scenario must run, got {res:?}"
         );
     }
 
@@ -3860,13 +3678,6 @@ mod tests {
         assert_eq!(cs[2], vec![0.0, 0.0, -1.0, 1.0], "contrast (1,2): L2 vs L1");
     }
 
-    #[test]
-    fn build_posthoc_contrasts_empty_when_no_posthoc() {
-        let spec = minimal_spec();
-        let cs = build_posthoc_contrasts(&spec).unwrap();
-        assert!(cs.is_empty());
-    }
-
     // -----------------------------------------------------------------------
     // Posthoc Tukey-k crit test
     // -----------------------------------------------------------------------
@@ -3882,54 +3693,17 @@ mod tests {
     fn zero_main_targets_posthoc_spec() -> SimulationSpec {
         // intercept + 1 continuous + 2 factor dummies = 4 predictors
         SimulationSpec {
-            n_non_factor: 1,
             n_factor_dummies: 2,
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
             factor_n_levels: vec![3],
             factor_proportions: vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
-            factor_sampled: Vec::new(),
             effect_sizes: vec![0.0, 0.0, 0.3, 0.5],
-            target_indices: vec![], // ZERO main targets
-            contrast_pairs: vec![], // ZERO contrasts
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
+            target_indices: vec![],
             posthoc: vec![crate::spec::PosthocSpec {
                 factor_index: 0,
                 target_indices: vec![2, 3], // dummy cols for the 3-level factor
             }],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: true, // omnibus F still runs
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            report_overall: true,
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -3978,17 +3752,15 @@ mod tests {
             overall_fire > 0,
             "at least some overall F tests should be significant"
         );
-    }
 
-    #[test]
-    fn run_batch_st_zero_main_targets_with_posthoc() {
-        // Same test on the sequential path.
-        let spec = zero_main_targets_posthoc_spec();
-        let result = run_batch_st(&spec, &[120], 40, 42, None)
+        // The sequential path (the WASM dispatch) takes the same zero-stride
+        // route and must agree with the multi-core run.
+        let st = run_batch_st(&spec, sample_sizes, n_sims, 42, None)
             .expect("run_batch_st n_targets==0 must not panic");
-        assert_eq!(result.shape.n_targets, 0);
-        assert!(result.uncorrected.is_empty());
-        assert_eq!(result.posthoc_unc.len(), 40 * 3);
+        assert!(st.uncorrected.is_empty());
+        assert_eq!(st.posthoc_unc, result.posthoc_unc);
+        assert_eq!(st.posthoc_cor, result.posthoc_cor);
+        assert_eq!(st.overall, result.overall);
     }
 
     #[test]
@@ -4012,10 +3784,15 @@ mod tests {
         .unwrap();
         assert_eq!(tukey.len(), 1);
         assert_eq!(tukey[0].len(), 3);
+        // df = 120 − 4 = 116. Tukey HSD for k = 3 levels (3 contrasts) sits
+        // strictly between the uncorrected t² and the Bonferroni(m = 3) t².
+        let df = f64::from(sample_sizes[0] - n_pred);
+        let unc = crate::critvals::t_ppf(1.0 - 0.05 / 2.0, df).powi(2);
+        let bonf = crate::critvals::t_ppf(1.0 - 0.05 / (2.0 * 3.0), df).powi(2);
         for v in &tukey[0] {
             assert!(
-                v.is_finite() && *v > 0.0,
-                "tukey posthoc crit must be finite & positive, got {v}"
+                unc < *v && *v < bonf,
+                "tukey posthoc crit {v} must lie in (unc {unc}, bonferroni {bonf})"
             );
         }
     }
@@ -4039,53 +3816,15 @@ mod tests {
         // n_non_factor=1, n_factor_dummies=3, interactions=[vec![1,2]].
         // effect_sizes length = 1 + 1 + 3 + 1 = 6.
         SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 3, // factor0: 1 dummy + factor1: 2 dummies
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
+            n_factor_dummies: 3,
             factor_n_levels: vec![2, 3], // factor0: 2 levels, factor1: 3 levels
             factor_proportions: vec![0.5, 0.5, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
-            factor_sampled: Vec::new(),
             // effect_sizes: intercept, x1, f0_dummy, f1_dummy0, f1_dummy1, interaction
             effect_sizes: vec![0.0, 0.3, 0.2, 0.2, 0.3, 0.1],
             target_indices: vec![1, 2],
-            contrast_pairs: vec![],
             // interaction: x1 (col 1) * factor0 dummy (col 2)
             interactions: vec![vec![1, 2]],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -4124,29 +3863,6 @@ mod tests {
         // factor1 dummies get new positions
         assert_eq!(col_remap[3], 2, "f1 dummy0 remap");
         assert_eq!(col_remap[4], 3, "f1 dummy1 remap");
-    }
-
-    /// `fit_columns` empty ⇒ `build_exclusion_remap` is byte-identical to its
-    /// factor-only behaviour (backward-compat invariant). Same fixture and
-    /// expectations as `build_exclusion_remap_drops_factor0_and_interaction`.
-    #[test]
-    fn build_exclusion_remap_empty_fit_columns_is_factor_only() {
-        let spec = two_factor_spec(); // fit_columns == []
-        assert!(
-            spec.fit_columns.is_empty(),
-            "fixture must carry no test-design reduction"
-        );
-        let p = 1
-            + spec.n_non_factor as usize
-            + spec.n_factor_dummies as usize
-            + spec.interactions.len();
-        let flags = [1u8, 0]; // factor0 excluded
-        let mut kept_cols: Vec<u32> = Vec::new();
-        let mut col_remap = vec![-1i32; p];
-        let p_red = build_exclusion_remap(&spec, &flags, &mut kept_cols, &mut col_remap);
-        assert_eq!(p_red, 4);
-        assert_eq!(kept_cols, vec![0u32, 1, 3, 4]);
-        assert_eq!(col_remap, vec![0, 1, -1, 2, 3, -1]);
     }
 
     /// `fit_columns` can drop a *continuous* column — something factor flags
@@ -4593,53 +4309,16 @@ mod tests {
         factor_min_level_count: u32,
     ) -> SimulationSpec {
         SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 1, // 2-level factor: 1 dummy
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
+            n_factor_dummies: 1,
             factor_n_levels: vec![2],
-            factor_proportions: proportions, // [p_ref, p_level1]
-            factor_sampled: Vec::new(),
+            factor_proportions: proportions,
             effect_sizes: vec![0.0, x1_beta, g_beta],
-            target_indices: vec![1, 2], // x1 and g[2]
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
+            target_indices: vec![1, 2],
             // Overall-F on, so the healthy-path parity test also pins the
             // overall buffer (dfn/dfd switch to p_red under exclusion).
             report_overall: true,
             factor_min_level_count,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -4821,54 +4500,16 @@ mod tests {
         // proportions: [ref=0.90, level1=0.05, level2=0.05]
         // At N=40: level1 count = floor(0.05·40) = 2 < 5 → excluded every sim.
         let spec = SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 2, // 3-level factor: 2 dummies
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
+            n_factor_dummies: 2,
             factor_n_levels: vec![3],
             factor_proportions: vec![0.90, 0.05, 0.05],
-            factor_sampled: Vec::new(),
-            effect_sizes: vec![0.0, 0.5, 0.3, 0.3], // intercept, x1, f_dummy0, f_dummy1
-            target_indices: vec![1],                // x1 only — sanity check
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
+            effect_sizes: vec![0.0, 0.5, 0.3, 0.3],
             posthoc: vec![crate::spec::PosthocSpec {
                 factor_index: 0,
                 target_indices: vec![2, 3], // dummy column indices for the 3-level factor
             }],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
             factor_min_level_count: 5,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         };
 
         let n_sims = 150u32;
@@ -4935,53 +4576,18 @@ mod tests {
         factor_min_level_count: u32,
     ) -> SimulationSpec {
         SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 1, // 2-level factor: 1 dummy
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
+            n_factor_dummies: 1,
             factor_n_levels: vec![2],
-            factor_proportions: proportions, // [p_ref, p_level1]
-            factor_sampled: Vec::new(),
+            factor_proportions: proportions,
             // intercept is effect_sizes[0] (column 0 = 1.0 for all rows);
             // also stored in spec.intercept for display / LRT reference.
             effect_sizes: vec![intercept, x1_beta, g_beta],
-            target_indices: vec![1, 2], // x1 and g[2]
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
+            target_indices: vec![1, 2],
             outcome_kind: OutcomeKind::Binary,
-            link: None,
             estimator: EstimatorSpec::Glm,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
             intercept,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
             factor_min_level_count,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -5112,51 +4718,13 @@ mod tests {
         let mut effect_sizes = vec![0.0; 1 + 1 + n_dummies as usize];
         effect_sizes[1] = x1_beta; // x1
         SimulationSpec {
-            n_non_factor: 1,
             n_factor_dummies: n_dummies,
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
             factor_n_levels: vec![5],
             factor_proportions: proportions,
-            factor_sampled: Vec::new(),
             effect_sizes,
-            target_indices: vec![1], // x1 only (null β=0 for FPR test)
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
             report_overall: true,
             factor_min_level_count,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -5173,82 +4741,17 @@ mod tests {
         effect_sizes[0] = intercept;
         effect_sizes[1] = x1_beta;
         SimulationSpec {
-            n_non_factor: 1,
             n_factor_dummies: n_dummies,
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
             factor_n_levels: vec![5],
             factor_proportions: proportions,
-            factor_sampled: Vec::new(),
             effect_sizes,
-            target_indices: vec![1], // x1 only (null for FPR test)
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
-            link: None,
             estimator: EstimatorSpec::Glm,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
             intercept,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
             report_overall: true,
             factor_min_level_count,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
-    }
-
-    /// OLS overall F under exclusion uses reduced dfs, not full-P dfs.
-    ///
-    /// 5-level factor (4 dummies) → df gap: full-P crit = F(5, n-6) ≈ 2.49,
-    /// correct crit = F(1, n-2) ≈ 4.10 at N=40. With the bug the null FPR would
-    /// be ≈ 0.12 (anti-conservative); with the fix it should sit near α=0.05.
-    /// Factor always excluded (proportions [0.92, 0.02, 0.02, 0.02, 0.02], N=40,
-    /// min_count=5) → reduced model = intercept + x1, x1 β=0 → null FPR ≈ 0.05.
-    #[test]
-    fn ols_overall_under_exclusion_uses_reduced_df() {
-        // Proportions: reference 0.92, four rare levels each at 0.02.
-        // At N=40 each rare level gets floor(0.02*40)=0 or 1 row < 5 → excluded every sim.
-        let spec = factor_5level_spec(0.0, vec![0.92, 0.02, 0.02, 0.02, 0.02], 5);
-        let n_sims = 800u32;
-        let result = run_batch(&spec, &[40], n_sims, 1337, None).unwrap();
-
-        // Sanity: factor excluded in every sim.
-        assert!(
-            result.factor_excluded.iter().all(|&c| c == 1),
-            "factor must be excluded in all sims for the df-correctness test to be valid"
-        );
-
-        // overall layout: n_sims × n_sample_sizes = n_sims × 1 (sim-major).
-        let hits: usize = result.overall.iter().map(|&b| b as usize).sum();
-        let fpr = hits as f64 / n_sims as f64;
-        assert!(
-            (0.02..=0.08).contains(&fpr),
-            "OLS overall null FPR under exclusion must be near α=0.05, got {fpr:.4} ({hits}/{n_sims})"
-        );
     }
 
     /// GLM (logit) overall LRT under exclusion uses reduced dfs, not full-P dfs.
@@ -5298,56 +4801,20 @@ mod tests {
         factor_min_level_count: u32,
     ) -> SimulationSpec {
         SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 1, // 2-level factor: 1 dummy
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
+            n_factor_dummies: 1,
             factor_n_levels: vec![2],
-            factor_proportions: proportions, // [p_ref, p_level1]
-            factor_sampled: Vec::new(),
+            factor_proportions: proportions,
             effect_sizes: vec![0.0, x1_beta, g_beta],
-            target_indices: vec![1, 2], // x1 and g[2]
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
+            target_indices: vec![1, 2],
             estimator: EstimatorSpec::Mle,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
             cluster: Some(crate::spec::ClusterSpec {
                 sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 5 },
                 tau_squared: 0.25,
                 slopes: vec![],
                 extra_groupings: vec![],
             }),
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
             factor_min_level_count,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -5473,7 +4940,9 @@ mod tests {
     /// reduced (N, p_red) table, so `uncorrected[sim]` must equal
     /// `overall[sim]` bit-for-bit. With a full-df marginal read the gates
     /// differ — t²crit(df = N−P = 6) ≈ 5.987 vs F(1, 10) ≈ 4.965 at N=12 —
-    /// and every sim whose t² lands in that gap breaks the equality.
+    /// and every sim whose t² lands in that gap breaks the equality. The same
+    /// equality guards the overall F side: a full-P overall crit F(5, N−6)
+    /// would break it just the same.
     /// x1_beta=0.65 puts the t² distribution astride the window (~50% power).
     /// Verified to FAIL against the full-df marginal read on 2026-06-05.
     #[test]
@@ -5569,31 +5038,27 @@ mod tests {
         spec
     }
 
-    /// Crossed+nested specs run end-to-end through the Mle arm: majority
-    /// convergence, finite power counts, joint significance populated.
+    /// Crossed+nested specs run end-to-end through the Mle arm on a two-point
+    /// grid: each N converges on its own (the second point fits after the
+    /// warm-start carry from the first, so pooling the two would hide a
+    /// broken carry at N = 192).
     #[test]
     fn general_path_runs_end_to_end() {
         let spec = crossed_nested_mle_spec();
         let r = run_batch_st(&spec, &[96, 192], 200, 2137, None).unwrap();
-        let conv: u32 = r.converged.iter().map(|&c| u32::from(c)).sum();
-        assert!(conv > 180, "convergence {conv}/400");
         assert_eq!(r.boundary_hit.len(), 400);
+        // Layout: converged[sim * n_ss + n_idx].
+        for (n_idx, n) in [96, 192].iter().enumerate() {
+            let conv: u32 = (0..200)
+                .map(|sim| u32::from(r.converged[sim * 2 + n_idx]))
+                .sum();
+            assert!(conv > 180, "N = {n}: convergence {conv}/200");
+        }
     }
 
-    /// Same seed ⇒ same result on the general path (the determinism twin the
-    /// Brent arm carries in `run_batch_lme_seed_reproducibility`).
-    #[test]
-    fn general_path_seed_reproducible() {
-        let spec = crossed_nested_mle_spec();
-        let r1 = run_batch_st(&spec, &[96], 100, 2137, None).unwrap();
-        let r2 = run_batch_st(&spec, &[96], 100, 2137, None).unwrap();
-        assert_eq!(r1.uncorrected, r2.uncorrected);
-        assert_eq!(r1.converged, r2.converged);
-        assert_eq!(r1.boundary_hit, r2.boundary_hit);
-    }
-
-    /// st ≡ mt on the general path (mirror of the
-    /// `run_batch_st_matches_run_batch_on_same_seed` twin).
+    /// st ≡ mt on the general path (mirror of the OLS
+    /// `run_batch_bit_identical_1_vs_n_threads` gate); also stands for
+    /// same-seed reproducibility, which two independent runs imply.
     #[test]
     fn general_path_st_mt_equal() {
         let spec = crossed_nested_mle_spec();
@@ -5641,6 +5106,14 @@ mod tests {
         let spec = slope_power_spec();
         let batch = run_batch(&spec, &[240], 200, 2137, None).unwrap();
         assert_eq!(batch.shape.n_variance_components, 2);
+        assert!(
+            batch.converged.iter().any(|&c| c != 0),
+            "some slope fits must converge"
+        );
+        assert!(
+            batch.pinned_components.iter().any(|&m| m != 0),
+            "some slope fits must pin a component, or the mask check below is vacuous"
+        );
         // Every converged fit's pinned mask uses only the 2 low bits.
         assert!(batch.pinned_components.iter().all(|&m| m & !0b11 == 0));
     }

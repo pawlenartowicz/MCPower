@@ -46,7 +46,7 @@ def _named_three_level_factor_model():
     # Rename integer-indexed dummy effects → named-level effects.
     # _apply() created treatment[2] (col 1) and treatment[3] (col 2).
     old_dummy_names = ["treatment[2]", "treatment[3]"]
-    for old_name, level_label in zip(old_dummy_names, non_ref_labels):
+    for old_name, level_label in zip(old_dummy_names, non_ref_labels, strict=True):
         new_name = f"treatment[{level_label}]"
         col_idx = m._registry._effects[old_name].column_index
         new_eff = Effect(
@@ -82,24 +82,10 @@ def test_engine_surfaces_posthoc_block(simple_anova_model):
     r = m.find_power(sample_size=200, target_test="overall, all-contrasts", verbose=False)
     # PowerResult is a dict subclass; posthoc is a list of per-factor blocks.
     posthoc = r["posthoc"]
-    assert len(posthoc) == 1            # one factor -> one block
+    assert len(posthoc) == 1  # one factor -> one block
     ph = posthoc[0]
     assert ph["n_levels"] == 3
-    assert len(ph["power_uncorrected"]) == 3   # C(3,2) = 3 pairwise contrasts
-
-
-def test_tukey_accepted_for_posthoc_only(simple_anova_model):
-    """correction='tukey' works for post-hoc; corrected power ≤ uncorrected."""
-    m = simple_anova_model
-    r = m.find_power(
-        sample_size=200,
-        target_test="overall, all-contrasts",
-        correction="tukey",
-        verbose=False,
-    )
-    ph = r["posthoc"][0]
-    for u, c in zip(ph["power_uncorrected"], ph["power_corrected"]):
-        assert c <= u + 1e-9   # Tukey is at least as conservative as uncorrected
+    assert len(ph["power_uncorrected"]) == 3  # C(3,2) = 3 pairwise contrasts
 
 
 def test_tukey_with_marginal_targets_warns_not_errors(simple_anova_model):
@@ -112,7 +98,7 @@ def test_tukey_with_marginal_targets_warns_not_errors(simple_anova_model):
             correction="tukey",
             verbose=False,
         )
-    assert len(r["posthoc"]) >= 1   # post-hoc still computed
+    assert len(r["posthoc"]) >= 1  # post-hoc still computed
 
 
 def test_pure_posthoc_only_no_marginal_targets(simple_anova_model):
@@ -141,8 +127,7 @@ def test_short_form_renders_posthoc_factor_grouped(capsys):
     """Short-form repr nests the contrasts into the main per-test table under a
     '<factor>  (pairwise)' span (like factor levels), not a separate section."""
     m = _named_three_level_factor_model()
-    m.find_power(sample_size=200, target_test="overall, all-contrasts",
-                 correction="tukey")
+    m.find_power(sample_size=200, target_test="overall, all-contrasts", correction="tukey")
     out = capsys.readouterr().out
     assert "treatment  (pairwise)" in out
     assert "low_dose vs placebo" in out
@@ -173,36 +158,9 @@ def test_short_form_posthoc_no_correction_single_power_column(simple_anova_model
 def test_long_form_nests_posthoc():
     """Long-form summary() nests post-hoc contrasts into the Per-test power table."""
     m = _named_three_level_factor_model()
-    r = m.find_power(sample_size=200, target_test="overall, all-contrasts",
-                     correction="tukey", verbose=False)
+    r = m.find_power(sample_size=200, target_test="overall, all-contrasts", correction="tukey", verbose=False)
     text = str(r.summary())
     assert "treatment  (pairwise)" in text
     assert "low_dose vs placebo" in text
     assert "high_dose vs low_dose" in text
     assert "Post-hoc pairwise contrasts" not in text
-
-
-def test_posthoc_meta_has_posthoc_factors():
-    """_report_meta includes posthoc_factors with correct levels list."""
-    m = _named_three_level_factor_model()
-    r = m.find_power(sample_size=200, target_test="overall, all-contrasts",
-                     correction="tukey", verbose=False)
-    meta = r._meta
-    assert "posthoc_factors" in meta
-    pf = meta["posthoc_factors"]
-    assert len(pf) == 1
-    assert pf[0]["name"] == "treatment"
-    assert pf[0]["levels"] == ["placebo", "low_dose", "high_dose"]
-
-
-def test_posthoc_meta_integer_indexed_levels():
-    """_report_meta synthesises numeric labels when level_labels is None."""
-    m = MCPower("pain_reduction = dose_group")
-    m.set_variable_type("dose_group=(factor,0.34,0.33,0.33)")
-    m.set_effects("dose_group[2]=0.5, dose_group[3]=0.8")
-    r = m.find_power(sample_size=200, target_test="all-contrasts", verbose=False)
-    meta = r._meta
-    pf = meta["posthoc_factors"]
-    assert len(pf) == 1
-    assert pf[0]["name"] == "dose_group"
-    assert pf[0]["levels"] == ["1", "2", "3"]

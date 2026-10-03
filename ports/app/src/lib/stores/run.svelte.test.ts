@@ -140,7 +140,7 @@ describe('runStore.startFindSampleSize', () => {
     expect(runStore.runTabs[0]?.kind).toBe('find-sample-size');
   });
 
-  it('runs find-sample-size in cluster-size mode (the engine grids N by the cluster size)', async () => {
+  it('does not block a cluster-size mixed spec: forwards spec, bounds and method unchanged', async () => {
     vi.mocked(findSampleSize).mockResolvedValueOnce({
       run_id: 'r3',
       result: sampleSizeResult as any,

@@ -1,4 +1,5 @@
 """With numpy blocked at import, the package must still import and run a list-input analysis."""
+
 import builtins
 import sys
 
@@ -29,7 +30,8 @@ def test_import_and_find_power_without_numpy(numpy_blocked):
     m = mcpower.MCPower("y ~ x1 + x2")
     m.set_effects("x1=0.5, x2=0.0")
     res = m.find_power(sample_size=50, n_sims=50)  # list/scalar inputs only
-    # A real result envelope with power for the tested target(s).
-    assert res is not None
-    assert "power_uncorrected" in res or "scenarios" in res
-    assert res["n_sims"] > 0
+    # The full single-scenario result: every requested sim ran, one power
+    # value per tested effect.
+    assert "scenarios" not in res
+    assert res["n_sims"] == 50
+    assert len(res["power_uncorrected"][0]) == 2

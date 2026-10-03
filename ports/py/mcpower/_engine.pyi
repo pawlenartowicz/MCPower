@@ -62,12 +62,6 @@ def fit_uploaded_data(
 ) -> dict: ...
 
 
-# Dev-only: registered behind the engine-py `test-bridge` Cargo feature.
-# Release wheels (built without `--features test-bridge`) do NOT export this
-# symbol — call sites must guard with `hasattr(_engine, "build_contract_from_json")`.
-def build_contract_from_json(json: str, /) -> list[tuple[str, bytes]]: ...
-
-
 # Dev-only (test-bridge): panics inside the engine boundary so tests can assert
 # the internal-error path raises RuntimeError with the report hint. Absent from
 # release wheels — guard with `hasattr(_engine, "panic_for_test")`.

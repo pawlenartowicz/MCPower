@@ -49,9 +49,10 @@ def _ss_result_with_correction():
 
 # ── Template-based HTML test (replaces old _write_cdn_html test) ─────────────
 
+
 def test_stacked_html_uses_template(tmp_path):
-    """_write_stacked_html produces one HTML with CDN tags and one vegaEmbed
-    call per block — the new template-based approach."""
+    """_write_stacked_html fills the engine's CDN template: the {{SPECS}}
+    placeholder is replaced by the JSON array of the block specs."""
     res = _small_model().find_power(120)
     blocks = plotting._plot_blocks(res, res._meta, "find_power", label_map={})
     out = str(tmp_path / "x.html")
@@ -60,8 +61,8 @@ def test_stacked_html_uses_template(tmp_path):
     assert "cdn.jsdelivr.net" in html
     assert "vega@" in html and "vega-lite@" in html and "vega-embed@" in html
     assert "vegaEmbed" in html
-    # One spec in the array → one vegaEmbed call inside the forEach
-    assert html.count("vegaEmbed") >= 1
+    assert "{{SPECS}}" not in html
+    assert json.dumps([spec for _, spec in blocks]) in html
 
 
 def test_stacked_html_escapes_script_tag(tmp_path):
@@ -88,6 +89,7 @@ def test_stacked_html_escapes_script_tag(tmp_path):
 
 # ── _next_free_path ──────────────────────────────────────────────────────────
 
+
 def test_next_free_path_suffixes(tmp_path):
     base = tmp_path / "find_power.html"
     assert plotting._next_free_path(str(base)) == str(base)
@@ -98,6 +100,7 @@ def test_next_free_path_suffixes(tmp_path):
 
 # ── _is_headless ─────────────────────────────────────────────────────────────
 
+
 def test_is_headless_true_without_display(monkeypatch):
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
@@ -106,6 +109,7 @@ def test_is_headless_true_without_display(monkeypatch):
 
 
 # ── plot() with no path — new basenames ─────────────────────────────────────
+
 
 def test_plot_no_path_writes_find_power_html(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -124,15 +128,17 @@ def test_plot_sample_size_named_html(tmp_path, monkeypatch):
 
 
 def test_plot_with_path_delegates_to_save_plot(tmp_path, monkeypatch):
-    called = {}
-    monkeypatch.setattr("mcpower.output.results.PowerResult.save_plot",
-                        lambda self, path, **k: called.setdefault("path", path))
+    """plot(path) saves to that path with save_plot's default light-print theme
+    and writes nothing else (no auto-named view file in cwd)."""
+    monkeypatch.chdir(tmp_path)
     res = _small_model().find_power(120)
-    res.plot(str(tmp_path / "out.png"))
-    assert called["path"] == str(tmp_path / "out.png")
+    res.plot(str(tmp_path / "out.html"))
+    assert set(os.listdir(str(tmp_path))) == {"out.html"}
+    assert '"legend"' in (tmp_path / "out.html").read_text()
 
 
 # ── Sample-size plot-set bridge ──────────────────────────────────────────────
+
 
 def test_sample_size_blocks_wire_through_to_rust_emitter():
     mp = _small_model()
@@ -154,10 +160,9 @@ def test_sample_size_blocks_wire_through_to_rust_emitter():
 
 # ── available_themes / _apply_theme ─────────────────────────────────────────
 
+
 def test_list_plot_themes_returns_four_names():
-    assert set(plotting.available_themes()) == {
-        "light-print", "dark-print", "light-app", "dark-app"
-    }
+    assert set(plotting.available_themes()) == {"light-print", "dark-print", "light-app", "dark-app"}
 
 
 def test_plot_theme_unknown_raises():
@@ -170,9 +175,7 @@ def test_plot_theme_unknown_raises():
 def test_apply_theme_deep_merges_axis_subkeys():
     # A spec that already carries an axis.titleColor under config: the theme's
     # labelColor must merge in rather than clobbering the whole axis block.
-    spec_json = json.dumps(
-        {"$schema": V5, "config": {"axis": {"titleColor": "#abc"}}, "data": {"values": []}}
-    )
+    spec_json = json.dumps({"$schema": V5, "config": {"axis": {"titleColor": "#abc"}}, "data": {"values": []}})
     merged = json.loads(plotting._apply_theme(spec_json, "light-app"))
     assert merged["config"]["background"] == "#ffffff"
     assert merged["config"]["axis"]["labelColor"] == "#6a7280"  # from theme
@@ -180,6 +183,7 @@ def test_apply_theme_deep_merges_axis_subkeys():
 
 
 # ── save_plot suffix / error handling ───────────────────────────────────────
+
 
 def test_save_plot_unknown_suffix_raises_valueerror(tmp_path):
     res = _ss_result()
@@ -190,6 +194,7 @@ def test_save_plot_unknown_suffix_raises_valueerror(tmp_path):
 def test_save_plot_missing_renderer_hints_extra(tmp_path, monkeypatch):
     res = _ss_result()
     import builtins
+
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
@@ -203,6 +208,7 @@ def test_save_plot_missing_renderer_hints_extra(tmp_path, monkeypatch):
 
 
 # ── Default light-print theme ─────────────────────────────────────────────────
+
 
 def test_saved_html_has_print_theme_by_default(tmp_path):
     """HTML saved without explicit theme= uses the light-print theme."""
@@ -236,10 +242,14 @@ def test_saved_html_no_theme_is_naked(tmp_path):
 
 # ── Mimebundle: block choice + light-print theme ──────────────────────────────
 
+
 def test_mimebundle_power_is_power_block_with_print_theme():
-    """find_power mimebundle: power block, light-print theme applied."""
-    res = _small_model().find_power(120)
-    bundle = res.summary()._repr_mimebundle_()
+    """find_power mimebundle: the report text plus the power block (a parsed
+    dict, not a string) with the light-print theme applied. Called the way
+    IPython calls it, with ``include``/``exclude`` keywords."""
+    report = _small_model().find_power(120).summary()
+    bundle = report._repr_mimebundle_(include=None, exclude=None)
+    assert bundle["text/plain"] == str(report)
     spec = bundle["application/vnd.vegalite.v5+json"]
     assert isinstance(spec, dict)
     # light-print theme applied
@@ -248,17 +258,22 @@ def test_mimebundle_power_is_power_block_with_print_theme():
 
 
 def test_mimebundle_sample_size_single_scenario_is_curve():
-    """Single-scenario find_sample_size mimebundle: curve block."""
+    """Single-scenario find_sample_size mimebundle: the per-target power-vs-N
+    curve block (not a joint k-block), light-print theme applied."""
     res = _ss_result()
     bundle = res.summary()._repr_mimebundle_()
     spec = bundle["application/vnd.vegalite.v5+json"]
     assert isinstance(spec, dict)
-    assert "config" in spec  # light-print theme applied
+    rows = spec["data"]["values"]
+    assert {row["target"] for row in rows} == {"x1", "x2"}
+    assert len({row["n"] for row in rows}) > 1
+    assert "legend" in spec["config"]  # light-print theme applied
 
 
 def test_mimebundle_sample_size_multi_scenario_is_overlay(monkeypatch):
     """Multi-scenario find_sample_size mimebundle: overlay block chosen."""
     from mcpower.output import plotting as _plt
+
     # Fake blocks to avoid slow sim run — two scenarios → overlay block present
     fake_blocks = [
         ("scenario:A", {"$schema": V5, "data": {"values": []}}),
@@ -276,22 +291,37 @@ def test_mimebundle_sample_size_multi_scenario_is_overlay(monkeypatch):
 
     # _scenarios returns len 2 if result has 'scenarios' dict with 2 entries
     from mcpower.output.results import SampleSizeResult
+
     # Build a minimal fake result with two scenarios so _scenarios returns len 2
     fake_result = SampleSizeResult(
         {
             "scenarios": {
-                "A": {"sample_sizes": [40], "target_indices": [1], "power_uncorrected": [[0.5]],
-                      "power_corrected": [[0.5]], "ci_uncorrected": [[(0.4, 0.6)]],
-                      "ci_corrected": [[(0.4, 0.6)]], "first_achieved": {0: 40},
-                      "success_count_histogram_corrected": [[10, 20]],
-                      "convergence_rate": [1.0], "boundary_hit_rate_tau_zero": [0.0],
-                      "boundary_hit_rate_high_tau": [0.0]},
-                "B": {"sample_sizes": [40], "target_indices": [1], "power_uncorrected": [[0.4]],
-                      "power_corrected": [[0.4]], "ci_uncorrected": [[(0.3, 0.5)]],
-                      "ci_corrected": [[(0.3, 0.5)]], "first_achieved": {0: 40},
-                      "success_count_histogram_corrected": [[15, 15]],
-                      "convergence_rate": [1.0], "boundary_hit_rate_tau_zero": [0.0],
-                      "boundary_hit_rate_high_tau": [0.0]},
+                "A": {
+                    "sample_sizes": [40],
+                    "target_indices": [1],
+                    "power_uncorrected": [[0.5]],
+                    "power_corrected": [[0.5]],
+                    "ci_uncorrected": [[(0.4, 0.6)]],
+                    "ci_corrected": [[(0.4, 0.6)]],
+                    "first_achieved": {0: 40},
+                    "success_count_histogram_corrected": [[10, 20]],
+                    "convergence_rate": [1.0],
+                    "boundary_hit_rate_tau_zero": [0.0],
+                    "boundary_hit_rate_high_tau": [0.0],
+                },
+                "B": {
+                    "sample_sizes": [40],
+                    "target_indices": [1],
+                    "power_uncorrected": [[0.4]],
+                    "power_corrected": [[0.4]],
+                    "ci_uncorrected": [[(0.3, 0.5)]],
+                    "ci_corrected": [[(0.3, 0.5)]],
+                    "first_achieved": {0: 40},
+                    "success_count_histogram_corrected": [[15, 15]],
+                    "convergence_rate": [1.0],
+                    "boundary_hit_rate_tau_zero": [0.0],
+                    "boundary_hit_rate_high_tau": [0.0],
+                },
             },
             "comparison": {},
         },
@@ -304,6 +334,7 @@ def test_mimebundle_sample_size_multi_scenario_is_overlay(monkeypatch):
 
 
 # ── Corrected-switch: axis title + data values ───────────────────────────────
+
 
 def test_corrected_axis_title_present():
     """Correction active → 'Power (Holm-corrected)' title in spec."""
@@ -338,36 +369,29 @@ def test_corrected_uses_corrected_data_values():
 
     blocks = plotting._plot_blocks(res, res._meta, "find_sample_size", label_map={})
     curve_spec = next(s for k, s in blocks if k == "curve")
-    # Extract power values from data rows
-    data_vals = [row["power"] for row in curve_spec["data"]["values"] if "power" in row]
-    if not data_vals:
-        # Spec may use different field name; just confirm the spec built successfully
-        assert curve_spec["data"]["values"], "spec must have data values"
-        return
-    # The values in the spec should be from the corrected arrays
-    flat_corrected = [v for row in corr for v in row]
-    flat_uncorrected = [v for row in uncorr for v in row]
-    # At least one value matches corrected, none match uncorrected (that's not in corrected)
-    only_in_uncorr = set(flat_uncorrected) - set(flat_corrected)
-    for v in data_vals:
-        assert v not in only_in_uncorr, f"value {v} is from uncorrected array, not corrected"
+    # Curve rows run N-major, target-minor — the same order as the result's
+    # per-N power rows.
+    data_vals = [row["power"] for row in curve_spec["data"]["values"]]
+    assert data_vals == [v for row in corr for v in row]
 
 
 # ── Target-power line in find_power spec ─────────────────────────────────────
+
 
 def test_find_power_spec_has_target_power_rule():
     """The power block spec contains a rule layer with the run's target power datum."""
     res = _small_model().find_power(120)
     blocks = plotting._plot_blocks(res, res._meta, "find_power", label_map={})
     power_spec = next(s for k, s in blocks if k == "power")
-    spec_json = json.dumps(power_spec)
-    target = res._meta["target_power"]
-    assert str(target) in spec_json, f"target_power {target} must appear in spec"
-    # There must be at least one rule layer
-    assert '"rule"' in spec_json or '"target_power_line"' in spec_json or str(target) in spec_json
+    rules = [
+        layer for layer in power_spec["layer"] if (layer["mark"] if isinstance(layer["mark"], str) else layer["mark"]["type"]) == "rule"
+    ]
+    assert len(rules) == 1
+    assert rules[0]["encoding"]["x"]["datum"] == res._meta["target_power"]
 
 
 # ── File-set semantics ────────────────────────────────────────────────────────
+
 
 def test_path_derivation_sanitization_and_dedupe(tmp_path):
     """_unique_block_paths deduplicates scenario labels that sanitize identically."""
@@ -387,7 +411,6 @@ def test_path_derivation_sanitization_and_dedupe(tmp_path):
 
 def test_derive_block_path_power_and_curve_unchanged(tmp_path):
     """'power' and 'curve' block keys keep the user's original path."""
-    base = str(tmp_path / "out.svg")
     stem = str(tmp_path / "out")
     assert plotting._derive_block_path(stem, ".svg", "power") == f"{stem}.svg"
     assert plotting._derive_block_path(stem, ".svg", "curve") == f"{stem}.svg"
@@ -396,9 +419,7 @@ def test_derive_block_path_power_and_curve_unchanged(tmp_path):
     assert plotting._derive_block_path(stem, ".svg", "exactly_k") == f"{stem}_exactly_k.svg"
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed"
-)
+@pytest.mark.skipif(importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed")
 def test_save_plot_single_scenario_fp_writes_one_svg(tmp_path):
     """Single-scenario find_power: save_plot(.svg) writes exactly {out.svg}."""
     res = _small_model().find_power(120)
@@ -408,9 +429,7 @@ def test_save_plot_single_scenario_fp_writes_one_svg(tmp_path):
     assert files == {"out.svg"}
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed"
-)
+@pytest.mark.skipif(importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed")
 def test_save_plot_single_scenario_ss_m2_writes_three_svgs(tmp_path):
     """Single-scenario find_sample_size with m=2 targets:
     save_plot(.svg) writes {out.svg, out_at_least_k.svg, out_exactly_k.svg}."""
@@ -421,61 +440,32 @@ def test_save_plot_single_scenario_ss_m2_writes_three_svgs(tmp_path):
     assert files == {"out.svg", "out_at_least_k.svg", "out_exactly_k.svg"}
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed"
-)
 def test_save_plot_html_writes_one_file(tmp_path):
-    """HTML output: one stacked file regardless of block count."""
+    """HTML output: one stacked file regardless of block count (the HTML path
+    needs no renderer)."""
     res = _ss_result()
     out = str(tmp_path / "chart.html")
     res.save_plot(out)
     files = set(os.listdir(str(tmp_path)))
     assert files == {"chart.html"}
     html = (tmp_path / "chart.html").read_text()
-    # Should have multiple vegaEmbed calls (one per block, via forEach)
     assert "vegaEmbed" in html
     # CDN tags present
     assert "cdn.jsdelivr.net" in html
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed"
-)
-def test_save_plot_theme_injects_config(tmp_path):
-    """Explicit theme='dark-print' produces a dark background."""
-    res = _ss_result()
-    out = str(tmp_path / "chart.html")
-    res.save_plot(out, theme="dark-print")
-    html = (tmp_path / "chart.html").read_text()
-    assert "#1e1e1e" in html
-
-
-@pytest.mark.skipif(
-    importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed"
-)
-@pytest.mark.parametrize("fmt", ["png", "svg", "pdf"])
-def test_save_plot_writes_nonempty_file(tmp_path, fmt):
-    """Single-scenario find_power: save_plot(<fmt>) produces a non-empty file."""
+@pytest.mark.skipif(importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed")
+@pytest.mark.parametrize("fmt, magic", [("png", b"\x89PNG"), ("svg", b"<svg"), ("pdf", b"%PDF")])
+def test_save_plot_writes_nonempty_file(tmp_path, fmt, magic):
+    """Single-scenario find_power: save_plot(<fmt>) renders a real file of that
+    format at the base name (one "power" block)."""
     res = _small_model().find_power(120)
     out = str(tmp_path / f"chart.{fmt}")
     res.save_plot(out)
-    # find_power single-scenario → one block ("power") → file keeps the base name
-    expected = tmp_path / f"chart.{fmt}"
-    assert expected.exists(), f"{expected} was not written"
-    assert expected.stat().st_size > 0, f"{expected} is empty"
+    assert (tmp_path / f"chart.{fmt}").read_bytes().startswith(magic)
 
 
-def test_save_plot_html_find_power_nonempty(tmp_path):
-    """HTML save for find_power is non-empty (no renderer gate needed)."""
-    res = _small_model().find_power(120)
-    out = str(tmp_path / "chart.html")
-    res.save_plot(out)
-    assert (tmp_path / "chart.html").stat().st_size > 0
-
-
-@pytest.mark.skipif(
-    importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed"
-)
+@pytest.mark.skipif(importlib.util.find_spec("vl_convert") is None, reason="vl-convert not installed")
 def test_save_plot_multi_scenario_ss_writes_exact_file_set(tmp_path):
     """Multi-scenario (S=2), multi-target (m=2) find_sample_size saved as out.svg
     must produce exactly the per-scenario files + overlay/at_least_k/exactly_k,
@@ -486,7 +476,9 @@ def test_save_plot_multi_scenario_ss_writes_exact_file_set(tmp_path):
         .set_simulations(200)
         .set_seed(2137)
         .find_sample_size(
-            from_size=40, to_size=120, by=40,
+            from_size=40,
+            to_size=120,
+            by=40,
             scenarios=["optimistic", "realistic"],
         )
     )

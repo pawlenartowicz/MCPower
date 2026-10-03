@@ -45,17 +45,13 @@ def test_continuous_upload_declared_factor_raises():
     m.set_variable_type("x=(factor,3)")
     m.set_effects("x[2]=0.3, x[3]=0.3")
 
+    # The port guard's message, not the engine's ColumnId / DirectOnFactor error.
     with pytest.raises(ValueError) as exc_info:
         m.find_power(100)
-
-    msg = str(exc_info.value)
-    # Must name the column
-    assert "'x'" in msg or "\"x\"" in msg, f"Column name missing from error: {msg}"
-    # Must mention the detected type
-    assert "continuous" in msg, f"Detected type missing from error: {msg}"
-    # Must NOT be the engine's ColumnId error (which says "DirectOnFactor" or "ColumnId")
-    assert "DirectOnFactor" not in msg, f"Got engine's internal error instead of our guard: {msg}"
-    assert "ColumnId" not in msg, f"Got engine's internal ColumnId error: {msg}"
+    assert str(exc_info.value) == (
+        "Column 'x' was detected as continuous from your uploaded data; it can't "
+        "be modeled as factor. Uploaded columns take their type from the data."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -74,11 +70,10 @@ def test_binary_upload_declared_continuous_raises():
 
     with pytest.raises(ValueError) as exc_info:
         m.find_power(100)
-
-    msg = str(exc_info.value)
-    assert "'x'" in msg or "\"x\"" in msg, f"Column name missing from error: {msg}"
-    assert "binary" in msg, f"Detected type missing from error: {msg}"
-    assert "DirectOnFactor" not in msg, f"Got engine's internal error: {msg}"
+    assert str(exc_info.value) == (
+        "Column 'x' was detected as binary from your uploaded data; it can't "
+        "be modeled as continuous. Uploaded columns take their type from the data."
+    )
 
 
 # ---------------------------------------------------------------------------

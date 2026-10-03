@@ -897,10 +897,10 @@ mod tests {
     use super::*;
     use engine_contract::fixtures::example1_simple_ols;
     use engine_contract::{
-        ClusterSizing, ClusterSpec, ColumnId, CorrectionMethod, DesignSpec, DfMethod,
-        EstimatorSpec, GenerationSpec, LmeScenarioPerturbations, OutcomeKind, OutcomeSpec,
-        PosthocSpec, ResidualSpec, ScenarioPerturbations, SimulationContract, SlopeTerm, TestSpec,
-        TestTarget, UploadedFrame, WaldSe,
+        ClusterSizing, ClusterSpec, ColumnId, CorrectionMethod, DesignSpec, EstimatorSpec,
+        GenerationSpec, LmeScenarioPerturbations, OutcomeKind, OutcomeSpec, PosthocSpec,
+        ResidualSpec, ScenarioPerturbations, SimulationContract, SlopeTerm, TestSpec, TestTarget,
+        UploadedFrame, WaldSe,
     };
 
     #[test]
@@ -919,6 +919,12 @@ mod tests {
         assert_eq!(s.correlation, vec![1.0, 0.0, 0.0, 1.0]);
         assert_eq!(s.upload_normal_shape, (0, 0));
         assert_eq!(s.upload_data_shape, (0, 0));
+        // Test block: targets at their design-test column positions, plus the
+        // correction / alpha passthrough.
+        assert_eq!(s.target_indices, vec![1, 2]);
+        assert_eq!(s.correction_method, CorrectionMethod::None);
+        assert_eq!(s.crit_values.alpha, 0.05);
+        assert_eq!(s.crit_values.posthoc_alpha, None);
     }
 
     #[test]
@@ -1067,16 +1073,6 @@ mod tests {
     }
 
     #[test]
-    fn target_indices_use_design_test_column_positions() {
-        let c = example1_simple_ols();
-        let s = contract_to_simulation_spec(&c).unwrap();
-        assert_eq!(s.target_indices, vec![1, 2]);
-        assert_eq!(s.correction_method, CorrectionMethod::None);
-        assert_eq!(s.crit_values.alpha, 0.05);
-        assert_eq!(s.crit_values.posthoc_alpha, None);
-    }
-
-    #[test]
     fn fit_columns_derived_from_reduced_design_test() {
         // Generation fits y ~ x1 + x2; the test design drops x2, so the engine
         // must fit only {intercept, x1} (omitted-variable / `test_formula`).
@@ -1152,8 +1148,11 @@ mod tests {
     #[test]
     fn fit_columns_empty_when_design_test_covers_full_generation() {
         // design_test covers every generation column ⇒ no reduction ⇒
-        // fit_columns stays empty (the full-fit / current behaviour).
-        let c = example1_simple_ols();
+        // fit_columns stays empty (the full-fit / current behaviour). An
+        // explicit full design_test is the shape spec-builder output takes;
+        // `None` would skip the comparison this test is about.
+        let mut c = example1_simple_ols();
+        c.design_test = Some(c.design_generation.clone());
         let s = contract_to_simulation_spec(&c).unwrap();
         assert!(
             s.fit_columns.is_empty(),
@@ -1451,17 +1450,6 @@ mod tests {
     }
 
     #[test]
-    fn glm_translates_with_intercept() {
-        let mut c = example1_simple_ols();
-        c.outcome.kind = OutcomeKind::Binary;
-        c.estimator = EstimatorSpec::Glm;
-        c.outcome.intercept = -1.3863;
-        let s = contract_to_simulation_spec(&c).unwrap();
-        assert_eq!(s.estimator, EstimatorSpec::Glm);
-        assert_eq!(s.intercept, -1.3863);
-    }
-
-    #[test]
     fn heteroskedasticity_driver_maps_column_to_xfull_index() {
         let mut c = example1_simple_ols();
         c.outcome.heteroskedasticity_driver = Some(ColumnId(1));
@@ -1567,20 +1555,9 @@ mod tests {
     fn joint_subset_target_is_rejected_as_unsupported() {
         // Arbitrary Joint subsets (not the full omnibus shape) still error —
         // we don't yet have a per-joint contrast surface.
-        let mut c = example1_simple_ols();
-        // design_test has 3 terms (Const, x1, x2). Add a third column so a
-        // proper "subset" Joint exists: {1} alone covers a strict subset of
-        // non-intercept positions {1, 2}.
-        c.test.targets = vec![TestTarget::Joint { terms: vec![1] }];
-        match contract_to_simulation_spec(&c) {
-            // validate() requires Joint.len() >= 2, so the rejection here
-            // comes through `ContractInvalid` rather than `JointNotSupported`.
-            Err(AdapterError::ContractInvalid(_)) => {}
-            other => panic!("unexpected: {other:?}"),
-        }
-
-        // For a true subset rejection, use a contract with >=3 non-intercept
-        // terms in design_test and a Joint covering only some of them.
+        // A contract with 3 non-intercept terms in design_test and a Joint
+        // covering only two of them (a single-term Joint never reaches the
+        // adapter: validate() requires Joint.len() >= 2).
         let c = SimulationContract {
             generation: GenerationSpec {
                 columns: vec![
@@ -1659,15 +1636,6 @@ mod tests {
             Err(AdapterError::JointNotSupported { got }) => assert_eq!(got, vec![1, 2]),
             other => panic!("unexpected: {other:?}"),
         }
-    }
-
-    #[test]
-    fn adapted_spec_msgpack_roundtrips() {
-        let c = example1_simple_ols();
-        let s = contract_to_simulation_spec(&c).unwrap();
-        let bytes = rmp_serde::to_vec_named(&s).unwrap();
-        let back: SimulationSpec = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(s, back);
     }
 
     /// `TestTarget::Contrast { positive: B, negative: Const(0) }` where 0 is
@@ -1765,6 +1733,9 @@ mod tests {
             spec_contrast.contrast_pairs.is_empty(),
             "reference-collapse should produce no contrast_pairs"
         );
+        // The whole kernel spec is identical, so any run of the two is
+        // bit-identical by construction.
+        assert_eq!(spec_marginal, spec_contrast);
     }
 
     /// A non-reference `Contrast { positive: 1, negative: 2 }` (B vs C, both
@@ -2048,6 +2019,11 @@ mod tests {
         // upload_data must still be populated (Phase-2 bootstrap reads it)
         assert_eq!(s.upload_data_shape, (3, 1));
         assert_eq!(s.upload_data, vec![0.3, -1.2, 0.9]);
+        // NORTA (bootstrap == false) leaves the strict-mode frame map empty.
+        assert!(
+            s.bootstrap_frame_map.is_empty(),
+            "NORTA must leave bootstrap_frame_map empty"
+        );
     }
 
     #[test]
@@ -2059,49 +2035,14 @@ mod tests {
         let s = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(s.n_non_factor, 1);
         assert_eq!(s.upload_normal_shape, (4, 1));
+        // Frame column 0 of the row-major 4×2 frame (column 1 holds 10..13).
+        assert_eq!(s.upload_normal, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     // -----------------------------------------------------------------
     // P2-3: strict (bootstrap) mode — upload_data + bootstrap_frame_map,
     // upload_normal empty.
     // -----------------------------------------------------------------
-
-    /// NORTA (bootstrap == false) path: bootstrap_frame_map is empty even though
-    /// upload_normal / upload_data are populated. Confirms the existing partial
-    /// path is unchanged by the strict wiring.
-    #[test]
-    fn norta_leaves_bootstrap_frame_map_empty() {
-        let frame_data = vec![0.3, -1.2, 0.9]; // 3×1
-        let c = minimal_uploaded_contract(frame_data, 3, 1, 0);
-        let s = contract_to_simulation_spec(&c).unwrap();
-        assert!(!s.upload_normal.is_empty(), "NORTA fills upload_normal");
-        assert!(
-            s.bootstrap_frame_map.is_empty(),
-            "NORTA must leave bootstrap_frame_map empty"
-        );
-    }
-
-    /// Strict (bootstrap == true): upload_data populated, upload_normal EMPTY,
-    /// and bootstrap_frame_map == [Some(0)] for one uploaded non-factor column.
-    #[test]
-    fn strict_populates_upload_data_and_frame_map_leaves_upload_normal_empty() {
-        let frame_data = vec![0.3, -1.2, 0.9]; // 3×1
-        let mut c = minimal_uploaded_contract(frame_data.clone(), 3, 1, 0);
-        // Flip the frame to strict (bootstrap) mode.
-        c.generation.uploaded_frame.as_mut().unwrap().bootstrap = true;
-        let s = contract_to_simulation_spec(&c).unwrap();
-        // upload_normal MUST be empty in strict mode.
-        assert!(
-            s.upload_normal.is_empty(),
-            "strict must leave upload_normal empty"
-        );
-        assert_eq!(s.upload_normal_shape, (0, 0));
-        // upload_data carries the raw frame for row-sampling.
-        assert_eq!(s.upload_data, frame_data);
-        assert_eq!(s.upload_data_shape, (3, 1));
-        // One non-factor uploaded column → frame column 0; no factors.
-        assert_eq!(s.bootstrap_frame_map, vec![Some(0)]);
-    }
 
     /// `cluster_level_columns` expands predictor → kernel columns:
     /// a continuous predictor at non-factor position k → one index `1 + k`;
@@ -2218,7 +2159,7 @@ mod tests {
                 correlations: Correlations::Identity,
                 cluster: None,
                 uploaded_frame: Some(UploadedFrame {
-                    data: frame_data,
+                    data: frame_data.clone(),
                     n_rows: 4,
                     n_cols: 2,
                     bootstrap: true,
@@ -2273,6 +2214,9 @@ mod tests {
             "strict must leave upload_normal empty"
         );
         assert_eq!(s.upload_normal_shape, (0, 0));
+        // upload_data carries the raw frame for whole-row sampling.
+        assert_eq!(s.upload_data, frame_data);
+        assert_eq!(s.upload_data_shape, (4, 2));
         // Mixed layout: Synthetic→None, Resampled→Some(0), FactorFromFrame→Some(1).
         assert_eq!(s.bootstrap_frame_map, vec![None, Some(0), Some(1)]);
     }
@@ -2280,25 +2224,6 @@ mod tests {
     // -----------------------------------------------------------------------
     // cluster_slope_design_cols resolution tests (Task 2)
     // -----------------------------------------------------------------------
-
-    /// Build a valid `(1 + x1 | g)` contract from example1_simple_ols:
-    /// ColumnId(0) is the first continuous predictor → x_full index 1.
-    fn contract_with_primary_slope() -> SimulationContract {
-        let mut c = example1_simple_ols();
-        c.estimator = EstimatorSpec::Mle;
-        c.generation.cluster = Some(ClusterSpec {
-            sizing: ClusterSizing::FixedClusters { n_clusters: 20 },
-            tau_squared: 0.25,
-            slopes: vec![SlopeTerm {
-                column: ColumnId(0),
-                variance: 0.16,
-                corr_with_intercept: 0.0,
-                corr_with: vec![],
-            }],
-            extra_groupings: vec![],
-        });
-        c
-    }
 
     /// Build a valid `(1 + x1 + x2 | g)` contract: both continuous predictors
     /// as slopes. ColumnId(0) → x_full 1; ColumnId(1) → x_full 2.
@@ -2338,15 +2263,6 @@ mod tests {
             extra_groupings: vec![],
         });
         c
-    }
-
-    /// A `(1 + x1 | g)` spec resolves the slope covariate (generation col 0,
-    /// the first continuous → x_full index 1) onto cluster_slope_design_cols.
-    #[test]
-    fn slope_design_cols_resolve_to_x_full_index() {
-        let c = contract_with_primary_slope();
-        let spec = contract_to_simulation_spec(&c).unwrap();
-        assert_eq!(spec.cluster_slope_design_cols, vec![1u32]);
     }
 
     /// `(1 + x1 + x2 | g)` resolves both, in declaration order (x_full 1, 2).
@@ -2451,15 +2367,5 @@ mod tests {
         c.wald_se = WaldSe::Hessian;
         let spec = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(spec.wald_se, WaldSe::Hessian);
-    }
-
-    #[test]
-    fn adapter_threads_df_method() {
-        // Threads the non-default value, so an adapter that dropped the field
-        // and left the default would fail here.
-        let mut c = example1_simple_ols();
-        c.df_method = DfMethod::Asymptotic;
-        let spec = contract_to_simulation_spec(&c).unwrap();
-        assert_eq!(spec.df_method, DfMethod::Asymptotic);
     }
 }

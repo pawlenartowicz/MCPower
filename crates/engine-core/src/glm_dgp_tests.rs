@@ -9,10 +9,7 @@
 //! and the `glm_irls_fit`/`GlmScratch` import path (now `glmm::loop_advanced`) changed.
 
 use crate::data_gen::generate_sim_data;
-use crate::spec::{
-    CorrectionMethod, CritValues, Distribution, EstimatorSpec, HeteroskedasticityCoeffs,
-    OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
-};
+use crate::spec::{Distribution, EstimatorSpec, OutcomeKind, SimulationSpec};
 use crate::workspace::SimWorkspace;
 use faer::Mat;
 use glmm::loop_advanced::{glm_irls_fit, GlmScratch, MAX_IRLS_ITERS};
@@ -68,97 +65,15 @@ fn logit_spec(n_non_factor: u32, effect_sizes: Vec<f64>) -> SimulationSpec {
     let intercept = effect_sizes[0];
     SimulationSpec {
         n_non_factor,
-        n_factor_dummies: 0,
         correlation: corr,
         var_types: vec![Distribution::Normal; n_non_factor as usize],
-        var_pinned: vec![],
         var_params: vec![0.0; n_non_factor as usize],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
-        upload_data: vec![],
-        upload_data_shape: (0, 0),
-        bootstrap_frame_map: vec![],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         effect_sizes,
         target_indices: (1..=n_non_factor).collect(),
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
         outcome_kind: OutcomeKind::Binary,
-        link: None,
         estimator: EstimatorSpec::Glm,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
         intercept,
-        posthoc: vec![],
-        max_failed_fraction: 0.1,
-        cluster: None,
-        scenario: ScenarioPerturbations::optimistic(),
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
-    }
-}
-
-/// EST-15: IRLS converges within MAX_IRLS_ITERS on well-behaved binary
-/// data with non-trivial signal, returning finite β̂ / z². No recovery
-/// value is pinned — only that the iteration terminates as *converged*
-/// with a finite iteration count and finite inference.
-#[test]
-fn glm_converges_on_separable_signal() {
-    let intercept = (0.3_f64 / 0.7).ln();
-    let spec = logit_spec(3, vec![intercept, 0.5, -0.3, 0.0]);
-    let n = 5000;
-    let p = 4;
-    let mut ws = SimWorkspace::new(n, p, 3, 0, None);
-    generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
-    let (x, y) = copy_xy(&ws, n, p);
-
-    let targets: Vec<u32> = vec![0, 1, 2, 3];
-    let fit = glm_irls_fit(
-        Family::Binomial {
-            link: BinomialLink::Logit,
-        },
-        LOGIT_NB_THETA,
-        x.as_ref(),
-        &y,
-        &targets,
-        None,
-        None, // prior_w: MCPower has no prior-observation-weights feature
-        None, // offset: no offset feature — byte-identical to the offset-free fit
-        glm_scratch(&mut ws),
-    );
-    assert!(fit.converged, "IRLS should converge on well-behaved data");
-    assert!(
-        fit.n_iter > 0 && fit.n_iter <= MAX_IRLS_ITERS,
-        "n_iter {} must be in (0, MAX_IRLS_ITERS={}]",
-        fit.n_iter,
-        MAX_IRLS_ITERS
-    );
-    for &b in fit.betas.iter() {
-        assert!(b.is_finite(), "β̂ must be finite on converged fit");
-    }
-    for &t in fit.t_sq.iter() {
-        // Finiteness only: direction + magnitude are already pinned by the
-        // sibling `glm_wald_z_sq_direction_and_ballpark` (same spec/seed,
-        // asserts z²[β₁] > 50 at n=5000). A tautological `>= 0.0` on a
-        // squared quantity adds nothing beyond the finite check here.
-        assert!(t.is_finite(), "z² must be finite on converged fit");
+        ..crate::test_support::base_spec()
     }
 }
 
@@ -319,10 +234,11 @@ fn glm_fit_warm_path_bounded_alloc() {
     );
 }
 
-/// C11 — GLM Wald z² direction and ballpark (n=5000, β₁=0.5)
+/// C11 — GLM Wald z² direction and ballpark (n=5000, β₁=0.5); EST-15 — IRLS
+/// converges within MAX_IRLS_ITERS on well-behaved binary data with finite
+/// β̂ / z² throughout.
 #[test]
 fn glm_wald_z_sq_direction_and_ballpark() {
-    // Extends glm_converges_on_separable_signal with direction + z² band assertions.
     // At n=5000 with β₁=0.5, β₂=-0.3, β₃=0.0, seed=42 (deterministic), the
     // fitted β̂ should be in the correct direction and the Wald z² for β₁ should
     // be in a realistic range (analytic SE ≈ 0.028 → z² ≈ 300 at n=5000).
@@ -348,6 +264,14 @@ fn glm_wald_z_sq_direction_and_ballpark() {
         glm_scratch(&mut ws),
     );
     assert!(fit.converged, "IRLS should converge on well-behaved data");
+    assert!(
+        fit.n_iter > 0 && fit.n_iter <= MAX_IRLS_ITERS,
+        "n_iter {} must be in (0, MAX_IRLS_ITERS={}]",
+        fit.n_iter,
+        MAX_IRLS_ITERS
+    );
+    assert!(fit.betas.iter().all(|b| b.is_finite()), "β̂ must be finite");
+    assert!(fit.t_sq.iter().all(|t| t.is_finite()), "z² must be finite");
 
     // β̂₁ should be near +0.5 (positive direction).
     assert!(

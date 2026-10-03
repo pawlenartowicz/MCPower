@@ -1,7 +1,8 @@
 """Test-selection DSL parser (``target_test`` string -> wire dict).
 
-Extracted free-function form of the selection logic; ``MCPower._resolve_tests``
-is a thin wrapper that calls ``resolve_tests(target_test, self._registry)``.
+Extracted free-function form of the selection logic; ``build_linear_spec``
+calls ``resolve_tests(target_test, registry, overall_available=...)`` when a
+``target_test`` is passed.
 """
 
 import re

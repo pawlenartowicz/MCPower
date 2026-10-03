@@ -9,7 +9,7 @@ use engine_app_spec::{
 use engine_contract::CorrectionMethod;
 use engine_orchestrator::{
     merge_power_results, merge_sample_size_results, ByValue, CancellationToken, GridMode,
-    SampleSizeMethod, SampleSizeResult,
+    OrchestratorError, SampleSizeMethod, SampleSizeResult, ScenarioResult,
 };
 
 fn sample_linear_spec() -> AppSpec {
@@ -58,46 +58,34 @@ fn sample_linear_spec() -> AppSpec {
 }
 
 #[test]
-fn run_single_core_find_power_smoke() {
-    let spec = sample_linear_spec();
-    let cancel = CancellationToken::new();
-    let result = run_single_core_find_power(&spec, 80, 800, 11, &NullEmitter, &cancel).expect("ok");
-    assert_eq!(result.scenarios.len(), 1);
-    let (_label, power) = &result.scenarios[0];
-    assert_eq!(power.target_indices.len(), power.power_uncorrected.len());
-    assert!(!power.target_indices.is_empty());
-    assert!(!power.success_counts_uncorrected.is_empty());
-}
-
-#[test]
 fn single_core_parts_merge_to_full_run() {
     let spec = sample_linear_spec();
     let cancel = CancellationToken::new();
     let part_a = run_single_core_find_power(&spec, 80, 800, 11, &NullEmitter, &cancel).expect("a");
     let part_b = run_single_core_find_power(&spec, 80, 800, 22, &NullEmitter, &cancel).expect("b");
+    let counts_a = part_a.scenarios[0].1.success_counts_uncorrected.clone();
+    let counts_b = part_b.scenarios[0].1.success_counts_uncorrected.clone();
+    assert_eq!(
+        counts_a.len(),
+        part_a.scenarios[0].1.target_indices.len(),
+        "one success count per target in each part"
+    );
+    // Non-empty guard: the zip/compare checks below pass vacuously on empty
+    // vectors. The spec targets x1 and x2.
+    assert_eq!(counts_a.len(), 2, "two targets (x1, x2)");
     let merged = merge_power_results(&[part_a, part_b]).expect("merge");
     assert_eq!(merged.scenarios.len(), 1);
     let (_label, power) = &merged.scenarios[0];
     assert_eq!(power.n_sims, 1600);
-    for &p in &power.power_uncorrected {
-        assert!((0.0..=1.0).contains(&p), "pooled power out of range: {p}");
+    // Pooling sums the per-part success counts and re-derives power from them.
+    let pooled: Vec<u64> = counts_a.iter().zip(&counts_b).map(|(a, b)| a + b).collect();
+    assert_eq!(power.success_counts_uncorrected, pooled);
+    for (&p, &k) in power.power_uncorrected.iter().zip(&pooled) {
+        assert_eq!(p, k as f64 / 1600.0, "pooled power = pooled count / n_sims");
+        // Anti-no-op floor: β ∈ {0.3, 0.2} at N=80 sits well above alpha
+        // (seeded, so deterministic).
+        assert!(p > 0.3, "pooled power should be well above chance, got {p}");
     }
-}
-
-#[test]
-fn run_single_core_find_sample_size_smoke() {
-    let spec = sample_linear_spec();
-    let cancel = CancellationToken::new();
-    let method = SampleSizeMethod::Grid {
-        by: ByValue::Fixed(20),
-        mode: GridMode::Linear,
-    };
-    let result =
-        run_single_core_find_sample_size(&spec, (40, 200), method, 800, 11, &NullEmitter, &cancel)
-            .expect("ok");
-    assert_eq!(result.scenarios.len(), 1);
-    let (_label, ssr) = &result.scenarios[0];
-    assert!(!ssr.grid_or_trace.is_empty());
 }
 
 #[test]
@@ -106,7 +94,16 @@ fn run_single_core_find_power_errors_when_pre_cancelled() {
     let cancel = CancellationToken::new();
     cancel.cancel();
     let res = run_single_core_find_power(&spec, 80, 800, 11, &NullEmitter, &cancel);
-    assert!(matches!(res, Err(AdapterError::Orchestrator(_))));
+    assert!(
+        matches!(
+            res,
+            Err(AdapterError::Orchestrator(
+                OrchestratorError::Cancelled { .. }
+            ))
+        ),
+        "a pre-cancelled token must surface as Cancelled, got {:?}",
+        res.err()
+    );
 }
 
 /// EP-3 — GAP 3: `merge_sample_size_results` (the WASM SSR pooling path) was
@@ -153,6 +150,23 @@ fn single_core_sample_size_parts_merge_via_merge_sample_size_results() {
     )
     .expect("part_b");
 
+    // Each worker hands its part to the main thread as JSON: the crossing
+    // fields (`fitted`, `fitted_joint`, `cluster_atom`) must survive that wire.
+    let json = serde_json::to_string(&part_a).expect("serializes");
+    let part_a: ScenarioResult<SampleSizeResult> =
+        serde_json::from_str(&json).expect("round-trips through the JSON wire");
+    let wire_ssr = &part_a.scenarios[0].1;
+    assert!(
+        !wire_ssr.fitted.is_empty(),
+        "fitted must be non-empty for a 2-target spec"
+    );
+    assert_eq!(wire_ssr.fitted.len(), wire_ssr.first_achieved.len());
+    assert_eq!(
+        wire_ssr.fitted_joint.len(),
+        wire_ssr.first_joint_achieved.len()
+    );
+    assert_eq!(wire_ssr.cluster_atom, 1);
+
     let merged = merge_sample_size_results(&[part_a, part_b]).expect("merge ok");
     assert_eq!(merged.scenarios.len(), 1);
     let (_label, ssr): &(String, SampleSizeResult) = &merged.scenarios[0];
@@ -190,13 +204,12 @@ fn single_core_sample_size_parts_merge_via_merge_sample_size_results() {
     );
 }
 
-/// Twin invariant: single-core power is statistically equivalent to
-/// native multi-core power for the same spec + seed.
-/// The fixture uses n_sims=128. At n_sims=128, σ ≈ 0.044 per estimate;
-/// the ±0.15 band is ~3.4σ — appropriate for this cheap fixture.
-/// (If n_sims is bumped in the fixture, tighten this tolerance accordingly.)
+/// Twin invariant at the app-spec driver layer: both drivers pass the same
+/// seed and n_sims to the orchestrator's `find_power` / `single_core_find_power`
+/// twins, which are bit-identical at a fixed seed, so the driver outputs must be
+/// equal. A driver that mis-plumbs the seed or n_sims breaks the equality.
 #[test]
-fn single_core_merged_matches_native_find_power() {
+fn single_core_matches_native_find_power() {
     let spec = sample_linear_spec();
     let cancel = CancellationToken::new();
 
@@ -206,25 +219,26 @@ fn single_core_merged_matches_native_find_power() {
     let single =
         run_single_core_find_power(&spec, 80, 128, 2137, &NullEmitter, &cancel).expect("single ok");
 
+    assert_eq!(
+        native.scenarios.len(),
+        1,
+        "no scenarios → one baseline result"
+    );
     let (_, native_pw) = &native.scenarios[0];
     let (_, single_pw) = &single.scenarios[0];
     assert_eq!(
+        native_pw.target_indices.len(),
         native_pw.power_uncorrected.len(),
-        single_pw.power_uncorrected.len(),
-        "target count mismatch between native and single-core paths"
+        "native path: one power entry per target"
     );
-    for (i, (&np, &sp)) in native_pw
-        .power_uncorrected
-        .iter()
-        .zip(single_pw.power_uncorrected.iter())
-        .enumerate()
-    {
-        assert!(
-            (np - sp).abs() <= 0.15,
-            "target {i}: native power {np:.4} vs single-core {sp:.4} differ by more than 0.15 \
-             (expected statistical equivalence at n_sims={}/{})",
-            native_pw.n_sims,
-            single_pw.n_sims,
-        );
-    }
+    assert!(
+        !native_pw.power_uncorrected.is_empty(),
+        "native path must report at least one target"
+    );
+    assert_eq!(native_pw.n_sims, single_pw.n_sims);
+    assert_eq!(
+        native_pw.success_counts_uncorrected, single_pw.success_counts_uncorrected,
+        "same seed + n_sims: twin drivers must agree exactly"
+    );
+    assert_eq!(native_pw.power_uncorrected, single_pw.power_uncorrected);
 }

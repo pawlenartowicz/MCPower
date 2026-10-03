@@ -280,15 +280,16 @@ fn aggregate_dispatches_glm_extras() {
     };
     let unc = vec![1u8, 0, 1, 1];
     let cor = unc.clone();
-    let conv = vec![1u8; 4];
+    // One non-converged sim: the count comes from the converged buffer, not n_sims.
+    let conv = vec![1u8, 0, 1, 1];
     let br = make_batch(unc, cor, conv, shape);
     let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Glm);
     assert!(matches!(
         aggs[0].estimator_extras,
         EstimatorExtras::Glm { .. }
     ));
-    // convergence_rate is orchestrator-owned: fixture uses vec![1u8; 4] (all converged).
-    approx::assert_relative_eq!(aggs[0].convergence_rate, 1.0);
+    assert_eq!(aggs[0].convergence_count, 3);
+    approx::assert_relative_eq!(aggs[0].convergence_rate, 0.75);
 }
 
 #[test]
@@ -304,17 +305,20 @@ fn aggregate_dispatches_mle_extras() {
         n_variance_components: 0,
     };
     let mut br = make_batch(vec![1u8, 1, 0, 1], vec![1u8; 4], vec![1u8; 4], shape);
+    br.boundary_hit = vec![0, 0, 1, 0];
     br.joint_unc = vec![1, 1, 0, 1];
     br.joint_cor = vec![1, 0, 0, 1];
     let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Mle);
     match &aggs[0].estimator_extras {
         EstimatorExtras::Mle {
+            boundary_hits,
             joint_uncorrected_rate,
             joint_corrected_rate,
             joint_uncorrected_count,
             joint_corrected_count,
             ..
         } => {
+            assert_eq!(*boundary_hits, 1);
             assert!(
                 (*joint_uncorrected_rate - 0.75).abs() < 1e-12,
                 "expected 3/4, got {joint_uncorrected_rate}"
@@ -361,37 +365,4 @@ fn aggregate_batch_populates_success_counts() {
                                                  // Rates must still equal counts/n_sims exactly.
     approx::assert_relative_eq!(pr.power_uncorrected[0], 2.0 / 3.0, max_relative = 1e-12);
     approx::assert_relative_eq!(pr.power_uncorrected[1], 1.0 / 3.0, max_relative = 1e-12);
-}
-
-#[test]
-fn aggregate_batch_populates_mle_extras_counts() {
-    // Mle estimator: joint_unc / joint_cor counters populate the *_count fields.
-    let shape = ResultShape {
-        n_sims: 4,
-        n_sample_sizes: 1,
-        n_targets: 1,
-        posthoc_blocks: vec![],
-        n_factors: 0,
-        n_variance_components: 0,
-    };
-    // boundary_hit nonzero in 1/4 sims; joint_unc/cor hit in 3/4.
-    let mut br = make_batch(vec![1u8, 1, 0, 1], vec![1u8; 4], vec![1u8; 4], shape);
-    br.boundary_hit = vec![0, 0, 1, 0];
-    br.joint_unc = vec![1, 1, 0, 1];
-    br.joint_cor = vec![1, 0, 0, 1];
-    let aggs = aggregate_batch(&br, &[0], &[], &EstimatorSpec::Mle);
-    match &aggs[0].estimator_extras {
-        EstimatorExtras::Mle {
-            boundary_hits,
-            joint_uncorrected_count,
-            joint_corrected_count,
-            ..
-        } => {
-            assert_eq!(*boundary_hits, 1);
-            assert_eq!(*joint_uncorrected_count, 3);
-            assert_eq!(*joint_corrected_count, 2);
-        }
-        other => panic!("expected Mle, got {other:?}"),
-    }
-    assert_eq!(aggs[0].convergence_count, 4);
 }

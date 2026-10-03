@@ -1,12 +1,13 @@
 """Tests for LME cluster validators in v2.
 
-Covers _validate_cluster_config and _validate_cluster_sample_size.
-v2 simplification: no nested_child, between_vars, random_slopes paths.
+Covers _validate_cluster_config and _validate_cluster_sample_size. The rules
+that set_cluster surfaces directly (both/neither sizing, ICC above 1, ICC 0,
+unknown grouping var, valid configs) are pinned at the public boundary in
+test_set_cluster.py; this file keeps the rows that boundary does not reach
+(negative ICC, size floors, stability band edges, sample-size warnings).
 """
 
 from __future__ import annotations
-
-import pytest
 
 from mcpower.spec.validators import (
     _validate_cluster_config,
@@ -19,75 +20,12 @@ from mcpower.spec.validators import (
 # ---------------------------------------------------------------------------
 
 
-def test_validate_cluster_config_valid():
-    r = _validate_cluster_config(
-        "school", icc=0.2, n_clusters=20, cluster_size=None,
-        parsed_grouping_vars=["school"],
-    )
-    assert r.is_valid
-
-
-def test_validate_cluster_config_xor_n_clusters_cluster_size():
-    # Both provided → error.
-    r = _validate_cluster_config(
-        "school", icc=0.2, n_clusters=10, cluster_size=5,
-        parsed_grouping_vars=["school"],
-    )
-    assert not r.is_valid
-    assert any("n_clusters" in e or "cluster_size" in e for e in r.errors)
-
-
-def test_validate_cluster_config_neither_n_clusters_nor_cluster_size():
-    r = _validate_cluster_config(
-        "school", icc=0.2, n_clusters=None, cluster_size=None,
-        parsed_grouping_vars=["school"],
-    )
-    assert not r.is_valid
-
-
-def test_validate_cluster_config_icc_range():
-    # ICC >= 1 → error
-    r = _validate_cluster_config(
-        "school", icc=1.5, n_clusters=10, cluster_size=None,
-        parsed_grouping_vars=["school"],
-    )
-    assert not r.is_valid
-    assert any("ICC" in e for e in r.errors)
-
-
-def test_validate_cluster_config_icc_zero_allowed():
-    # ICC == 0 is the degenerate "no random effect" case and must be allowed.
-    r = _validate_cluster_config(
-        "school", icc=0, n_clusters=20, cluster_size=None,
-        parsed_grouping_vars=["school"],
-    )
-    assert r.is_valid
-
-
 def test_validate_cluster_config_icc_negative():
     r = _validate_cluster_config(
         "school", icc=-0.1, n_clusters=10, cluster_size=None,
         parsed_grouping_vars=["school"],
     )
     assert not r.is_valid
-
-
-def test_validate_cluster_config_grouping_var_not_in_formula():
-    r = _validate_cluster_config(
-        "classroom", icc=0.2, n_clusters=10, cluster_size=None,
-        parsed_grouping_vars=["school"],
-    )
-    assert not r.is_valid
-    assert any("classroom" in e for e in r.errors)
-
-
-def test_validate_cluster_config_cluster_size_used():
-    # cluster_size provided, n_clusters=None → valid
-    r = _validate_cluster_config(
-        "school", icc=0.2, n_clusters=None, cluster_size=10,
-        parsed_grouping_vars=["school"],
-    )
-    assert r.is_valid
 
 
 def test_validate_cluster_config_cluster_size_too_small():

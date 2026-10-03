@@ -6,30 +6,6 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
-/// Build msgpack bytes of the `SimulationContract` itself (no adapter pass).
-/// Test-only back-door (gated behind the `test-bridge` Cargo feature) — the
-/// production wheel never ships this symbol so the raw contract shape stays
-/// out of the public surface.
-#[cfg(feature = "test-bridge")]
-#[pyfunction]
-pub fn build_contract_from_json(json: &str) -> PyResult<Vec<(String, Py<PyBytes>)>> {
-    use engine_spec_builder::build_linear_contract;
-    let spec: LinearSpec = serde_json::from_str(json)
-        .map_err(|e| PyValueError::new_err(format!("invalid LinearSpec JSON: {e}")))?;
-    let contracts = build_linear_contract(&spec).map_err(map_spec_error)?;
-
-    Python::attach(|py| {
-        let mut out = Vec::with_capacity(contracts.len());
-        for c in contracts {
-            let name = c.scenario.name.clone();
-            let bytes = rmp_serde::to_vec_named(&c)
-                .map_err(|e| PyRuntimeError::new_err(format!("msgpack encode: {e}")))?;
-            out.push((name, PyBytes::new(py, &bytes).into()));
-        }
-        Ok(out)
-    })
-}
-
 /// Build the whole `Vec<SimulationContract>` as a single msgpack blob,
 /// parametrising outcome_kind + estimator + intercept + clusters at the call
 /// site. Replaces the legacy `build_contract_specs_from_json` path.

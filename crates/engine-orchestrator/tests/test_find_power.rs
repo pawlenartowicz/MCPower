@@ -51,6 +51,7 @@ fn find_power_vectors_sized_by_marginals_plus_contrasts() {
     let sc = single_core_find_power(&contracts, 100, 50, 42, None, &cancel).expect("ok");
     let sp = &sc.scenarios[0].1;
     assert_eq!(sp.power_uncorrected.len(), expected);
+    assert_eq!(sp.success_counts_uncorrected.len(), expected);
     assert_eq!(sp.contrast_pairs, pr.contrast_pairs);
 }
 
@@ -294,11 +295,20 @@ fn find_power_identical_scenarios_are_bit_identical() {
     assert_eq!(pr_a, pr_b, "identical-knob scenarios must be bit-identical");
 }
 
+fn is_empty_contracts_error(
+    r: &Result<
+        engine_orchestrator::ScenarioResult<engine_orchestrator::PowerResult>,
+        engine_orchestrator::OrchestratorError,
+    >,
+) -> bool {
+    matches!(r, Err(engine_orchestrator::OrchestratorError::InvalidScenarios(m)) if m.contains("empty"))
+}
+
 #[test]
 fn find_power_rejects_empty_scenarios() {
     let cancel = CancellationToken::new();
     let r = find_power(&[], 100, 50, 0, None, &cancel);
-    assert!(r.is_err());
+    assert!(is_empty_contracts_error(&r), "{r:?}");
 }
 
 // Dispatch-twin: the single-core entry must reject empty contracts exactly
@@ -306,50 +316,39 @@ fn find_power_rejects_empty_scenarios() {
 #[test]
 fn single_core_find_power_rejects_empty_scenarios() {
     let cancel = CancellationToken::new();
-    assert!(single_core_find_power(&[], 100, 50, 0, None, &cancel).is_err());
+    let r = single_core_find_power(&[], 100, 50, 0, None, &cancel);
+    assert!(is_empty_contracts_error(&r), "{r:?}");
 }
 
+/// Dispatch twins: at the same seed, `find_power` (`run_batch`) and
+/// `single_core_find_power` (`run_batch_st`) walk the same per-sim seeds, so the
+/// whole result must be bit-identical — any divergence in lowering, aggregation
+/// or result assembly between the twins shows up here. Thread-count invariance
+/// itself is owned by engine-core (`run_batch_bit_identical_1_vs_n_threads`).
 #[test]
-fn find_power_with_two_scenarios_is_deterministic_across_thread_counts() {
-    // Two minimal OLS contracts with distinct labels. Both are zero-perturbation
-    // so there are no stochastic scenario-construction paths to diverge.
-    let c1 = minimal_ols_contract_labelled("first");
-    let c2 = minimal_ols_contract_labelled("second");
-    let contracts = vec![c1, c2];
-
-    let pool1 = rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build()
-        .unwrap();
-    let pool_auto = rayon::ThreadPoolBuilder::new().build().unwrap();
+fn find_power_and_single_core_twin_are_bit_identical() {
+    let contracts = vec![
+        minimal_ols_contract_labelled("first"),
+        minimal_ols_contract_labelled("second"),
+    ];
     let cancel = CancellationToken::new();
+    let mc = find_power(&contracts, 20, 200, 2137, None, &cancel).unwrap();
+    let sc = single_core_find_power(&contracts, 20, 200, 2137, None, &cancel).unwrap();
 
-    let r1 = pool1
-        .install(|| find_power(&contracts, 100, 64, 2137, None, &cancel))
-        .unwrap();
-    let r_auto = pool_auto
-        .install(|| find_power(&contracts, 100, 64, 2137, None, &cancel))
-        .unwrap();
-
-    // Vacuous-green guards: verify output is well-formed and non-degenerate.
-    assert_eq!(r_auto.scenarios.len(), 2);
-    for (_, pr) in &r_auto.scenarios {
-        assert_eq!(pr.n_sims, 64);
-        assert!(!pr.power_uncorrected.is_empty());
-        assert!(pr.power_uncorrected.iter().all(|p| p.is_finite()));
+    // Anti-vacuity: both scenarios ran and produced interior power.
+    assert_eq!(mc.scenarios.len(), 2);
+    for (_, pr) in &mc.scenarios {
+        assert_eq!(pr.n_sims, 200);
+        assert!(
+            pr.power_uncorrected[0] > 0.0 && pr.power_uncorrected[0] < 1.0,
+            "fixture must keep power off the boundaries, got {}",
+            pr.power_uncorrected[0]
+        );
     }
-    let total: f64 = r_auto
-        .scenarios
-        .iter()
-        .flat_map(|(_, pr)| pr.power_uncorrected.iter())
-        .sum();
-    assert!(
-        total > 0.0,
-        "no scenario produced non-zero power — degenerate fixture"
+    assert_eq!(
+        mc, sc,
+        "dispatch twins must be bit-identical at the same seed"
     );
-
-    // Determinism gate: results must be bit-equal regardless of thread count.
-    assert_eq!(r1, r_auto, "results must be bit-equal across thread counts");
 }
 
 #[test]

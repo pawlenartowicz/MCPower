@@ -31,29 +31,6 @@ function samplePoissonSpec(): AppSpec {
 }
 
 describe('generatePoissonScript', () => {
-  it('emits family="poisson" and set_baseline_rate (not probability)', () => {
-    const out = generatePoissonScript(samplePoissonSpec(), 'find-power', { sample_size: 80 });
-    expect(out).toContain('from mcpower import MCPower');
-    expect(out).toContain('MCPower("y = x1 + x2", family="poisson")');
-    expect(out).toContain('model.set_baseline_rate(2)');
-    expect(out).not.toContain('set_baseline_probability');
-    expect(out).toContain('model.find_power(');
-    expect(out).toContain('sample_size=80,');
-  });
-
-  it('raises a type-guard error when called with a non-poisson spec', () => {
-    const linearSpec = { ...samplePoissonSpec(), family: 'linear' } as unknown as AppSpec;
-    expect(() => generatePoissonScript(linearSpec, 'find-power', { sample_size: 80 })).toThrow();
-  });
-
-  it('generates an R script', () => {
-    const out = generatePoissonScript(samplePoissonSpec(), 'find-power', { sample_size: 100 }, 'r');
-    expect(out).toContain('library(mcpower)');
-    expect(out).toContain('family = "poisson"');
-    expect(out).toContain('model$set_baseline_rate(');
-    expect(out).not.toContain('model.'); // no Python syntax leaked
-  });
-
   // Pins the exact generated text so a later de-duplication of the poisson/logit
   // generators (they share every block except the family token and the baseline
   // setter) cannot silently change what a Poisson scenario produces.

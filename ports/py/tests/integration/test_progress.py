@@ -2,8 +2,9 @@
 
 The wrapper opens a tqdm bar lazily on the first engine callback. If the
 engine subsequently raises, the bar would otherwise leak to stderr until
-interpreter shutdown — the model layer wraps engine calls in try/finally
-to call ``cb.close()`` so the bar is always released.
+interpreter shutdown — the model layer runs engine calls inside
+``managed_progress``, which calls ``cb.close()`` on exit so the bar is always
+released.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import sys
 
 import pytest
 
-from mcpower.progress import _TqdmCallback, resolve_progress_callback
+from mcpower.progress import _TqdmCallback, managed_progress, resolve_progress_callback
 
 
 def test_close_is_idempotent_on_never_opened() -> None:
@@ -68,19 +69,14 @@ def test_close_handles_missing_tqdm_sentinel() -> None:
 
 
 def test_bar_closed_after_engine_exception() -> None:
-    """The model layer's try/finally closes the bar on engine errors."""
-    cb = _TqdmCallback()
-
-    def fake_engine_call() -> None:
-        # Mimic the engine calling progress mid-run, then panicking.
-        cb(50, 1000)
-        raise RuntimeError("engine panicked")
-
+    """managed_progress (the model layer's wrapper around engine calls)
+    closes an open bar when the engine raises mid-run."""
     with pytest.raises(RuntimeError, match="engine panicked"):
-        try:
-            fake_engine_call()
-        finally:
-            cb.close()
+        with managed_progress(None) as cb:
+            # Mimic the engine calling progress mid-run, then panicking.
+            cb(50, 1000)
+            assert cb._bar is not None
+            raise RuntimeError("engine panicked")
 
     assert cb._bar is None
 

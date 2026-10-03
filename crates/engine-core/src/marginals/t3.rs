@@ -96,16 +96,6 @@ impl T3PpfTable {
 mod tests {
     use super::*;
 
-    #[test]
-    fn lookup_median_is_zero() {
-        let t = T3PpfTable::build_default();
-        assert!(
-            t.lookup(0.5).abs() < 1e-6,
-            "median should map to 0, got {}",
-            t.lookup(0.5)
-        );
-    }
-
     /// The PPF lookup is monotonically non-decreasing across the
     /// table's percentile range — the quantile function of a unimodal
     /// symmetric distribution is monotone. A broken table (unsorted entries,

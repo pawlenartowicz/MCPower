@@ -4,7 +4,7 @@ use engine_app_spec::{
 };
 use engine_contract::CorrectionMethod;
 use engine_orchestrator::{
-    ByValue, CancellationToken, EstimatorExtras, GridMode, SampleSizeMethod,
+    ByValue, CancellationToken, EstimatorExtras, GridMode, OrchestratorError, SampleSizeMethod,
 };
 
 fn sample_linear_spec() -> AppSpec {
@@ -138,19 +138,6 @@ fn run_single_core_find_power_smoke_logit() {
     );
 }
 
-// `run_find_power` driver behavior is shared by the Tauri and WASM ports; the WASM
-// single-core path mirrors this when it lands.
-#[test]
-fn run_find_power_smoke() {
-    let spec = sample_linear_spec();
-    let cancel = CancellationToken::new();
-    let result = run_find_power(&spec, 80, &NullEmitter, &cancel).expect("ok");
-    assert_eq!(result.scenarios.len(), 1);
-    let (_label, power) = &result.scenarios[0];
-    assert_eq!(power.target_indices.len(), power.power_uncorrected.len());
-    assert!(!power.target_indices.is_empty());
-}
-
 // `run_find_sample_size` driver behavior is shared by the Tauri and WASM ports; the WASM
 // single-core path mirrors this when it lands.
 #[test]
@@ -164,20 +151,18 @@ fn run_find_sample_size_smoke() {
     let result = run_find_sample_size(&spec, (40, 200), method, &NullEmitter, &cancel).expect("ok");
     assert_eq!(result.scenarios.len(), 1);
     let (_label, size_result) = &result.scenarios[0];
-    // Grid (40..=200 by 20) ⇒ multiple points; pin structure, not just non-empty —
-    // each point ran real sims and carries one power entry per target.
-    assert!(
-        size_result.grid_or_trace.len() >= 2,
-        "grid spans multiple N"
-    );
-    let first = &size_result.grid_or_trace[0];
-    assert_eq!(first.n, 40, "first grid point is the lower bound");
-    assert!(first.n_sims > 0, "grid point ran sims");
-    assert_eq!(
-        first.power_uncorrected.len(),
-        first.target_indices.len(),
-        "one power entry per target"
-    );
+    // Grid 40..=200 by 20: every point ran the spec's n_sims and carries one
+    // power entry per target.
+    let ns: Vec<usize> = size_result.grid_or_trace.iter().map(|p| p.n).collect();
+    assert_eq!(ns, (40..=200).step_by(20).collect::<Vec<_>>());
+    for pt in &size_result.grid_or_trace {
+        assert_eq!(pt.n_sims, 128, "N={} must run the spec's n_sims", pt.n);
+        assert_eq!(
+            pt.power_uncorrected.len(),
+            pt.target_indices.len(),
+            "one power entry per target"
+        );
+    }
 }
 
 #[test]
@@ -186,5 +171,14 @@ fn run_find_power_returns_error_when_token_pre_cancelled() {
     let cancel = CancellationToken::new();
     cancel.cancel();
     let res = run_find_power(&spec, 80, &NullEmitter, &cancel);
-    assert!(matches!(res, Err(AdapterError::Orchestrator(_))));
+    assert!(
+        matches!(
+            res,
+            Err(AdapterError::Orchestrator(
+                OrchestratorError::Cancelled { .. }
+            ))
+        ),
+        "a pre-cancelled token must surface as Cancelled, got {:?}",
+        res.err()
+    );
 }

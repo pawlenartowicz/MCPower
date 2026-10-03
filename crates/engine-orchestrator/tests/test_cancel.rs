@@ -5,12 +5,6 @@ use engine_contract::fixtures::example1_simple_ols;
 use engine_orchestrator::{CancellationToken, OrchestratorError};
 
 #[test]
-fn token_starts_uncancelled() {
-    let t = CancellationToken::new();
-    assert!(!t.is_cancelled());
-}
-
-#[test]
 fn cancel_is_visible_to_clones() {
     let t = CancellationToken::new();
     let t2 = t.clone();
@@ -18,13 +12,8 @@ fn cancel_is_visible_to_clones() {
     t.cancel();
     assert!(t.is_cancelled());
     assert!(t2.is_cancelled());
-}
-
-#[test]
-fn cancel_is_idempotent() {
-    let t = CancellationToken::new();
-    t.cancel();
-    t.cancel();
+    // Idempotent: a second cancel keeps the flag set (not a toggle).
+    t2.cancel();
     assert!(t.is_cancelled());
 }
 

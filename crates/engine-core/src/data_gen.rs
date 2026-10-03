@@ -1327,8 +1327,8 @@ fn draw_residual(rng: &mut SimRng, residual_dist: ResidualDist, residual_df: f64
 mod tests {
     use super::*;
     use crate::spec::{
-        CorrectionMethod, CritValues, Distribution, EstimatorSpec, HeteroskedasticityCoeffs,
-        OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
+        Distribution, EstimatorSpec, OutcomeKind, ResidualDist, ScenarioPerturbations,
+        SimulationSpec,
     };
 
     fn ols_spec_2x(
@@ -1341,17 +1341,9 @@ mod tests {
             n_factor_dummies,
             correlation: vec![1.0, 0.3, 0.3, 1.0],
             var_types: vec![Distribution::Normal, Distribution::Normal],
-            var_pinned: vec![],
             var_params: vec![0.0, 0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
             factor_n_levels,
             factor_proportions: factor_props,
-            factor_sampled: Vec::new(),
             // β layout: intercept, x1, x2, (optional factor dummies)
             effect_sizes: {
                 let mut v = vec![0.0, 0.5, 0.3];
@@ -1359,34 +1351,7 @@ mod tests {
                 v
             },
             target_indices: vec![1, 2],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
@@ -1452,14 +1417,28 @@ mod tests {
         assert_eq!(counts, [4, 0], "minority level is empty until N·p_g grows");
     }
 
+    /// The preflight helper `fixed_allocation_counts` must report exactly the
+    /// level counts `generate_sim_data` realizes under fixed allocation — the
+    /// orchestrator's factor preflight relies on that agreement.
     #[test]
-    fn fixed_allocation_counts_matches_row_loop_walk() {
-        // Same probs/N as the existing minority-empty test: [0.9, 0.1] at N=4 → [4, 0].
-        assert_eq!(fixed_allocation_counts(&[0.9, 0.1], 4), vec![4, 0]);
-        // Within-1 of N·p at a healthy N.
-        let c = fixed_allocation_counts(&[0.7, 0.1, 0.1, 0.1], 40);
-        assert_eq!(c.iter().sum::<u32>(), 40);
+    fn fixed_allocation_counts_matches_generated_design() {
+        let props = [0.7, 0.1, 0.1, 0.1];
+        let spec = ols_spec_2x(3, vec![4], props.to_vec());
+        let n = 40;
+        let mut ws = SimWorkspace::new(n, 6, 2, 1, None);
+        generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
+        // Reference coding: level 0 = all dummies zero; level k ⇒ column 2 + k.
+        let mut realized = vec![0u32; 4];
+        for i in 0..n {
+            let lvl = (1..4).find(|&k| ws.x_full[(i, 2 + k)] == 1.0).unwrap_or(0);
+            realized[lvl] += 1;
+        }
+        let c = fixed_allocation_counts(&props, n);
         assert_eq!(c, vec![28, 4, 4, 4]);
+        assert_eq!(
+            realized, c,
+            "preflight counts must equal the generated design"
+        );
     }
 
     #[test]
@@ -1527,13 +1506,12 @@ mod tests {
     }
 
     #[test]
-    fn fixed_vs_sampled_first_row_continuous_byte_identical() {
-        // All draws share one sequential per-sim stream, and within a row
-        // the continuous block draws BEFORE the factor block — so row 0's
-        // continuous values are byte-identical across modes (the fixed branch
-        // consumes no RNG before them). From row 1 onward the missing
-        // categorical draw shifts the stream, so later rows' continuous
-        // values and all residuals diverge — deliberately not compared.
+    fn fixed_vs_sampled_continuous_and_residuals_byte_identical() {
+        // Continuous X (CLASS_XNORM) and residuals (CLASS_RESID) are
+        // counter-addressed, not drawn from the sequential stream the sampled
+        // factor's categorical draws consume. So switching the allocation mode
+        // moves only the factor column: every row's continuous values and
+        // every residual stay byte-identical across modes.
         let spec_fixed = factor_spec_70_30();
         let mut spec_sampled = factor_spec_70_30();
         spec_sampled.scenario.sampled_factor_proportions = true;
@@ -1543,11 +1521,18 @@ mod tests {
         let mut ws_s = SimWorkspace::new(n, n_pred, 2, 1, None);
         generate_sim_data(&spec_fixed, 3, 42, &mut ws_f).unwrap();
         generate_sim_data(&spec_sampled, 3, 42, &mut ws_s).unwrap();
-        for j in 0..=2 {
+        for i in 0..n {
+            for j in 1..=2 {
+                assert_eq!(
+                    ws_f.x_full[(i, j)].to_bits(),
+                    ws_s.x_full[(i, j)].to_bits(),
+                    "continuous x[{i},{j}] must match across modes"
+                );
+            }
             assert_eq!(
-                ws_f.x_full[(0, j)],
-                ws_s.x_full[(0, j)],
-                "row-0 continuous x[0,{j}] must match across modes"
+                ws_f.residuals[i].to_bits(),
+                ws_s.residuals[i].to_bits(),
+                "residual {i} must match across modes"
             );
         }
     }
@@ -1660,44 +1645,6 @@ mod tests {
     }
 
     #[test]
-    fn clustered_ols_generates_without_error() {
-        // Continuous + cluster=Some + Ols is the free pairing — must succeed
-        // AND produce a well-shaped design: x_full is (n, 1+n_non_factor),
-        // y_full has length n, and the intercept column is exactly 1.0.
-        use crate::spec::{ClusterSizing, ClusterSpec};
-        let mut spec = ols_spec_simple();
-        spec.cluster = Some(ClusterSpec {
-            sizing: ClusterSizing::FixedClusters { n_clusters: 10 },
-            tau_squared: 0.1,
-            slopes: vec![],
-            extra_groupings: vec![],
-        });
-        let n = 50;
-        let n_predictors = 3;
-        let mut ws = SimWorkspace::new(
-            n,
-            n_predictors,
-            2,
-            0,
-            Some(&engine_contract::ClusterSpec::intercept_only(
-                ClusterSizing::FixedClusters { n_clusters: 10 },
-                0.25,
-            )),
-        );
-        generate_sim_data(&spec, 0, 42, &mut ws)
-            .expect("clustered OLS should generate without error");
-        assert_eq!(ws.x_full.nrows(), n);
-        assert_eq!(ws.x_full.ncols(), n_predictors);
-        for i in 0..n {
-            assert_eq!(
-                ws.x_full[(i, 0)],
-                1.0,
-                "intercept column must be 1.0 at row {i}"
-            );
-            assert!(ws.y_full[i].is_finite(), "y[{i}] must be finite");
-        }
-    }
-    #[test]
     fn binary_cluster_icc_noise_sd_jitter_is_live() {
         // Settled decision (05b): icc_noise_sd jitters τ² in raw τ²-space once per
         // sim for every outcome kind including Binary. Pins that the jitter path
@@ -1743,14 +1690,41 @@ mod tests {
         // independent jitter draws.
         let realized_tau = |ws: &SimWorkspace| ws.tau_squared_design;
         let outcome_sum = |ws: &SimWorkspace| (0..n).map(|i| ws.y_full[i]).sum::<f32>();
+        // The binary arm consumes the JITTERED τ: the cluster draws are the
+        // first next_normal()·√τ²_eff of the per-sim stream, and every y is the
+        // Bernoulli threshold of sigmoid(lp + u[g]).
+        let check_binary_arm = |ws: &SimWorkspace, sim_id: u64| {
+            let mut rng = SimRng::new(42, sim_id);
+            let tau = ws.tau_squared_design.max(0.0).sqrt();
+            for c in 0..10 {
+                let expected = (rng.next_normal() as f64 * tau) as f32;
+                assert_eq!(ws.cluster_u_draws[c], expected, "sim {sim_id} cluster {c}");
+            }
+            for i in 0..n {
+                let mut lp = 0.0_f64;
+                for j in 0..n_predictors {
+                    lp += ws.x_full[(i, j)] as f64 * spec.effect_sizes[j];
+                }
+                let u = ws.cluster_u_draws[ws.cluster_ids[i] as usize] as f64;
+                let p = glmm::loop_advanced::sigmoid_stable(lp + u);
+                let expected = if (ws.residuals[i] as f64) < p {
+                    1.0
+                } else {
+                    0.0
+                };
+                assert_eq!(ws.y_full[i], expected, "sim {sim_id} row {i}");
+            }
+        };
 
         generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
         let tau0 = realized_tau(&ws);
         let sum0 = outcome_sum(&ws);
+        check_binary_arm(&ws, 0);
 
         generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
         let tau1 = realized_tau(&ws);
         let sum1 = outcome_sum(&ws);
+        check_binary_arm(&ws, 1);
 
         // (a) both realized per-sim τ² finite and ≥ 0
         assert!(
@@ -1814,76 +1788,108 @@ mod tests {
     // (normal column mean≈0/var≈1; sample correlation r≈0.3) — smuggled
     // statistical correctness (statistical-band tests belong at L3 only). The
     // deterministic mechanics survive elsewhere: intercept column == 1.0 is
-    // asserted by `clustered_ols_generates_without_error` (DGEN-04); the Normal
-    // marginal-identity by `apply_marginal_normal_is_identity` (DIST-06); and the
-    // Cholesky design being bit-identical across runs by
-    // `d1_step4_optimistic_no_perturbation`.
+    // asserted by `interaction_column_is_elementwise_product`; the Normal
+    // marginal-identity by the Normal row of `golden_apply_marginal_all_variants`;
+    // and the optimistic Cholesky design by `d1_step4_optimistic_no_perturbation`.
 
     #[test]
     fn d1_step4_optimistic_no_perturbation() {
         // With ScenarioPerturbations::default(), the design must match a hand-built
         // baseline: Cholesky of spec.correlation, original var_types, original
-        // residual_dist. Run twice and ensure X is bit-identical.
+        // residual_dist — and the EVD repair machinery stays untouched.
         let spec = ols_spec_simple();
         let n_pred = 3;
         let mut ws_a = SimWorkspace::new(100, n_pred, 2, 0, None);
-        let mut ws_b = SimWorkspace::new(100, n_pred, 2, 0, None);
         generate_sim_data(&spec, 0, 42, &mut ws_a).unwrap();
-        generate_sim_data(&spec, 0, 42, &mut ws_b).unwrap();
-        for i in 0..100 {
-            for j in 0..n_pred {
-                assert_eq!(ws_a.x_full[(i, j)], ws_b.x_full[(i, j)]);
+        let mut expected_l = faer::Mat::<f64>::from_fn(2, 2, |i, j| spec.correlation[j * 2 + i]);
+        crate::correlation::factor_only(expected_l.as_mut()).unwrap();
+        for i in 0..2 {
+            for j in 0..2 {
+                assert_eq!(
+                    ws_a.l_design[(i, j)].to_bits(),
+                    expected_l[(i, j)].to_bits(),
+                    "l_design[{i},{j}] must be the Cholesky factor of spec.correlation"
+                );
             }
         }
+        assert_eq!(ws_a.var_types_design, spec.var_types);
+        assert_eq!(ws_a.residual_dist_design, spec.residual_dist);
         assert_eq!(
             ws_a.evd_scratch.evd_repair_count, 0,
             "optimistic path must not touch EVD"
         );
     }
 
+    /// Correlation noise reaches the generated design: a 2-predictor spec with
+    /// `correlation_noise_sd > 0` must not reuse the optimistic Cholesky factor,
+    /// and its X must differ from the optimistic run at the same seed. Pairs
+    /// with `d1_step5_scenario_stream_independence`, which checks the inverse.
     #[test]
-    fn d1_step5_scenario_stream_independence() {
-        // High-noise scenario: two runs at same (base_seed, sim_id) produce identical X.
-        let mut spec = ols_spec_simple();
-        spec.scenario = ScenarioPerturbations {
-            name: "realistic".into(),
-            correlation_noise_sd: 0.2,
-            distribution_change_prob: 0.0,
-            ..Default::default()
-        };
-        let n_pred = 3;
-        let mut ws_a = SimWorkspace::new(100, n_pred, 2, 0, None);
-        let mut ws_b = SimWorkspace::new(100, n_pred, 2, 0, None);
-        generate_sim_data(&spec, 7, 42, &mut ws_a).unwrap();
-        generate_sim_data(&spec, 7, 42, &mut ws_b).unwrap();
-        for i in 0..100 {
-            for j in 0..n_pred {
-                assert_eq!(ws_a.x_full[(i, j)], ws_b.x_full[(i, j)]);
-            }
-        }
-
-        // Different scenario, same data-seed sim_id → X differs.
-        let mut spec2 = ols_spec_simple();
-        spec2.scenario = ScenarioPerturbations {
+    fn correlation_noise_reaches_generated_design() {
+        let spec = ols_spec_simple();
+        let mut noisy = spec.clone();
+        noisy.scenario = ScenarioPerturbations {
             name: "doomer".into(),
             correlation_noise_sd: 0.4,
             ..Default::default()
         };
-        let mut ws_c = SimWorkspace::new(100, n_pred, 2, 0, None);
-        generate_sim_data(&spec2, 7, 42, &mut ws_c).unwrap();
-        let mut differed = false;
-        for i in 0..100 {
-            for j in 0..n_pred {
-                if ws_a.x_full[(i, j)] != ws_c.x_full[(i, j)] {
-                    differed = true;
-                    break;
-                }
+        let n = 100;
+        let mut ws_a = SimWorkspace::new(n, 3, 2, 0, None);
+        let mut ws_b = SimWorkspace::new(n, 3, 2, 0, None);
+        generate_sim_data(&spec, 7, 42, &mut ws_a).unwrap();
+        generate_sim_data(&noisy, 7, 42, &mut ws_b).unwrap();
+        assert_ne!(
+            ws_a.l_design[(1, 0)].to_bits(),
+            ws_b.l_design[(1, 0)].to_bits(),
+            "noisy design must not keep the optimistic Cholesky off-diagonal"
+        );
+        assert!(
+            (0..n).any(|i| ws_a.x_full[(i, 2)] != ws_b.x_full[(i, 2)]),
+            "correlation noise must change the generated x2 column"
+        );
+    }
+
+    /// Scenario draws come from their own stream: a 1-predictor spec with
+    /// `correlation_noise_sd > 0` leaves the optimistic fast path and consumes
+    /// scenario-stream normals, yet its 1×1 correlation resets to [1] and no
+    /// other knob is live, so X, residuals and y must stay bit-identical to the
+    /// optimistic run. Any leak of scenario draws into the data stream shifts them.
+    #[test]
+    fn d1_step5_scenario_stream_independence() {
+        let mut spec = ols_spec_simple();
+        spec.n_non_factor = 1;
+        spec.correlation = vec![1.0];
+        spec.var_types = vec![Distribution::Normal];
+        spec.var_params = vec![0.0];
+        spec.effect_sizes = vec![0.0, 0.5];
+        spec.target_indices = vec![1];
+        let mut noisy = spec.clone();
+        noisy.scenario = ScenarioPerturbations {
+            name: "doomer".into(),
+            correlation_noise_sd: 0.4,
+            ..Default::default()
+        };
+        assert!(!noisy.scenario.is_optimistic());
+        let n = 100;
+        let mut ws_a = SimWorkspace::new(n, 2, 1, 0, None);
+        let mut ws_b = SimWorkspace::new(n, 2, 1, 0, None);
+        generate_sim_data(&spec, 7, 42, &mut ws_a).unwrap();
+        generate_sim_data(&noisy, 7, 42, &mut ws_b).unwrap();
+        for i in 0..n {
+            for j in 0..2 {
+                assert_eq!(
+                    ws_a.x_full[(i, j)].to_bits(),
+                    ws_b.x_full[(i, j)].to_bits(),
+                    "x[{i},{j}]"
+                );
             }
-            if differed {
-                break;
-            }
+            assert_eq!(
+                ws_a.residuals[i].to_bits(),
+                ws_b.residuals[i].to_bits(),
+                "ε[{i}]"
+            );
+            assert_eq!(ws_a.y_full[i].to_bits(), ws_b.y_full[i].to_bits(), "y[{i}]");
         }
-        assert!(differed, "different scenarios should produce different X");
     }
 
     #[test]
@@ -1930,64 +1936,38 @@ mod tests {
 
     fn logit_spec_simple(intercept: f64, beta1: f64) -> SimulationSpec {
         SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 0,
-            correlation: vec![1.0],
-            var_types: vec![Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
             effect_sizes: vec![intercept, beta1],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
-            link: None,
             estimator: EstimatorSpec::Glm,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
             intercept,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 
+    /// Unclustered logit: every y is the Bernoulli threshold of the row's
+    /// uniform residual against sigmoid(β₀ + β₁·x) — so β (sign and size)
+    /// reaches the link exactly, and y is 0/1 by construction.
     #[test]
-    fn logit_y_is_binary() {
-        let spec = logit_spec_simple(0.0, 0.5);
-        let n = 5000;
+    fn logit_y_is_bernoulli_of_sigmoid_eta() {
+        let spec = logit_spec_simple(-0.4, 2.0);
+        let n = 2000;
         let mut ws = SimWorkspace::new(n, 2, 1, 0, None);
         generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
         for i in 0..n {
-            let y = ws.y_full[i];
-            assert!(y == 0.0 || y == 1.0, "y[{i}] = {y} is not binary");
+            let eta = spec.effect_sizes[0] + spec.effect_sizes[1] * ws.x_full[(i, 1)] as f64;
+            let p = glmm::loop_advanced::sigmoid_stable(eta);
+            let expected = if (ws.residuals[i] as f64) < p {
+                1.0
+            } else {
+                0.0
+            };
+            assert_eq!(ws.y_full[i], expected, "row {i}");
         }
+        let s: f32 = ws.y_full[..n].iter().sum();
+        assert!(
+            s > 0.0 && (s as usize) < n,
+            "y must be a real Bernoulli mix"
+        );
     }
 
     #[test]
@@ -2018,116 +1998,78 @@ mod tests {
         }
     }
 
+    /// Probit latent-normal formulation: y = 1{z < η} with z the row's N(0,1)
+    /// residual and η = β₀ + β₁·x compared directly (no sigmoid) — a
+    /// logit/probit routing swap breaks the identity.
     #[test]
-    fn logit_predictor_increases_probability() {
-        // intercept = 0, β₁ = 2 → strong monotone link: large positive x ⇒ p ≈ 1.
-        let spec = logit_spec_simple(0.0, 2.0);
-        let n = 5000;
-        let mut ws = SimWorkspace::new(n, 2, 1, 0, None);
-        generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
-        let mut pos_y = 0.0_f64;
-        let mut pos_n = 0usize;
-        let mut neg_y = 0.0_f64;
-        let mut neg_n = 0usize;
-        for i in 0..n {
-            let x1 = ws.x_full[(i, 1)];
-            let y = ws.y_full[i] as f64;
-            if x1 > 0.0 {
-                pos_y += y;
-                pos_n += 1;
-            } else if x1 < 0.0 {
-                neg_y += y;
-                neg_n += 1;
-            }
-        }
-        let p_pos = pos_y / pos_n as f64;
-        let p_neg = neg_y / neg_n as f64;
-        assert!(
-            p_pos > 0.7,
-            "rows with x>0 should have p>0.7, got {p_pos} ({pos_n} rows)"
-        );
-        assert!(
-            p_neg < 0.3,
-            "rows with x<0 should have p<0.3, got {p_neg} ({neg_n} rows)"
-        );
-    }
-
-    #[test]
-    fn probit_intercept_only_rate_matches_phi() {
-        // No predictor effect (β₁ = 0) ⇒ every row shares the same latent
-        // threshold η = b0, so the empirical event rate should converge to
-        // Φ(b0). Large n keeps Monte Carlo noise well under the 0.02 band
-        // used by the analogous logit checks above.
-        let b0 = 0.4;
-        let mut spec = logit_spec_simple(b0, 0.0);
+    fn probit_y_is_latent_normal_threshold_of_eta() {
+        let mut spec = logit_spec_simple(0.4, 0.3);
         spec.link = Some(LinkKind::Probit);
-        let n = 20_000;
+        let n = 2000;
         let mut ws = SimWorkspace::new(n, 2, 1, 0, None);
         generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
-        let mut ones = 0.0_f64;
         for i in 0..n {
-            ones += ws.y_full[i] as f64;
+            let eta = spec.effect_sizes[0] + spec.effect_sizes[1] * ws.x_full[(i, 1)] as f64;
+            let expected = if (ws.residuals[i] as f64) < eta {
+                1.0
+            } else {
+                0.0
+            };
+            assert_eq!(ws.y_full[i], expected, "row {i}");
         }
-        let rate = ones / n as f64;
-        let expected = phi(b0);
+        let s: f32 = ws.y_full[..n].iter().sum();
         assert!(
-            (rate - expected).abs() < 0.02,
-            "probit event rate {rate} should be close to Φ({b0}) = {expected}"
+            s > 0.0 && (s as usize) < n,
+            "y must be a real Bernoulli mix"
         );
     }
 
+    /// Count outcome: y_i = Q(z_i; λ_i), the Poisson inverse CDF of the row's
+    /// N(0,1) residual at λ_i = exp(β₀ + β₁·x). Poisson moments of the quantile
+    /// map itself are pinned by `rng::poisson_tests`.
     #[test]
-    fn count_intercept_only_mean_matches_lambda() {
-        // No predictor effect (β₁ = 0) ⇒ every row shares the same log-rate
-        // η = ln(λ), so λ_i = λ for all i and the empirical mean of y should
-        // converge to λ. Large n keeps Monte Carlo noise well under the
-        // tolerance used by the analogous logit/probit checks above.
-        let lambda: f64 = 5.0;
-        let mut spec = logit_spec_simple(lambda.ln(), 0.0);
+    fn count_y_is_poisson_quantile_of_exp_eta() {
+        let mut spec = logit_spec_simple(5.0_f64.ln(), 0.3);
         spec.outcome_kind = OutcomeKind::Count;
-        let n = 20_000;
+        let n = 2000;
         let mut ws = SimWorkspace::new(n, 2, 1, 0, None);
         generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
-        let mut total = 0.0_f64;
         for i in 0..n {
-            total += ws.y_full[i] as f64;
+            let eta = spec.effect_sizes[0] + spec.effect_sizes[1] * ws.x_full[(i, 1)] as f64;
+            let expected = poisson_quantile(ws.residuals[i] as f64, eta.exp()) as f32;
+            assert_eq!(ws.y_full[i], expected, "row {i}");
         }
-        let mean = total / n as f64;
-        assert!(
-            (mean - lambda).abs() < 0.1,
-            "count mean {mean} should be close to λ = {lambda}"
-        );
     }
 
     // -----------------------------------------------------------------
     // Marginal / residual transform property tests (DIST-06/08/10/11)
     // -----------------------------------------------------------------
 
-    /// DIST-06: `apply_marginal` with `Distribution::Normal` is the identity
-    /// transform — the input z is returned unchanged for any finite z.
-    #[test]
-    fn apply_marginal_normal_is_identity() {
-        let spec = ols_spec_simple();
-        for z in [-3.5_f64, -1.0, 0.0, 0.4, 2.7, 8.0] {
-            let out = apply_marginal(z, Distribution::Normal, 0.0, 0, &spec);
-            assert_eq!(out, z, "Normal marginal must be identity at z={z}");
-        }
-    }
-
     /// DIST-08: `apply_marginal` with Right/LeftSkewed stays finite for any
     /// finite z: when Φ underflows to 0 the raw deviate is −ln(0) = +∞, and
     /// the `.min(EXP_CAP)` censor maps it to the cap (f64::min drops the ∞ arm).
+    /// At |z| = 50 Φ underflows: the heavy tail lands exactly on the censor
+    /// cap (EXP_CAP standardized, +6 SD by construction) and the light tail on
+    /// the support's left edge (E = 0 standardized). LeftSkewed mirrors both.
     #[test]
     fn apply_marginal_skewed_is_finite() {
         let spec = ols_spec_simple();
-        for z in [-50.0_f64, -8.0, -1.0, 0.0, 1.0, 8.0, 50.0] {
-            for dist in [Distribution::RightSkewed, Distribution::LeftSkewed] {
-                let out = apply_marginal(z, dist, 0.0, 0, &spec);
-                assert!(
-                    out.is_finite(),
-                    "{dist:?} marginal must be finite at z={z}, got {out}"
-                );
-            }
+        let cap = (EXP_CAP - EXP_CENSORED_MEAN) / EXP_CENSORED_STD;
+        let edge = -EXP_CENSORED_MEAN / EXP_CENSORED_STD;
+        assert!(
+            (cap - 6.0).abs() < 1e-12,
+            "cap must sit at +6 SD, got {cap}"
+        );
+        let right = |z: f64| apply_marginal(z, Distribution::RightSkewed, 0.0, 0, &spec);
+        let left = |z: f64| apply_marginal(z, Distribution::LeftSkewed, 0.0, 0, &spec);
+        // Heavy tail: the censor returns the cap bit-for-bit.
+        assert_eq!(right(50.0).to_bits(), cap.to_bits());
+        assert_eq!(left(-50.0).to_bits(), (-cap).to_bits());
+        // Light tail: Φ rounds to 1 within an ULP, so E = −ln Φ ≈ 0.
+        assert!((right(-50.0) - edge).abs() < 1e-12, "{}", right(-50.0));
+        assert!((left(50.0) + edge).abs() < 1e-12, "{}", left(50.0));
+        for z in [-8.0_f64, -1.0, 0.0, 1.0, 8.0] {
+            assert!(right(z).is_finite() && left(z).is_finite(), "z={z}");
         }
     }
 
@@ -2513,13 +2455,12 @@ mod tests {
     }
 
     /// DGEN-08: cluster random-effect draws are taken as a fixed-size block
-    /// *before* the per-row X/residual loop — their count is set by
-    /// `n_clusters`, not by `tau_squared`. Two specs differing only in
-    /// `tau_squared` (same `n_clusters`) therefore consume the cluster block
-    /// identically and produce bit-identical `x_full`: the per-row X draws are
-    /// not interleaved with the cluster draws. A broken kernel that drew
-    /// cluster effects inside the row loop (count varying with the loop) would
-    /// shift the X stream.
+    /// *before* the row loop on the per-sim sequential stream. With a SAMPLED
+    /// factor the row loop consumes that same stream (one categorical draw per
+    /// row), so the order is observable: the first `n_clusters` normals of a
+    /// fresh stream must be the cluster draws, and the next `n` uniforms must
+    /// be the rows' categorical draws. Drawing the cluster block inside or
+    /// after the row loop breaks both.
     ///
     /// This also guards CRN / curve quality, not just determinism: drawing the
     /// cluster block before the row loop is what keeps `find_sample_size`'s
@@ -2528,67 +2469,31 @@ mod tests {
     fn cluster_draws_precede_row_loop() {
         use crate::spec::{ClusterSizing, ClusterSpec};
         let n = 40;
-        let n_pred = 3;
-        let n_clusters = 4;
-
-        let mut spec_a = ols_spec_simple();
-        spec_a.estimator = EstimatorSpec::Mle;
-        spec_a.cluster = Some(ClusterSpec {
+        let n_clusters = 4u32;
+        let tau_sq = 0.3_f64;
+        let mut spec = factor_spec_70_30();
+        spec.scenario.sampled_factor_proportions = true;
+        spec.estimator = EstimatorSpec::Mle;
+        let cluster = ClusterSpec {
             sizing: ClusterSizing::FixedClusters { n_clusters },
-            tau_squared: 0.3,
+            tau_squared: tau_sq,
             slopes: vec![],
             extra_groupings: vec![],
-        });
-        let mut spec_b = ols_spec_simple();
-        spec_b.estimator = EstimatorSpec::Mle;
-        spec_b.cluster = Some(ClusterSpec {
-            sizing: ClusterSizing::FixedClusters { n_clusters },
-            tau_squared: 1.5,
-            slopes: vec![],
-            extra_groupings: vec![],
-        });
+        };
+        spec.cluster = Some(cluster.clone());
+        let mut ws = SimWorkspace::new(n, 4, 2, 1, Some(&cluster));
+        generate_sim_data(&spec, 3, 42, &mut ws).unwrap();
 
-        let mut ws_a = SimWorkspace::new(
-            n,
-            n_pred,
-            2,
-            0,
-            Some(&engine_contract::ClusterSpec::intercept_only(
-                ClusterSizing::FixedClusters { n_clusters },
-                0.25,
-            )),
-        );
-        let mut ws_b = SimWorkspace::new(
-            n,
-            n_pred,
-            2,
-            0,
-            Some(&engine_contract::ClusterSpec::intercept_only(
-                ClusterSizing::FixedClusters { n_clusters },
-                0.25,
-            )),
-        );
-        generate_sim_data(&spec_a, 3, 42, &mut ws_a).unwrap();
-        generate_sim_data(&spec_b, 3, 42, &mut ws_b).unwrap();
-
-        // All cluster effects populated (block drawn up front).
+        let mut check = SimRng::new(42, 3);
+        let tau = tau_sq.sqrt();
         for c in 0..n_clusters as usize {
-            assert!(
-                ws_a.cluster_u_draws[c].is_finite(),
-                "cluster_u_draws[{c}] must be drawn"
-            );
+            let expected = (check.next_normal() as f64 * tau) as f32;
+            assert_eq!(ws.cluster_u_draws[c], expected, "cluster {c} draw");
         }
-        // X stream identical: tau only scales the cluster draws, it does not
-        // change how many RNG values the per-row loop consumes.
         for i in 0..n {
-            for j in 0..n_pred {
-                assert_eq!(
-                    ws_a.x_full[(i, j)],
-                    ws_b.x_full[(i, j)],
-                    "X stream diverges at ({i},{j}) when only tau_squared differs — \
-                     per-row X draws must not interleave with the cluster block"
-                );
-            }
+            let lvl = check.next_categorical(&[0.7, 0.3]);
+            let expected = if lvl == 1 { 1.0 } else { 0.0 };
+            assert_eq!(ws.x_full[(i, 3)], expected, "factor dummy at row {i}");
         }
     }
 
@@ -2966,7 +2871,7 @@ mod tests {
     /// DGEN-FS: FixedSize layout produces contiguous blocks (`cluster_ids[i] == i / cluster_size`)
     /// and the `cluster_u_draws` buffer is sized to `max_n / cluster_size`.
     #[test]
-    fn fixed_size_block_layout_is_nested_across_prefixes() {
+    fn fixed_size_block_layout_and_draw_buffer() {
         use crate::spec::{ClusterSizing, ClusterSpec};
         // Use a standard simple OLS spec with a FixedSize cluster override.
         let mut spec = ols_spec_simple();
@@ -3222,7 +3127,6 @@ mod tests {
     fn minimal_spec(n_cont: usize) -> SimulationSpec {
         SimulationSpec {
             n_non_factor: n_cont as u32,
-            n_factor_dummies: 0,
             correlation: {
                 let mut v = vec![0.0f64; n_cont * n_cont];
                 for d in 0..n_cont {
@@ -3231,47 +3135,9 @@ mod tests {
                 v
             },
             var_types: vec![Distribution::Normal; n_cont],
-            var_pinned: vec![],
             var_params: vec![0.0; n_cont],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
             effect_sizes: vec![0.25f64; 1 + n_cont],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
-            estimator: EstimatorSpec::Ols,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
-            cluster: None,
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         }
     }
 

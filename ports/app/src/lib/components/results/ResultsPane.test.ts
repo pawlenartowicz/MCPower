@@ -68,11 +68,6 @@ describe('ResultsPane', () => {
     expect(screen.getByText('Run 1')).toBeInTheDocument(); // the preserved prior result tab
   });
 
-  it('renders the get-started checklist when no tabs exist', () => {
-    render(ResultsPane);
-    expect(screen.getByText(/Get started/i)).toBeInTheDocument();
-  });
-
   it('shows the family tutorial and what-to-find card beside the checklist before any run', () => {
     render(ResultsPane);
     expect(screen.getByText(/Get started/i)).toBeInTheDocument();
@@ -80,7 +75,7 @@ describe('ResultsPane', () => {
     expect(screen.getByTestId('family-tutorial')).toBeInTheDocument();
   });
 
-  it('switches to tabs + bars view when a Find-power tab is pushed', () => {
+  it('replaces the empty state with the run tab once a Find-power tab is pushed', () => {
     runStore.pushTab({
       label: 'Run 1',
       kind: 'find-power',
@@ -134,24 +129,5 @@ describe('ResultsPane', () => {
     expect(screen.getByTestId('tab-export')).toBeInTheDocument();
     await fireEvent.click(screen.getByTestId('tab-joint'));
     expect(screen.getByTestId('joint-dist-tab')).toBeInTheDocument();
-  });
-
-  it('exposes every scenario on the pushed tab', () => {
-    const result2 = { ...samplePowerResult, n: 120 };
-    const tab = runStore.pushTab({
-      label: 'Run Multi',
-      kind: 'find-power',
-      subView: 'summary',
-      spec: sampleSpec,
-      sample_size: 80,
-      effect_names: ['x1', 'x2'],
-      result: samplePowerResult as any,
-      scenarios: [
-        ['scenario-a', samplePowerResult as any],
-        ['scenario-b', result2 as any],
-      ],
-    });
-    expect(tab.scenarios.length).toBe(2);
-    expect(tab.result).toBe(tab.scenarios[0]![1]);
   });
 });

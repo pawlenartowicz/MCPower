@@ -1,4 +1,4 @@
-// Tests for getEffectsFromData (G1) and csv-driven findPower (G2).
+// Tests for getEffectsFromData (G1) and findPower's `corrected` plot flag.
 // The wasm module is not compiled in the test environment, so we mock the
 // vendor module and assert on the TS wrapper behaviour only.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -18,7 +18,7 @@ import * as wasmMod from '../vendor/engine-wasm/engine_wasm.js';
 import { getEffectsFromData, findPower } from '../src/index';
 import type { EffectsFromData, CsvData, AppSpec } from '../src/types';
 
-// Minimal Linear spec (no csv) used as a base for both G1 and G2 tests.
+// Minimal Linear spec (no csv) used as a base for both suites.
 const BASE_SPEC: AppSpec = {
   family: 'linear',
   parsed_formula: { outcome: 'y', predictors: ['x'], interaction_terms: [] },
@@ -82,21 +82,6 @@ describe('getEffectsFromData', () => {
     expect(result.baseline_probability).toBe(0.31);
   });
 
-  it('preserves null cluster_icc / baseline_probability through the JSON round-trip', async () => {
-    // The regression/Gaussian preview: both scalars null. They must come back
-    // as null (not undefined / dropped) so the host's Apply flow skips them.
-    const mockPreview: EffectsFromData = {
-      effects: [{ name: 'x', value: 0.9 }],
-      cluster_icc: null,
-      baseline_probability: null,
-    };
-    vi.mocked(wasmMod.get_effects_from_data).mockReturnValue(JSON.stringify(mockPreview));
-
-    const result = await getEffectsFromData(BASE_SPEC);
-    expect(result.cluster_icc).toBeNull();
-    expect(result.baseline_probability).toBeNull();
-  });
-
   it('propagates wasm errors as JS errors', async () => {
     vi.mocked(wasmMod.get_effects_from_data).mockImplementation(() => {
       throw new Error('get_effects_from_data: no csv data attached to this spec');
@@ -106,43 +91,21 @@ describe('getEffectsFromData', () => {
   });
 });
 
-// ── G2: csv passes through findPower ─────────────────────────────────────────
+// ── findPower: the `corrected` flag reaching the plot emitter ────────────────
+// Verbatim spec forwarding to the workers is pinned in wald_se.test.ts; the
+// TS-side logic here is deriving `corrected` from spec.correction.
 
-describe('findPower csv passthrough (G2)', () => {
+describe('findPower corrected flag', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(wasmMod.default).mockResolvedValue(undefined);
   });
 
-  function makeWorkerMock(partJson: string) {
-    // Minimal Worker stub: immediately posts a part message on postMessage.
-    const listeners: Record<string, ((e: MessageEvent) => void)> = {};
-    return {
-      onmessage: null as ((e: MessageEvent) => void) | null,
-      set onmessage(fn: ((e: MessageEvent) => void) | null) {
-        if (fn) listeners['message'] = fn;
-      },
-      postMessage(msg: unknown) {
-        // Yield so onmessage is set first, then reply synchronously.
-        Promise.resolve().then(() => {
-          if (listeners['message']) {
-            listeners['message']({ data: { kind: 'part', part: partJson } } as MessageEvent);
-          }
-        });
-      },
-      terminate: vi.fn(),
-    };
-  }
-
-  it('serializes csv field into the spec JSON sent to workers', async () => {
-    // Capture the spec JSON passed to the worker.
-    const capturedSpecs: string[] = [];
-
+  it("passes corrected = (correction !== 'none') to power_plot_specs_json", async () => {
     // Stub Worker globally so fanOut's new Worker() works in Node.
     (globalThis as Record<string, unknown>).Worker = class {
       onmessage: ((e: MessageEvent) => void) | null = null;
-      postMessage(msg: Record<string, unknown>) {
-        capturedSpecs.push(msg['spec'] as string);
+      postMessage() {
         Promise.resolve().then(() => {
           if (this.onmessage) {
             this.onmessage({ data: { kind: 'part', part: '{}' } } as MessageEvent);
@@ -166,43 +129,16 @@ describe('findPower csv passthrough (G2)', () => {
     });
 
     // merge + plot stubs.
-    const partResult = JSON.stringify({ scenarios: [['s1', {}]] });
-    vi.mocked(wasmMod.merge_power_results).mockReturnValue(partResult);
-    vi.mocked(wasmMod.power_plot_specs_json).mockReturnValue(
-      JSON.stringify({ blocks: [] }),
+    vi.mocked(wasmMod.merge_power_results).mockReturnValue(
+      JSON.stringify({ scenarios: [['s1', {}]] }),
     );
+    vi.mocked(wasmMod.power_plot_specs_json).mockReturnValue(JSON.stringify({ blocks: [] }));
 
-    const csvData: CsvData = {
-      mode: 'partial',
-      n_rows: 2,
-      columns: [
-        { name: 'x', col_type: 'continuous', values: [0.5, -0.5], labels: [] },
-        { name: 'y', col_type: 'continuous', values: [1.0, -1.0], labels: [] },
-      ],
-    };
+    await findPower({ ...BASE_SPEC, correction: 'none' }, 10);
+    await findPower({ ...BASE_SPEC, correction: 'holm' }, 10);
 
-    const specWithCsv: AppSpec = { ...BASE_SPEC, csv: csvData };
-    const specNoCsv: AppSpec = { ...BASE_SPEC, csv: null };
-
-    // Fire both calls; we only need to see the serialized spec.
-    await findPower(specWithCsv, 10);
-    await findPower(specNoCsv, 10);
-
-    expect(capturedSpecs).toHaveLength(2);
-
-    const parsedWith = JSON.parse(capturedSpecs[0]!) as { csv: unknown };
-    const parsedWithout = JSON.parse(capturedSpecs[1]!) as { csv: unknown };
-
-    // csv-present spec carries the csv block.
-    expect(parsedWith.csv).not.toBeNull();
-    expect((parsedWith.csv as CsvData).mode).toBe('partial');
-
-    // csv-absent spec does not.
-    expect(parsedWithout.csv).toBeNull();
-
-    // correction: 'none' in BASE_SPEC → corrected=false reaches the plot emitter (D6).
-    expect(wasmMod.power_plot_specs_json).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), false);
+    const corrected = vi.mocked(wasmMod.power_plot_specs_json).mock.calls.map((c) => c[2]);
+    expect(corrected).toEqual([false, true]);
 
     // Cleanup globals.
     delete (globalThis as Record<string, unknown>).Worker;

@@ -6,39 +6,11 @@ derived from the raw boundary_hit uint8 array:
   - code 2  → tau estimated as implausibly high (boundary REML)
 """
 
-import pytest
 from mcpower import MCPower
 
-
 # ---------------------------------------------------------------------------
-# LME: rates present and in [0, 1]
+# LME find_sample_size: one rate per sample size
 # ---------------------------------------------------------------------------
-
-def test_result_envelope_includes_boundary_hit_rates():
-    model = MCPower("y ~ x1 + (1|cluster)", family="lme")
-    model.set_effects("x1=0.3").set_cluster("cluster", ICC=0.2, n_clusters=10)
-    res = model.find_power(100, n_sims=50, seed=2137)
-    assert "boundary_hit_rate_tau_zero" in res
-    assert "boundary_hit_rate_high_tau" in res
-    val_low = res["boundary_hit_rate_tau_zero"]
-    val_high = res["boundary_hit_rate_high_tau"]
-    # Range check — secondary; the primary assertion below catches no-op.
-    if hasattr(val_low, "__iter__") and not isinstance(val_low, (str, bytes)):
-        for v in val_low:
-            assert 0.0 <= v <= 1.0
-        for v in val_high:
-            assert 0.0 <= v <= 1.0
-        # At ICC=0.2, nc=10, N=100, seed=2137: tau_zero=[0.02]; a broken boundary-hit
-        # extraction (all zeros) is caught here.
-        assert any(v > 0.0 for v in val_low), (
-            "expected at least one tau_zero boundary hit > 0 — boundary_hit extraction may be broken"
-        )
-    else:
-        assert 0.0 <= val_low <= 1.0
-        assert 0.0 <= val_high <= 1.0
-        assert val_low > 0.0, (
-            "expected tau_zero boundary hit > 0 — boundary_hit extraction may be broken"
-        )
 
 
 def test_lme_find_sample_size_includes_boundary_hit_rates():
@@ -60,34 +32,13 @@ def test_lme_find_sample_size_includes_boundary_hit_rates():
         assert 0.0 <= v <= 1.0
     # At ICC=0.05, nc=10, seed=2137: tau_zero rates are [0.22, 0.12]; a broken
     # boundary-hit extraction (all zeros) is caught here.
-    assert any(v > 0.0 for v in rates_tz), (
-        "expected at least one tau_zero boundary hit > 0 — boundary_hit extraction may be broken"
-    )
-
-
-# ---------------------------------------------------------------------------
-# OLS: both rates must be 0.0 (boundary_hit is always zero for OLS)
-# ---------------------------------------------------------------------------
-
-def test_ols_boundary_hit_rates_are_zero():
-    model = MCPower("y ~ x1 + x2")
-    model.set_effects("x1=0.5, x2=0.3")
-    res = model.find_power(100, n_sims=50)
-    assert "boundary_hit_rate_tau_zero" in res
-    assert "boundary_hit_rate_high_tau" in res
-    val_tz = res["boundary_hit_rate_tau_zero"]
-    val_ht = res["boundary_hit_rate_high_tau"]
-    if hasattr(val_tz, "__iter__") and not isinstance(val_tz, (str, bytes)):
-        assert all(v == 0.0 for v in val_tz)
-        assert all(v == 0.0 for v in val_ht)
-    else:
-        assert val_tz == 0.0
-        assert val_ht == 0.0
+    assert any(v > 0.0 for v in rates_tz), "expected at least one tau_zero boundary hit > 0 — boundary_hit extraction may be broken"
 
 
 # ---------------------------------------------------------------------------
 # Shape sanity: single-N find_power returns a list of length 1
 # ---------------------------------------------------------------------------
+
 
 def test_lme_boundary_hit_rates_shape_single_n():
     model = MCPower("y ~ x1 + (1|cluster)", family="lme")

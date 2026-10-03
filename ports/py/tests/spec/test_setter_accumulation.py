@@ -34,13 +34,6 @@ def _two_factor_model_separate_calls() -> MCPower:
     return m
 
 
-def test_two_factors_separate_calls_both_survive_in_registry():
-    """Both factors must register; pre-fix only the last (g2) survived."""
-    m = _two_factor_model_separate_calls()
-    m._apply()
-    assert set(m._registry.factor_names) == {"g1", "g2"}
-
-
 def test_two_factors_separate_calls_effect_names_both_suffixed():
     """Each factor contributes a ``[level]``-suffixed dummy; the demoted-g1 bug
     left g1 as a bare continuous name."""
@@ -183,7 +176,8 @@ def test_set_baseline_probability_last_wins():
     """
     chain = MCPower("y ~ x", family="logit")
     chain.set_effects("x=0.3")
-    chain.set_baseline_probability(0.3).set_baseline_probability(0.5)
+    assert chain.set_baseline_probability(0.3) is chain  # chainable
+    chain.set_baseline_probability(0.5)
     spec_chain = chain.to_simulation_spec()
 
     single = MCPower("y ~ x", family="logit")

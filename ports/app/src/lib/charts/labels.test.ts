@@ -94,15 +94,6 @@ describe('relabelTargets', () => {
     expect(values[0]!.target).toBe('target_3'); // not in map → unchanged
     expect(values[1]!.target).toBe('x1');
   });
-
-  it('is a no-op when map is empty', () => {
-    const spec: unknown = {
-      data: { values: [{ target: 'target_1', v: 0.7 }] },
-    };
-    relabelTargets(spec, {});
-    const values = (spec as { data: { values: RowArr } }).data.values;
-    expect(values[0]!.target).toBe('target_1'); // unchanged
-  });
 });
 
 describe('setUnitAxisTitle', () => {

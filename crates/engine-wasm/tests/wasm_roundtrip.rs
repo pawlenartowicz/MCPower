@@ -13,7 +13,7 @@ const LINEAR_SPEC_JSON: &str = r#"{"family":"linear","parsed_formula":{"outcome"
 /// NaN in the single-core result (both have zero-count denominators in
 /// `from_batch`); they must survive `serde_json` null encoding through the real
 /// `engine_wasm::find_power` → `engine_wasm::merge_power_results` boundary.
-/// Mirrors `native_roundtrip::nan_bearing_extras_survive_json_wire_and_merge`
+/// Mirrors `engine-app-spec/tests/wire_json.rs::nan_bearing_extras_survive_json_wire_and_merge`
 /// but exercises the actual wasm-bindgen export wrappers.
 const LOGIT_SPEC_JSON: &str = r#"{"family":"logit","parsed_formula":{"outcome":"y","predictors":["x1"],"interaction_terms":[]},"var_types":[{"kind":"numeric","name":"x1"}],"effects":[{"name":"x1","value":0.3}],"correlations":null,"alpha":0.05,"target_power":0.8,"n_sims":64,"seed":2137,"tests":{"kind":"all"},"correction":"none","scenarios":[],"csv":null,"baseline_probability":0.3,"report_overall":false,"contrasts":[]}"#;
 
@@ -27,8 +27,8 @@ fn find_power_returns_scenario_result_json() {
     let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
     // Cross the real wasm-bindgen boundary and confirm the contract SHAPE + values
     // survive it — not merely that a "scenarios" key exists. This is the field-
-    // preservation path behind the historical NaN crash; mirrors the native bar in
-    // native_roundtrip::find_power_json_round_trips_natively.
+    // preservation path behind the historical NaN crash; the native JSON-wire
+    // bar lives in engine-app-spec/tests/wire_json.rs.
     let scenarios = v
         .get("scenarios")
         .and_then(|s| s.as_array())
@@ -61,8 +61,8 @@ fn parse_formula_round_trips() {
         Err(_) => panic!("parse errored"),
     };
     let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
-    assert!(v.get("dependent").is_some());
-    assert!(v.get("predictors").is_some());
+    assert_eq!(v["dependent"], "y");
+    assert_eq!(v["predictors"], serde_json::json!(["x1", "x2"]));
 }
 
 #[wasm_bindgen_test]
@@ -90,7 +90,7 @@ fn merge_pools_two_power_parts() {
 /// inside the wasm-bindgen glue) cannot catch. Running under `wasm-pack test
 /// --node` exercises the real export boundary.
 ///
-/// Mirrors `native_roundtrip::nan_bearing_extras_survive_json_wire_and_merge`.
+/// Mirrors `engine-app-spec/tests/wire_json.rs::nan_bearing_extras_survive_json_wire_and_merge`.
 #[wasm_bindgen_test]
 fn nan_bearing_extras_survive_wasm_json_wire_and_merge() {
     // Single-core logit run: the worker calls find_power and sends JSON back

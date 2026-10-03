@@ -12,11 +12,8 @@ describe('clampAgqNodes', () => {
     expect(clampAgqNodes(100)).toBe(AGQ_MAX_NODES);
   });
 
-  it('falls back to the default instead of propagating NaN (an emptied NumberInput)', () => {
+  it('falls back to the default instead of propagating NaN (an emptied NumberInput) or ±Infinity', () => {
     expect(clampAgqNodes(NaN)).toBe(AGQ_DEFAULT_NODES);
-  });
-
-  it('falls back to the default for non-finite input', () => {
     expect(clampAgqNodes(Infinity)).toBe(AGQ_DEFAULT_NODES);
     expect(clampAgqNodes(-Infinity)).toBe(AGQ_DEFAULT_NODES);
   });

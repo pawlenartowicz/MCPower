@@ -31,8 +31,10 @@ fn power_result(power_u: Vec<f64>, power_c: Vec<f64>) -> PowerResult {
         "convergence_rate": 1.0,
         "boundary_hit": [],
         "estimator_extras": { "estimator": "ols" },
-        "success_count_histogram_uncorrected": [0, 0, 100],
-        "success_count_histogram_corrected": [0, 0, 100],
+        // Distinct histograms: P(>=1) / P(>=2) is 0.9 / 0.6 uncorrected and
+        // 0.6 / 0.2 corrected, so a block reading the wrong one is visible.
+        "success_count_histogram_uncorrected": [10, 30, 60],
+        "success_count_histogram_corrected": [40, 40, 20],
     }))
     .expect("PowerResult deserializes from the required fields")
 }
@@ -83,6 +85,17 @@ fn ss_scenarios(labels: &[&str]) -> ScenarioResult<SampleSizeResult> {
     }
 }
 
+/// The `field` column of a spec's inline data rows, in row order.
+fn data_column(spec: &str, field: &str) -> Vec<f64> {
+    let v: serde_json::Value = serde_json::from_str(spec).expect("valid JSON");
+    v.pointer("/data/values")
+        .and_then(serde_json::Value::as_array)
+        .expect("inline data rows")
+        .iter()
+        .filter_map(|row| row.get(field).and_then(serde_json::Value::as_f64))
+        .collect()
+}
+
 // ── power_plot_specs block shape ───────────────────────────────────────────
 
 #[test]
@@ -114,27 +127,6 @@ fn power_specs_two_scenarios_single_power_block() {
 // ── sample_size_curve_specs block shape ────────────────────────────────────
 
 #[test]
-fn sample_size_single_scenario_two_targets_block_order() {
-    // S=1, m=2 → ["curve", "at_least_k", "exactly_k"]
-    let result = ss_scenarios(&["default"]);
-    let PlotSpecs { blocks } = sample_size_curve_specs(&result, 0.8, false);
-    let keys: Vec<&str> = blocks.iter().map(|b| b.key.as_str()).collect();
-    assert_eq!(
-        keys,
-        vec!["curve", "at_least_k", "exactly_k"],
-        "S=1, m=2 block order must be curve, at_least_k, exactly_k"
-    );
-    for b in &blocks {
-        let v: serde_json::Value = serde_json::from_str(&b.spec).expect("valid JSON");
-        assert!(
-            v.get("config").is_none(),
-            "block '{}' must be theme-naked",
-            b.key
-        );
-    }
-}
-
-#[test]
 fn sample_size_two_scenarios_two_targets_block_order() {
     // S=2, m=2 → ["scenario:default", "scenario:optimistic", "overlay", "at_least_k", "exactly_k"]
     let result = ss_scenarios(&["default", "optimistic"]);
@@ -160,37 +152,13 @@ fn sample_size_two_scenarios_two_targets_block_order() {
 #[test]
 fn corrected_flag_changes_power_values_in_spec() {
     // power_result: uncorrected=[0.7,0.6], corrected=[0.5,0.4]
-    // The power spec embeds the data as inline JSON values; we check that the
-    // corrected numbers appear in the spec when corrected=true, and the uncorrected
-    // numbers appear when corrected=false.
     let result = power_scenarios_corrected(&["s"]);
 
     let spec_u = power_plot_specs(&result, 0.8, false).blocks.remove(0).spec;
     let spec_c = power_plot_specs(&result, 0.8, true).blocks.remove(0).spec;
 
-    // uncorrected spec must contain 0.7 and NOT 0.5
-    assert!(
-        spec_u.contains("0.7"),
-        "uncorrected spec should contain 0.7; got: {spec_u}"
-    );
-    assert!(
-        spec_u.contains("0.6"),
-        "uncorrected spec should contain 0.6; got: {spec_u}"
-    );
-    // corrected spec must contain 0.5 and NOT 0.7 (at the data layer)
-    assert!(
-        spec_c.contains("0.5"),
-        "corrected spec should contain 0.5; got: {spec_c}"
-    );
-    assert!(
-        spec_c.contains("0.4"),
-        "corrected spec should contain 0.4; got: {spec_c}"
-    );
-    // The two specs must differ because the data is different
-    assert_ne!(
-        spec_u, spec_c,
-        "corrected=true must produce a different spec than corrected=false"
-    );
+    assert_eq!(data_column(&spec_u, "power"), [0.7, 0.6]);
+    assert_eq!(data_column(&spec_c, "power"), [0.5, 0.4]);
 }
 
 #[test]
@@ -206,32 +174,43 @@ fn corrected_flag_changes_curve_values_in_spec() {
     let keys_c: Vec<&str> = blocks_c.iter().map(|b| b.key.as_str()).collect();
     assert_eq!(keys_u, keys_c);
 
-    // curve block differs because power values differ
-    let curve_u = &blocks_u.iter().find(|b| b.key == "curve").unwrap().spec;
-    let curve_c = &blocks_c.iter().find(|b| b.key == "curve").unwrap().spec;
-    assert_ne!(
-        curve_u, curve_c,
-        "curve spec must differ when corrected changes"
+    // The curve rows (N=80 then N=160, two targets each) follow the flag.
+    let block = |blocks: &[engine_app_spec::PlotBlock], key: &str| {
+        blocks.iter().find(|b| b.key == key).unwrap().spec.clone()
+    };
+    assert_eq!(
+        data_column(&block(&blocks_u, "curve"), "power"),
+        [0.5, 0.4, 0.85, 0.8]
+    );
+    assert_eq!(
+        data_column(&block(&blocks_c, "curve"), "power"),
+        [0.3, 0.2, 0.65, 0.6]
     );
 
-    // corrected spec must contain 0.3 (corrected uncorrected is 0.5)
-    assert!(
-        curve_c.contains("0.3"),
-        "corrected curve must contain corrected power 0.3"
-    );
-    assert!(
-        curve_u.contains("0.5"),
-        "uncorrected curve must contain uncorrected power 0.5"
-    );
+    // The joint-detection block always reads the corrected histogram
+    // ([40, 40, 20] → P(>=1)=0.6, P(>=2)=0.2), whatever the flag says.
+    for blocks in [&blocks_u, &blocks_c] {
+        assert_eq!(
+            data_column(&block(blocks, "at_least_k"), "p"),
+            [0.6, 0.2, 0.6, 0.2]
+        );
+    }
 }
 
 // ── sample-size unit: x field switches to n_unit ───────────────────────────
 
 /// With a unit divisor the curve's x field becomes `n_unit` (= n / divisor) and
 /// the engine emits no x title — the host names the unit. The `n` field stays on
-/// every row so a host can still read total observations.
+/// every row so a host can still read total observations. Without one (divisor
+/// 1, observations) the x field stays `n` and no row carries `n_unit`.
 #[test]
 fn sample_size_curve_uses_n_unit_when_the_result_carries_a_divisor() {
+    let result = ss_scenarios(&["default"]);
+    let PlotSpecs { blocks } = sample_size_curve_specs(&result, 0.8, false);
+    let curve = blocks.iter().find(|b| b.key == "curve").unwrap();
+    assert!(curve.spec.contains("\"field\":\"n\""), "{}", curve.spec);
+    assert!(!curve.spec.contains("n_unit"), "{}", curve.spec);
+
     let mut result = ss_scenarios(&["default"]);
     for (_, ss) in result.scenarios.iter_mut() {
         ss.unit_divisor = 8;
@@ -241,7 +220,6 @@ fn sample_size_curve_uses_n_unit_when_the_result_carries_a_divisor() {
         .iter()
         .find(|b| b.key == "curve")
         .expect("curve block present");
-    let v: serde_json::Value = serde_json::from_str(&curve.spec).expect("valid JSON");
     assert!(
         curve.spec.contains("\"field\":\"n_unit\""),
         "x field must be n_unit: {}",
@@ -252,29 +230,6 @@ fn sample_size_curve_uses_n_unit_when_the_result_carries_a_divisor() {
         "the engine must leave the axis title to the host: {}",
         curve.spec
     );
-    // n / 8 for the two grid points (n = 80 and 160).
-    let values = v
-        .pointer("/layer/0/data/values")
-        .or_else(|| v.pointer("/data/values"))
-        .expect("curve data rows");
-    let units: Vec<i64> = values
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|row| row.get("n_unit").and_then(serde_json::Value::as_i64))
-        .collect();
-    assert!(
-        units.iter().all(|&u| u == 10 || u == 20),
-        "n_unit must be n / 8: {units:?}"
-    );
-}
-
-/// Divisor 1 (the default, observations) leaves the spec exactly as before.
-#[test]
-fn sample_size_curve_keeps_the_n_field_without_a_divisor() {
-    let result = ss_scenarios(&["default"]);
-    let PlotSpecs { blocks } = sample_size_curve_specs(&result, 0.8, false);
-    let curve = blocks.iter().find(|b| b.key == "curve").unwrap();
-    assert!(curve.spec.contains("\"field\":\"n\""), "{}", curve.spec);
-    assert!(!curve.spec.contains("n_unit"), "{}", curve.spec);
+    // n / 8 on every row: two targets at n = 80, then two at n = 160.
+    assert_eq!(data_column(&curve.spec, "n_unit"), [10.0, 10.0, 20.0, 20.0]);
 }

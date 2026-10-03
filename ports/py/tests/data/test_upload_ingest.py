@@ -60,17 +60,16 @@ def test_lazy_pandas_detection_no_import():
     assert len(data) == 2 and len(data[0]) == 1
 
 
-def test_dict_branch_still_works():
-    data, cols = normalize_upload_input({"x": [1, 2, 3], "y": [4, 5, 6]}, None)
-    assert cols == ["x", "y"]
-    assert data == [[1, 2, 3], [4, 5, 6]]
-
-
 def test_array_branch_still_works():
-    src = np.ones((5, 3))
+    # Row-major 5x3 ndarray in, column-major lists out (a transpose would fail).
+    src = np.arange(15, dtype=float).reshape(5, 3)
     data, cols = normalize_upload_input(src, ["a", "b", "c"])
     assert cols == ["a", "b", "c"]
-    assert len(data) == 3 and len(data[0]) == 5
+    assert data == [
+        [0.0, 3.0, 6.0, 9.0, 12.0],
+        [1.0, 4.0, 7.0, 10.0, 13.0],
+        [2.0, 5.0, 8.0, 11.0, 14.0],
+    ]
 
 
 # ---------------------------------------------------------------------------

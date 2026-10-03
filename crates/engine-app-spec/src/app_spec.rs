@@ -519,20 +519,61 @@ pub struct CsvData {
 mod target_power_tests {
     use super::*;
 
+    /// The smallest valid spec of one family, via serde so the test does not
+    /// depend on the full struct field set. `extra` adds the family's own fields.
+    fn spec(
+        family: &str,
+        target_power: f64,
+        correction: &str,
+        extra: serde_json::Value,
+    ) -> AppSpec {
+        let mut v = serde_json::json!({
+            "family": family, "target_power": target_power,
+            "parsed_formula": {"outcome": "y", "predictors": ["x"], "interaction_terms": []},
+            "var_types": [{"kind": "numeric", "name": "x"}],
+            "effects": [{"name": "x", "value": 0.3}],
+            "correlations": null, "alpha": 0.05, "n_sims": 10, "seed": 1,
+            "tests": {"kind": "all"}, "correction": correction, "csv": null,
+        });
+        let obj = v.as_object_mut().expect("object");
+        obj.extend(extra.as_object().expect("object").clone());
+        serde_json::from_value(v).unwrap_or_else(|e| panic!("{family} spec deserializes: {e}"))
+    }
+
+    // The Tauri plot commands read the target-power line and the corrected flag
+    // off whichever family the run used; each variant must answer for itself.
     #[test]
     fn target_power_reads_each_variant() {
-        // Build the smallest valid spec per variant via serde from JSON so the
-        // test does not depend on the full struct field set.
-        let linear: AppSpec = serde_json::from_str(
-            r#"{"family":"linear","target_power":0.8,
-                "parsed_formula":{"outcome":"y","predictors":["x"],"interaction_terms":[]},
-                "var_types":[{"kind":"numeric","name":"x"}],
-                "effects":[{"name":"x","value":0.3}],
-                "correlations":null,"alpha":0.05,"n_sims":10,"seed":1,
-                "tests":{"kind":"all"},"correction":"none",
-                "csv":null,"report_overall":true,"contrasts":[]}"#,
-        )
-        .expect("linear spec deserializes");
-        assert_eq!(linear.target_power(), 0.8);
+        use serde_json::json;
+        let rows = [
+            (spec("linear", 0.81, "none", json!({})), 0.81, false),
+            (
+                spec("logit", 0.82, "holm", json!({"baseline_probability": 0.3})),
+                0.82,
+                true,
+            ),
+            (
+                spec(
+                    "mixed",
+                    0.83,
+                    "bonferroni",
+                    json!({
+                        "cluster_name": "g", "icc": 0.2,
+                        "cluster_dim": {"kind": "n_clusters", "value": 20}
+                    }),
+                ),
+                0.83,
+                true,
+            ),
+            (
+                spec("poisson", 0.84, "none", json!({"baseline_rate": 2.0})),
+                0.84,
+                false,
+            ),
+        ];
+        for (s, target_power, corrected) in rows {
+            assert_eq!(s.target_power(), target_power, "{s:?}");
+            assert_eq!(s.is_corrected(), corrected, "{s:?}");
+        }
     }
 }

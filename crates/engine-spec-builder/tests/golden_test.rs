@@ -15,6 +15,8 @@ struct GoldenCase {
     expected_var_types: Vec<i32>,
     expected_effect_sizes: Vec<f64>,
     expected_target_indices: Vec<u32>,
+    expected_factor_n_levels: Vec<i32>,
+    expected_factor_proportions: Vec<f64>,
 }
 
 /// Translates Python-side `_DIST_CODE` integers (the JSON fixtures still encode
@@ -78,6 +80,14 @@ fn run_case(file_name: &str) {
         s.target_indices, case.expected_target_indices,
         "[{file_name}] target_indices"
     );
+    assert_eq!(
+        s.factor_n_levels, case.expected_factor_n_levels,
+        "[{file_name}] factor_n_levels"
+    );
+    assert_eq!(
+        s.factor_proportions, case.expected_factor_proportions,
+        "[{file_name}] factor_proportions"
+    );
 }
 
 #[test]
@@ -90,10 +100,9 @@ fn linear_with_factor_3lvl() {
     run_case("linear_with_factor_3lvl.json");
 }
 
-// The two interaction cases below assert that build_linear_contract accepts
-// interaction terms and emits at least one DesignTerm::Interaction.
-// They call build_linear_contract directly because contract_to_simulation_spec
-// has todo!() stubs for the Interaction arm; the full pipeline is not yet wired.
+// The two interaction cases below call build_linear_contract directly: they pin
+// the contract's DesignTerm::Interaction components, which the SimulationSpec
+// projection does not expose.
 
 #[test]
 fn linear_interaction_xi_xj_builds_with_interaction_term() {
@@ -158,8 +167,7 @@ fn linear_interaction_xi_xj_builds_with_interaction_term() {
         .as_ref()
         .unwrap_or(&contracts[0].design_generation);
     // x1:x2 ⇒ one Interaction over the two Direct predictor columns (not merely
-    // "some Interaction exists"); mirrors build_design_appends_interaction_term at
-    // the build_linear_contract level.
+    // "some Interaction exists").
     assert!(
         dt.terms.iter().any(|t| matches!(t,
             DesignTerm::Interaction { components }

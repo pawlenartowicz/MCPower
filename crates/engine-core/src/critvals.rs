@@ -1513,46 +1513,6 @@ mod tests {
     }
 
     #[test]
-    fn holm_thresholds_dominate_uncorrected_and_last_equals() {
-        // CRIT-08: every Holm rank threshold is at least as conservative as the
-        // uncorrected threshold, and the least-conservative rank (k = m-1, effective
-        // α/2) equals uncorrected exactly. Ordering property — no value pinned.
-        let crit = CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        };
-        let sample_sizes = vec![101_u32];
-        let n_predictors = 3_u32; // df = 98
-        let n_targets = 3_u32;
-        let df = 98.0;
-
-        let holm = CritValueTable::build(
-            &crit,
-            &sample_sizes,
-            n_predictors,
-            n_targets,
-            CorrectionMethod::Holm,
-            EstimatorSpec::Ols,
-        )
-        .unwrap();
-        let t_unc = t_ppf(1.0 - 0.05 / 2.0, df);
-        let unc_sq = t_unc * t_unc;
-
-        let row = &holm.correction_t_crit_sq[0];
-        for (k, &v) in row.iter().enumerate() {
-            assert!(
-                v >= unc_sq - 1e-9,
-                "Holm rank {k} threshold {v} is below uncorrected {unc_sq}"
-            );
-        }
-        let last = row[(n_targets - 1) as usize];
-        assert!(
-            ((last - unc_sq) / unc_sq).abs() < 1e-12,
-            "Holm last rank {last} must equal uncorrected {unc_sq}"
-        );
-    }
-
-    #[test]
     fn build_table_posthoc_alpha_default() {
         let crit = CritValues {
             alpha: 0.05,
@@ -1643,47 +1603,11 @@ mod tests {
             rel < 1e-12,
             "Logit uncorrected t_crit_sq = {got}, expected {expected}, rel {rel}"
         );
-    }
 
-    #[test]
-    fn crit_logit_invariant_to_n() {
-        let crit = CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        };
-        let table_small = CritValueTable::build(
-            &crit,
-            &[100_u32],
-            2,
-            1,
-            CorrectionMethod::None,
-            EstimatorSpec::Glm,
-        )
-        .unwrap();
-        let table_large = CritValueTable::build(
-            &crit,
-            &[10_000_u32],
-            2,
-            1,
-            CorrectionMethod::None,
-            EstimatorSpec::Glm,
-        )
-        .unwrap();
-        assert_eq!(
-            table_small.t_crit_sq_uncorrected[0], table_large.t_crit_sq_uncorrected[0],
-            "Wald-z threshold is df-independent"
-        );
-    }
-
-    #[test]
-    fn crit_logit_bonferroni() {
-        let crit = CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        };
+        // Bonferroni over m = 3 targets: z²(1 − α/(2m)) in every slot.
         let table = CritValueTable::build(
             &crit,
-            &[100_u32],
+            &sample_sizes,
             2,
             3,
             CorrectionMethod::Bonferroni,
@@ -1752,152 +1676,6 @@ mod tests {
         );
     }
 
-    /// EstimatorSpec::Mle threshold is df-independent (same for N=100 and N=10000).
-    #[test]
-    fn critvals_lme_invariant_to_n() {
-        let cv = CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        };
-        let tab_small = CritValueTable::build(
-            &cv,
-            &[100_u32],
-            2,
-            1,
-            CorrectionMethod::None,
-            EstimatorSpec::Mle,
-        )
-        .unwrap();
-        let tab_large = CritValueTable::build(
-            &cv,
-            &[10_000_u32],
-            2,
-            1,
-            CorrectionMethod::None,
-            EstimatorSpec::Mle,
-        )
-        .unwrap();
-        assert_eq!(
-            tab_small.t_crit_sq_uncorrected[0], tab_large.t_crit_sq_uncorrected[0],
-            "Wald-z threshold is df-independent for EstimatorSpec::Mle"
-        );
-    }
-
-    /// Boolean-equivalence for the Holm/BH ordering. The hot path compares in
-    /// `t²` space; a naive reference compares in `|t|` space. With the
-    /// deterministic ascending-target-index tie-breaker, the pass/fail
-    /// boolean vectors must match exactly.
-    #[test]
-    fn holm_bh_t2_vs_abs_t_boolean_equivalence() {
-        // Synthetic per-target t² values (one sample size, 5 targets).
-        // Negative t in one entry to expose the |t| vs t² difference under
-        // hypothetical "signed" sorts. With t² the sign drops out, and both
-        // reference paths use |t| then square — equivalence is by construction
-        // once the tie-breaker matches.
-        let t_vals = [1.2_f64, -2.3, 0.7, 3.5, 1.2];
-        let abs_t: Vec<f64> = t_vals.iter().map(|x| x.abs()).collect();
-        let t_sq: Vec<f64> = t_vals.iter().map(|x| x * x).collect();
-
-        let n_targets = t_vals.len();
-        let df = 95.0_f64;
-        let alpha = 0.05_f64;
-
-        // Pre-build the t² thresholds for Holm.
-        let crit_sq: Vec<f64> = (0..n_targets)
-            .map(|k| {
-                let eff = alpha / (2.0 * (n_targets - k) as f64);
-                let t = t_ppf(1.0 - eff, df);
-                t * t
-            })
-            .collect();
-        // And the |t| thresholds for the reference (same numbers, unsquared).
-        let crit_abs: Vec<f64> = (0..n_targets)
-            .map(|k| {
-                let eff = alpha / (2.0 * (n_targets - k) as f64);
-                t_ppf(1.0 - eff, df)
-            })
-            .collect();
-
-        // Sort descending by sort-key; tie-break ascending by index.
-        fn sorted_indices(scores: &[f64]) -> Vec<usize> {
-            let mut idx: Vec<usize> = (0..scores.len()).collect();
-            idx.sort_by(|&a, &b| {
-                scores[b]
-                    .partial_cmp(&scores[a])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(a.cmp(&b))
-            });
-            idx
-        }
-
-        // Holm step-down (Bonferroni-style): walking sorted from largest,
-        // if any position fails its threshold, all subsequent positions fail.
-        fn holm_outcome(order: &[usize], scores: &[f64], thresholds: &[f64]) -> Vec<bool> {
-            let n = scores.len();
-            let mut pass = vec![false; n];
-            let mut cont = true;
-            for (k, &i) in order.iter().enumerate() {
-                if cont && scores[i] > thresholds[k] {
-                    pass[i] = true;
-                } else {
-                    cont = false;
-                }
-            }
-            pass
-        }
-
-        let order_abs = sorted_indices(&abs_t);
-        let order_sq = sorted_indices(&t_sq);
-        assert_eq!(order_abs, order_sq, "tie-broken orders must match");
-
-        let pass_abs = holm_outcome(&order_abs, &abs_t, &crit_abs);
-        let pass_sq = holm_outcome(&order_sq, &t_sq, &crit_sq);
-        assert_eq!(pass_abs, pass_sq, "Holm boolean vectors must match");
-
-        // Now BH step-up: walk sorted from smallest, find largest k whose
-        // score exceeds threshold[k]; all positions at/above pass.
-        let crit_sq_bh: Vec<f64> = (0..n_targets)
-            .map(|k| {
-                let eff = (k + 1) as f64 / n_targets as f64 * alpha / 2.0;
-                let t = t_ppf(1.0 - eff, df);
-                t * t
-            })
-            .collect();
-        let crit_abs_bh: Vec<f64> = (0..n_targets)
-            .map(|k| {
-                let eff = (k + 1) as f64 / n_targets as f64 * alpha / 2.0;
-                t_ppf(1.0 - eff, df)
-            })
-            .collect();
-
-        fn bh_outcome(order: &[usize], scores: &[f64], thresholds: &[f64]) -> Vec<bool> {
-            let n = scores.len();
-            let mut pass = vec![false; n];
-            // order[0] is largest score → BH threshold for rank 1.
-            // BH: rank j has threshold[j] where rank = 1..=m and BH uses
-            //   reject if p_(j) < j*alpha/m → equivalently |t|_(j) > t_crit(j*alpha/m).
-            // Walk from largest score (smallest p) — first pass position k means
-            // all positions 0..=k pass.
-            for (k, &i) in order.iter().enumerate() {
-                let rank_from_largest = n - 1 - k; // largest |t| has BH threshold index n-1
-                if scores[i] > thresholds[rank_from_largest] {
-                    for &j in &order[..=k] {
-                        pass[j] = true;
-                    }
-                }
-            }
-            pass
-        }
-
-        let pass_abs_bh = bh_outcome(&order_abs, &abs_t, &crit_abs_bh);
-        let pass_sq_bh = bh_outcome(&order_sq, &t_sq, &crit_sq_bh);
-        assert_eq!(pass_abs_bh, pass_sq_bh, "BH boolean vectors must match");
-    }
-
-    // -----------------------------------------------------------------
-    // χ²(k) quantiles + LmeIntercept joint critval (joint Wald-χ² plan)
-    // -----------------------------------------------------------------
-
     #[test]
     fn chi2_ppf_edge_cases() {
         assert_eq!(chi2_ppf(0.0, 5.0), 0.0);
@@ -1953,26 +1731,6 @@ mod tests {
             assert!(
                 (v - expected).abs() < 1e-6,
                 "joint critval {v} differs from chi2_ppf(0.95, 2) = {expected}"
-            );
-        }
-    }
-
-    #[test]
-    fn crit_value_table_non_lme_has_nan_joint() {
-        let crit = CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        };
-        let sample_sizes = vec![100_u32];
-        for fam in [EstimatorSpec::Ols, EstimatorSpec::Glm] {
-            let table =
-                CritValueTable::build(&crit, &sample_sizes, 3, 2, CorrectionMethod::None, fam)
-                    .unwrap();
-            assert_eq!(table.joint_t_crit_sq.len(), 1);
-            assert!(
-                table.joint_t_crit_sq[0].is_nan(),
-                "expected NaN joint critval for estimator={fam:?}, got {}",
-                table.joint_t_crit_sq[0]
             );
         }
     }
@@ -2038,27 +1796,6 @@ mod tests {
             table.overall_crit[0],
             expected
         );
-    }
-
-    #[test]
-    fn overall_crit_lme_is_infinity() {
-        let crit = CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        };
-        let table = CritValueTable::build(
-            &crit,
-            &[100_u32, 500],
-            4,
-            1,
-            CorrectionMethod::None,
-            EstimatorSpec::Mle,
-        )
-        .unwrap();
-        assert_eq!(table.overall_crit.len(), 2);
-        for &v in &table.overall_crit {
-            assert!(v.is_infinite() && v > 0.0, "got {v}, expected +inf");
-        }
     }
 
     #[test]
@@ -2145,16 +1882,16 @@ mod tests {
     #[test]
     fn q_tukey_ppf_asymptotic_golden_value() {
         // At df→∞, q_tukey_ppf(0.95, 3) converges to qtukey(0.95, 3, Inf) ≈ 3.314493 (R).
-        // At df=1e6 the approximation error vs Inf is negligible (< 0.001).
+        // At df=1e6 the approximation error vs Inf is negligible (< 1e-5).
         let q_large_df = q_tukey_ppf(0.95, 3.0, 1e6);
         assert!(
-            (q_large_df - 3.314493f64).abs() < 0.01,
+            (q_large_df - 3.314493f64).abs() < 1e-4,
             "q_tukey_ppf(0.95, 3, 1e6) = {q_large_df}, expected ≈ 3.314493 (R qtukey)"
         );
         // Additional point at moderate df: qtukey(0.95, 4, 30) = 3.845401 (R).
         let q_30 = q_tukey_ppf(0.95, 4.0, 30.0);
         assert!(
-            (q_30 - 3.845401f64).abs() < 0.01,
+            (q_30 - 3.845401f64).abs() < 1e-4,
             "q_tukey_ppf(0.95, 4, 30) = {q_30}, expected ≈ 3.845401 (R qtukey)"
         );
     }
@@ -2250,21 +1987,6 @@ mod tests {
             bw.as_ref(),
         )
         .unwrap()
-    }
-
-    /// CRIT-11: the between-within split of a balanced one-way design matches
-    /// the hand arithmetic. N = 40 rows in clusters of 8 ⇒ g = 5; the fitted
-    /// design is intercept + one cluster-level + one within-cluster predictor
-    /// ⇒ p = 3, p_between = 2. So df_resid = 40 − 3 = 37,
-    /// df_between = 5 − 2 = 3, df_within = 37 − 3 = 34.
-    #[test]
-    fn bw_df_of_balanced_one_way_matches_hand_computation() {
-        let spec = bw_two_predictor_spec(
-            EstimatorSpec::Mle,
-            ClusterSizing::FixedSize { cluster_size: 8 },
-        );
-        let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::None, &[]);
-        assert_eq!(table.df_per_target[0], vec![3.0, 34.0]);
     }
 
     /// CRIT-12: the cluster-level target is referred to df_between and the
@@ -2519,6 +2241,12 @@ mod tests {
     /// CRIT-17: the split depends on the design, not the solver — a Gaussian LMM
     /// and a clustered GLMM over the same design get the same per-target df and
     /// the same thresholds.
+    ///
+    /// CRIT-11: the shared split matches the hand arithmetic for a balanced
+    /// one-way design. N = 40 rows in clusters of 8 ⇒ g = 5; the fitted design
+    /// is intercept + one cluster-level + one within-cluster predictor ⇒
+    /// p = 3, p_between = 2. So df_resid = 40 − 3 = 37, df_between = 5 − 2 = 3,
+    /// df_within = 37 − 3 = 34.
     #[test]
     fn bw_df_identical_for_mle_and_clustered_glm() {
         let sizing = ClusterSizing::FixedSize { cluster_size: 8 };

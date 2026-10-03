@@ -1,28 +1,16 @@
-from mcpower.config import (
-    get_config, get_report_config, get_simulation_defaults,
-    get_benchmarks, get_limits, get_cluster_limits,
-)
+from mcpower.config import get_cluster_limits, get_config
 
 
-def test_sections_present():
+def test_cluster_limits_remap_limits_and_auto_count():
+    # get_cluster_limits() is the port's own projection: four keys from
+    # `limits` plus `simulation.cluster_auto_count` renamed to
+    # `auto_count_default`. Literal config values are pinned by engine-contract.
     cfg = get_config()
-    assert set(cfg) >= {"simulation", "benchmarks", "limits", "report", "upload"}
-
-
-def test_simulation_defaults():
-    sim = get_simulation_defaults()
-    assert sim["seed"] == 2137
-    assert sim["alpha"] == 0.05
-    assert sim["target_power"] == 0.8
-    assert sim["n_sims"]["ols"] == 1600
-    assert sim["max_failed_fraction"] == 0.1
-    assert sim["cluster_auto_count"] == 12
-    assert sim["sample_size_bounds"] == {"from": 30, "to": 200, "by": "auto"}
-
-
-def test_limits_and_benchmarks():
-    assert get_limits()["max_alpha"] == 0.25
-    assert get_limits()["factor_levels"] == [2, 20]
-    assert get_benchmarks()["continuous"] == [0.1, 0.25, 0.4]
-    assert get_report_config()["format"]["power_decimals_long"] == 1
-    assert get_cluster_limits()["min_rows_per_cluster"] == 2
+    lim = cfg["limits"]
+    assert get_cluster_limits() == {
+        "min_rows_per_cluster": lim["min_rows_per_cluster"],
+        "min_clusters": lim["min_clusters"],
+        "reliable_rows_per_cluster": lim["reliable_rows_per_cluster"],
+        "recommended_rows_per_cluster": lim["recommended_rows_per_cluster"],
+        "auto_count_default": cfg["simulation"]["cluster_auto_count"],
+    }

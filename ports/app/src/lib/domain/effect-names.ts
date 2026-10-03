@@ -1,6 +1,6 @@
 // Derives displayable effect names, reference-level rows, grouped predictor
-// structure, contrast labels, effect-size presets, and the cfg.effects reconcile
-// from a FamilyConfig and its parsed formula.
+// structure, effect-size presets, and the cfg.effects reconcile from a
+// FamilyConfig and its parsed formula.
 // NOTE: expandMainEffect/expandInteraction are the single source of effect-name derivation shared by UI rows and the engine adapter; a change here changes both surfaces.
 
 import { BENCHMARKS } from '$lib/configs/app-config';
@@ -134,16 +134,11 @@ function variableRows(name: string, v: VariableRow | undefined): EffectRowMeta[]
   ];
 }
 
-export function effectRows(cfg: FamilyConfig): EffectRowMeta[] {
-  const g = effectGroups(cfg);
-  return [...g.variables.flatMap((v) => v.rows), ...g.interactions.flatMap((i) => i.rows)];
-}
-
 // ---------------------------------------------------------------------------
 // Grouped projection — one entry per variable, then one per interaction term.
-// The card UI (PredictorCards) consumes this instead of the flat effectRows so
-// the grouping (and the factor-interaction flag that drives the hint) lives here
-// next to the name derivation rather than being string-sniffed in the component.
+// The card UI (PredictorCards) consumes this, so the grouping (and the
+// factor-interaction flag that drives the hint) lives here next to the name
+// derivation rather than being string-sniffed in the component.
 // ---------------------------------------------------------------------------
 
 export interface VariableGroup {
@@ -279,22 +274,4 @@ export function presetsFor(
   if (name.includes(':')) return CONTINUOUS_PRESETS;
   const v = variables.find((x) => x.name === name);
   return v && (v.kind === 'binary' || v.kind === 'factor') ? COHEN_PRESETS : CONTINUOUS_PRESETS;
-}
-
-export function contrastNames(cfg: FamilyConfig): string[] {
-  const byName = new Map(cfg.variables.map((v) => [v.name, v]));
-  const out: string[] = [];
-  for (const name of predictorNames(cfg)) {
-    const v = byName.get(name);
-    // ANOVA auto-contrasts only its primary factors, never covariate-factors.
-    if (cfg.family === 'anova' && v?.role === 'covariate') continue;
-    const levels = factorLevels(v);
-    if (levels.length < 2) continue;
-    for (let i = 0; i < levels.length; i++) {
-      for (let j = i + 1; j < levels.length; j++) {
-        out.push(`${name}[${levels[i]}] − ${name}[${levels[j]}]`);
-      }
-    }
-  }
-  return out;
 }

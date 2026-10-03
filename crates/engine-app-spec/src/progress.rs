@@ -37,7 +37,7 @@ impl<'a> ProgressSink for EmitterSink<'a> {
 /// `ProgressEvent` union in `ports/wasm/src/types.ts` (WASM worker pool) and
 /// `ports/app/src/lib/domain/result.ts` (Tauri/app listener). Any rename or new
 /// `kind` value must be mirrored in both.
-pub fn serialize_event(event: ProgressEvent) -> Value {
+fn serialize_event(event: ProgressEvent) -> Value {
     match event {
         ProgressEvent::Started {
             total_sims,

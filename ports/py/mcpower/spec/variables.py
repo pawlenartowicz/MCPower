@@ -225,10 +225,6 @@ class VariableRegistry:
         """Get predictor by name."""
         return self._predictors.get(name)
 
-    def get_effect(self, name: str) -> Optional[Effect]:
-        """Get effect by name."""
-        return self._effects.get(name)
-
     def set_variable_type(self, name: str, var_type: str, **kwargs) -> None:
         """
         Set the distribution type for a predictor variable.

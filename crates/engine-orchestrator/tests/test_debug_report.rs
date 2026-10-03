@@ -61,11 +61,19 @@ fn debug_report_input_stage_resolves() {
     let report = debug_report(&c, 42, 100, 50, mask).unwrap();
     let inp = report.input.expect("input present");
     assert_eq!(inp.resolved_alpha, c.test.alpha);
-    // Effect names are synthesized positional labels.
-    assert!(inp
-        .effective_effects
-        .iter()
-        .all(|(name, _)| name.starts_with("col_") || name == "intercept"));
+    // Effect sizes by synthesized positional label: the intercept slot, then
+    // the single Direct column with its contract coefficient (D-E).
+    assert_eq!(
+        inp.effective_effects,
+        vec![("intercept".to_string(), 0.0), ("col_1".to_string(), 0.5)]
+    );
+    // The echoed contract fills the omitted design_test with design_generation.
+    assert!(c.design_test.is_none(), "fixture leaves design_test unset");
+    assert_eq!(
+        inp.contract.design_test.as_ref(),
+        Some(&c.design_generation),
+        "design_test defaults to design_generation"
+    );
 }
 
 #[test]

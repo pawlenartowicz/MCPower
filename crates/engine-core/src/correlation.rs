@@ -295,7 +295,12 @@ mod tests {
             "fallback should have been used"
         );
 
-        // Reconstruct L · Lᵀ; assert PSD with unit diagonal.
+        // Reconstruct L · Lᵀ and compare with the hand-computed repair. The
+        // input has eigenvalues {−0.8, 1.9, 1.9}, the negative one along
+        // v = (1, −1, −1)/√3. Clipping it to the floor (≈ 0) adds 0.8·vvᵀ:
+        // diagonal 1 + 0.8/3, off-diagonals ±(0.9 − 0.8/3). Renormalising to a
+        // unit diagonal gives off-diagonals ±0.6333…/1.2666… = ±0.5 (the 1e-10
+        // floor moves them by ~4e-11).
         let mut recon = Mat::<f64>::zeros(3, 3);
         for i in 0..3 {
             for j in 0..3 {
@@ -306,28 +311,15 @@ mod tests {
                 recon[(i, j)] = acc;
             }
         }
-        for i in 0..3 {
-            assert!(
-                approx_eq(recon[(i, i)], 1.0, 1e-9),
-                "diag {i} = {}",
-                recon[(i, i)]
-            );
-        }
-        // Symmetry of reconstruction.
+        let expected = [[1.0, 0.5, 0.5], [0.5, 1.0, -0.5], [0.5, -0.5, 1.0]];
         for i in 0..3 {
             for j in 0..3 {
                 assert!(
-                    approx_eq(recon[(i, j)], recon[(j, i)], 1e-9),
-                    "asymm ({i},{j})"
+                    approx_eq(recon[(i, j)], expected[i][j], 1e-9),
+                    "repaired ({i},{j}) = {}, expected {}",
+                    recon[(i, j)],
+                    expected[i][j]
                 );
-            }
-        }
-        // Off-diagonals must be within [-1, 1].
-        for i in 0..3 {
-            for j in 0..3 {
-                if i != j {
-                    assert!(recon[(i, j)] >= -1.0 - 1e-9 && recon[(i, j)] <= 1.0 + 1e-9);
-                }
             }
         }
     }
@@ -343,44 +335,6 @@ mod tests {
                 let expected = if i == j { 1.0 } else { 0.0 };
                 assert_eq!(m[(i, j)], expected, "({i},{j})");
             }
-        }
-    }
-
-    /// CORR-07: after repairing an indefinite matrix, the reconstructed
-    /// `L·Lᵀ` is PSD — all its eigenvalues are ≥ 0 (within tolerance). The
-    /// spectral clip in the EVD repair path must enforce this; a broken clip
-    /// that left a negative eigenvalue would fail.
-    #[test]
-    fn psd_repair_reconstruction_is_psd() {
-        let original = mat_from_rows(3, &[&[1.0, 0.9, 0.9], &[0.9, 1.0, -0.9], &[0.9, -0.9, 1.0]]);
-        let mut m = original.clone();
-        let mut scratch = EvdScratch::new();
-        psd_repair_and_factor(m.as_mut(), &mut scratch).unwrap();
-        assert_eq!(scratch.evd_repair_count, 1);
-
-        // Reconstruct L·Lᵀ.
-        let mut recon = Mat::<f64>::zeros(3, 3);
-        for i in 0..3 {
-            for j in 0..3 {
-                let mut acc = 0.0;
-                for k in 0..3 {
-                    acc += m[(i, k)] * m[(j, k)];
-                }
-                recon[(i, j)] = acc;
-            }
-        }
-        // Eigenvalues of the reconstructed (symmetric) matrix must all be ≥ 0.
-        let evd = recon
-            .as_ref()
-            .self_adjoint_eigen(Side::Lower)
-            .expect("self-adjoint EVD of reconstructed symmetric matrix");
-        let s = evd.S().column_vector();
-        for k in 0..3 {
-            let lambda: f64 = s[k];
-            assert!(
-                lambda >= -1e-9,
-                "reconstructed matrix has a negative eigenvalue {lambda}; spectral clip failed"
-            );
         }
     }
 

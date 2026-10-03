@@ -154,126 +154,15 @@ mod tests {
     use faer::Mat;
     use glmm::loop_advanced::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
 
-    /// EST-29: posthoc pass/fail is monotone in the uncorrected threshold —
-    /// lowering the threshold can only turn failures into passes, never the
-    /// reverse. So the pass set at a low threshold is a superset of the pass
-    /// set at a high threshold (per-target, t² > crit_sq comparison). No
-    /// contrast t² value is pinned — only the ordering invariant.
-    #[test]
-    fn posthoc_pass_monotone_in_threshold() {
-        let n = 200;
-        let p = 4; // intercept, x_cont, dummy_a, dummy_b
-        let mut rng = SimRng::new(42, 1);
-        let mut x = Mat::<f64>::zeros(n, p);
-        for i in 0..n {
-            x[(i, 0)] = 1.0;
-            x[(i, 1)] = rng.next_normal() as f64;
-            let lvl = i % 3;
-            x[(i, 2)] = if lvl == 1 { 1.0 } else { 0.0 };
-            x[(i, 3)] = if lvl == 2 { 1.0 } else { 0.0 };
-        }
-        let true_beta = [0.0f64, 0.5, 0.4, -0.3];
-        let mut y = vec![0.0f64; n];
-        for i in 0..n {
-            let mut s = 0.0f64;
-            for j in 0..p {
-                s += x[(i, j)] * true_beta[j];
-            }
-            y[i] = s + rng.next_normal() as f64 * 0.5;
-        }
-
-        let mut ws = SimWorkspace::new(n, p, 1, 1, None);
-        ws.reset_suff_stats();
-        {
-            let mut s = OlsSuffStats {
-                xtx: ws.suff_xtx.as_mut(),
-                xty: &mut ws.suff_xty,
-                yty: &mut ws.suff_yty,
-                sum_y: &mut ws.suff_sum_y,
-                n_rows: &mut ws.suff_n_rows,
-                panel_x: &mut ws.panel_x,
-                panel_y: &mut ws.panel_y,
-            };
-            s.add_rows(x.as_ref(), &y);
-        }
-        let scratch = OlsScratch {
-            fit_betas: &mut ws.fit_betas,
-            fit_var_diag: &mut ws.fit_var_diag,
-            fit_t_sq: &mut ws.fit_t_sq,
-            fit_u_scratch: &mut ws.fit_u_scratch,
-            fit_factor: ws.fit_factor.as_mut(),
-            fit_rhs: ws.fit_rhs.as_mut(),
-        };
-        let ols = fit_suff_stats_t_sq(
-            ws.suff_xtx.as_ref(),
-            &ws.suff_xty,
-            ws.suff_yty,
-            ws.suff_sum_y,
-            ws.suff_n_rows,
-            &[2, 3],
-            ws.suff_xtx_work.as_mut(),
-            scratch,
-        );
-        assert!(ols.converged);
-
-        // c1 = dummy_a (e_2); c2 = dummy_a − dummy_b (e_2 − e_3).
-        let contrasts = vec![vec![0.0, 0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0, -1.0]];
-
-        let mut t_sq_scratch: Vec<f64> = Vec::new();
-        let mut u_scratch = vec![0.0_f64; p];
-
-        // Very high threshold → expect (almost) no passes; very low → all pass.
-        let mut high_unc = vec![0u8; 2];
-        let mut high_cor = vec![0u8; 2];
-        evaluate_posthoc(
-            &ols,
-            &contrasts,
-            1e12,
-            CorrectionMethod::None,
-            &[1e12, 1e12],
-            &mut t_sq_scratch,
-            &mut u_scratch,
-            &mut high_unc,
-            &mut high_cor,
-        );
-
-        let mut low_unc = vec![0u8; 2];
-        let mut low_cor = vec![0u8; 2];
-        evaluate_posthoc(
-            &ols,
-            &contrasts,
-            0.0,
-            CorrectionMethod::None,
-            &[0.0, 0.0],
-            &mut t_sq_scratch,
-            &mut u_scratch,
-            &mut low_unc,
-            &mut low_cor,
-        );
-
-        // Monotonicity: a target passing at the high threshold must also pass
-        // at the low threshold (superset relation).
-        for t in 0..2 {
-            assert!(
-                low_unc[t] >= high_unc[t],
-                "target {t}: lowering the threshold must not flip a pass to a fail"
-            );
-        }
-        // At threshold 0 every (finite, positive) t² passes.
-        assert_eq!(low_unc, vec![1, 1], "all contrasts pass at threshold 0");
-        // At an astronomically high threshold none pass.
-        assert_eq!(high_unc, vec![0, 0], "no contrast passes at threshold 1e12");
-    }
-
     /// Posthoc contrast **golden** on a 3-level factor + continuous covariate,
     /// pinned against an external R `lm` oracle (scripts/posthoc_contrast_golden.R).
     /// The 12-row fixture has reference level A (rows 0–3), level B (4–7), level
     /// C (8–11). For each contrast `c` the engine's squared statistic is
     /// `t² = (c·β̂)² / (σ̂²·‖L⁻¹c‖²)` with σ̂² = RSS/(n−p) — identical to R's OLS
-    /// contrast t². The crit-boundary sandwich pins each t² to ±1e-5 relative;
-    /// a separate Bonferroni call pins the corrected pass/fail pattern and the
-    /// malformed-contrast skip — the corrected path the monotone test leaves
-    /// untraced.
+    /// contrast t². The crit-boundary sandwich pins each t² to ±1e-5 relative
+    /// (and with it the uncorrected pass/fail at any threshold); a separate
+    /// Bonferroni call pins the corrected pass/fail pattern and the
+    /// malformed-contrast skip.
     #[test]
     fn posthoc_contrast_golden_three_level_factor() {
         // Fixture + goldens generated by scripts/posthoc_contrast_golden.R.

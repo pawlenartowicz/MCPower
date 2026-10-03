@@ -9,7 +9,7 @@
 //! counts (merge-safe by construction). Fit quality rests on the CRN
 //! row-stable prefix-nesting invariant (adjacent grid points share rows, so
 //! the series is smooth and near-monotone); see the curve-quality guard tests
-//! `rng_rows_stable_across_max_n` and `cluster_draws_precede_row_loop` in
+//! `d1_step2_prefix_stable_across_max_n` and `cluster_draws_precede_row_loop` in
 //! engine-core.
 //!
 //! **Barlow72** = Barlow, Bartholomew, Bremner & Brunk (1972), *Statistical

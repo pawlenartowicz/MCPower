@@ -40,8 +40,8 @@ test('mixed find-power happy path renders bars', async ({ page }) => {
   await expect(page.getByTestId('bar-x')).toBeVisible();
 
   // The mock always returns convergence_rate = 1.0, which is >= 0.95 threshold,
-  // so the convergence notice should NOT appear.
-  await expect(page.getByTestId('convergence-notice')).not.toBeVisible();
+  // so the diagnostics badge reports all clear (no convergence warning).
+  await expect(page.getByTestId('diagnostics-badge')).toContainText(/all clear/);
 });
 
 test('a second (1|item) term renders a crossed cluster card and runs', async ({ page }) => {

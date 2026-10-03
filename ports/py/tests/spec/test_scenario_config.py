@@ -77,14 +77,24 @@ def test_build_scenario_dict_emits_lme_keys_from_realistic():
 
 
 def test_set_scenario_configs_accepts_lme_keys():
-    """After removing the lme-key ValueError, set_scenario_configs accepts them."""
+    """The random-effect scenario knobs are accepted and stored as given."""
     from mcpower import MCPower
 
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.3")
-    # Must not raise
-    m.set_scenario_configs({"optimistic": {"icc_noise_sd": 0.1}})
-    assert m._scenario_configs["optimistic"]["icc_noise_sd"] == pytest.approx(0.1)
+    m.set_scenario_configs(
+        {
+            "optimistic": {
+                "icc_noise_sd": 0.1,
+                "random_effect_dist": "heavy_tailed",
+                "random_effect_df": 7,
+            }
+        }
+    )
+    cfg = m._scenario_configs["optimistic"]
+    assert cfg["icc_noise_sd"] == pytest.approx(0.1)
+    assert cfg["random_effect_dist"] == "heavy_tailed"
+    assert cfg["random_effect_df"] == 7
 
 
 def test_optimistic_preset_has_truth_start_true():

@@ -7,11 +7,10 @@
 //! contributes only the driver.
 //! The `/exp(γ²/2)` factor preserves mean residual variance for a normal driver.
 
+mod common;
+
 use engine_core::data_gen::generate_sim_data;
-use engine_core::spec::{
-    CorrectionMethod, CritValues, Distribution, EstimatorSpec, HeteroskedasticityCoeffs,
-    OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
-};
+use engine_core::spec::{Distribution, ScenarioPerturbations, SimulationSpec};
 use engine_core::workspace::SimWorkspace;
 
 /// Two zero-mean unit-variance uncorrelated normal predictors; β = (0, 0.5, 0.3).
@@ -21,53 +20,17 @@ use engine_core::workspace::SimWorkspace;
 fn make_spec(driver: Option<u32>, lambda: f64) -> SimulationSpec {
     let mut s = SimulationSpec {
         n_non_factor: 2,
-        n_factor_dummies: 0,
         correlation: vec![1.0, 0.0, 0.0, 1.0],
         var_types: vec![Distribution::Normal, Distribution::Normal],
-        var_pinned: vec![],
         var_params: vec![0.0, 0.0],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
-        upload_data: vec![],
-        upload_data_shape: (0, 0),
-        bootstrap_frame_map: vec![],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         effect_sizes: vec![0.0, 0.5, 0.3],
         target_indices: vec![1, 2],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
-        crit_values: CritValues {
-            alpha: 0.05,
-            posthoc_alpha: None,
-        },
         heteroskedasticity_driver: driver,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
-        max_failed_fraction: 0.1,
-        cluster: None,
         scenario: ScenarioPerturbations {
             heteroskedasticity_ratio: lambda,
             ..ScenarioPerturbations::optimistic()
         },
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     };
     s.het_coeffs = s.compute_het_coeffs();
     s
@@ -94,52 +57,38 @@ fn coeffs_populate_lp_and_per_column_moments() {
     assert_eq!(s.het_coeffs.col_std, vec![0.0, 1.0, 1.0]);
 }
 
+/// Exact per-row residual multiplier for the linear-predictor driver: with the
+/// same raw CLASS_RESID draws (λ = 1 leaves them unscaled), the λ = 4 residual
+/// is `ε₁ᵢ·sqrt(exp(γ·zᵢ)/exp(γ²/2))`. The `/exp(γ²/2)` renormalisation keeps
+/// E[Var(ε)] = σ² as λ moves (exact in expectation for a normal driver), and
+/// dropping it shifts every row by exp(γ²/4) ≈ 3% at λ = 4, far outside the
+/// f32 rounding tolerance used here.
 #[test]
 fn residual_scale_matches_exp_form_for_lp_driver() {
     let lambda = 4.0_f64;
+    let spec_off = make_spec(None, 1.0);
     let spec = make_spec(None, lambda);
     let n_pred = 3;
     let n = 400;
+    let mut ws_off = SimWorkspace::new(n, n_pred, 2, 0, None);
     let mut ws = SimWorkspace::new(n, n_pred, 2, 0, None);
+    generate_sim_data(&spec_off, 0, 42, &mut ws_off).unwrap();
     generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
 
     let mu = spec.het_coeffs.lp_pop_mean;
     let sd = spec.het_coeffs.lp_pop_std;
     let gamma = lambda.ln() / 4.0;
     let inv_norm = (-gamma * gamma / 2.0).exp();
-    let mut unscaled_sq = 0.0;
     for i in 0..n {
-        // x_full and residuals are f32 (data plane); widen to f64 for stats.
+        // x_full and residuals are f32 (data plane); widen to f64.
         let lp = 0.5 * ws.x_full[(i, 1)] as f64 + 0.3 * ws.x_full[(i, 2)] as f64;
         let z = (lp - mu) / sd;
         let mult = (gamma * z).exp() * inv_norm;
-        let raw = ws.residuals[i] as f64 / mult.sqrt();
-        unscaled_sq += raw * raw;
-    }
-    let var = unscaled_sq / n as f64;
-    // After dividing out the exact per-row multiplier the residuals are standard
-    // normal again; var ≈ 1 within sampling noise at n=400.
-    assert!((var - 1.0).abs() < 0.3, "unscaled residual var = {var}");
-}
-
-#[test]
-fn mean_residual_variance_preserved_across_lambda() {
-    // The /exp(γ²/2) renormalization keeps E[Var(ε)] = σ² = 1 as λ moves, so
-    // dialing heteroskedasticity does not change total noise. Exact in expectation
-    // for a normal driver; checked as mean(residualᵢ²) ≈ 1.
-    let n_pred = 3;
-    let n = 4000;
-    for &lambda in &[1.0_f64, 2.0, 4.0] {
-        let spec = make_spec(None, lambda);
-        let mut ws = SimWorkspace::new(n, n_pred, 2, 0, None);
-        generate_sim_data(&spec, 7, 2024, &mut ws).unwrap();
-        let mean_sq: f64 = (0..n)
-            .map(|i| (ws.residuals[i] * ws.residuals[i]) as f64)
-            .sum::<f64>()
-            / n as f64;
+        let expected = ws_off.residuals[i] as f64 * mult.sqrt();
+        let got = ws.residuals[i] as f64;
         assert!(
-            (mean_sq - 1.0).abs() < 0.1,
-            "λ={lambda}: mean residual² = {mean_sq}, expected ≈ 1.0"
+            (got - expected).abs() <= 1e-6 * expected.abs().max(1e-3),
+            "row {i}: residual {got}, expected {expected}"
         );
     }
 }

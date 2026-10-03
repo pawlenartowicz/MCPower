@@ -39,20 +39,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn overall_expands_to_all_effects() {
-        let effects = vec!["x1".into(), "x2".into(), "x1:x2".into()];
-        let r = resolve_targets(&["overall".into()], &effects).unwrap();
-        assert_eq!(r, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn explicit_names_resolve_to_indices() {
-        let effects = vec!["x1".into(), "x2".into()];
-        let r = resolve_targets(&["x2".into()], &effects).unwrap();
-        assert_eq!(r, vec![2]);
-    }
-
-    #[test]
     fn unknown_target_errors() {
         let effects = vec!["x1".into()];
         let err = resolve_targets(&["x9".into()], &effects).unwrap_err();

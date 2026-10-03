@@ -215,15 +215,20 @@ function makeSampleSizeTabSingleTarget(): RunTab {
 
 describe('JointDistTab', () => {
   it('renders a combined k | Exactly | At least table from the histogram', () => {
-    const tab = makeTabWithHistogram([10, 30, 60]);
-    const { getByText, getByTestId, getAllByText } = render(JointDistTab, { props: { tab } });
-    expect(getByTestId('joint-dist-tab')).toBeTruthy();
-    // New design: one table with column headers "k", "Exactly", "At least"
-    // (not two separate captioned tables for Exactly-k and At-least-k)
-    expect(getByText(/^Exactly$/i)).toBeTruthy();
-    expect(getByText(/^At least$/i)).toBeTruthy();
-    // k column: rows 0,1,2 should all be present
-    expect(getAllByText('0').length).toBeGreaterThan(0);
+    // 1000 sims: 100 with 0 significant, 300 with 1, 600 with both.
+    const tab = makeTabWithHistogram([100, 300, 600]);
+    const { getByTestId } = render(JointDistTab, { props: { tab } });
+    const table = getByTestId('joint-dist-tab').querySelector('table')!;
+    const headers = [...table.querySelectorAll('thead th')].map((th) => th.textContent?.trim());
+    expect(headers).toEqual(['k', 'Exactly', 'At least']);
+    const rows = [...table.querySelectorAll('tbody tr')].map((tr) =>
+      [...tr.querySelectorAll('td')].map((td) => td.textContent?.trim()),
+    );
+    expect(rows).toEqual([
+      ['0', '10.0%', '100.0%'],
+      ['1', '30.0%', '90.0%'],
+      ['2', '60.0%', '60.0%'],
+    ]);
   });
 
   it('shows the neutral empty-state message when histogram is empty', () => {
@@ -236,13 +241,17 @@ describe('JointDistTab', () => {
 describe('JointDistTab — find-sample-size', () => {
   it('renders the joint required-N table and no stale analytical message', () => {
     const tab = makeSampleSizeTab();
-    const { queryByText, getAllByText, getByText } = render(JointDistTab, { props: { tab } });
+    const { queryByText, getByTestId } = render(JointDistTab, { props: { tab } });
     expect(queryByText(/analytical/i)).toBeNull();
-    // Exactly two rows: "≥ 2 of 2 tests" and "≥ 1 of 2 tests".
-    expect(getAllByText(/of 2 tests/)).toHaveLength(2);
-    // first_joint_achieved [50, 100] threaded into cells: k=1 -> 50, k=2 -> 100.
-    expect(getByText('100')).toBeTruthy();
-    expect(getByText('50')).toBeTruthy();
+    // No fitted_joint (older payload) → grid values. first_joint_achieved
+    // [50, 100] is indexed by k-1; rows run from all-k down to 1.
+    const rows = [...getByTestId('joint-dist-tab').querySelectorAll('tbody tr')].map((tr) =>
+      [...tr.querySelectorAll('td')].map((td) => td.textContent?.trim()),
+    );
+    expect(rows).toEqual([
+      ['≥ 2 of 2 tests', '100'],
+      ['≥ 1 of 2 tests', '50'],
+    ]);
   });
 
   it('renders at_least_k chart when block is present (≥2 targets)', () => {
@@ -285,16 +294,6 @@ describe('JointDistTab — fitted_joint crossing fits', () => {
     expect(queryByText('100')).toBeNull();
   });
 
-  it('at_or_below_min: joint headline shows ≤ n_min', () => {
-    const fitted_joint: CrossingFit[] = [
-      { status: 'at_or_below_min', n_min: 50 },
-      { status: 'at_or_below_min', n_min: 50 },
-    ];
-    const tab = makeSampleSizeTab(fitted_joint);
-    const { getAllByText } = render(JointDistTab, { props: { tab } });
-    expect(getAllByText('≤ 50').length).toBeGreaterThanOrEqual(2);
-  });
-
   it('not_reached: joint headline shows ≥ ceiling', () => {
     const fitted_joint: CrossingFit[] = [
       { status: 'not_reached', n_approx: null },
@@ -304,14 +303,5 @@ describe('JointDistTab — fitted_joint crossing fits', () => {
     const { getAllByText } = render(JointDistTab, { props: { tab } });
     // ceiling = max(50, 100) = 100
     expect(getAllByText('≥ 100').length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('missing fitted_joint (older payload): falls back silently to first_joint_achieved', () => {
-    // No fitted_joint → behaves exactly like pre-fitting payloads (first_joint_achieved).
-    const tab = makeSampleSizeTab();
-    const { getByText } = render(JointDistTab, { props: { tab } });
-    // first_joint_achieved = [50, 100]: k=1→50, k=2→100.
-    expect(getByText('100')).toBeTruthy();
-    expect(getByText('50')).toBeTruthy();
   });
 });

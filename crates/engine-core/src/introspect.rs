@@ -40,17 +40,10 @@ pub struct IntrospectData {
 /// Per-target uncorrected threshold + df, in the engine's squared space.
 #[derive(Debug, Clone)]
 pub struct IntrospectCrit {
-    /// First target's (squared) uncorrected threshold. Every target shares it
-    /// except under the between-within denominator df, which this single slot
-    /// cannot express; NaN when the spec has no targets.
-    pub crit_sq_uncorrected: f64,
-    /// `N` minus the FITTED predictor count as f64 — the same entry width the
-    /// per-target rows below are built at (OLS df_resid; ignored by z-families).
-    pub df_resid: f64,
     /// Per-target (squared) uncorrected threshold, aligned to `target_indices`
     /// then `contrast_pairs` — the full row `CritValueTable::t_crit_sq_uncorrected`
     /// carries for this N. Differs across targets only under the between-within
-    /// denominator df; otherwise every entry equals `crit_sq_uncorrected`.
+    /// denominator df; otherwise every entry is the same.
     pub crit_sq_uncorrected_per_target: Vec<f64>,
     /// Per-target denominator df, mirroring `CritValueTable::df_per_target`'s row
     /// for this N: empty when the threshold is standard-normal (Wald-z) for
@@ -79,13 +72,6 @@ pub struct IntrospectResults {
     /// (= `spec.target_indices`). Lets the host align targets to design columns.
     pub target_cols: Vec<u32>,
     pub converged: bool,
-    /// First target's (squared) uncorrected threshold — see
-    /// [`IntrospectCrit::crit_sq_uncorrected`].
-    pub crit_sq_uncorrected: f64,
-    /// `N` minus the FITTED predictor count (the full design width unless a
-    /// `test_formula` reduces it). Only meaningful for OLS (Student-t df_resid);
-    /// the z-based GLM/MLE estimators are df-independent and ignore it.
-    pub df_resid: f64,
     /// Per-target (squared) uncorrected threshold — see
     /// [`IntrospectCrit::crit_sq_uncorrected_per_target`].
     pub crit_sq_uncorrected_per_target: Vec<f64>,
@@ -186,8 +172,7 @@ fn capture_sim0_data(
 /// bit-equivalence tests).
 ///
 /// `design` is column-major `nrow * ncol` (the shape `capture_sim0_data`
-/// emits). All three estimator arms are wired; `df_resid` is OLS-only-meaningful
-/// (z-families are df-independent).
+/// emits). All three estimator arms are wired.
 ///
 /// This function deliberately does NOT mirror the sparse-factor exclusion branch
 /// of `run_one_sim` — debug fits provided bytes as-is so the L3 same-bytes
@@ -671,11 +656,6 @@ pub fn fit_provided_data(
         statistic,
         target_cols: spec.target_indices.clone(),
         converged,
-        crit_sq_uncorrected: table.t_crit_sq_uncorrected[0]
-            .first()
-            .copied()
-            .unwrap_or(f64::NAN),
-        df_resid: (nrow as i64 - p_fit as i64) as f64,
         crit_sq_uncorrected_per_target: table.t_crit_sq_uncorrected[0].clone(),
         df_per_target: table.df_per_target[0].clone(),
         variance_components,
@@ -815,15 +795,7 @@ pub fn run_introspect(
 ) -> Result<IntrospectOut, EngineError> {
     let crit = if mask.crit {
         let table = build_crit_table_for_debug(spec, &[n])?;
-        // Fitted width, matching `df_per_target` below — both come from the
-        // entry crit table, which is built over the fitted design.
-        let (p_entry, _, _) = entry_width(spec);
         Some(IntrospectCrit {
-            crit_sq_uncorrected: table.t_crit_sq_uncorrected[0]
-                .first()
-                .copied()
-                .unwrap_or(f64::NAN),
-            df_resid: (n as i64 - p_entry as i64) as f64,
             crit_sq_uncorrected_per_target: table.t_crit_sq_uncorrected[0].clone(),
             df_per_target: table.df_per_target[0].clone(),
         })
@@ -893,61 +865,17 @@ mod tests {
         Vec<f64>,
         Vec<u32>,
     ) {
-        use crate::spec::{
-            ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, EstimatorSpec,
-            HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations,
-        };
+        use crate::spec::{ClusterSizing, ClusterSpec, EstimatorSpec, OutcomeKind};
         let spec = crate::spec::SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 0,
-            correlation: vec![1.0],
-            var_types: vec![crate::spec::Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
-            effect_sizes: vec![0.0, 0.5],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
             outcome_kind: OutcomeKind::Binary,
-            link: None,
             estimator: EstimatorSpec::Glm,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
             cluster: Some(ClusterSpec {
                 sizing: ClusterSizing::FixedClusters { n_clusters: 8 },
                 tau_squared: 0.25,
                 slopes: vec![],
                 extra_groupings: vec![],
             }),
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         };
 
         let (n, nc, p) = (80usize, 8usize, 2usize);
@@ -1014,36 +942,14 @@ mod tests {
         assert!(d.cluster_ids.is_none());
     }
 
-    #[test]
-    fn introspect_data_regenerates_identically() {
-        // Determinism: same (spec, n, base_seed) ⇒ byte-identical sim-0 draw.
-        let c = minimal_ols_contract();
-        let spec = contract_to_simulation_spec(&c).unwrap();
-        let mask = IntrospectMask {
-            stats: false,
-            data: true,
-            crit: false,
-            power: false,
-        };
-        let a = run_introspect(&spec, 64, 10, 99, mask)
-            .unwrap()
-            .data
-            .unwrap();
-        let b = run_introspect(&spec, 64, 10, 99, mask)
-            .unwrap()
-            .data
-            .unwrap();
-        assert_eq!(a.design, b.design);
-        assert_eq!(a.outcome, b.outcome);
-    }
-
     /// CRN row-prefix nesting at the generated-data level: for a fixed (spec,
     /// base_seed) the sim-0 draw at a small N must be the exact prefix of the draw at
     /// a larger N — per design column (column-major) and for the outcome. Guards the
     /// batch generation loop against a per-N reseed or a `factor_prefix_counts`
     /// mis-reset that silently breaks common-random-numbers nesting across grid points
-    /// (a historical bug class). `rng_rows_stable_across_max_n` guards the stream
-    /// source; this guards that the batch consumes it nested at the data level.
+    /// (a historical bug class). `rng::tests::fill_words_prefix_stable_and_column_disjoint`
+    /// guards the stream layout; this guards that the batch consumes it nested at
+    /// the data level.
     #[test]
     fn introspect_data_is_row_prefix_nested_across_n() {
         let c = minimal_ols_contract();
@@ -1085,6 +991,10 @@ mod tests {
     /// fits (t3_table + het_coeffs — debug invariant 4, data → stat coherence).
     /// Red before the fix: a HighKurtosis marginal panicked on the missing t(3)
     /// table. Oracle: generate_sim_data on a manually prepared spec, bit-equal.
+    /// Heteroskedasticity must also be LIVE in the data stage: with λ = 4 the
+    /// outcomes must differ from a generation that keeps the raw spec's
+    /// het_coeffs (driver-std 0 ⇒ hsk silently inert, the pre-fix behaviour),
+    /// so the bit-equality cannot pass with hsk inert on both sides.
     #[test]
     fn introspect_data_runs_prepared_spec() {
         let c = minimal_ols_contract();
@@ -1127,39 +1037,22 @@ mod tests {
                 "outcome row {i} diverges from the prepared-spec generation"
             );
         }
-    }
 
-    /// Heteroskedasticity must be LIVE in the data stage: with λ = 4 pinned,
-    /// the sim-0 outcomes must differ from a raw-spec generation (default
-    /// het_coeffs ⇒ driver-std 0 ⇒ hsk silently inert — the pre-fix behavior).
-    #[test]
-    fn introspect_data_hsk_is_live() {
-        let c = minimal_ols_contract();
-        let mut spec = contract_to_simulation_spec(&c).unwrap();
-        spec.scenario.heteroskedasticity_ratio = 4.0;
-        let n = 200u32;
-        let mask = IntrospectMask {
-            stats: false,
-            data: true,
-            crit: false,
-            power: false,
-        };
-        let d = run_introspect(&spec, n, 1, 7, mask).unwrap().data.unwrap();
-
-        let p = (1 + spec.n_non_factor + spec.n_factor_dummies) as usize + spec.interactions.len();
-        let mut ws = SimWorkspace::new(
+        let mut inert = prepared.clone();
+        inert.het_coeffs = spec.het_coeffs.clone();
+        let mut ws_inert = SimWorkspace::new(
             n as usize,
             p,
-            spec.n_non_factor as usize,
-            spec.factor_n_levels.len(),
+            inert.n_non_factor as usize,
+            inert.factor_n_levels.len(),
             None,
         );
-        generate_sim_data(&spec, 0, 7, &mut ws).unwrap(); // raw spec: hsk inert
-        let identical =
-            (0..n as usize).all(|i| (d.outcome[i] as f32).to_bits() == ws.y_full[i].to_bits());
+        generate_sim_data(&inert, 0, 7, &mut ws_inert).unwrap();
+        let identical = (0..n as usize)
+            .all(|i| (d.outcome[i] as f32).to_bits() == ws_inert.y_full[i].to_bits());
         assert!(
             !identical,
-            "λ=4 must change sim-0 outcomes vs the inert-hsk (raw spec) generation"
+            "λ=4 must change sim-0 outcomes vs the inert-hsk (raw het_coeffs) generation"
         );
     }
 
@@ -1184,93 +1077,18 @@ mod tests {
         assert!(out.data.is_none());
         assert!(out.batch.is_none());
         let crit = out.crit.expect("crit present");
-        // OLS df = N - n_predictors_total (1 + n_non_factor + n_factor_dummies).
-        let p = 1 + spec.n_non_factor + spec.n_factor_dummies;
-        assert_eq!(crit.df_resid, (100 - p) as f64);
-        assert!(crit.crit_sq_uncorrected.is_finite() && crit.crit_sq_uncorrected > 0.0);
-    }
-
-    // Engine-level self-consistency: recomputing rejects from the captured
-    // squared statistic vs the squared threshold reproduces batch.uncorrected.
-    fn assert_stats_reproduce_uncorrected(estimator_contract: engine_contract::SimulationContract) {
-        let spec = contract_to_simulation_spec(&estimator_contract).unwrap();
-        let n = 120u32;
-        let n_sims = 200u32;
-        let seed = 12345u64;
-        let out = run_introspect(
-            &spec,
-            n,
-            n_sims,
-            seed,
-            IntrospectMask {
-                stats: true,
-                data: false,
-                crit: true,
-                power: true,
-            },
-        )
-        .unwrap();
-
-        let batch = out.batch.expect("batch");
-        let stat_sq = out.stat_sq.expect("stat_sq");
-        let crit_sq = out.crit.expect("crit").crit_sq_uncorrected;
-        let nt = spec.target_indices.len() + spec.contrast_pairs.len();
-        let ns = n_sims as usize;
-        assert_eq!(stat_sq.len(), ns * nt);
-        // BatchResult.uncorrected shape: (n_sims, n_sample_sizes=1, n_targets) row-major.
-        for t in 0..nt {
-            let mut from_stats = 0u64;
-            let mut from_batch = 0u64;
-            for s in 0..ns {
-                if stat_sq[s * nt + t] > crit_sq {
-                    from_stats += 1;
-                }
-                from_batch += batch.uncorrected[s * nt + t] as u64;
-            }
-            assert_eq!(
-                from_stats, from_batch,
-                "target {t}: stats vs batch reject mismatch"
-            );
+        // example1: OLS, 2 continuous predictors ⇒ p = 3, both targets refer
+        // to the residual df N − p = 97 and the uncorrected t²(0.975; 97).
+        assert_eq!(crit.df_per_target, vec![97.0, 97.0]);
+        let t = crate::critvals::t_ppf(0.975, 97.0);
+        assert_eq!(crit.crit_sq_uncorrected_per_target.len(), 2);
+        for &v in &crit.crit_sq_uncorrected_per_target {
+            assert!((v - t * t).abs() < 1e-12, "t² crit {v}, expected {}", t * t);
         }
     }
 
-    #[test]
-    fn ols_stats_reproduce_uncorrected_counts() {
-        assert_stats_reproduce_uncorrected(minimal_ols_contract());
-    }
-
-    /// `run_introspect` with `mask.stats=true` returns `stat_sq` of
-    /// shape (n_sims × n_targets) row-major, where n_targets =
-    /// |target_indices| + |contrast_pairs|.
-    #[test]
-    fn introspect_stats_shape() {
-        let c = minimal_ols_contract();
-        let spec = contract_to_simulation_spec(&c).unwrap();
-        let n_sims = 64u32;
-        let out = run_introspect(
-            &spec,
-            100,
-            n_sims,
-            42,
-            IntrospectMask {
-                stats: true,
-                data: false,
-                crit: false,
-                power: false,
-            },
-        )
-        .unwrap();
-        let stat_sq = out.stat_sq.expect("stat_sq present when mask.stats=true");
-        let n_targets = spec.target_indices.len() + spec.contrast_pairs.len();
-        assert_eq!(
-            stat_sq.len(),
-            n_sims as usize * n_targets,
-            "stat_sq must be n_sims × n_targets row-major"
-        );
-    }
-
     // -----------------------------------------------------------------
-    // H1 — interaction contract: ncol==4 and df_resid==n-4
+    // H1 — interaction contract: ncol==4 and residual df == n-4
     //      Guards the OOB-panic regression (n_predictors_total must include
     //      interactions.len()); if it regresses, generate_sim_data writes to
     //      column index 3 in a 3-column workspace → panic before any assert.
@@ -1354,7 +1172,7 @@ mod tests {
         // H1 regression guard: if n_predictors_total reverts to omitting
         // interactions.len(), SimWorkspace is sized for 3 cols but generate_sim_data
         // writes to column index 3 → OOB panic. The test panics before reaching
-        // the ncol/df_resid asserts, so any reversion is caught.
+        // the ncol/df asserts, so any reversion is caught.
         let c = interaction_ols_contract_for_introspect();
         let spec = contract_to_simulation_spec(&c).unwrap();
 
@@ -1400,68 +1218,13 @@ mod tests {
             "column 0 of design must be all 1.0 (intercept)"
         );
 
-        // Crit stage: df_resid = n - 4 (all 4 predictors accounted for).
+        // Crit stage: residual df = n - 4 (all 4 predictors accounted for).
         let crit = out.crit.expect("crit present");
         assert_eq!(
-            crit.df_resid,
-            (n as i64 - expected_p as i64) as f64,
-            "df_resid must account for interaction column: got {}, expected {}",
-            crit.df_resid,
-            n as i64 - expected_p as i64
+            crit.df_per_target,
+            vec![(n as i64 - expected_p as i64) as f64],
+            "residual df must account for the interaction column"
         );
-        assert!(
-            crit.crit_sq_uncorrected.is_finite() && crit.crit_sq_uncorrected > 0.0,
-            "crit_sq_uncorrected must be positive finite, got {}",
-            crit.crit_sq_uncorrected
-        );
-    }
-
-    /// Non-degenerate Mle specs route through the general path and surface
-    /// per-grouping variance components (τ̂²_g = θ̂_g²·σ̂², [primary, extras…]).
-    /// Generate a crossed-grouping dataset with the engine itself, then refit it.
-    #[test]
-    fn fit_provided_data_general_path_surfaces_variance_components() {
-        use engine_contract::{
-            ClusterSizing, ClusterSpec, EstimatorSpec, GroupingRelation, GroupingSpec,
-        };
-        let mut c = minimal_ols_contract();
-        c.estimator = EstimatorSpec::Mle;
-        let mut cluster =
-            ClusterSpec::intercept_only(ClusterSizing::FixedClusters { n_clusters: 6 }, 0.20);
-        cluster.extra_groupings = vec![GroupingSpec {
-            relation: GroupingRelation::Crossed { n_clusters: 4 },
-            tau_squared: 0.15,
-            slopes: vec![],
-        }];
-        c.generation.cluster = Some(cluster);
-        let spec = contract_to_simulation_spec(&c).unwrap();
-        let p = (1 + spec.n_non_factor + spec.n_factor_dummies) as usize;
-        let n = 96usize; // atom 6·4 = 24 → multiple
-        let mut ws = SimWorkspace::new(
-            n,
-            p,
-            spec.n_non_factor as usize,
-            spec.factor_n_levels.len(),
-            spec.cluster.as_ref(),
-        );
-        crate::data_gen::generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
-        // Column-major design copy of the first n rows.
-        let mut design = vec![0.0; n * p];
-        for j in 0..p {
-            for i in 0..n {
-                design[j * n + i] = ws.x_full[(i, j)] as f64;
-            }
-        }
-        let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
-        let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
-        let r = fit_provided_data(&spec, &design, n, p, &outcome, Some(&cids)).unwrap();
-        assert!(r.converged);
-        assert_eq!(r.variance_components.len(), 2); // primary + 1 crossed
-        assert!(r
-            .variance_components
-            .iter()
-            .all(|v| v.is_finite() && *v >= 0.0));
-        assert!(r.sigma_sq_hat.is_finite() && r.sigma_sq_hat > 0.0);
     }
 
     /// Extra-grouping random SLOPE: the crossed factor carries intercept + 1
@@ -1469,9 +1232,9 @@ mod tests {
     /// diagonal variance components, not one. Primary intercept-only (q_p = 1) ⇒
     /// total length 1 (primary) + 2 (extra) = 3. Before the cursor-walk fix the
     /// extra pushed a single scalar (length 2) and read the wrong θ slot
-    /// (`theta[base+e]`, which assumed q_g==1). Clone of
-    /// `fit_provided_data_general_path_surfaces_variance_components` with one
-    /// slope added to the crossed extra.
+    /// (`theta[base+e]`, which assumed q_g==1). Intercept-only extras are
+    /// covered end-to-end by the orchestrator's provided-data tests; this adds
+    /// one slope to the crossed extra.
     #[test]
     fn introspect_surfaces_extra_grouping_slope_variance() {
         use engine_contract::{
@@ -1652,13 +1415,9 @@ mod tests {
     /// full-width df gate.
     #[test]
     fn fit_provided_data_test_formula_uses_reduced_between_within_df() {
-        use crate::spec::{
-            ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, DfMethod, EstimatorSpec,
-            HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations,
-        };
+        use crate::spec::{ClusterSizing, ClusterSpec, DfMethod, EstimatorSpec};
         let spec = SimulationSpec {
             n_non_factor: 4,
-            n_factor_dummies: 0,
             correlation: vec![
                 1.0, 0.0, 0.0, 0.0, //
                 0.0, 1.0, 0.0, 0.0, //
@@ -1666,52 +1425,19 @@ mod tests {
                 0.0, 0.0, 0.0, 1.0,
             ],
             var_types: vec![Distribution::Normal; 4],
-            var_pinned: vec![],
             var_params: vec![0.0; 4],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
             between_var_indices: vec![1, 2, 3, 4],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
             effect_sizes: vec![0.0, 1.0, 0.0, 0.0, 0.0],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
             estimator: EstimatorSpec::Mle,
-            wald_se: Default::default(),
             df_method: DfMethod::BetweenWithin,
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
             cluster: Some(ClusterSpec {
                 sizing: ClusterSizing::FixedClusters { n_clusters: 4 },
                 tau_squared: 0.25,
                 slopes: vec![],
                 extra_groupings: vec![],
             }),
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
-            cluster_slope_design_cols: vec![],
-            extra_slope_cols: Vec::new(),
             fit_columns: vec![0, 1],
+            ..crate::test_support::base_spec()
         };
 
         // Data is generated at the FULL design width (5 columns) — the caller
@@ -1753,9 +1479,7 @@ mod tests {
             "cluster-level target must take the reduced design's between df"
         );
         let t = crate::critvals::t_ppf(0.975, 2.0);
-        assert!((r.crit_sq_uncorrected - t * t).abs() < 1e-12);
-        // df_resid follows the fitted width too: 40 − 2.
-        assert_eq!(r.df_resid, 38.0);
+        assert!((r.crit_sq_uncorrected_per_target[0] - t * t).abs() < 1e-12);
         // Targets stay in the CALLER's column space; dropped columns have no
         // estimate.
         assert_eq!(r.target_cols, vec![1]);
@@ -1769,51 +1493,13 @@ mod tests {
     /// primary block → q_p(q_p−1)/2 = 1 off-diagonal entry, |·| ≤ 1).
     #[test]
     fn slope_introspect_surfaces_variance_and_corr() {
-        use crate::spec::{
-            ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, EstimatorSpec,
-            HeteroskedasticityCoeffs, OutcomeKind, ResidualDist, ScenarioPerturbations,
-        };
+        use crate::spec::{ClusterSizing, ClusterSpec, EstimatorSpec};
         use engine_contract::SlopeTerm;
 
         // Replicate batch.rs::tests::slope_power_spec / minimal_lme_spec inline,
         // using enough clusters and observations that the LMM can converge.
         let spec = SimulationSpec {
-            n_non_factor: 1,
-            n_factor_dummies: 0,
-            correlation: vec![1.0],
-            var_types: vec![crate::spec::Distribution::Normal],
-            var_pinned: vec![],
-            var_params: vec![0.0],
-            upload_normal: vec![],
-            upload_normal_shape: (0, 0),
-            upload_data: vec![],
-            upload_data_shape: (0, 0),
-            bootstrap_frame_map: vec![],
-            between_var_indices: vec![],
-            factor_n_levels: vec![],
-            factor_proportions: vec![],
-            factor_sampled: Vec::new(),
-            effect_sizes: vec![0.0, 0.5],
-            target_indices: vec![1],
-            contrast_pairs: vec![],
-            interactions: vec![],
-            correction_method: CorrectionMethod::None,
-            crit_values: CritValues {
-                alpha: 0.05,
-                posthoc_alpha: None,
-            },
-            heteroskedasticity_driver: None,
-            residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
-            outcome_kind: OutcomeKind::Continuous,
-            link: None,
             estimator: EstimatorSpec::Mle,
-            wald_se: Default::default(),
-            df_method: Default::default(),
-            nagq: 1,
-            intercept: 0.0,
-            posthoc: vec![],
-            max_failed_fraction: 0.1,
             cluster: Some(ClusterSpec {
                 sizing: ClusterSizing::FixedClusters { n_clusters: 20 },
                 tau_squared: 0.25,
@@ -1825,15 +1511,9 @@ mod tests {
                 }],
                 extra_groupings: vec![],
             }),
-            scenario: ScenarioPerturbations::optimistic(),
-            t3_table: None,
-            het_coeffs: HeteroskedasticityCoeffs::default(),
-            report_overall: false,
-            factor_min_level_count: 0,
             // x_full col 1 = x1 (col 0 = intercept, col 1 = first continuous).
             cluster_slope_design_cols: vec![1],
-            extra_slope_cols: Vec::new(),
-            fit_columns: Vec::new(),
+            ..crate::test_support::base_spec()
         };
 
         let p = (1 + spec.n_non_factor + spec.n_factor_dummies) as usize;

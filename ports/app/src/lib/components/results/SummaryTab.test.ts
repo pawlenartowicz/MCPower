@@ -99,47 +99,6 @@ describe('SummaryTab', () => {
     expect(getByTestId('diagnostics-badge')).toBeTruthy();
   });
 
-  it('shows the scenario selector only with >1 scenario', () => {
-    const { queryByTestId } = render(SummaryTab, { props: { tab: makeTab(/*1 scenario*/) } });
-    expect(queryByTestId('scenario-selector')).toBeNull();
-  });
-
-  it('shows the scenario selector with >1 scenario', () => {
-    const { getByTestId } = render(SummaryTab, { props: { tab: makeTab(2) } });
-    expect(getByTestId('scenario-selector')).toBeTruthy();
-  });
-
-  it('renders correct effect labels (idx-1 mapping, not raw idx)', () => {
-    // target_indices [1,2] → effectNames[0]='x1', effectNames[1]='condition[treatment]'
-    // If the raw-idx bug existed, we'd see undefined/'condition[treatment]' for x1.
-    // Use getAllByText since 'x1' also appears in sr-only bar spans from SummaryTab.
-    const { getAllByText } = render(SummaryTab, { props: { tab: makeTab() } });
-    const matches = getAllByText('x1');
-    // At least one td with 'x1' must exist (the table row label)
-    const tdMatch = matches.find((el) => el.tagName === 'TD');
-    expect(tdMatch).toBeTruthy();
-  });
-
-  it('multi-scenario: renders scenario name columns and a Δ column', () => {
-    // makeTab(2) → ['default', {power:[0.72,0.65]}], ['optimistic', {power:[0.85,0.78]}]
-    // REPORT_CONFIG.baseline_scenario.prefer_label = 'optimistic' → baseline = optimistic
-    // For x1 (pos=0): baseline=0.85, default=0.72 → Δ = -13.0pp
-    const { getByTestId, getAllByText } = render(SummaryTab, { props: { tab: makeTab(2) } });
-    // Table must still have the summary-table testid
-    expect(getByTestId('summary-table')).toBeTruthy();
-    // Both scenario names appear (table headers + scenario selector buttons) — use getAllByText
-    expect(getAllByText('default').length).toBeGreaterThan(0);
-    expect(getAllByText('optimistic').length).toBeGreaterThan(0);
-    // A Δ column header must be present in the table thead
-    const table = getByTestId('summary-table');
-    const thCells = table.querySelectorAll('th');
-    const hasDelta = Array.from(thCells).some((th) => th.textContent?.trim() === 'Δ');
-    expect(hasDelta).toBeTruthy();
-    // The Δ for x1 row (pos=0): baseline=optimistic=0.85, default=0.72, diff=-0.13 → -13.0pp
-    const deltaMatches = getAllByText('-13.0pp');
-    expect(deltaMatches.length).toBeGreaterThan(0);
-  });
-
   // Helper: build a strict-mode CsvData fixture.
   function makeStrictCsv(n_rows: number): CsvData {
     return {

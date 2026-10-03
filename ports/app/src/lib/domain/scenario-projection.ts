@@ -1,6 +1,6 @@
 // Projects an editable `ScenarioConfig` (the GUI's app copy of the three named
 // sets) to the wire `ScenarioWire` (= `engine_spec_builder::input::ScenarioInput`).
-// This is the TS port of Python's `_scenario_dict` (model.py): the same fields,
+// This is the TS port of Python's `build_scenario_dict` (spec/spec_builder.py): the same fields,
 // the same name → integer-code encoding for the two distribution lists, and the
 // same rejection of residual distributions the scenario wire cannot carry.
 // The `lme` sub-object is flattened onto the wire: its fields are hoisted
@@ -8,8 +8,9 @@
 import type { ScenarioConfig } from '$lib/configs/scenarios';
 import type { ScenarioWire } from './app-spec';
 
-// Distribution name → integer code. Mirrors Python's `_DIST_CODE` (model.py);
-// the parity test pins these against the Python constants so they cannot drift.
+// Distribution name → integer code. Mirrors the engine's `DIST_CODES`
+// (engine-spec-builder `project_contract.rs`), which Python reads through
+// `get_dist_codes()`; the parity test pins these values so they cannot drift.
 export const DIST_CODE: Readonly<Record<string, number>> = {
   normal: 0,
   binary: 1,
@@ -42,9 +43,6 @@ export const RE_DIST_CODE: Readonly<Record<string, number>> = {
   heavy_tailed: 1,
 };
 
-// Empty set; named export kept so membership-checking callers need no change.
-export const UNSUPPORTED_RESIDUAL_IN_SCENARIOS: ReadonlySet<string> = new Set();
-
 function encodeDist(name: string): number {
   const code = DIST_CODE[name];
   if (code === undefined) {
@@ -56,12 +54,6 @@ function encodeDist(name: string): number {
 }
 
 function encodeResidual(name: string): number {
-  if (UNSUPPORTED_RESIDUAL_IN_SCENARIOS.has(name)) {
-    throw new Error(
-      `residual distribution '${name}' is not yet supported in scenario perturbations; ` +
-        `the scenario wire format supports normal/right_skewed/left_skewed/high_kurtosis/uniform`,
-    );
-  }
   const code = RESIDUAL_CODE[name];
   if (code === undefined) {
     throw new Error(
@@ -73,7 +65,7 @@ function encodeResidual(name: string): number {
 
 /**
  * Project one `ScenarioConfig` to the wire `ScenarioWire`, mirroring Python's
- * `_scenario_dict`. Throws on a residual distribution the wire cannot carry. The
+ * `build_scenario_dict`. Throws on a residual distribution the wire cannot carry. The
  * `lme` sub-object is flattened: its three fields are hoisted onto the wire
  * (random_effect_dist name-encoded via RE_DIST_CODE; df and icc_noise_sd raw),
  * mirroring the Python port. The `lme` sub-object itself is not on the wire.

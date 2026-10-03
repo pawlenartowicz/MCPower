@@ -7,7 +7,6 @@ import {
   assembleFormula,
   validatePredictorName,
   applyBuilderVariables,
-  FACTOR_DEFAULT_LEVELS,
   type BuilderState,
 } from './model-builder';
 
@@ -118,10 +117,6 @@ describe('applyBuilderVariables', () => {
     expect(g.levels).toBeUndefined();
     expect(g.nLevels).toBeUndefined();
     expect(g.referenceLevel).toBeUndefined();
-  });
-
-  it('exposes a 3-level factor default', () => {
-    expect(FACTOR_DEFAULT_LEVELS).toEqual(['1', '2', '3']);
   });
 });
 

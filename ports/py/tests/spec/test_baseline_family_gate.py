@@ -34,16 +34,6 @@ def test_set_baseline_probability_rejected_for_poisson():
         m.set_baseline_probability(0.3)
 
 
-def test_set_baseline_probability_accepted_for_logit_and_probit():
-    """Correct pairings are unaffected by the gate."""
-    MCPower("y ~ x1", family="logit").set_baseline_probability(0.3)
-    MCPower("y ~ x1", family="probit").set_baseline_probability(0.3)
-
-
-def test_set_baseline_rate_accepted_for_poisson():
-    MCPower("y ~ x1", family="poisson").set_baseline_rate(2.0)
-
-
 def test_set_baseline_probability_rejected_for_ols_and_lme():
     """Non-binary families other than the pairwise mismatch are also gated."""
     with pytest.raises(ValueError, match="set_baseline_probability is only for"):

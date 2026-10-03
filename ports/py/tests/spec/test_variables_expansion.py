@@ -1,7 +1,7 @@
 """Factor-level expansion edge cases for VariableRegistry.expand_factors().
 
-Covers lines ~139-146 (empty/random-only formula) and lines ~366-395
-(factor interaction expansion with/without level_labels).
+Covers the empty / random-only formula rejection and factor interaction
+expansion with and without level_labels.
 """
 
 import pytest
@@ -10,7 +10,7 @@ from mcpower.spec.variables import VariableRegistry
 
 
 # ---------------------------------------------------------------------------
-# Lines ~139-146: formula with only random effects / empty RHS
+# Formula with only random effects / empty RHS
 # ---------------------------------------------------------------------------
 
 
@@ -32,8 +32,12 @@ def test_empty_rhs_raises():
 
 
 # ---------------------------------------------------------------------------
-# Lines ~366-395: factor interaction expansion — with level_labels
+# Factor interaction expansion — with level_labels
 # ---------------------------------------------------------------------------
+
+
+def _interaction_names(reg):
+    return [n for n in reg.effect_names if ":" in n]
 
 
 def _make_registry_with_labeled_factor_interaction():
@@ -53,33 +57,14 @@ def _make_registry_with_labeled_factor_interaction():
 
 def test_factor_interaction_with_labels_expands_to_correct_dummy_names():
     """cyl:x with labels=['4','6','8'] and reference='4' must expand to
-    'cyl[6]:x' and 'cyl[8]:x' — the two non-reference dummy interactions."""
+    exactly 'cyl[6]:x' and 'cyl[8]:x' — the two non-reference dummy
+    interactions; the reference 'cyl[4]:x' and the raw 'cyl:x' are gone."""
     reg = _make_registry_with_labeled_factor_interaction()
-    effect_names = reg.effect_names
-    assert "cyl[6]:x" in effect_names, f"Expected 'cyl[6]:x' in {effect_names}"
-    assert "cyl[8]:x" in effect_names, f"Expected 'cyl[8]:x' in {effect_names}"
-
-
-def test_factor_interaction_reference_level_excluded():
-    """Reference level 'cyl[4]' must NOT appear as an interaction term."""
-    reg = _make_registry_with_labeled_factor_interaction()
-    effect_names = reg.effect_names
-    assert "cyl[4]:x" not in effect_names, (
-        f"Reference-level dummy 'cyl[4]:x' must not appear; got {effect_names}"
-    )
-
-
-def test_factor_interaction_original_interaction_removed():
-    """After expand_factors the raw 'cyl:x' interaction must not remain."""
-    reg = _make_registry_with_labeled_factor_interaction()
-    effect_names = reg.effect_names
-    assert "cyl:x" not in effect_names, (
-        f"Unexpanded 'cyl:x' must be gone after expand_factors; got {effect_names}"
-    )
+    assert _interaction_names(reg) == ["cyl[6]:x", "cyl[8]:x"]
 
 
 # ---------------------------------------------------------------------------
-# Lines ~380-381: factor interaction expansion — WITHOUT level_labels
+# Factor interaction expansion — WITHOUT level_labels
 # (integer-indexed fallback, preserve_factor_level_names=False semantics)
 # ---------------------------------------------------------------------------
 
@@ -99,20 +84,9 @@ def _make_registry_without_labeled_factor_interaction():
 
 def test_factor_interaction_without_labels_expands_to_integer_indexed_names():
     """Without level_labels, interaction dummies use integer indices:
-    'group[2]:x' and 'group[3]:x'."""
+    exactly 'group[2]:x' and 'group[3]:x' (reference 'group[1]:x' excluded)."""
     reg = _make_registry_without_labeled_factor_interaction()
-    effect_names = reg.effect_names
-    assert "group[2]:x" in effect_names, f"Expected 'group[2]:x' in {effect_names}"
-    assert "group[3]:x" in effect_names, f"Expected 'group[3]:x' in {effect_names}"
-
-
-def test_factor_interaction_without_labels_reference_excluded():
-    """'group[1]:x' (reference level) must not appear."""
-    reg = _make_registry_without_labeled_factor_interaction()
-    effect_names = reg.effect_names
-    assert "group[1]:x" not in effect_names, (
-        f"Reference 'group[1]:x' must not appear; got {effect_names}"
-    )
+    assert _interaction_names(reg) == ["group[2]:x", "group[3]:x"]
 
 
 # ---------------------------------------------------------------------------
@@ -131,10 +105,5 @@ def test_two_factor_interaction_cartesian_product():
         "b", "factor", n_levels=2, labels=["ctrl", "treat"], reference="ctrl"
     )
     reg.expand_factors()
-    effect_names = reg.effect_names
-    # Only one non-ref level per factor → one product term
-    assert "a[hi]:b[treat]" in effect_names, f"Expected 'a[hi]:b[treat]' in {effect_names}"
-    # Reference-level combos must not appear
-    assert "a[lo]:b[treat]" not in effect_names
-    assert "a[hi]:b[ctrl]" not in effect_names
-    assert "a[lo]:b[ctrl]" not in effect_names
+    # Only one non-ref level per factor → one product term; no reference combos.
+    assert _interaction_names(reg) == ["a[hi]:b[treat]"]

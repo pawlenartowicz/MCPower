@@ -18,14 +18,9 @@ fn linear_grid_inclusive_endpoint_partial_step() {
 
 #[test]
 fn log_grid_n_points_dedup_sorted() {
+    // 4 log-spaced points over [10, 1000]: 10·10^(2k/3), rounded, endpoints pinned.
     let (g, _) = build_grid(10, 1000, ByValue::Fixed(4), GridMode::Log, 1, 1).expect("ok");
-    assert!(g.first() == Some(&10));
-    assert!(g.last() == Some(&1000));
-    let mut sorted = g.clone();
-    sorted.sort();
-    assert_eq!(g, sorted);
-    sorted.dedup();
-    assert_eq!(g, sorted);
+    assert_eq!(g, vec![10, 46, 215, 1000]);
 }
 
 #[test]
@@ -38,10 +33,10 @@ fn log_grid_rejects_zero_from() {
 }
 
 /// build_grid rejects inverted bounds (to < from).
-/// Fixed(0) no longer errors — the real builder maps it to atom (>=1), so it
-/// yields a valid atom-stepped grid. Inverted-bounds guard still fires.
+/// Fixed(0) does not error — the builder maps it to the atom (>=1), so it
+/// yields a valid atom-stepped grid.
 #[test]
-fn grid_rejects_inverted_bounds_and_zero_step() {
+fn grid_rejects_inverted_bounds_and_maps_zero_step_to_atom() {
     for mode in [GridMode::Linear, GridMode::Log] {
         // to < from: always an error.
         assert!(matches!(
@@ -52,13 +47,7 @@ fn grid_rejects_inverted_bounds_and_zero_step() {
     // Fixed(0) -> ceil_to(0, atom=1).max(1) = 1 -> valid step=1 grid; not an error.
     let (g, _) = build_grid(10, 15, ByValue::Fixed(0), GridMode::Linear, 1, 1)
         .expect("Fixed(0) yields a valid step-1 grid");
-    assert!(!g.is_empty(), "grid must be non-empty");
-    assert!(
-        g.windows(2).all(|p| p[0] < p[1]),
-        "grid must be strictly ascending"
-    );
-    assert_eq!(g[0], 10);
-    assert_eq!(*g.last().unwrap(), 15);
+    assert_eq!(g, vec![10, 11, 12, 13, 14, 15]);
 }
 
 #[test]

@@ -74,6 +74,8 @@ describe('ConvergenceNotice', () => {
   it('computes high-τ̂ boundary from the boundary_hit array, ignoring benign τ̂=0', async () => {
     // 40 benign τ̂=0 (value 1) + 5 high-τ̂ (value 2); n_sims=100 → rate 5% > 1%.
     // Only the high-τ̂ count drives the warning; the 40 ones must be ignored.
+    // The estimator is glm: the rate is estimator-agnostic (an old mle-only
+    // guard silently skipped GLMM boundary hits).
     const result = makeResult({
       n_sims: 100,
       boundary_hit: [...Array(40).fill(1), ...Array(5).fill(2)],
@@ -82,26 +84,6 @@ describe('ConvergenceNotice', () => {
     const { getByText } = render(ConvergenceNotice, { props: { tab: makeTab(olsSpec, result) } });
     await expandBadge(getByText);
     expect(getByText(/High-τ̂ boundary hits 5\.0%/)).toBeTruthy();
-  });
-
-  it('surfaces GLMM (glm + cluster) boundary hits — previously skipped for non-mle', async () => {
-    // estimator 'glm' would have been skipped by the old estimator==='mle' guard.
-    const mixedSpec: AppSpec = {
-      family: 'mixed',
-      ...LINEAR_BODY,
-      cluster_name: 'site',
-      icc: 0.1,
-      cluster_dim: { kind: 'n_clusters', value: 20 },
-      outcome: { kind: 'binary', baseline_probability: 0.3 },
-    };
-    const result = makeResult({
-      n_sims: 100,
-      boundary_hit: Array(3).fill(2), // 3% > 1%
-      estimator_extras: { estimator: 'glm', baseline_prob_realized: 0.3 } as EstimatorExtras,
-    });
-    const { getByText } = render(ConvergenceNotice, { props: { tab: makeTab(mixedSpec, result) } });
-    await expandBadge(getByText);
-    expect(getByText(/High-τ̂ boundary hits 3\.0%/)).toBeTruthy();
   });
 
   it('computes GLM baseline drift against the requested baseline from the spec', async () => {

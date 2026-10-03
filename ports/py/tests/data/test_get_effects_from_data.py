@@ -100,7 +100,7 @@ def test_get_effects_from_data_missing_predictor_errors():
 def test_get_effects_from_data_no_uploaded_data_errors():
     """Calling without any uploaded data is an error."""
     m = MCPower("y = x1")
-    with pytest.raises((RuntimeError, ValueError)):
+    with pytest.raises(RuntimeError, match="no uploaded data"):
         m.get_effects_from_data("y")
 
 

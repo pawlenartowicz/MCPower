@@ -5,12 +5,11 @@
 mod common;
 use common::minimal_ols_contract;
 
-use engine_contract::{ClusterSizing, ClusterSpec, SimulationContract};
-use engine_orchestrator::grid::build_grid;
+use engine_contract::{ClusterSizing, ClusterSpec, EstimatorSpec, SimulationContract};
 use engine_orchestrator::{
     bounds_to_rows, find_power, find_sample_size, resolve_unit_divisor, sample_size_result_to_host,
     single_core_find_power, single_core_find_sample_size, ByValue, CancellationToken, GridMode,
-    HostValue, SampleSizeMethod, SampleSizeUnit,
+    HostValue, OrchestratorError, SampleSizeMethod, SampleSizeUnit,
 };
 
 fn clustered_contract(sizing: ClusterSizing, tau: f64) -> SimulationContract {
@@ -73,8 +72,11 @@ fn fixed_size_cluster_below_floor_errors() {
         &cancel,
     );
     assert!(
-        r.is_err(),
-        "expected error for cluster_size < min_rows_per_cluster"
+        matches!(
+            r,
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 1, min: 2 })
+        ),
+        "expected ClusterSizeTooSmall for cluster_size < min_rows_per_cluster, got {r:?}"
     );
 }
 
@@ -101,16 +103,22 @@ fn single_core_find_sample_size_rejects_cluster_size_too_small() {
         &cancel,
     );
     assert!(
-        r.is_err(),
-        "single_core: expected error for cluster_size < min_rows_per_cluster"
+        matches!(
+            r,
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 1, min: 2 })
+        ),
+        "single_core: expected ClusterSizeTooSmall, got {r:?}"
     );
 }
 
+/// Also the end-to-end run of the `Continuous + cluster + Ols` pairing:
+/// clustered data generated, OLS fitted ignoring the clustering.
 #[test]
 fn find_power_floors_n_to_atom_and_warns() {
     // FixedClusters { n_clusters: 20 } → atom = 20.
     // 95 / 20 = 4 complete clusters → floored to 80.
     let c = clustered_contract(ClusterSizing::FixedClusters { n_clusters: 20 }, 0.3);
+    assert_eq!(c.estimator, EstimatorSpec::Ols);
     let cancel = CancellationToken::new();
     let res = find_power(&[c], 95, 50, 2137, None, &cancel).unwrap();
     let (_, pr) = &res.scenarios[0];
@@ -119,6 +127,13 @@ fn find_power_floors_n_to_atom_and_warns() {
         pr.grid_warnings.iter().any(|w| w.contains("80")),
         "expected warning mentioning 80, got: {:?}",
         pr.grid_warnings
+    );
+    // Discriminating floor: β=0.5 at N=80 yields high power; anything below
+    // 0.2 indicates a no-op generation or estimation path.
+    assert!(
+        pr.power_uncorrected[0] > 0.2,
+        "β=0.5 at N=80 must produce power > 0.2, got {}",
+        pr.power_uncorrected[0]
     );
 }
 
@@ -146,91 +161,6 @@ fn ep3_single_core_floors_n_to_atom_and_warns() {
         pr.grid_warnings.iter().any(|w| w.contains("80")),
         "single_core: expected warning mentioning 80, got: {:?}",
         pr.grid_warnings
-    );
-}
-
-// ── Grid purity / mergeability invariants ───────────────────────────────────
-
-#[test]
-fn grid_is_pure_function_of_inputs() {
-    // The grid is a function only of (from, to, by, mode, atom, hard_min) —
-    // never of observed power — so the search stays mergeable across WASM
-    // workers and safe for multi-effect targets. Same inputs ⇒ byte-identical
-    // grid + warnings.
-    let a = build_grid(
-        30,
-        200,
-        ByValue::Auto { count: 12 },
-        GridMode::Linear,
-        20,
-        40,
-    )
-    .unwrap();
-    let b = build_grid(
-        30,
-        200,
-        ByValue::Auto { count: 12 },
-        GridMode::Linear,
-        20,
-        40,
-    )
-    .unwrap();
-    assert_eq!(a, b);
-}
-
-#[test]
-fn single_core_and_multicore_request_identical_grid() {
-    // Multi-core `find_sample_size` and single-core (WASM-worker)
-    // `single_core_find_sample_size` must request the SAME sample sizes for a
-    // clustered FixedSize spec — the grid is built from inputs before any
-    // simulation, so it is identical even though the RNG-driven power values are
-    // only statistically (not byte-) equal across worker counts.
-    let sizing = ClusterSizing::FixedSize { cluster_size: 10 };
-    let method = SampleSizeMethod::Grid {
-        by: ByValue::Auto { count: 12 },
-        mode: GridMode::Linear,
-    };
-    let cancel = CancellationToken::new();
-
-    let multi = find_sample_size(
-        &[clustered_contract(sizing.clone(), 0.3)],
-        0.8,
-        (50, 200),
-        30,
-        method,
-        1,
-        2137,
-        None,
-        &cancel,
-    )
-    .unwrap();
-    let single = single_core_find_sample_size(
-        &[clustered_contract(sizing, 0.3)],
-        0.8,
-        (50, 200),
-        30,
-        method,
-        1,
-        2137,
-        None,
-        &cancel,
-    )
-    .unwrap();
-
-    let ns = |r: &engine_orchestrator::ScenarioResult<engine_orchestrator::SampleSizeResult>| {
-        r.scenarios[0]
-            .1
-            .grid_or_trace
-            .iter()
-            .map(|p| p.n)
-            .collect::<Vec<usize>>()
-    };
-    let multi_ns = ns(&multi);
-    let single_ns = ns(&single);
-    assert!(multi_ns.iter().all(|&n| n % 10 == 0), "{multi_ns:?}");
-    assert_eq!(
-        multi_ns, single_ns,
-        "multi-core and single-core must request the same grid N's"
     );
 }
 

@@ -90,7 +90,7 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install maturin numpy msgpack pandas pytest tqdm
+          pip install maturin numpy msgpack pandas pytest tqdm vl-convert-python
           maturin develop --release
           pytest tests/
 
@@ -120,6 +120,10 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build:wasm
           pnpm test
+      # wasm32-gated tests in crates/engine-wasm/tests never run under the native
+      # `cargo test --workspace`; this is their only CI home.
+      - name: wasm-bindgen export round-trips
+        run: wasm-pack test --node crates/engine-wasm
       # WebKit/iOS gate: an auditable, named check over wasm-strip-relaxed's own
       # self-assert. If a strip regression ever leaves relaxed-simd opcodes in the
       # bundle, WebKit fails to instantiate ("invalid extended simd op 271"); this

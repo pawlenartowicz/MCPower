@@ -17,11 +17,10 @@
 //! and N = 20000, where a per-observation model would instead sit at 1.0.
 //! `het_zero_is_clean_signal` is cheap (pure generation) and stays in the suite.
 
+mod common;
+
 use engine_core::batch::run_batch;
-use engine_core::spec::{
-    CorrectionMethod, CritValues, Distribution, EstimatorSpec, HeteroskedasticityCoeffs,
-    OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
-};
+use engine_core::spec::{CritValues, ScenarioPerturbations, SimulationSpec};
 use engine_core::workspace::SimWorkspace;
 
 const ALPHA: f64 = 0.05;
@@ -33,54 +32,16 @@ const N_SIMS: u32 = 3000;
 /// for. `het` is the scenario heterogeneity knob (τ = het·|β|).
 fn ols_spec(beta_x1: f64, het: f64) -> SimulationSpec {
     SimulationSpec {
-        n_non_factor: 1,
-        n_factor_dummies: 0,
-        correlation: vec![1.0],
-        var_types: vec![Distribution::Normal],
-        var_pinned: vec![],
-        var_params: vec![0.0],
-        upload_normal: vec![],
-        upload_normal_shape: (0, 0),
-        upload_data: vec![],
-        upload_data_shape: (0, 0),
-        bootstrap_frame_map: vec![],
-        between_var_indices: vec![],
-        factor_n_levels: vec![],
-        factor_proportions: vec![],
-        factor_sampled: Vec::new(),
         effect_sizes: vec![0.0, beta_x1],
-        target_indices: vec![1],
-        contrast_pairs: vec![],
-        interactions: vec![],
-        correction_method: CorrectionMethod::None,
         crit_values: CritValues {
             alpha: ALPHA,
             posthoc_alpha: None,
         },
-        heteroskedasticity_driver: None,
-        residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
-        outcome_kind: OutcomeKind::Continuous,
-        link: None,
-        estimator: EstimatorSpec::Ols,
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-        intercept: 0.0,
-        posthoc: vec![],
-        max_failed_fraction: 0.1,
-        cluster: None,
         scenario: ScenarioPerturbations {
             heterogeneity: het,
             ..ScenarioPerturbations::optimistic()
         },
-        t3_table: None,
-        het_coeffs: HeteroskedasticityCoeffs::default(),
-        report_overall: false,
-        factor_min_level_count: 0,
-        cluster_slope_design_cols: vec![],
-        extra_slope_cols: Vec::new(),
-        fit_columns: Vec::new(),
+        ..common::base_spec()
     }
 }
 

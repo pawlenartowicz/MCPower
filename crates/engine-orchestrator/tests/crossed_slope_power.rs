@@ -1,7 +1,8 @@
 //! End-to-end: a crossed-slope contract (`y ~ x + (1+x | primary) + (1+x | item)`)
 //! flows through `find_power` with no API change — the additive `GroupingSpec.slopes`
 //! lowers into the kernel, data-gen draws covariate-weighted REs, and the blocked
-//! LMM solver fits them. Pins that the whole pipeline produces a valid power.
+//! LMM solver fits them. Pins that the extra-grouping slope reaches the kernel
+//! (four variance components surface) and that the fits mostly converge.
 
 mod common;
 use common::minimal_ols_contract;
@@ -10,7 +11,7 @@ use engine_contract::{
     ClusterSizing, ClusterSpec, ColumnId, EstimatorSpec, GroupingRelation, GroupingSpec,
     SimulationContract, SlopeTerm,
 };
-use engine_orchestrator::{find_power, CancellationToken};
+use engine_orchestrator::{find_power, CancellationToken, EstimatorExtras};
 
 fn crossed_slope_contract() -> SimulationContract {
     let slope = |v: f64, rho: f64| SlopeTerm {
@@ -43,9 +44,23 @@ fn crossed_slope_power_runs_end_to_end() {
     let res = find_power(&[c], 80, 60, 2137, None, &cancel).unwrap();
     let (_, pr) = &res.scenarios[0];
     assert_eq!(pr.n, 80, "N is an atom multiple, no floor");
-    let power = pr.power_uncorrected[0];
+    // Primary intercept + slope and crossed intercept + slope: four variance
+    // components. A dropped extra-grouping slope would surface three.
+    let EstimatorExtras::Mle {
+        boundary_rate_per_component,
+        ..
+    } = &pr.estimator_extras
+    else {
+        panic!("expected Mle extras, got {:?}", pr.estimator_extras);
+    };
+    assert_eq!(
+        boundary_rate_per_component.len(),
+        4,
+        "{boundary_rate_per_component:?}"
+    );
     assert!(
-        power > 0.0 && power <= 1.0,
-        "crossed-slope power must be a valid probability, got {power}"
+        pr.convergence_rate > 0.5,
+        "crossed-slope convergence_rate {}",
+        pr.convergence_rate
     );
 }

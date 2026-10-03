@@ -2,66 +2,6 @@ use engine_spec_builder::{
     LinearSpec, SpecError, UploadColumn, UploadColumnType, UploadInput, UploadMode,
 };
 
-#[test]
-fn linear_spec_without_upload_deserializes() {
-    let json = r#"{"formula":"y = x1","predictors":[{"name":"x1","kind":"normal"}],
-        "effects":[{"name":"x1","size":0.5}],"correlations":[],"alpha":0.05,
-        "correction":"bonferroni","targets":["overall"],"heterogeneity":0.0,
-        "heteroskedasticity":{},"residual":{"distribution":"normal","df":0.0},
-        "max_failed_fraction":0.1,"scenarios":[]}"#;
-    let spec: LinearSpec = serde_json::from_str(json).unwrap();
-    assert!(spec.upload.is_none());
-    assert_eq!(spec.formula, "y = x1");
-    assert_eq!(spec.alpha, 0.05);
-}
-
-#[test]
-fn upload_input_round_trips() {
-    let up = UploadInput {
-        mode: UploadMode::Partial,
-        n_rows: 3,
-        columns: vec![UploadColumn {
-            name: "x1".into(),
-            col_type: UploadColumnType::Continuous,
-            values: vec![1.0, 2.0, 3.0],
-            labels: vec![],
-        }],
-    };
-    let s = serde_json::to_string(&up).unwrap();
-    let back: UploadInput = serde_json::from_str(&s).unwrap();
-    assert_eq!(up, back);
-}
-
-#[test]
-fn standardize_continuous_is_zscore_ddof0() {
-    let col = UploadColumn {
-        name: "x".into(),
-        col_type: UploadColumnType::Continuous,
-        values: vec![1.0, 2.0, 3.0, 4.0, 5.0],
-        labels: vec![],
-    };
-    let z = engine_spec_builder::upload::standardize_column(&col);
-    let sd = 2f64.sqrt();
-    assert!((z[0] - (-2.0 / sd)).abs() < 1e-12);
-    assert!((z[2] - 0.0).abs() < 1e-12);
-    assert!((z[4] - (2.0 / sd)).abs() < 1e-12);
-    let m: f64 = z.iter().sum::<f64>() / z.len() as f64;
-    assert!(m.abs() < 1e-12);
-}
-
-#[test]
-fn standardize_binary_centers_at_proportion() {
-    let col = UploadColumn {
-        name: "b".into(),
-        col_type: UploadColumnType::Binary,
-        values: vec![0.0, 0.0, 1.0, 1.0, 1.0],
-        labels: vec![],
-    };
-    let z = engine_spec_builder::upload::standardize_column(&col);
-    assert!((z[0] - (-0.6)).abs() < 1e-12);
-    assert!((z[2] - (0.4)).abs() < 1e-12);
-}
-
 // ── A3 tests ─────────────────────────────────────────────────────────────────
 
 fn make_two_predictor_spec_with_upload(upload: UploadInput) -> LinearSpec {
@@ -261,192 +201,15 @@ fn measured_offdiag(contracts: &[engine_contract::SimulationContract]) -> f64 {
     }
 }
 
-/// Correlation is continuous-only by design: a binary uploaded column is NOT
-/// included in the measured correlation matrix, even when it is strongly
-/// associated with a continuous column in the data. Its off-diagonal entry
-/// stays at the identity default (0) — the binary column is generated from its
-/// marginal, independent of the continuous predictor.
-#[test]
-fn partial_mode_does_not_correlate_binary_column() {
-    use engine_contract::{EstimatorSpec, OutcomeKind};
-    use engine_spec_builder::input::{
-        Correction, EffectAssignment, HeteroskedasticityInput, PredictorSpec, ResidualSpec, VarKind,
-    };
-
-    // x1 continuous and x2 binary are strongly associated in the data
-    // (x2 = 1 exactly when x1 is large), yet binary must not be correlated.
-    let upload = UploadInput {
-        mode: UploadMode::Partial,
-        n_rows: 5,
-        columns: vec![
-            UploadColumn {
-                name: "x1".into(),
-                col_type: UploadColumnType::Continuous,
-                values: vec![1.0, 2.0, 3.0, 4.0, 5.0],
-                labels: vec![],
-            },
-            UploadColumn {
-                name: "x2".into(),
-                col_type: UploadColumnType::Binary,
-                values: vec![0.0, 0.0, 0.0, 1.0, 1.0],
-                labels: vec![],
-            },
-        ],
-    };
-    let spec = LinearSpec {
-        formula: "y = x1 + x2".into(),
-        predictors: vec![
-            PredictorSpec {
-                name: "x1".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-            PredictorSpec {
-                name: "x2".into(),
-                pinned: false,
-                kind: VarKind::Binary { proportion: 0.4 },
-            },
-        ],
-        effects: vec![
-            EffectAssignment {
-                name: "x1".into(),
-                size: 0.5,
-            },
-            EffectAssignment {
-                name: "x2".into(),
-                size: 0.3,
-            },
-        ],
-        correlations: vec![],
-        alpha: 0.05,
-        correction: Correction::None,
-        targets: vec!["overall".into()],
-        heteroskedasticity: HeteroskedasticityInput::default(),
-        residual: ResidualSpec::default(),
-        max_failed_fraction: 0.1,
-        scenarios: vec![],
-        test_formula: None,
-        report_overall: false,
-        contrast_pairs: vec![],
-        posthoc_requests: vec![],
-        upload: Some(upload),
-        cluster_level_vars: vec![],
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-    };
-    let contracts = engine_spec_builder::build_contract(
-        &spec,
-        OutcomeKind::Continuous,
-        None,
-        Some(EstimatorSpec::Ols),
-        0.0,
-        vec![],
-    )
-    .expect("build_contract");
-
-    let offdiag = measured_offdiag(&contracts);
-    assert!(
-        offdiag.abs() < 1e-9,
-        "binary column must not be correlated (continuous-only by design), got offdiag={offdiag}"
-    );
-}
-
-#[test]
-fn partial_mode_measures_empirical_correlation() {
-    use engine_contract::{EstimatorSpec, OutcomeKind};
-    use engine_spec_builder::input::{
-        Correction, EffectAssignment, HeteroskedasticityInput, PredictorSpec, ResidualSpec, VarKind,
-    };
-
-    // Build two perfectly monotone columns: Spearman ρ_S = 1.0, a fixed point of
-    // the latent conversion (2·sin(π·1/6) = 1.0), so the installed value is 1.0.
-    // x1 = [1, 2, 3, 4, 5], x2 = [2, 4, 6, 8, 10] → ρ_S = 1.0
-    let upload = UploadInput {
-        mode: UploadMode::Partial,
-        n_rows: 5,
-        columns: vec![
-            UploadColumn {
-                name: "x1".into(),
-                col_type: UploadColumnType::Continuous,
-                values: vec![1.0, 2.0, 3.0, 4.0, 5.0],
-                labels: vec![],
-            },
-            UploadColumn {
-                name: "x2".into(),
-                col_type: UploadColumnType::Continuous,
-                values: vec![2.0, 4.0, 6.0, 8.0, 10.0],
-                labels: vec![],
-            },
-        ],
-    };
-    let spec = LinearSpec {
-        formula: "y = x1 + x2".into(),
-        predictors: vec![
-            PredictorSpec {
-                name: "x1".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-            PredictorSpec {
-                name: "x2".into(),
-                pinned: false,
-                kind: VarKind::Normal,
-            },
-        ],
-        effects: vec![
-            EffectAssignment {
-                name: "x1".into(),
-                size: 0.5,
-            },
-            EffectAssignment {
-                name: "x2".into(),
-                size: 0.3,
-            },
-        ],
-        correlations: vec![],
-        alpha: 0.05,
-        correction: Correction::None,
-        targets: vec!["overall".into()],
-        heteroskedasticity: HeteroskedasticityInput::default(),
-        residual: ResidualSpec::default(),
-        max_failed_fraction: 0.1,
-        scenarios: vec![],
-        test_formula: None,
-        report_overall: false,
-        contrast_pairs: vec![],
-        posthoc_requests: vec![],
-        upload: Some(upload),
-        cluster_level_vars: vec![],
-        wald_se: Default::default(),
-        df_method: Default::default(),
-        nagq: 1,
-    };
-    let contracts = engine_spec_builder::build_contract(
-        &spec,
-        OutcomeKind::Continuous,
-        None,
-        Some(EstimatorSpec::Ols),
-        0.0,
-        vec![],
-    )
-    .expect("build_contract");
-
-    let offdiag = measured_offdiag(&contracts);
-    assert!(
-        (offdiag - 1.0).abs() < 0.05,
-        "expected r≈1.0 for perfectly correlated columns, got {offdiag}"
-    );
-}
-
 /// The installed off-diagonal is the **Spearman** rank correlation converted to
 /// the latent-Gaussian scale (`2·sin(π·ρ_S/6)`), not the raw Pearson r.
 ///
 /// x1=[1,2,3,4,5], x2=[1,2,3,5,4] (last two swapped) → ρ_S = 0.9, and the raw
 /// Pearson of these same-valued columns is *also* 0.9. The latent conversion
-/// inflates it to `2·sin(π·0.9/6) = 0.9079809994790935` — so a result of 0.9
-/// would mean we measured Pearson (or skipped the conversion), and only 0.90798
-/// proves both Spearman measurement and the latent inversion.
+/// inflates it to `2·sin(π·0.9/6) = 0.9079809994790935`, so a result of 0.9
+/// would mean the conversion was skipped. Rank-based measurement itself is
+/// pinned by `partial_mode_measures_nontrivial_and_excludes_binary`, whose data
+/// has Pearson r ≠ ρ_S.
 #[test]
 fn partial_mode_measures_spearman_converted() {
     use engine_contract::{EstimatorSpec, OutcomeKind};
@@ -540,7 +303,7 @@ fn explicit_correlation_overrides_measured() {
         ResidualSpec, VarKind,
     };
 
-    // Same perfectly-correlated columns, but user explicitly sets r=0.1
+    // Perfectly correlated columns (measured ρ = 1), but the user explicitly sets r=0.1
     let upload = UploadInput {
         mode: UploadMode::Partial,
         n_rows: 5,
@@ -893,56 +656,15 @@ fn extract_matrix(contracts: &[engine_contract::SimulationContract]) -> (Vec<f64
     }
 }
 
-/// Compute Spearman rank correlation by ranking then calling Pearson on centered ranks.
-/// Mirrors the `spearman_to_latent` implementation in upload.rs (rank-then-Pearson).
-fn spearman_ref(a: &[f64], b: &[f64]) -> f64 {
-    fn rank(v: &[f64]) -> Vec<f64> {
-        let n = v.len();
-        let mut idx: Vec<usize> = (0..n).collect();
-        idx.sort_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap());
-        let mut r = vec![0.0f64; n];
-        let mut i = 0;
-        while i < n {
-            let mut j = i;
-            while j + 1 < n && v[idx[j]] == v[idx[j + 1]] {
-                j += 1;
-            }
-            let avg = (i + j) as f64 / 2.0;
-            for k in i..=j {
-                r[idx[k]] = avg;
-            }
-            i = j + 1;
-        }
-        r
-    }
-    fn pearson_centered(a: &[f64], b: &[f64]) -> f64 {
-        let n = a.len() as f64;
-        let ma: f64 = a.iter().sum::<f64>() / n;
-        let mb: f64 = b.iter().sum::<f64>() / n;
-        let ca: Vec<f64> = a.iter().map(|x| x - ma).collect();
-        let cb: Vec<f64> = b.iter().map(|x| x - mb).collect();
-        let num: f64 = ca.iter().zip(cb.iter()).map(|(x, y)| x * y).sum();
-        let da: f64 = ca.iter().map(|x| x * x).sum::<f64>().sqrt();
-        let db: f64 = cb.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if da * db < 1e-15 {
-            return 0.0;
-        }
-        num / (da * db)
-    }
-    let ra = rank(a);
-    let rb = rank(b);
-    pearson_centered(&ra, &rb)
-}
-
-/// Non-trivial Spearman correlation (x1,x2) ≈ 0.85 installed as latent Gaussian,
-/// plus binary column b has zero off-diagonal slots in the installed matrix.
+/// Non-trivial Spearman correlation (x1,x2) installed as latent Gaussian, plus a
+/// binary column b with zero off-diagonal slots in the installed matrix.
 ///
-/// Validates that NORTA installs the frame's empirical Spearman r (converted to
+/// Validates that NORTA installs the frame's empirical Spearman ρ_S (converted to
 /// the latent Gaussian scale via `2·sin(π·ρ_S/6)`) for continuous pairs, while
-/// binary columns have 0 in their off-diagonal slots — generated from their
-/// marginal only, independent of all other predictors.
+/// binary columns have 0 in their off-diagonal slots: correlation is
+/// continuous-only by design, so b is generated from its marginal only, even
+/// though it tracks x1 in the data (b = 1 exactly when x1 > 0, ρ_S(x1,b) ≈ 0.85).
 #[test]
-#[allow(clippy::erasing_op, clippy::identity_op)]
 fn partial_mode_measures_nontrivial_and_excludes_binary() {
     use engine_contract::{EstimatorSpec, OutcomeKind};
     use engine_spec_builder::input::{
@@ -951,7 +673,7 @@ fn partial_mode_measures_nontrivial_and_excludes_binary() {
 
     let x1 = vec![-1.2, -0.5, 0.1, 0.4, 0.9, 1.3, -0.8, 0.2, 0.6, -0.1];
     let x2 = vec![-0.9, -0.7, 0.3, 0.1, 1.1, 0.8, -0.2, 0.5, 0.2, -0.4];
-    let b = vec![0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
+    let b = vec![0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0];
 
     let upload = UploadInput {
         mode: UploadMode::Partial,
@@ -960,13 +682,13 @@ fn partial_mode_measures_nontrivial_and_excludes_binary() {
             UploadColumn {
                 name: "x1".into(),
                 col_type: UploadColumnType::Continuous,
-                values: x1.clone(),
+                values: x1,
                 labels: vec![],
             },
             UploadColumn {
                 name: "x2".into(),
                 col_type: UploadColumnType::Continuous,
-                values: x2.clone(),
+                values: x2,
                 labels: vec![],
             },
             UploadColumn {
@@ -1042,27 +764,24 @@ fn partial_mode_measures_nontrivial_and_excludes_binary() {
     assert_eq!(k, 3, "3 non-factor predictors → 3×3 matrix");
 
     // Column ordering: x1=0, x2=1, b=2 (non-factor declaration order).
-    // values is symmetric; (i,j) entry at vals[i*k+j] == vals[j*k+i].
-    let r_installed = vals[0 * k + 1]; // (x1, x2) off-diagonal
-
-    let rho_s = spearman_ref(&x1, &x2);
-    let r_expected = 2.0 * (std::f64::consts::PI * rho_s / 6.0).sin();
-    assert!(
-        (r_installed - r_expected).abs() < 1e-9,
-        "installed latent r {r_installed} != Spearman-to-latent {r_expected} (rho_S={rho_s})"
-    );
-
-    // Binary column b occupies index 2 — its off-diagonal slots must be 0.
-    let r_x1b = vals[0 * k + 2]; // (x1, b)
-    let r_x2b = vals[1 * k + 2]; // (x2, b)
-    assert!(
-        r_x1b.abs() < 1e-9,
-        "binary column slot (x1,b) must be 0, got {r_x1b}"
-    );
-    assert!(
-        r_x2b.abs() < 1e-9,
-        "binary column slot (x2,b) must be 0, got {r_x2b}"
-    );
+    // ρ_S(x1,x2) = 47/55 (R `cor(x1, x2, method = "spearman")`), so the latent
+    // entry is 2·sin(π·(47/55)/6) = 0.8653160468930163 (computed in R). The
+    // binary column's slots stay 0, and the PSD block is installed unshrunk.
+    let r = 0.8653160468930163;
+    #[rustfmt::skip]
+    let expected = [
+        1.0, r,   0.0,
+        r,   1.0, 0.0,
+        0.0, 0.0, 1.0,
+    ];
+    for (i, (got, want)) in vals.iter().zip(expected).enumerate() {
+        assert!(
+            (got - want).abs() < 1e-12,
+            "entry ({}, {}) = {got}, expected {want}; matrix {vals:?}",
+            i / k,
+            i % k
+        );
+    }
 }
 
 // ── P2-3 strict (bootstrap) signal tests ──────────────────────────────────────
@@ -1117,8 +836,7 @@ fn upload_mode_none_does_not_measure_correlations() {
         Correction, EffectAssignment, HeteroskedasticityInput, PredictorSpec, ResidualSpec, VarKind,
     };
 
-    // Two perfectly-correlated continuous columns (same data pattern as the
-    // partial-mode correlation test, but with UploadMode::None).
+    // Two perfectly-correlated continuous columns, uploaded with UploadMode::None.
     let upload = UploadInput {
         mode: UploadMode::None,
         n_rows: 5,

@@ -37,9 +37,6 @@ describe('parsed-formula derivations', () => {
       interaction_terms: [['x1', 'x2']],
     });
   });
-  it('extracts an intercept RE as a cluster term', () => {
-    expect(toClusterTerms(fp)).toEqual([{ cluster: 'g', parent: null, slopeVars: [] }]);
-  });
   it('maps nested and slope REs to structured cluster terms', () => {
     const multi: FormulaParse = {
       ...fp,

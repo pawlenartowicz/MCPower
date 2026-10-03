@@ -101,9 +101,10 @@ export type TestSelection =
 
 /**
  * Mirrors `engine_spec_builder::input::ScenarioInput` (the projected wire shape
- * Python's `_scenario_dict` produces). The two distribution lists are already
- * integer-encoded (`new_distributions` via `_DIST_CODE`, `residual_dists` via
- * `_RESIDUAL_CODE`). RE-perturbation fields are carried flat on the wire:
+ * Python's `build_scenario_dict` (spec/spec_builder.py) produces). The two distribution lists are already
+ * integer-encoded (`new_distributions` via the engine's `DIST_CODES`,
+ * `residual_dists` via `RESIDUAL_CODES`, both in engine-spec-builder's
+ * `project_contract.rs`). RE-perturbation fields are carried flat on the wire:
  * `random_effect_dist`, `random_effect_df`, and `icc_noise_sd` (see below).
  */
 export interface ScenarioWire {

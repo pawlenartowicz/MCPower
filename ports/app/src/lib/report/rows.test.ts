@@ -10,10 +10,13 @@ describe('buildRows', () => {
       ['x1', 'condition[treatment]', 'condition[active]'],
       { condition: { baseline: 'control' } },
     );
-    expect(rows[0]).toEqual({ kind: 'continuous', label: 'x1', pos: 0 });
-    expect(rows[1]).toEqual({ kind: 'factor_header', label: 'condition', baseline: 'control' });
-    expect(rows[2]).toEqual({ kind: 'factor_level', label: 'treatment', factor: 'condition', pos: 1 });
-    expect(rows[3]).toEqual({ kind: 'factor_level', label: 'active', factor: 'condition', pos: 2 });
+    // One header per factor, not one per level.
+    expect(rows).toEqual([
+      { kind: 'continuous', label: 'x1', pos: 0 },
+      { kind: 'factor_header', label: 'condition', baseline: 'control' },
+      { kind: 'factor_level', label: 'treatment', factor: 'condition', pos: 1 },
+      { kind: 'factor_level', label: 'active', factor: 'condition', pos: 2 },
+    ]);
   });
 
   it('handles continuous-only case', () => {
@@ -26,19 +29,6 @@ describe('buildRows', () => {
       { kind: 'continuous', label: 'age', pos: 0 },
       { kind: 'continuous', label: 'income', pos: 1 },
     ]);
-  });
-
-  it('emits factor_header only once per factor', () => {
-    const rows = buildRows(
-      [1, 2, 3],
-      ['grp[b]', 'grp[c]', 'grp[d]'],
-      { grp: { baseline: 'a' } },
-    );
-    const headers = rows.filter((r) => r.kind === 'factor_header');
-    expect(headers.length).toBe(1);
-    expect(headers[0]!.label).toBe('grp');
-    expect(headers[0]!.baseline).toBe('a');
-    expect(rows.filter((r) => r.kind === 'factor_level').length).toBe(3);
   });
 
   it('throws a clear error when idx-1 is out of range', () => {

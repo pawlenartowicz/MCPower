@@ -4,8 +4,11 @@
   import { NumberInput } from '$lib/components/ui/number-input';
   import { familyStore } from '$lib/stores/family.svelte';
   import { uploadStore } from '$lib/stores/upload.svelte';
-  import { correlatableVariables, pearson, allContinuousUploaded } from '$lib/domain/correlations';
-  import { uploadedColumnByName } from '$lib/domain/upload-detect';
+  import {
+    allContinuousUploaded,
+    correlatableVariables,
+    correlationDisplayValue,
+  } from '$lib/domain/correlations';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
   const n = $derived(cfg.variables.length);
@@ -43,24 +46,18 @@
   );
 
   /**
-   * Display value for cell (entryI.idx, entryJ.idx).
-   * In partial mode, when the stored value is still 0 (untouched) and both
-   * variables are uploaded-continuous, we show the measured Pearson r instead.
-   * The measured value is NEVER written to cfg.correlations.
+   * Display value for cell (entryI.idx, entryJ.idx): the stored value, or the
+   * measured Pearson r for an untouched uploaded-continuous pair in partial
+   * mode. The measured value is NEVER written to cfg.correlations.
    */
   function displayValue(iIdx: number, jIdx: number): number {
-    const stored = cfg.correlations[iIdx]?.[jIdx] ?? 0;
-    if (uploadStore.mode !== 'partial' || stored !== 0) return stored;
-    const uploadedMap = uploadedColumnByName(uploadStore.csvData);
-    const varI = cfg.variables[iIdx];
-    const varJ = cfg.variables[jIdx];
-    if (!varI || !varJ) return stored;
-    const colI = uploadedMap.get(varI.name);
-    const colJ = uploadedMap.get(varJ.name);
-    if (!colI || !colJ || colI.col_type !== 'continuous' || colJ.col_type !== 'continuous') {
-      return stored;
-    }
-    return pearson(colI.values, colJ.values);
+    return correlationDisplayValue(
+      cfg.correlations[iIdx]?.[jIdx] ?? 0,
+      uploadStore.mode,
+      uploadStore.csvData,
+      cfg.variables[iIdx]?.name,
+      cfg.variables[jIdx]?.name,
+    );
   }
 </script>
 
