@@ -19,7 +19,7 @@ const LOGIT_SPEC_JSON: &str = r#"{"family":"logit","parsed_formula":{"outcome":"
 
 #[wasm_bindgen_test]
 fn find_power_returns_scenario_result_json() {
-    let out = engine_wasm::find_power(LINEAR_SPEC_JSON, 80, 200, 11, None);
+    let out = engine_wasm::find_power(LINEAR_SPEC_JSON, 80, 200, 11, None, None);
     let out = match out {
         Ok(s) => s,
         Err(_) => panic!("find_power errored"),
@@ -67,7 +67,7 @@ fn parse_formula_round_trips() {
 
 #[wasm_bindgen_test]
 fn merge_pools_two_power_parts() {
-    let part = match engine_wasm::find_power(LINEAR_SPEC_JSON, 80, 200, 11, None) {
+    let part = match engine_wasm::find_power(LINEAR_SPEC_JSON, 80, 200, 11, None, None) {
         Ok(s) => s,
         Err(_) => panic!("part errored"),
     };
@@ -97,7 +97,7 @@ fn nan_bearing_extras_survive_wasm_json_wire_and_merge() {
     // to the main thread. tau_squared_hat_mean is NaN in a per-worker result
     // (zero-count denominator in from_batch) → serde_json encodes it as JSON
     // null.
-    let part = engine_wasm::find_power(LOGIT_SPEC_JSON, 80, 64, 11, None)
+    let part = engine_wasm::find_power(LOGIT_SPEC_JSON, 80, 64, 11, None, None)
         .expect("find_power must succeed for a valid logit spec");
 
     // The JSON produced by find_power must contain "null" for the NaN fields.

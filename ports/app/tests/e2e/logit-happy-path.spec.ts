@@ -35,10 +35,10 @@ test('logit find-power happy path renders bars and table baseline', async ({ pag
 
   // TableView is rendered inside the default Summary tab (alongside the bars chart),
   // so the realized baseline is already on screen — no sub-view switch needed. It
-  // surfaces "baseline prob (realized) = NN.N%" when the estimator is glm (the adapter
-  // maps Binary regression → AppSpec::Logit → glm estimator).
-  await expect(page.getByText(/baseline prob \(realized\)/i)).toBeVisible();
-  // The mock echoes spec.baseline_probability as the realized baseline, so the
+  // surfaces "event rate = NN.N% · baseline NN.N%" when the estimator is glm (the
+  // adapter maps Binary regression → AppSpec::Logit → glm estimator).
+  await expect(page.getByText(/event rate =/i)).toBeVisible();
+  // The mock echoes spec.baseline_probability as the realized event rate, so the
   // 0.3 typed above must reach the AppSpec and come back as 30.0%.
-  await expect(page.getByText(/baseline prob \(realized\)/i)).toContainText('30.0%');
+  await expect(page.getByText(/event rate =/i)).toContainText('event rate = 30.0%');
 });
