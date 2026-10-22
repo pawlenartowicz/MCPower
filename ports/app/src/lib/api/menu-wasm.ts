@@ -5,8 +5,7 @@ export function downloadBlob(filename: string, blob: Blob): void {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
-  // Firefox only fires the download if the anchor is in the document (mirrors
-  // wasm/src/index.ts downloadPlot).
+  // Firefox only fires the download if the anchor is in the document.
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

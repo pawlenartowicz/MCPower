@@ -17,6 +17,8 @@
 import init, {
   merge_power_results,
   merge_sample_size_results,
+  curvature_hints_power,
+  curvature_hints_sample_size,
   power_plot_specs_json,
   sample_size_plot_specs_json,
   parse_formula as wasm_parse_formula,
@@ -26,26 +28,9 @@ import init, {
 import { classifyCase, poolSize, splitSims, workerSeeds } from './seeds';
 import { ProgressAggregator } from './progress';
 import { validateUploadRows } from './upload';
-import { reuseFraction, strictReuseWarning } from './reuse';
 import type {
-  AppSpec, CsvData, EffectDescriptor, EffectsFromData, FindPowerResponse, FindSampleSizeResponse, PlotSpecs, ProgressEvent, SampleSizeMethod,
+  AppSpec, EffectDescriptor, EffectsFromData, FindPowerResponse, FindSampleSizeResponse, PlotSpecs, ProgressEvent, SampleSizeMethod,
 } from './types';
-import htmlTemplate from '$configs/plot-html-template.html?raw';
-import plotThemes from '$configs/plot-themes.json';
-
-/** Deep-merge `overlay` into `base` (mutates base). Mirrors Python's `_deep_merge`. */
-function deepMerge(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
-  for (const [key, value] of Object.entries(overlay)) {
-    const existing = base[key];
-    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing) &&
-        value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      deepMerge(existing as Record<string, unknown>, value as Record<string, unknown>);
-    } else {
-      base[key] = value;
-    }
-  }
-  return base;
-}
 
 /** Derive `corrected` from an AppSpec JSON object. Mirrors `AppSpec::is_corrected()`. */
 function isCorrected(spec: AppSpec): boolean {
@@ -295,9 +280,16 @@ export async function findPower(
   const agg = new ProgressAggregator(nSims, shares, sampleSize, emit);
 
   const specJson = JSON.stringify(spec);
+  // Every worker fits with the curvature hints of the master seed (seeds[0]),
+  // computed once here. One worker needs none: its seed is the master seed,
+  // so its own pilot gives the same hints without blocking the main thread.
+  const hints = nWorkers > 1 ? curvature_hints_power(specJson, sampleSize, seeds[0]!) : undefined;
   const parts = await fanOut(
     runId, shares, seeds,
-    (share, seed) => ({ kind: 'power', spec: specJson, sampleSize, nSims: share, seed: seed.toString() }),
+    (share, seed) => ({
+      kind: 'power', spec: specJson, sampleSize, nSims: share, seed: seed.toString(),
+      ...(hints !== undefined && { hints }),
+    }),
     agg, borrowWarm(nWorkers, opts?.workers),
   );
 
@@ -305,22 +297,7 @@ export async function findPower(
   const plots = JSON.parse(power_plot_specs_json(merged, spec.target_power, isCorrected(spec))) as PlotSpecs;
   agg.finish();
 
-  const warnings: string[] = [];
-  const csv = (spec as unknown as { csv: CsvData | null }).csv;
-  if (csv?.mode === 'strict' && csv.n_rows > 0) {
-    const U = csv.n_rows;
-    const frac = reuseFraction(U, sampleSize);
-    const diagLine = `[strict bootstrap] N=${sampleSize}, uploaded rows U=${U}: ~${Math.round(frac)}% of rows reused per simulated dataset.`;
-    warnings.push(diagLine);
-    console.warn(diagLine);
-    const w = strictReuseWarning(U, sampleSize);
-    if (w !== null) {
-      warnings.push(w);
-      console.warn(w);
-    }
-  }
-
-  return { run_id: runId, result: JSON.parse(merged), plots, warnings };
+  return { run_id: runId, result: JSON.parse(merged), plots };
 }
 
 export async function findSampleSize(
@@ -346,11 +323,15 @@ export async function findSampleSize(
   const specJson = JSON.stringify(spec);
   const boundsJson = JSON.stringify(bounds);
   const methodJson = JSON.stringify(method);
+  // Shared curvature hints, as in findPower.
+  const hints =
+    nWorkers > 1 ? curvature_hints_sample_size(specJson, boundsJson, methodJson, seeds[0]!) : undefined;
   const parts = await fanOut(
     runId, shares, seeds,
     (share, seed) => ({
       kind: 'sample_size', spec: specJson, bounds: boundsJson, method: methodJson,
       nSims: share, seed: seed.toString(),
+      ...(hints !== undefined && { hints }),
     }),
     agg, borrowWarm(nWorkers, opts?.workers),
   );
@@ -359,72 +340,5 @@ export async function findSampleSize(
   const plots = JSON.parse(sample_size_plot_specs_json(merged, spec.target_power, isCorrected(spec))) as PlotSpecs;
   agg.finish();
 
-  const warnings: string[] = [];
-  const csvSS = (spec as unknown as { csv: CsvData | null }).csv;
-  if (csvSS?.mode === 'strict' && csvSS.n_rows > 0) {
-    const U = csvSS.n_rows;
-    // Per-target per-scenario diagnostics, mirroring Python's find_sample_size path.
-    const parsedResult = JSON.parse(merged) as { scenarios: [string, { first_achieved: (number | null)[] }][] };
-    for (const [, inner] of parsedResult.scenarios) {
-      const fa = inner.first_achieved ?? [];
-      fa.forEach((achievedN, pos) => {
-        if (achievedN === null) return;
-        const frac = reuseFraction(U, achievedN);
-        const diagLine = `[strict bootstrap] target ${pos}: first N=${achievedN}, uploaded rows U=${U}: ~${Math.round(frac)}% of rows reused per simulated dataset.`;
-        warnings.push(diagLine);
-        console.warn(diagLine);
-        const w = strictReuseWarning(U, achievedN);
-        if (w !== null) {
-          warnings.push(w);
-          console.warn(w);
-        }
-      });
-    }
-  }
-
-  return { run_id: runId, result: JSON.parse(merged), plots, warnings };
-}
-
-/**
- * Wrap a Vega-Lite spec JSON string in a self-contained HTML document using
- * the shared CDN template (`configs/plot-html-template.html`).  The `light-print`
- * theme is deep-merged into `spec.config` before embedding — this is a saved
- * artifact, so it gets the light-print theme.  The returned string can be written to
- * a `.html` file or opened in a browser tab via a Blob URL.
- *
- * Mirrors Python's `_write_stacked_html` (theme=`"light-print"`) in
- * `ports/py/mcpower/output/plotting.py`.
- * Mirror checklist: if the `<\/` escape strategy or the `"light-print"` theme-key
- * changes in `_write_stacked_html`, update this function to match.
- */
-export function plotHtml(spec: string): string {
-  const specObj = JSON.parse(spec) as Record<string, unknown>;
-  const printTheme = (plotThemes as Record<string, Record<string, unknown>>)['light-print']!;
-  const config = (specObj['config'] !== null && typeof specObj['config'] === 'object' && !Array.isArray(specObj['config']))
-    ? specObj['config'] as Record<string, unknown>
-    : {};
-  specObj['config'] = deepMerge(config, printTheme);
-  // Escape "</" → "<\/" in the substituted payload so a spec value containing a
-  // literal "</script>" cannot break out of the inline <script> block.
-  // The backslash is inert inside a JS string; the HTML parser no longer sees a
-  // closing tag. Mirrors Python's `.replace("</", "<\\/")` in _write_stacked_html.
-  const specsJson = JSON.stringify([specObj]).replace(/<\//g, '<\\/');
-  return htmlTemplate.replace('{{SPECS}}', specsJson);
-}
-
-/**
- * Trigger a browser file-download of a Vega-Lite spec JSON string.
- * Creates a temporary anchor element, clicks it, then cleans up.
- * Browser-only — in Node/vitest environments mock `document`, `Blob`, and `URL`.
- */
-export function downloadPlot(spec: string, filename: string): void {
-  const blob = new Blob([spec], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return { run_id: runId, result: JSON.parse(merged), plots };
 }

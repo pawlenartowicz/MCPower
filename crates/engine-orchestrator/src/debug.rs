@@ -429,7 +429,7 @@ mod entry {
         } else {
             None
         };
-        use engine_core::introspect::{run_introspect, IntrospectMask};
+        use engine_core::introspect::{IntrospectMask, run_introspect};
 
         let need_power = stages.stats && stages.crit; // D-F
         let icall = if stages.data || stages.stats || stages.crit || need_power {
@@ -506,11 +506,7 @@ mod entry {
                     let statistic: Vec<f64> = (0..n_sims)
                         .map(|s| {
                             let v = stat_sq[s * nt + t];
-                            if v.is_nan() {
-                                f64::NAN
-                            } else {
-                                v.sqrt()
-                            }
+                            if v.is_nan() { f64::NAN } else { v.sqrt() }
                         })
                         .collect();
                     TargetStats {
@@ -589,8 +585,10 @@ mod entry {
 
     /// Fit a provided dataset with the configured solver (the `data → results`
     /// path). Lowers the contract exactly as `debug_report` does so the spec /
-    /// test definition is identical, then calls `fit_provided_data`. Wired for
-    /// all three estimators (OLS t, GLM/MLE Wald z).
+    /// test definition is identical, then calls `fit_provided_data` with the
+    /// lowered scenario base seed, so a mixed fit reruns the same curvature-hint
+    /// pilot as `debug_report`'s stats stage at `n = nrow`. Wired for all three
+    /// estimators (OLS t, GLM/MLE Wald z).
     #[allow(clippy::too_many_arguments)] // raw data buffers for one validation call site
     pub fn debug_load_data(
         c: &SimulationContract,
@@ -625,6 +623,7 @@ mod entry {
 
         let r = engine_core::introspect::fit_provided_data(
             spec,
+            scenario.base_seed,
             design,
             nrow,
             ncol,

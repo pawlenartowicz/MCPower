@@ -53,6 +53,25 @@ pub struct SimulationContract {
     /// Post-batch convergence threshold (fraction of failed sims); evaluated
     /// host-side, not by the kernel.
     pub max_failed_fraction: f64,
+    /// Curvature hints for the mixed-model gradient search, one entry per
+    /// sample-size grid point, set only by the WASM host. `None` (the
+    /// default): the engine runs its own one-draw pilot to compute them.
+    /// `Some(v)`: no pilot runs and grid point `k` fits with `v[k]`;
+    /// `Some([])` means no hints, and a non-empty `v` whose length is not the
+    /// grid length is an error. Lets every single-core worker of one run fit
+    /// with the same hints, computed once from the master seed.
+    #[serde(default)]
+    pub curvature_hints: Option<Vec<Option<CurvatureHintParts>>>,
+}
+
+/// One glmm `CurvatureHint` as plain numbers, so it can cross a WASM worker
+/// boundary: the row-major `dim × dim` inverse Hessian and the units the hint
+/// was taken in.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CurvatureHintParts {
+    pub dim: usize,
+    pub inv_hessian: Vec<f64>,
+    pub units: f64,
 }
 
 /// Serde default for `SimulationContract.nagq` — Laplace (mirrors
@@ -66,14 +85,6 @@ mod tests {
     use super::*;
     use crate::estimator::{DfMethod, WaldSe};
     use crate::fixtures::example1_simple_ols;
-
-    #[test]
-    fn simulation_contract_msgpack_roundtrip_example1() {
-        let c = example1_simple_ols();
-        let bytes = rmp_serde::to_vec_named(&c).unwrap();
-        let back: SimulationContract = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(c, back);
-    }
 
     #[test]
     fn contract_wald_se_defaults_when_absent() {
@@ -96,5 +107,35 @@ mod tests {
         assert_eq!(back.wald_se, WaldSe::Rx);
         assert_eq!(back.nagq, 1);
         assert_eq!(back.df_method, DfMethod::BetweenWithin);
+    }
+
+    #[test]
+    fn contract_curvature_hints_default_to_none_when_absent() {
+        let c = example1_simple_ols();
+        let v = rmp_serde::to_vec_named(&c).unwrap();
+        let mut val: rmpv::Value = rmp_serde::from_slice(&v).unwrap();
+        if let rmpv::Value::Map(entries) = &mut val {
+            entries.retain(|(k, _)| k.as_str() != Some("curvature_hints"));
+        }
+        let mut stripped = Vec::new();
+        rmpv::encode::write_value(&mut stripped, &val).unwrap();
+        let back: SimulationContract = rmp_serde::from_slice(&stripped).unwrap();
+        assert_eq!(back.curvature_hints, None);
+    }
+
+    #[test]
+    fn contract_curvature_hints_msgpack_roundtrip() {
+        let mut c = example1_simple_ols();
+        c.curvature_hints = Some(vec![
+            Some(CurvatureHintParts {
+                dim: 2,
+                inv_hessian: vec![2.0, 0.5, 0.5, 1.0],
+                units: 4.0,
+            }),
+            None,
+        ]);
+        let bytes = rmp_serde::to_vec_named(&c).unwrap();
+        let back: SimulationContract = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(c, back);
     }
 }

@@ -82,6 +82,13 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
                 .into(),
         ));
     }
+    // The pooling loop reads both factor vectors at the exclusion length, so
+    // the head's two must agree (each part is then checked against the head).
+    if head.factor_separation_counts.len() != head.factor_exclusion_counts.len() {
+        return Err(OrchestratorError::IncompatibleMerge(
+            "factor_separation_counts length does not match factor_exclusion_counts".into(),
+        ));
+    }
     // Joint-significance histogram length: targets + post-hoc contrasts + 1. A real
     // aggregated part always carries this length; an empty (len-0) histogram is a part
     // built without the per-sim counters. All parts must agree — mixing an empty and a
@@ -353,6 +360,44 @@ pub fn merge_sample_size_results(
                 .collect();
             pooled_per_n.push(merge_one_power_result(&prs)?);
         }
+        // Each point was checked only against the same point of the other
+        // parts; `derive_sample_size_outputs` sizes every series and takes
+        // `n_sims` from point 0 and applies both to all points, so every point
+        // must match point 0.
+        if let Some((first, rest)) = pooled_per_n.split_first() {
+            for (n_idx, pr) in rest.iter().enumerate() {
+                if pr.n_sims != first.n_sims {
+                    return Err(OrchestratorError::IncompatibleMerge(format!(
+                        "grid point {} of scenario {s_idx} has n_sims {} but grid point 0 \
+                         has {}",
+                        n_idx + 1,
+                        pr.n_sims,
+                        first.n_sims
+                    )));
+                }
+                if pr.success_counts_corrected.len() != first.success_counts_corrected.len()
+                    || pr.success_count_histogram_corrected.len()
+                        != first.success_count_histogram_corrected.len()
+                {
+                    return Err(OrchestratorError::IncompatibleMerge(format!(
+                        "grid point {} of scenario {s_idx} has a different target count \
+                         than grid point 0",
+                        n_idx + 1
+                    )));
+                }
+                if pr.posthoc.len() != first.posthoc.len()
+                    || pr.posthoc.iter().zip(&first.posthoc).any(|(a, b)| {
+                        a.success_counts_corrected.len() != b.success_counts_corrected.len()
+                    })
+                {
+                    return Err(OrchestratorError::IncompatibleMerge(format!(
+                        "grid point {} of scenario {s_idx} has a different post-hoc block or \
+                         contrast count than grid point 0",
+                        n_idx + 1
+                    )));
+                }
+            }
+        }
 
         // Recompute all four derivations from the pooled counts via the
         // shared helper. Per-worker `fitted` values are computed-then-
@@ -376,6 +421,8 @@ pub fn merge_sample_size_results(
                 fitted_joint: d.fitted_joint,
                 first_overall_achieved: d.first_overall_achieved,
                 fitted_overall: d.fitted_overall,
+                posthoc_first_achieved: d.posthoc_first_achieved,
+                posthoc_fitted: d.posthoc_fitted,
                 cluster_atom: head_cluster_atom,
                 unit_divisor: head_unit_divisor,
                 target_power: head_target_power,
@@ -402,19 +449,30 @@ fn merge_posthoc_blocks(
     if n_blocks == 0 {
         return Ok(Vec::new());
     }
-    // All parts must have the same block count and per-block contrast count.
-    for p in &prs[1..] {
+    // All parts must have the same block count, per-block level and contrast
+    // counts, and (head included) corrected counts as long as uncorrected —
+    // the pooling loop indexes both at the uncorrected length.
+    for p in prs {
         if p.posthoc.len() != n_blocks {
             return Err(OrchestratorError::IncompatibleMerge(
                 "posthoc block count mismatch across parts".into(),
             ));
         }
         for b in 0..n_blocks {
-            if p.posthoc[b].success_counts_uncorrected.len()
-                != prs[0].posthoc[b].success_counts_uncorrected.len()
-            {
+            let (block, head) = (&p.posthoc[b], &prs[0].posthoc[b]);
+            if block.success_counts_corrected.len() != block.success_counts_uncorrected.len() {
+                return Err(OrchestratorError::IncompatibleMerge(
+                    "posthoc corrected and uncorrected contrast counts differ".into(),
+                ));
+            }
+            if block.success_counts_uncorrected.len() != head.success_counts_uncorrected.len() {
                 return Err(OrchestratorError::IncompatibleMerge(
                     "posthoc contrast count mismatch across parts".into(),
+                ));
+            }
+            if block.n_levels != head.n_levels {
+                return Err(OrchestratorError::IncompatibleMerge(
+                    "posthoc n_levels mismatch across parts".into(),
                 ));
             }
         }
@@ -487,7 +545,7 @@ fn merge_estimator_extras(
                 }
             }
             Ok(EstimatorExtras::Glm {
-                baseline_prob_realized: if n > 0 { sum / n as f64 } else { 0.0 },
+                baseline_prob_realized: if n > 0 { sum / n as f64 } else { f64::NAN },
                 baseline_prob_sum: sum,
                 baseline_prob_n: n,
                 singular_fit_rate: if singular_n > 0 {
@@ -569,7 +627,7 @@ fn merge_estimator_extras(
                 tau_estimate: if tau_n > 0 {
                     tau_sum / tau_n as f64
                 } else {
-                    0.0
+                    f64::NAN
                 },
                 boundary_hits,
                 joint_uncorrected_rate: joint_unc as f64 / denom,

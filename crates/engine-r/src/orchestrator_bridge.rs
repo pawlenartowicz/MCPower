@@ -10,8 +10,8 @@
 
 use engine_contract::SimulationContract;
 use engine_orchestrator::{
-    power_result_to_host, sample_size_result_to_host, HostValue, PowerResult, SampleSizeMethod,
-    SampleSizeResult, ScenarioResult,
+    HostValue, PowerResult, SampleSizeMethod, SampleSizeResult, ScenarioResult,
+    power_result_to_host, sample_size_result_to_host,
 };
 use extendr_api::error::Result;
 use extendr_api::prelude::*;

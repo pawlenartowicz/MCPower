@@ -17,8 +17,8 @@ use engine_contract::{
     TestTarget,
 };
 use engine_orchestrator::{
-    find_power, find_sample_size, single_core_find_power, single_core_find_sample_size, ByValue,
-    CancellationToken, GridMode, SampleSizeMethod,
+    ByValue, CancellationToken, GridMode, SampleSizeMethod, find_power, find_sample_size,
+    single_core_find_power, single_core_find_sample_size,
 };
 
 /// Contract with a 2-level factor whose proportions are `probs` and no other
@@ -82,6 +82,7 @@ fn factor_contract(probs: [f64; 2]) -> SimulationContract {
         posthoc: vec![],
         scenario,
         max_failed_fraction: 0.05,
+        curvature_hints: None,
     }
 }
 

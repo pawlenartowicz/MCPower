@@ -239,3 +239,40 @@ test_that("length-1 corr_with in extra-grouping slope serialises as array not sc
   expect_length(corr_with_1, 1L)
   expect_true(is.list(corr_with_1))
 })
+
+# Nested child without n_per_parent -> NestedWithin at the config default.
+test_that("nested child without n_per_parent encodes NestedWithin at the config default", {
+  m <- MCPower$new("y ~ x1 + (1|school/district)", family = "lme")$
+    set_effects("x1=0.3")$
+    set_cluster("school", ICC = 0.10, n_clusters = 20L)$
+    set_cluster("school:district", ICC = 0.05)
+  priv <- m$.__enclos_env__$private
+  enc <- mcpower:::.encode_outcome_and_clusters(
+    m$family, "canonical", m$estimator, m$intercept, priv$pending_clusters,
+    nested_vars = priv$nested_child_vars())
+  parsed <- jsonlite::fromJSON(enc$clusters_json, simplifyVector = FALSE)
+  rel <- parsed[[1]]$extra_groupings[[1]]$relation
+  expect_equal(rel$NestedWithin$n_per_parent,
+               as.integer(mcpower:::.sim_defaults()$nested_n_per_parent))
+  expect_null(rel$Crossed)
+})
+
+test_that("nested child given n_clusters errors", {
+  m <- MCPower$new("y ~ x1 + (1|school/district)", family = "lme")$
+    set_effects("x1=0.3")$
+    set_cluster("school", ICC = 0.10, n_clusters = 20L)
+  expect_error(
+    m$set_cluster("school:district", ICC = 0.05, n_clusters = 30L),
+    "district is nested in school; give n_per_parent"
+  )
+})
+
+test_that("nested child given cluster_size errors", {
+  m <- MCPower$new("y ~ x1 + (1|school/district)", family = "lme")$
+    set_effects("x1=0.3")$
+    set_cluster("school", ICC = 0.10, n_clusters = 20L)
+  expect_error(
+    m$set_cluster("school:district", ICC = 0.05, cluster_size = 30L),
+    "give n_per_parent .*, not cluster_size"
+  )
+})

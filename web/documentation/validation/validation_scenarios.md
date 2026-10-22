@@ -7,14 +7,14 @@ right_sidebar: body
 
 # What this report shows
 
-MCPower’s **sensitivity analysis** deliberately stresses a planned study:
-instead of simulating the idealised design you specified, each scenario
-*perturbs* it — slopes wobble between observations, residual variance
-trends with the predictors, correlations differ from the plan, predictor
-and residual distributions get swapped, group allocation becomes random.
-Each perturbation is controlled by a knob in `configs/scenarios.json`,
-and each knob documents a precise statistical *law* for the disturbance
-it injects.
+MCPower’s **sensitivity analysis** deliberately stresses a planned
+study: instead of simulating the idealised design you specified, each
+scenario *perturbs* it — slopes wobble between observations, residual
+variance trends with the predictors, correlations differ from the plan,
+predictor and residual distributions get swapped, group allocation
+becomes random. Each perturbation is controlled by a knob in
+`configs/scenarios.json`, and each knob documents a precise statistical
+*law* for the disturbance it injects.
 
 This report checks **that every knob generates exactly its documented
 law** — no more, no less. It is the L5 layer of the validation charter:
@@ -38,31 +38,35 @@ in β̂₀ while every effect estimate stays clean.
 
 # Results at a glance
 
-> **72 of 72 gates pass.** Golden reproducibility: all cases reproduce.
+> **80 of 80 gates pass.** Golden reproducibility: all cases reproduce.
 
-| Case            | Verdict  | Golden check |
-|:----------------|:---------|:-------------|
-| fg_glm_flip     | all PASS | reproduces   |
-| fg_glm_ident    | all PASS | reproduces   |
-| scen_b0         | all PASS | reproduces   |
-| scen_b1_glm     | all PASS | reproduces   |
-| scen_b1_ols     | all PASS | reproduces   |
-| scen_b2         | all PASS | reproduces   |
-| scen_b3         | all PASS | reproduces   |
-| scen_b4         | all PASS | reproduces   |
-| scen_b5         | all PASS | reproduces   |
-| scen_co_high    | all PASS | reproduces   |
-| scen_co_low     | all PASS | reproduces   |
-| scen_co_psd     | all PASS | reproduces   |
-| scen_fa_mle     | all PASS | reproduces   |
-| scen_fa_mle_fp  | all PASS | reproduces   |
-| scen_fa_ols     | all PASS | reproduces   |
-| scen_he         | all PASS | reproduces   |
-| scen_hs         | all PASS | reproduces   |
-| scen_px         | all PASS | reproduces   |
-| scen_px_t3      | all PASS | reproduces   |
-| scen_re         | all PASS | reproduces   |
-| scen_re_replace | all PASS | reproduces   |
+| Case             | Verdict  | Golden check |
+|:-----------------|:---------|:-------------|
+| fg_glm_flip      | all PASS | reproduces   |
+| fg_glm_ident     | all PASS | reproduces   |
+| fg_poisson_ident | all PASS | reproduces   |
+| fg_probit_ident  | all PASS | reproduces   |
+| scen_b0          | all PASS | reproduces   |
+| scen_b1_glm      | all PASS | reproduces   |
+| scen_b1_ols      | all PASS | reproduces   |
+| scen_b2          | all PASS | reproduces   |
+| scen_b3          | all PASS | reproduces   |
+| scen_b4          | all PASS | reproduces   |
+| scen_b5          | all PASS | reproduces   |
+| scen_co_high     | all PASS | reproduces   |
+| scen_co_low      | all PASS | reproduces   |
+| scen_co_psd      | all PASS | reproduces   |
+| scen_fa_mle      | all PASS | reproduces   |
+| scen_fa_mle_fp   | all PASS | reproduces   |
+| scen_fa_ols      | all PASS | reproduces   |
+| scen_he          | all PASS | reproduces   |
+| scen_he_poisson  | all PASS | reproduces   |
+| scen_he_probit   | all PASS | reproduces   |
+| scen_hs          | all PASS | reproduces   |
+| scen_px          | all PASS | reproduces   |
+| scen_px_t3       | all PASS | reproduces   |
+| scen_re          | all PASS | reproduces   |
+| scen_re_replace  | all PASS | reproduces   |
 
 # Tier A — one knob at a time
 
@@ -81,6 +85,24 @@ moments.
 |:---|:---|:---|---:|---:|---:|:---|
 | jitter slope on x1² = h²β² (h=0.4) | scen_he | jitter slope on x1² = h²β² (h=0.4) | 0.02491 | 0.0256 | -0.25106 | PASS |
 | jitter slope on x2² = h²β² (h=0.4) | scen_he | jitter slope on x2² = h²β² (h=0.4) | 0.00830 | 0.0100 | -1.07315 | PASS |
+
+The same knob under the non-linear GLM links (probit latent scale,
+Poisson log-rate): the β-jitter is drawn once per study, so each study
+fits a clean GLM at its own β_eff and the mean β̂ recovers the per-study
+pseudo-true `glm_perstudy_beta(β, h)`. The **slopes** land on that
+oracle within the leak band; the intercept carries an additional
+link-nonlinearity (Jensen) shift that the per-study oracle omits —
+reported, not gated.
+
+|  | Case | Gate | Measured | Law | z | Verdict |
+|:---|:---|:---|---:|---:|---:|:---|
+| β̂\[x1\] = per-study pseudo-true (h=0.4) | scen_he_probit | β̂\[x1\] = per-study pseudo-true (h=0.4) | 0.49293 | 0.50040 | -0.66346 | PASS |
+| β̂\[x2\] = per-study pseudo-true (h=0.4) | scen_he_probit | β̂\[x2\] = per-study pseudo-true (h=0.4) | 0.29411 | 0.30024 | -0.77896 | PASS |
+| β̂\[x1\] = per-study pseudo-true (h=0.4)1 | scen_he_poisson | β̂\[x1\] = per-study pseudo-true (h=0.4) | 0.50479 | 0.50040 | 0.36984 | PASS |
+| β̂\[x2\] = per-study pseudo-true (h=0.4)1 | scen_he_poisson | β̂\[x2\] = per-study pseudo-true (h=0.4) | 0.29595 | 0.30024 | -0.63083 | PASS |
+
+    ## 
+    ## Reported intercept Jensen shift (not gated): probit +0.0274, Poisson +0.0140.
 
 ## Heteroskedasticity (residual-variance trend)
 
@@ -366,6 +388,10 @@ Knobs must be live or inert exactly per family.
 | bit-identity under logit: optimistic ≡ glm_l4 | fg_glm_ident | bit-identity under logit: optimistic ≡ glm_l4 | 1.00000 | 1 | NA | PASS |
 | bit-identity under logit: glm_l4 ≡ glm_l4re | fg_glm_ident | bit-identity under logit: glm_l4 ≡ glm_l4re | 1.00000 | 1 | NA | PASS |
 | h-toggle flip rate = MC prediction (paired Δ = 0) | fg_glm_flip | h-toggle flip rate = MC prediction (paired Δ = 0) | 0.00234 | 0 | 0.6365 | PASS |
+| bit-identity under probit: optimistic ≡ g_l4 | fg_probit_ident | bit-identity under probit: optimistic ≡ g_l4 | 1.00000 | 1 | NA | PASS |
+| bit-identity under probit: g_l4 ≡ g_l4re | fg_probit_ident | bit-identity under probit: g_l4 ≡ g_l4re | 1.00000 | 1 | NA | PASS |
+| bit-identity under poisson: optimistic ≡ g_l4 | fg_poisson_ident | bit-identity under poisson: optimistic ≡ g_l4 | 1.00000 | 1 | NA | PASS |
+| bit-identity under poisson: g_l4 ≡ g_l4re | fg_poisson_ident | bit-identity under poisson: g_l4 ≡ g_l4re | 1.00000 | 1 | NA | PASS |
 
 - **GLM λ / residual swaps — inert by bit-identity.** `apply_hsk`
   requires a continuous outcome and consumes no RNG, so a λ toggle is an
@@ -380,6 +406,12 @@ Knobs must be live or inert exactly per family.
   rate 0.0827 vs predicted 0.0804. The Jensen mean-rate shift (+0.0051)
   is expected and reported, not gated — median latent-rate invariance is
   unobservable.
+- **Probit / Poisson λ + residual swaps — inert by bit-identity.** Same
+  premise as logit: `apply_hsk` needs a continuous Gaussian outcome and
+  consumes no RNG, so a λ toggle is an exact no-op under probit (binary)
+  and Poisson (count), and a forced residual swap leaves the outcomes
+  bit-identical. Both pairs reproduce bit-for-bit across K draws
+  (`fg_probit_ident`, `fg_poisson_ident`).
 - **MLE — only `sampled_factor_proportions` is live** (see the Fa
   section above); every other knob is rejected by the engine’s estimator
   gate.
@@ -429,6 +461,10 @@ Knobs must be live or inert exactly per family.
 | scen_fa_mle | sampled: Var(count) level 2 = n·p(1−p) | 194.0300 | 210.0000 | -0.9094 | PASS |
 | scen_fa_mle | sampled: Var(count) level 3 = n·p(1−p) | 158.4900 | 160.0000 | -0.1044 | PASS |
 | scen_fa_mle_fp | find_power accepts Fa toggle under estimator = Mle | 1.0000 | 1.0000 | NA | PASS |
+| scen_he_probit | β̂\[x1\] = per-study pseudo-true (h=0.4) | 0.4929 | 0.5004 | -0.6635 | PASS |
+| scen_he_probit | β̂\[x2\] = per-study pseudo-true (h=0.4) | 0.2941 | 0.3002 | -0.7790 | PASS |
+| scen_he_poisson | β̂\[x1\] = per-study pseudo-true (h=0.4) | 0.5048 | 0.5004 | 0.3698 | PASS |
+| scen_he_poisson | β̂\[x2\] = per-study pseudo-true (h=0.4) | 0.2960 | 0.3002 | -0.6308 | PASS |
 | scen_b0 | optimistic ≡ non-scenario path (bit-identical PowerResult) | 1.0000 | 1.0000 | NA | PASS |
 | scen_b1_ols | optimistic: β̂\[intercept\] unbiased | -0.0025 | 0.0000 | -2.1096 | PASS |
 | scen_b1_ols | optimistic: β̂\[x1\] unbiased | 0.3994 | 0.4000 | -0.4687 | PASS |
@@ -460,8 +496,12 @@ Knobs must be live or inert exactly per family.
 | fg_glm_ident | bit-identity under logit: optimistic ≡ glm_l4 | 1.0000 | 1.0000 | NA | PASS |
 | fg_glm_ident | bit-identity under logit: glm_l4 ≡ glm_l4re | 1.0000 | 1.0000 | NA | PASS |
 | fg_glm_flip | h-toggle flip rate = MC prediction (paired Δ = 0) | 0.0023 | 0.0000 | 0.6365 | PASS |
+| fg_probit_ident | bit-identity under probit: optimistic ≡ g_l4 | 1.0000 | 1.0000 | NA | PASS |
+| fg_probit_ident | bit-identity under probit: g_l4 ≡ g_l4re | 1.0000 | 1.0000 | NA | PASS |
+| fg_poisson_ident | bit-identity under poisson: optimistic ≡ g_l4 | 1.0000 | 1.0000 | NA | PASS |
+| fg_poisson_ident | bit-identity under poisson: g_l4 ≡ g_l4re | 1.0000 | 1.0000 | NA | PASS |
 
-> **All 72 gates pass and every case reproduces its golden baseline.**
+> **All 80 gates pass and every case reproduces its golden baseline.**
 > Each scenario knob generates its documented law: the realised slope
 > wobble, variance trend, correlation noise (with its clamp truncation),
 > swap frequencies, pool moments, allocation behaviour, NORTA coupling,
@@ -486,13 +526,13 @@ beta unbiased — PASS
 
 | item                     | value                        |
 |:-------------------------|:-----------------------------|
-| Report generated         | 21 June 2026                 |
+| Report generated         | 20 October 2026              |
 | R version                | R version 4.5.3 (2026-03-11) |
-| mcpower                  | 1.0.0                        |
+| mcpower                  | 1.4.0                        |
 | Gate band (SE-of-mean z) | 4                            |
 | Golden tolerance         | 1e-09                        |
-| Cases                    | 21                           |
-| Gates                    | 72                           |
+| Cases                    | 25                           |
+| Gates                    | 80                           |
 
 Cases live in `mcpower/validation/formulas.R` (`SCENARIO_CASES`), probes
 in `mcpower/validation/common.R`, gates in

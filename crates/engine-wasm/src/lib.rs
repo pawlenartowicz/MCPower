@@ -3,13 +3,14 @@
 //! of engine-py / engine-r.
 
 use engine_app_spec::{
-    parse_formula as app_parse_formula, power_plot_specs, run_single_core_find_power,
-    run_single_core_find_sample_size, sample_size_curve_specs, AdapterError, AppSpec, NullEmitter,
-    ProgressEmitter,
+    AdapterError, AppSpec, NullEmitter, ProgressEmitter, parse_formula as app_parse_formula,
+    power_plot_specs, run_curvature_hints_power, run_curvature_hints_sample_size,
+    run_single_core_find_power, run_single_core_find_sample_size, sample_size_curve_specs,
 };
 use engine_orchestrator::{
-    merge_power_results as orch_merge_power, merge_sample_size_results as orch_merge_sample_size,
-    CancellationToken, PowerResult, SampleSizeMethod, SampleSizeResult, ScenarioResult,
+    CancellationToken, CurvatureHintParts, PowerResult, SampleSizeMethod, SampleSizeResult,
+    ScenarioResult, merge_power_results as orch_merge_power,
+    merge_sample_size_results as orch_merge_sample_size,
 };
 use js_sys::Function;
 use serde_json::Value;
@@ -37,7 +38,8 @@ impl ProgressEmitter for JsEmitter {
 // ---- run twins (one worker's share) ----
 /// One worker's share of a power run at one `sample_size`; `spec_json` is an
 /// `AppSpec`. Returns the per-worker `ScenarioResult<PowerResult>` JSON;
-/// `on_progress` receives `ProgressEvent` JSON strings.
+/// `on_progress` receives `ProgressEvent` JSON strings. `hints_json` is the
+/// run's `curvature_hints_power` string; absent = the engine runs its own pilot.
 #[wasm_bindgen]
 pub fn find_power(
     spec_json: &str,
@@ -45,17 +47,32 @@ pub fn find_power(
     n_sims: usize,
     base_seed: u64,
     on_progress: Option<Function>,
+    hints_json: Option<String>,
 ) -> Result<String, JsError> {
     let spec: AppSpec = serde_json::from_str(spec_json).map_err(err)?;
+    let hints: Option<Hints> = hints_json
+        .map(|h| serde_json::from_str(&h))
+        .transpose()
+        .map_err(err)?;
     let cancel = CancellationToken::new(); // cosmetic in WASM; real killswitch is worker.terminate()
     let result = run_with_emitter(on_progress, |emitter| {
-        run_single_core_find_power(&spec, sample_size, n_sims, base_seed, emitter, &cancel)
+        run_single_core_find_power(
+            &spec,
+            sample_size,
+            n_sims,
+            base_seed,
+            hints,
+            emitter,
+            &cancel,
+        )
     })?;
     serde_json::to_string(&result).map_err(err)
 }
 
 /// One worker's share of a Grid sample-size search; inputs are JSON-encoded.
 /// Returns the per-worker `ScenarioResult<SampleSizeResult>` JSON.
+/// `hints_json` is the run's `curvature_hints_sample_size` string, as in
+/// `find_power`.
 #[wasm_bindgen]
 pub fn find_sample_size(
     spec_json: &str,
@@ -64,15 +81,54 @@ pub fn find_sample_size(
     n_sims: usize,
     base_seed: u64,
     on_progress: Option<Function>,
+    hints_json: Option<String>,
 ) -> Result<String, JsError> {
     let spec: AppSpec = serde_json::from_str(spec_json).map_err(err)?;
     let bounds: (usize, usize) = serde_json::from_str(bounds_json).map_err(err)?;
     let method: SampleSizeMethod = serde_json::from_str(method_json).map_err(err)?;
+    let hints: Option<Hints> = hints_json
+        .map(|h| serde_json::from_str(&h))
+        .transpose()
+        .map_err(err)?;
     let cancel = CancellationToken::new();
     let result = run_with_emitter(on_progress, |emitter| {
-        run_single_core_find_sample_size(&spec, bounds, method, n_sims, base_seed, emitter, &cancel)
+        run_single_core_find_sample_size(
+            &spec, bounds, method, n_sims, base_seed, hints, emitter, &cancel,
+        )
     })?;
     serde_json::to_string(&result).map_err(err)
+}
+
+// ---- curvature hints (main thread, once per run) ----
+/// Curvature hints per scenario, per grid point.
+type Hints = Vec<Vec<Option<CurvatureHintParts>>>;
+
+/// The curvature hints of a power run at `base_seed` (the master seed), as a
+/// JSON string the main thread hands unchanged to every worker's `find_power`.
+#[wasm_bindgen]
+pub fn curvature_hints_power(
+    spec_json: &str,
+    sample_size: usize,
+    base_seed: u64,
+) -> Result<String, JsError> {
+    let spec: AppSpec = serde_json::from_str(spec_json).map_err(err)?;
+    let hints = run_curvature_hints_power(&spec, sample_size, base_seed).map_err(err)?;
+    serde_json::to_string(&hints).map_err(err)
+}
+
+/// The curvature hints of a Grid sample-size run, as in `curvature_hints_power`.
+#[wasm_bindgen]
+pub fn curvature_hints_sample_size(
+    spec_json: &str,
+    bounds_json: &str,
+    method_json: &str,
+    base_seed: u64,
+) -> Result<String, JsError> {
+    let spec: AppSpec = serde_json::from_str(spec_json).map_err(err)?;
+    let bounds: (usize, usize) = serde_json::from_str(bounds_json).map_err(err)?;
+    let method: SampleSizeMethod = serde_json::from_str(method_json).map_err(err)?;
+    let hints = run_curvature_hints_sample_size(&spec, bounds, method, base_seed).map_err(err)?;
+    serde_json::to_string(&hints).map_err(err)
 }
 
 // ---- merge (main thread pools worker parts) ----

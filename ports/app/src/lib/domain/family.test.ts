@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { defaultFamilyConfig, FAMILIES, FAMILY_LABEL, SELECTABLE_FAMILIES } from './family';
+import { defaultFamilyConfig, EXTRA_GROUPING_DEFAULTS, FAMILIES, FAMILY_LABEL, SELECTABLE_FAMILIES, mixedDefaultSimulations } from './family';
 
 describe('family domain', () => {
+  it('reads the nested-grouping default from the shared config', () => {
+    expect(EXTRA_GROUPING_DEFAULTS.nestedN).toBe(2);
+  });
+
+  it('gives a mixed model its sim default by outcome: 800 Gaussian, 400 binary/Poisson', () => {
+    expect(defaultFamilyConfig('mixed').advanced.simulations).toBe(800);
+    expect(mixedDefaultSimulations('linear')).toBe(800);
+    expect(mixedDefaultSimulations('logit')).toBe(400);
+    expect(mixedDefaultSimulations('probit')).toBe(400);
+    expect(mixedDefaultSimulations('poisson')).toBe(400);
+  });
+
   it('lists three entrypoints in spec order', () => {
     expect(FAMILIES).toEqual(['anova', 'regression', 'mixed']);
   });

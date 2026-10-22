@@ -1,7 +1,7 @@
 //! Bridge `engine-spec-builder` to Python: contract construction, formula parsing, and assignment parsing.
 //! Mirror: `engine-r/src/spec_builder_bridge.rs` — change together.
 
-use engine_spec_builder::{build_contract_with_skeleton, LinearSpec, SpecError};
+use engine_spec_builder::{LinearSpec, SpecError, build_contract_with_skeleton};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -39,7 +39,7 @@ pub fn build_contract_from_spec(
         other => {
             return Err(PyValueError::new_err(format!(
                 "unknown outcome_kind {other:?}"
-            )))
+            )));
         }
     };
     let link = match link {
@@ -54,7 +54,7 @@ pub fn build_contract_from_spec(
         other => {
             return Err(PyValueError::new_err(format!(
                 "unknown estimator {other:?}"
-            )))
+            )));
         }
     };
     let clusters: Vec<engine_contract::ClusterSpec> = serde_json::from_str(clusters_json)
@@ -137,8 +137,8 @@ pub fn split_assignments(input: &str) -> PyResult<Vec<String>> {
 // ── Parser bridge ─────────────────────────────────────────────────────────────
 
 use engine_spec_builder::{
-    parse_assignments as rust_parse_assignments, parse_formula as rust_parse_formula,
     AssignmentKey, AssignmentKind, AssignmentValue, KnownNames, RandomEffect, Term, VarTypeParams,
+    parse_assignments as rust_parse_assignments, parse_formula as rust_parse_formula,
 };
 use pyo3::types::PyDict;
 
@@ -285,9 +285,6 @@ fn assignment_item_to_pydict<'py>(
     d.set_item("key", key_d)?;
     let val_d = PyDict::new(py);
     match value {
-        AssignmentValue::VariableType(v) => {
-            val_d.set_item("variable_type", v)?;
-        }
         AssignmentValue::VariableTypeWithParams { var_type, params } => {
             // Emit the legacy info dict the host's set_variable_type consumes:
             // {"type": ..., ["proportion"] | ["n_levels", "proportions"]}.
@@ -337,6 +334,8 @@ fn map_spec_error(e: SpecError) -> PyErr {
         | SpecError::FactorProportionLengthMismatch { .. }
         | SpecError::FactorReferenceMissing { .. }
         | SpecError::FactorProportionNonPositive { .. }
+        | SpecError::BinaryProportionOutOfRange { .. }
+        | SpecError::FactorCodeOutOfRange { .. }
         | SpecError::CorrelationOutOfRange { .. }
         | SpecError::CorrelationUnknownVar { .. }
         | SpecError::CorrelationNotPsd

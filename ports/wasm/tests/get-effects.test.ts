@@ -42,7 +42,7 @@ const BASE_SPEC: AppSpec = {
 describe('getEffectsFromData', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(wasmMod.default).mockResolvedValue(undefined);
+    vi.mocked(wasmMod.default).mockResolvedValue({} as wasmMod.InitOutput);
   });
 
   it('calls wasm get_effects_from_data with the JSON-serialized spec and returns the parsed EffectsFromData object', async () => {
@@ -98,7 +98,7 @@ describe('getEffectsFromData', () => {
 describe('findPower corrected flag', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(wasmMod.default).mockResolvedValue(undefined);
+    vi.mocked(wasmMod.default).mockResolvedValue({} as wasmMod.InitOutput);
   });
 
   it("passes corrected = (correction !== 'none') to power_plot_specs_json", async () => {

@@ -149,11 +149,7 @@ pub fn build_grid(
 /// are interpreted as percentages (Python parity), e.g. `80.0 → 0.8`.
 #[inline]
 pub(crate) fn as_proportion(p: f64) -> f64 {
-    if p > 1.0 {
-        p / 100.0
-    } else {
-        p
-    }
+    if p > 1.0 { p / 100.0 } else { p }
 }
 
 /// Smallest N at which `powers_corrected[i][target_index] >= p_target`,
@@ -211,6 +207,10 @@ pub(crate) struct SampleSizeDerivations {
     /// GLM LRT only); singular, since the omnibus is one test.
     pub first_overall_achieved: Option<usize>,
     pub fitted_overall: Option<CrossingFit>,
+    /// Per post-hoc block, per contrast: grid-empirical required N and the
+    /// model-based crossing, both from the per-N corrected post-hoc counts.
+    pub posthoc_first_achieved: Vec<Vec<Option<usize>>>,
+    pub posthoc_fitted: Vec<Vec<CrossingFit>>,
 }
 
 /// Derive the four sample-size outputs from the per-N results. One helper
@@ -220,9 +220,10 @@ pub(crate) struct SampleSizeDerivations {
 /// per-worker fitted values are simply discarded and recomputed there).
 ///
 /// `n_sims` for the joint family comes from the histogram row sum, not the
-/// `n_sims` field — under merge's tolerant skip-on-empty histogram pooling
-/// the two can differ, and the row sum is the denominator the pooled buckets
-/// were accumulated against. Identical for fresh `aggregate_batch` output
+/// `n_sims` field: the row sum is the denominator the buckets were
+/// accumulated against. Merge rejects parts whose histogram lengths differ
+/// (an empty histogram among populated ones), so a merged histogram's row sum
+/// equals the pooled `n_sims`, as it does for fresh `aggregate_batch` output
 /// (rows sum to `n_sims` by invariant).
 pub(crate) fn derive_sample_size_outputs(
     per_n: &[PowerResult],
@@ -311,6 +312,38 @@ pub(crate) fn derive_sample_size_outputs(
         (None, None)
     };
 
+    // Post-hoc contrasts: same scan and fit as the marginal targets, over each
+    // block's corrected power / counts. Block and contrast counts come from the
+    // first grid point (every point carries the same blocks).
+    let block_sizes: Vec<usize> = per_n
+        .first()
+        .map(|pr| pr.posthoc.iter().map(|b| b.power_corrected.len()).collect())
+        .unwrap_or_default();
+    let mut posthoc_first_achieved = Vec::with_capacity(block_sizes.len());
+    let mut posthoc_fitted = Vec::with_capacity(block_sizes.len());
+    for (b, &n_contrasts) in block_sizes.iter().enumerate() {
+        let powers: Vec<Vec<f64>> = per_n
+            .iter()
+            .map(|pr| pr.posthoc[b].power_corrected.clone())
+            .collect();
+        posthoc_first_achieved.push(
+            (0..n_contrasts)
+                .map(|c| first_n_at_target(&powers, sample_sizes, target_power, c))
+                .collect(),
+        );
+        posthoc_fitted.push(
+            (0..n_contrasts)
+                .map(|c| {
+                    let counts: Vec<u64> = per_n
+                        .iter()
+                        .map(|pr| pr.posthoc[b].success_counts_corrected[c])
+                        .collect();
+                    fit_crossing(sample_sizes, &counts, n_sims, target_power, atom)
+                })
+                .collect(),
+        );
+    }
+
     SampleSizeDerivations {
         first_achieved,
         first_joint_achieved,
@@ -318,6 +351,8 @@ pub(crate) fn derive_sample_size_outputs(
         fitted_joint,
         first_overall_achieved,
         fitted_overall,
+        posthoc_first_achieved,
+        posthoc_fitted,
     }
 }
 
@@ -466,9 +501,10 @@ mod grid_builder_tests {
         )
         .unwrap();
         assert!(g.len() < 4);
-        assert!(w
-            .iter()
-            .any(|m| m.contains("coarse") || m.contains("grid points")));
+        assert!(
+            w.iter()
+                .any(|m| m.contains("coarse") || m.contains("grid points"))
+        );
     }
 
     #[test]

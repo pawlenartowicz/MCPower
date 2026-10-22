@@ -24,19 +24,19 @@ pub mod validate;
 pub mod variables;
 
 pub use assignments::{
-    parse_assignments, split_assignments, AssignmentKey, AssignmentKind, AssignmentValue,
-    Assignments, KnownNames, VarTypeParams,
+    AssignmentKey, AssignmentKind, AssignmentValue, Assignments, KnownNames, VarTypeParams,
+    parse_assignments, split_assignments,
 };
 pub use error::SpecError;
-pub use formula::{parse_formula, ParsedFormula, RandomEffect, Term};
+pub use formula::{ParsedFormula, RandomEffect, Term, parse_formula};
 pub use input::{
     EffectAssignment, HeteroskedasticityInput, LinearSpec, PredictorSpec, ResidualSpec,
     UploadColumn, UploadColumnType, UploadInput, UploadMode, VarKind,
 };
 pub use project_contract::{
-    build_contract, build_contract_with_skeleton, build_linear_contract,
-    build_linear_contract_with_skeleton, dist_codes_json, re_dist_codes_json, residual_codes_json,
+    build_contract, build_contract_with_skeleton, build_linear_contract_with_skeleton,
+    dist_codes_json, re_dist_codes_json, residual_codes_json,
 };
 pub use skeleton::{EffectDescriptor, EffectSkeleton};
-pub use upload::{build_recovery_design, standardize_continuous, RecoveryDesign};
-pub use variables::{build_predictor_table, PredictorTable};
+pub use upload::{RecoveryDesign, build_recovery_design, standardize_continuous};
+pub use variables::{PredictorTable, build_predictor_table};

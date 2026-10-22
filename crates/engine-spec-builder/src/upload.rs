@@ -206,20 +206,28 @@ fn binary_proportion(col: &UploadColumn) -> f64 {
 /// Compute level proportions for a factor column.
 /// Returns a `Vec<f64>` of length `n_levels` (= `labels.len()`), where each
 /// entry is the fraction of rows with that level code.
-fn level_proportions(col: &UploadColumn) -> Vec<f64> {
+///
+/// # Errors
+/// [`SpecError::FactorCodeOutOfRange`] when a value is not an integer in
+/// `0..n_levels` (including NaN and negative values).
+fn level_proportions(col: &UploadColumn) -> Result<Vec<f64>, SpecError> {
     let n_levels = col.labels.len();
     if n_levels == 0 || col.values.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
     let n = col.values.len() as f64;
     let mut counts = vec![0u32; n_levels];
     for &v in &col.values {
-        let code = v as usize;
-        if code < n_levels {
-            counts[code] += 1;
+        if !(v.fract() == 0.0 && v >= 0.0 && v < n_levels as f64) {
+            return Err(SpecError::FactorCodeOutOfRange {
+                name: col.name.clone(),
+                value: v,
+                n_levels,
+            });
         }
+        counts[v as usize] += 1;
     }
-    counts.iter().map(|&c| c as f64 / n).collect()
+    Ok(counts.iter().map(|&c| c as f64 / n).collect())
 }
 
 /// Compute Pearson r over two already-standardized vectors (mean ≈ 0).
@@ -229,11 +237,7 @@ fn pearson(a: &[f64], b: &[f64]) -> f64 {
     let sum_a2: f64 = a.iter().map(|ai| ai * ai).sum();
     let sum_b2: f64 = b.iter().map(|bi| bi * bi).sum();
     let denom = (sum_a2 * sum_b2).sqrt();
-    if denom == 0.0 {
-        0.0
-    } else {
-        sum_ab / denom
-    }
+    if denom == 0.0 { 0.0 } else { sum_ab / denom }
 }
 
 /// Fractional (average-rank) ranks of `x`. Each tie group shares the mean of the
@@ -337,17 +341,19 @@ fn ridge_shrink_to_psd(r: &[f64], n: usize) -> Vec<f64> {
 /// `predictor_names` must be `non_factor_names` concatenated with `factor_names`
 /// from the `PredictorTable` — this matches the contract column index layout.
 ///
+/// Fails with [`SpecError::FactorCodeOutOfRange`] on an invalid factor level code.
+///
 /// Returns a parallel `Vec<Option<Vec<f64>>>` over `predictor_names[0..n_non_factor]`:
 /// `Some(std_values)` for each matched *continuous* non-factor column, `None`
 /// otherwise (binary, factor, or unmatched). Correlation is continuous-only by
 /// design, so binary columns are excluded here. Passed directly to
 /// `measure_correlations` so standardization is computed once.
-pub fn apply_upload(
-    gen: &mut GenerationSpec,
+pub(crate) fn apply_upload(
+    generation: &mut GenerationSpec,
     predictor_names: &[String],
     n_non_factor: usize,
     upload: &UploadInput,
-) -> Vec<Option<Vec<f64>>> {
+) -> Result<Vec<Option<Vec<f64>>>, SpecError> {
     let n_rows = upload.n_rows as usize;
     let col_by_name: std::collections::HashMap<&str, &UploadColumn> = upload
         .columns
@@ -385,28 +391,29 @@ pub fn apply_upload(
             // Replace the contract column spec
             match uc.col_type {
                 UploadColumnType::Continuous => {
-                    gen.columns[contract_col_idx] = ColumnSpec::Resampled { frame_column: fc };
+                    generation.columns[contract_col_idx] =
+                        ColumnSpec::Resampled { frame_column: fc };
                 }
                 UploadColumnType::Binary => {
                     let proportion = binary_proportion(uc);
-                    gen.columns[contract_col_idx] = ColumnSpec::ResampledBinary {
+                    generation.columns[contract_col_idx] = ColumnSpec::ResampledBinary {
                         frame_column: fc,
                         proportion,
                     };
                 }
                 UploadColumnType::Factor => {
-                    let props = level_proportions(uc);
+                    let props = level_proportions(uc)?;
                     let n_levels = props.len() as u32;
                     // Preserve the per-factor override set on the synthetic column
                     // this rewrite replaces (set_variable_type runs before upload).
-                    let sampled_proportions = match &gen.columns[contract_col_idx] {
+                    let sampled_proportions = match &generation.columns[contract_col_idx] {
                         ColumnSpec::FactorSynthetic {
                             sampled_proportions,
                             ..
                         } => *sampled_proportions,
                         _ => None,
                     };
-                    gen.columns[contract_col_idx] = ColumnSpec::FactorFromFrame {
+                    generation.columns[contract_col_idx] = ColumnSpec::FactorFromFrame {
                         frame_column: fc,
                         n_levels,
                         proportions: props,
@@ -427,7 +434,7 @@ pub fn apply_upload(
                 data[row_idx * n_matched + col_idx] = val;
             }
         }
-        gen.uploaded_frame = Some(UploadedFrame {
+        generation.uploaded_frame = Some(UploadedFrame {
             data,
             n_rows: upload.n_rows,
             n_cols: n_matched as u32,
@@ -437,7 +444,7 @@ pub fn apply_upload(
         });
     }
 
-    non_factor_std
+    Ok(non_factor_std)
 }
 
 /// Measure empirical **Spearman** rank correlations among matched continuous
@@ -468,8 +475,8 @@ pub fn apply_upload(
 /// - [`SpecError::CorrelationNotPsd`]: the user-explicit overlay leaves the
 ///   combined (measured + overlay) matrix non–positive-semi-definite. The
 ///   measured block alone is always repaired to PSD first.
-pub fn measure_correlations(
-    gen: &mut GenerationSpec,
+pub(crate) fn measure_correlations(
+    generation: &mut GenerationSpec,
     non_factor_names: &[String],
     spec_correlations: &[CorrelationPair],
     non_factor_std: &[Option<Vec<f64>>],
@@ -533,7 +540,7 @@ pub fn measure_correlations(
     // Non-factor columns occupy positions 0..n_non_factor in generation.columns
     // (factors are appended after), matching what build_contract_correlations emits.
     let continuous_columns: Vec<ColumnId> = (0..n as u32).map(ColumnId).collect();
-    gen.correlations = Correlations::Matrix {
+    generation.correlations = Correlations::Matrix {
         continuous_columns,
         values,
     };
@@ -559,6 +566,27 @@ mod standardize_tests {
         assert!((z[4] - (2.0 / sd)).abs() < 1e-12);
         let m: f64 = z.iter().sum::<f64>() / z.len() as f64;
         assert!(m.abs() < 1e-12);
+    }
+
+    #[test]
+    fn level_proportions_counts_valid_codes_and_rejects_invalid() {
+        let factor = |values: Vec<f64>| UploadColumn {
+            name: "g".into(),
+            col_type: UploadColumnType::Factor,
+            values,
+            labels: vec!["A".into(), "B".into(), "C".into()],
+        };
+        let p = level_proportions(&factor(vec![0.0, 1.0, 1.0, 2.0])).unwrap();
+        assert_eq!(p, vec![0.25, 0.5, 0.25]);
+        for bad in [3.0, -1.0, f64::NAN, 1.5, f64::INFINITY] {
+            match level_proportions(&factor(vec![0.0, 1.0, bad])) {
+                Err(SpecError::FactorCodeOutOfRange { name, n_levels, .. }) => {
+                    assert_eq!(name, "g");
+                    assert_eq!(n_levels, 3);
+                }
+                other => panic!("code {bad}: got {other:?}"),
+            }
+        }
     }
 
     #[test]

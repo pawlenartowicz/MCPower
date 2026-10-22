@@ -17,18 +17,18 @@
 //! Cluster random intercepts are generated whenever a ClusterSpec is present,
 //! independent of outcome_kind and estimator (generate-clustered/solve-OLS is valid).
 
+use crate::FLOAT_NEAR_ZERO;
 use crate::distributions::{marginal_uniform, phi, sample_t};
 use crate::rng::{
-    fill_normal_column, fill_uniform_column, poisson_quantile, SimRng, CLASS_RESID, CLASS_XNORM,
+    CLASS_RESID, CLASS_XNORM, SimRng, fill_normal_column, fill_uniform_column, poisson_quantile,
 };
 use crate::scenarios::{
-    perturb_correlation, perturb_var_types, pick_residual, scenario_rng, STREAM_TAG_HET,
+    STREAM_TAG_HET, perturb_correlation, perturb_var_types, pick_residual, scenario_rng,
 };
 use crate::spec::{
     ClusterSizing, Distribution, EngineError, LinkKind, OutcomeKind, ResidualDist, SimulationSpec,
 };
 use crate::workspace::SimWorkspace;
-use crate::FLOAT_NEAR_ZERO;
 
 // Censored Exp(1) at E ≤ EXP_CAP, standardized to exact unit variance; they
 // standardize the Right/LeftSkewed marginals in apply_marginal.
@@ -140,9 +140,13 @@ pub fn generate_sim_data(
     let mut rng = SimRng::new(base_seed, sim_id);
 
     // 2a. Cluster random-effect draws — one per cluster, fresh every sim.
-    // Placed before the row loop so the RNG call order is: cluster draws first,
-    // then per-row X/residual draws; this makes the per-row draws independent of
-    // n_clusters. Draws happen whenever cluster.is_some().
+    // Placed before the row loop so the sequential stream serves cluster draws
+    // first, then the row-level sequential draws (sampled categorical levels,
+    // resampled-row indices). The counter-based continuous columns are keyed by
+    // (class, col) and do not touch this stream, so they are independent of
+    // n_clusters; sampled-factor and resampled-row draws start after the
+    // n_clusters cluster draws and so shift with n_clusters. Draws happen
+    // whenever cluster.is_some().
     if let Some(cluster_spec) = &spec.cluster {
         // τ_eff is set per sim by populate_design (above); read it out as
         // a Copy f64 before the mutable cluster_u_draws writes.
@@ -367,11 +371,10 @@ pub fn generate_sim_data(
     // slots 1..=df = χ² accumulator normals; Right/LeftSkewed → slots
     // 0..df-1 = χ² accumulator normals. Mirrors draw_residual's math
     // (T standardization df/(df−2), χ² centering (χ²−df)/√(2df), LeftSkewed
-    // sign flip) — change together. df is clamped ≥ 3 exactly as there, so
-    // sample_t's degenerate-df fallback has no batched counterpart (the clamp
-    // makes it unreachable). One harmless cast difference vs draw_residual:
-    // .max(1) here is applied before the u32 cast rather than at the loop
-    // bound — equivalent under the df ≥ 3 clamp.
+    // sign flip) — change together. df is clamped ≥ 3 exactly as there. One
+    // harmless cast difference vs draw_residual: .max(1) here is applied
+    // before the u32 cast rather than at the loop bound — equivalent under
+    // the df ≥ 3 clamp.
     match spec.outcome_kind {
         OutcomeKind::Binary if matches!(spec.link, Some(LinkKind::Probit)) => {
             // Probit latent-normal formulation: draw z ~ N(0,1); the link site
@@ -561,8 +564,7 @@ pub fn generate_sim_data(
         // BEFORE the interaction block, so interactions use the copied values.
         if is_bootstrap {
             debug_assert!(u_rows > 0, "bootstrap mode requires a non-empty frame");
-            let r = ((rng.next_uniform() as f64 * u_rows as f64) as usize)
-                .min(u_rows.saturating_sub(1));
+            let r = rng.next_index(u_rows);
             // Non-factor uploaded columns.
             for j in 0..n_non_factor {
                 if let Some(fc) = spec.bootstrap_frame_map[j] {
@@ -575,11 +577,7 @@ pub fn generate_sim_data(
                             // stored = x - p; recover 0/1 (consistent with the NORTA
                             // 0/1 marginal).
                             let p = spec.var_params.get(j).copied().unwrap_or(0.0);
-                            if v + p >= 0.5 {
-                                1.0
-                            } else {
-                                0.0
-                            }
+                            if v + p >= 0.5 { 1.0 } else { 0.0 }
                         }
                         // UploadedData / continuous: copy the standardized value directly.
                         _ => v,
@@ -1046,7 +1044,7 @@ fn populate_design(
             ws.l_design[(i, j)] = ws.sigma_design[(i, j)];
         }
     }
-    crate::correlation::psd_repair_and_factor(ws.l_design.as_mut(), &mut ws.evd_scratch)?;
+    crate::correlation::psd_repair_and_factor(ws.l_design.as_mut())?;
 
     perturb_var_types(
         &spec.scenario,
@@ -1121,11 +1119,7 @@ fn apply_marginal(
             // NOT center here per-row; v1 centers the whole column at the end (a small
             // hypothesis-testing bias, not a hot-path requirement).
             let u = phi(z);
-            if u < 1.0 - param {
-                0.0
-            } else {
-                1.0
-            }
+            if u < 1.0 - param { 0.0 } else { 1.0 }
         }
         Distribution::RightSkewed => {
             // Standardized, tail-censored Exp(1): skew +1.90, exkurt 4.85, support [-1, +6] SD.
@@ -1167,11 +1161,7 @@ fn apply_marginal(
             // continuous-only by design; binary/factor joint dependence is preserved
             // only by strict-mode resampling), so it is generated independently here.
             let u = phi(z);
-            if u < 1.0 - param {
-                0.0
-            } else {
-                1.0
-            }
+            if u < 1.0 - param { 0.0 } else { 1.0 }
         }
         Distribution::UploadedFactor => {
             // Factor marginal/proportions come from the FactorFromFrame multinomial
@@ -1796,7 +1786,7 @@ mod tests {
     fn d1_step4_optimistic_no_perturbation() {
         // With ScenarioPerturbations::default(), the design must match a hand-built
         // baseline: Cholesky of spec.correlation, original var_types, original
-        // residual_dist — and the EVD repair machinery stays untouched.
+        // residual_dist.
         let spec = ols_spec_simple();
         let n_pred = 3;
         let mut ws_a = SimWorkspace::new(100, n_pred, 2, 0, None);
@@ -1814,10 +1804,6 @@ mod tests {
         }
         assert_eq!(ws_a.var_types_design, spec.var_types);
         assert_eq!(ws_a.residual_dist_design, spec.residual_dist);
-        assert_eq!(
-            ws_a.evd_scratch.evd_repair_count, 0,
-            "optimistic path must not touch EVD"
-        );
     }
 
     /// Correlation noise reaches the generated design: a 2-predictor spec with
@@ -2116,7 +2102,7 @@ mod tests {
 
         let n = 256;
         let n_pred = 4; // intercept + x1 + x2 + x1:x2
-                        // SimWorkspace::new(n_rows, n_predictors, n_non_factor, n_factors, cluster)
+        // SimWorkspace::new(n_rows, n_predictors, n_non_factor, n_factors, cluster)
         let mut ws = SimWorkspace::new(n, n_pred, 2, 0, None);
         // generate_sim_data(spec, sim_id, base_seed, ws)
         generate_sim_data(&spec, 0, 42, &mut ws).unwrap();

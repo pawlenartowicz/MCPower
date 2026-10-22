@@ -10,7 +10,7 @@ mod common;
 use common::logit_spec;
 
 use engine_contract::{ClusterSizing, ClusterSpec, OutcomeKind, SimulationContract, WaldSe};
-use engine_orchestrator::{find_power, CancellationToken};
+use engine_orchestrator::{CancellationToken, find_power};
 use engine_spec_builder::build_contract;
 
 /// Minimal clustered-binary GLMM contract (random intercept, 20 clusters,

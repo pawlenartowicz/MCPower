@@ -1,4 +1,4 @@
-// TypeScript mirror of the scenario contract from `mcpower/configs/scenarios.json`; keep this shape aligned with `engine_contract::validate_scenarios`.
+// TypeScript mirror of the scenario contract from `mcpower/configs/scenarios.json`; keep this shape aligned with the serde types `engine_contract::ScenarioPerturbations` / `LmeScenarioPerturbations`, which the bundled JSON deserializes into.
 // The GUI maintains an editable app copy (three named sets); the bundled JSON seeds it on first run.
 
 // Canonical residual-distribution names matching RESIDUAL_CODES in engine_contract::project_contract.

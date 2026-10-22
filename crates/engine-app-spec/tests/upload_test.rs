@@ -381,7 +381,7 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
     let n = 200usize;
     let x_vals: Vec<f64> = (0..n).map(|i| (i % 5) as f64 - 2.0).collect();
     let group_codes: Vec<f64> = (0..n).map(|i| (i / 25) as f64).collect(); // 0..7
-                                                                           // y = 1·x + u_cluster + small deterministic ε; u_cluster spreads ±~1.
+    // y = 1·x + u_cluster + small deterministic ε; u_cluster spreads ±~1.
     let y_vals: Vec<f64> = (0..n)
         .map(|i| {
             let x = (i % 5) as f64 - 2.0;

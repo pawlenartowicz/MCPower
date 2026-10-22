@@ -34,9 +34,11 @@ faer        = { version = "0.24", default-features = false, features = ["std", "
 faer        = "0.24"
 
 [dev-dependencies]
-rayon       = "1.10"
 engine-contract = { path = "../engine-contract", features = ["test-fixtures"] }
 engine-spec-builder = { path = "../engine-spec-builder" }
 approx = "0.5"
 rmp-serde = "1"
 insta = { version = "1", features = ["json"] }
+# Tests parse emitted JSON; float_roundtrip makes that exact whether or not
+# engine-app-spec (which enables the feature) is in the same build.
+serde_json = { version = "1", features = ["float_roundtrip"] }

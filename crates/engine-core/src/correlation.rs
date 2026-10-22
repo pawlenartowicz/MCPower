@@ -19,24 +19,6 @@ use faer::{Mat, MatMut, MatRef, Side};
 /// eigenvalue, so the perturbed matrix shifts negligibly.
 const PSD_EIGENVALUE_FLOOR: f64 = 1e-10;
 
-/// Eigendecomposition workspace owned by `SimWorkspace`. Tracks whether the
-/// EVD fallback was exercised (used by tests to assert the optimistic fast
-/// path doesn't touch the EVD machinery).
-#[derive(Debug, Default)]
-pub struct EvdScratch {
-    /// Incremented every time `psd_repair_and_factor` falls back to the EVD
-    /// repair path. Tests can read & reset this to assert behaviour.
-    pub evd_repair_count: u64,
-}
-
-impl EvdScratch {
-    pub fn new() -> Self {
-        Self {
-            evd_repair_count: 0,
-        }
-    }
-}
-
 /// Cholesky in place, optimistic path.
 ///
 /// Reads the lower triangle of `in_out`, writes `L` (lower-triangular Cholesky
@@ -79,10 +61,7 @@ pub fn factor_only(mut in_out: MatMut<'_, f64>) -> Result<(), EngineError> {
 ///   4. Renormalize to unit diagonal: `A' / sqrt(diag(A') · diag(A')ᵀ)`.
 ///   5. Force diagonal to 1.0 exactly.
 ///   6. Cholesky-factor in place.
-pub fn psd_repair_and_factor(
-    mut in_out: MatMut<'_, f64>,
-    scratch_evd: &mut EvdScratch,
-) -> Result<(), EngineError> {
+pub fn psd_repair_and_factor(mut in_out: MatMut<'_, f64>) -> Result<(), EngineError> {
     let n = in_out.nrows();
     assert_eq!(
         n,
@@ -121,8 +100,6 @@ pub fn psd_repair_and_factor(
             sym
         }
     };
-
-    scratch_evd.evd_repair_count += 1;
 
     // Eigendecomposition (lower triangle accessed).
     let evd = sym
@@ -261,12 +238,7 @@ mod tests {
         let mut m1 = original.clone();
         let mut m2 = original.clone();
         factor_only(m1.as_mut()).unwrap();
-        let mut scratch = EvdScratch::new();
-        psd_repair_and_factor(m2.as_mut(), &mut scratch).unwrap();
-        assert_eq!(
-            scratch.evd_repair_count, 0,
-            "fast path should not touch EVD"
-        );
+        psd_repair_and_factor(m2.as_mut()).unwrap();
         for i in 0..3 {
             for j in 0..3 {
                 assert_eq!(m1[(i, j)], m2[(i, j)], "({i},{j})");
@@ -288,12 +260,7 @@ mod tests {
         // Same indefinite matrix; psd_repair should succeed via EVD.
         let original = mat_from_rows(3, &[&[1.0, 0.9, 0.9], &[0.9, 1.0, -0.9], &[0.9, -0.9, 1.0]]);
         let mut m = original.clone();
-        let mut scratch = EvdScratch::new();
-        psd_repair_and_factor(m.as_mut(), &mut scratch).unwrap();
-        assert_eq!(
-            scratch.evd_repair_count, 1,
-            "fallback should have been used"
-        );
+        psd_repair_and_factor(m.as_mut()).unwrap();
 
         // Reconstruct L · Lᵀ and compare with the hand-computed repair. The
         // input has eigenvalues {−0.8, 1.9, 1.9}, the negative one along
@@ -327,9 +294,7 @@ mod tests {
     #[test]
     fn psd_repair_identity_bit_exact() {
         let mut m = Mat::<f64>::identity(4, 4);
-        let mut scratch = EvdScratch::new();
-        psd_repair_and_factor(m.as_mut(), &mut scratch).unwrap();
-        assert_eq!(scratch.evd_repair_count, 0);
+        psd_repair_and_factor(m.as_mut()).unwrap();
         for i in 0..4 {
             for j in 0..4 {
                 let expected = if i == j { 1.0 } else { 0.0 };
@@ -356,10 +321,8 @@ mod tests {
             ),
             "boundary-singular matrix should fail the strict factor_only path"
         );
-        let mut scratch = EvdScratch::new();
-        psd_repair_and_factor(m.as_mut(), &mut scratch)
+        psd_repair_and_factor(m.as_mut())
             .expect("repair must succeed on a boundary PSD-but-singular matrix");
-        assert_eq!(scratch.evd_repair_count, 1, "EVD fallback should have run");
         // Reconstructed L·Lᵀ has unit diagonal and is PSD.
         let mut recon = Mat::<f64>::zeros(3, 3);
         for i in 0..3 {
@@ -391,14 +354,9 @@ mod tests {
         );
 
         let mut b = Mat::<f64>::zeros(0, 0);
-        let mut scratch = EvdScratch::new();
         assert!(
-            psd_repair_and_factor(b.as_mut(), &mut scratch).is_ok(),
+            psd_repair_and_factor(b.as_mut()).is_ok(),
             "psd_repair_and_factor on n==0 must be Ok"
-        );
-        assert_eq!(
-            scratch.evd_repair_count, 0,
-            "n==0 must not trigger EVD repair"
         );
     }
 }

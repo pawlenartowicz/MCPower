@@ -134,6 +134,44 @@ describe('TableView — find-sample-size marginal table (A4)', () => {
   });
 });
 
+function makePowerTab(spec: unknown, extras: unknown): RunTab {
+  const result = { ...gridPoint(100, [0.8, 0.6]), estimator_extras: extras } as PowerResult;
+  return {
+    id: 'p-tab',
+    label: 'Run 1',
+    kind: 'find-power',
+    subView: 'summary',
+    spec,
+    sample_size: 100,
+    effect_names: ['a', 'b'],
+    result,
+    scenarios: [['default', result]],
+  } as RunTab;
+}
+
+describe('TableView — binary event rate line', () => {
+  const logit = { ...baseSpec, family: 'logit' as const, baseline_probability: 0.1 };
+
+  it('shows the realized event rate next to the requested baseline', () => {
+    const tab = makePowerTab(logit, { estimator: 'glm', baseline_prob_realized: 0.171 });
+    const { getByText } = render(TableView, { props: { tab } });
+    expect(getByText('event rate = 17.1% · baseline 10.0%')).toBeTruthy();
+  });
+
+  it('shows n/a when the realized value is not finite', () => {
+    const tab = makePowerTab(logit, { estimator: 'glm', baseline_prob_realized: NaN });
+    const { getByText } = render(TableView, { props: { tab } });
+    expect(getByText('event rate = n/a · baseline 10.0%')).toBeTruthy();
+  });
+
+  it('reads the requested baseline from a binary mixed spec', () => {
+    const mixed = { ...baseSpec, family: 'mixed' as const, outcome: { kind: 'binary', baseline_probability: 0.25 } };
+    const tab = makePowerTab(mixed, { estimator: 'glm', baseline_prob_realized: 0.3 });
+    const { getByText } = render(TableView, { props: { tab } });
+    expect(getByText('event rate = 30.0% · baseline 25.0%')).toBeTruthy();
+  });
+});
+
 describe('TableView — find-sample-size overall (omnibus) row', () => {
   it('renders the overall required-N row first when fitted_overall is present', () => {
     const tab = makeSampleSizeTab([100, 150], undefined, {

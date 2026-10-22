@@ -66,15 +66,6 @@ pub enum WaldSe {
     Rx,
 }
 
-impl WaldSe {
-    /// `wald_se` only affects the clustered-binary GLMM estimator. OLS/LMM and
-    /// unclustered GLM SEs are already exact, so the orchestrator ignores the
-    /// switch there rather than computing a Hessian. (design §7.)
-    pub fn affects(self, est: EstimatorSpec, clustered: bool) -> bool {
-        matches!(est, EstimatorSpec::Glm) && clustered
-    }
-}
-
 /// Reference distribution for mixed-model fixed-effect Wald tests. Additive
 /// contract field; no-op for `Ols` and unclustered `Glm`. This default mirrors
 /// `configs/config.json` `estimation.df_method` — the single home for the
@@ -106,11 +97,6 @@ mod tests {
         assert_eq!(serde_json::to_string(&WaldSe::Rx).unwrap(), "\"rx\"");
         // default flipped to rx at 1.1.0 (fastmode); mirrors config.json estimation.wald_se
         assert_eq!(WaldSe::default(), WaldSe::Rx);
-        // affects() is true only for clustered GLM
-        assert!(WaldSe::Hessian.affects(EstimatorSpec::Glm, true));
-        assert!(!WaldSe::Hessian.affects(EstimatorSpec::Glm, false)); // unclustered GLM
-        assert!(!WaldSe::Hessian.affects(EstimatorSpec::Ols, true));
-        assert!(!WaldSe::Hessian.affects(EstimatorSpec::Mle, true)); // LMM
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! Translate `engine_core::EngineError` to PyO3 exception types.
 
 use engine_core::EngineError;
-use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PyValueError};
 use pyo3::PyErr;
+use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PyValueError};
 
 /// Report-this suffix for genuine engine bugs (caught Rust panics) — never added
 /// to the validation (`ValueError`) or cancellation (`KeyboardInterrupt`) paths.

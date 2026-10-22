@@ -109,7 +109,6 @@ struct AssembleSummary {
     coefficient_count: usize,
     generation_column_count: usize,
     alpha: f64,
-    correction_code: i32,
 }
 
 fn build_summary(contracts: &[engine_contract::SimulationContract]) -> AssembleSummary {
@@ -120,7 +119,6 @@ fn build_summary(contracts: &[engine_contract::SimulationContract]) -> AssembleS
         coefficient_count: c.outcome.coefficients.len(),
         generation_column_count: c.generation.columns.len(),
         alpha: c.test.alpha,
-        correction_code: c.test.correction.code(),
     }
 }
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Diagnostic badge shown after runs: flags low convergence, GLM baseline drift, high-τ̂ boundary
+  // Diagnostic badge shown after runs: flags low convergence, high-τ̂ boundary
   // hits, GLMM Laplace-approximation bias, sparse-factor exclusions, and preflight/grid warnings.
   import type { RunTab } from '$lib/stores/run.svelte';
   import type { PowerResult, SampleSizeResult, EstimatorExtras } from '$lib/domain/result';
@@ -25,16 +25,6 @@
 
   const convergenceRate = $derived(r?.convergence_rate ?? 1);
 
-  /** Requested GLM event probability from the run's spec (the value
-   * set_baseline_probability would carry), or null when the outcome is not
-   * binary. GLMM surfaces under family 'mixed' with a binary outcome, so it must
-   * read the mixed source — covering only LogitSpec would leave GLMM drift dead. */
-  function requestedBaseline(spec: AppSpec): number | null {
-    if (spec.family === 'logit') return spec.baseline_probability;
-    if (spec.family === 'mixed' && spec.outcome?.kind === 'binary') return spec.outcome.baseline_probability;
-    return null;
-  }
-
   /** Smallest cluster size at the evaluated N: explicit cluster_size, or
    * floor(N / n_clusters). null when the run is not clustered (mixed family). */
   function minClusterSize(spec: AppSpec, n: number): number | null {
@@ -42,19 +32,6 @@
     const dim = spec.cluster_dim;
     return dim.kind === 'cluster_size' ? dim.value : Math.floor(n / dim.value);
   }
-
-  // GLM baseline drift = |realized − requested|, requested read from the spec
-  // (NOT baseline_prob_sum/baseline_prob_n, which equals realized → always 0).
-  // Estimator must be 'glm' (covers plain GLM and GLMM). Mirrors Py/R diagnostic_warnings.
-  const glmDrift = $derived((): number | null => {
-    if (!r?.estimator_extras) return null;
-    const ex = r.estimator_extras as EstimatorExtras;
-    if (ex.estimator !== 'glm') return null;
-    const realized = (ex as Extract<EstimatorExtras, { estimator: 'glm' }>).baseline_prob_realized;
-    const requested = requestedBaseline(tab.spec);
-    if (realized == null || requested == null) return null;
-    return Math.abs(realized - requested);
-  });
 
   // High-τ̂ boundary rate from the per-sim boundary_hit array (value 2), divided by
   // n_sims — estimator-agnostic, identical source of truth to Py/R's
@@ -85,7 +62,6 @@
   });
 
   const convergenceProblem = $derived(convergenceRate < thresholds.convergence_min);
-  const glmDriftProblem = $derived(glmDrift() != null && glmDrift()! > thresholds.glm_baseline_drift_max);
   const boundaryProblem = $derived(highBoundary() != null && highBoundary()! > thresholds.lme_boundary_hit_max);
   const laplaceProblem = $derived(laplaceBias() != null);
 
@@ -162,7 +138,7 @@
     r ? (r.grid_warnings ?? []) : ssr ? (ssr.grid_warnings ?? []) : [] as string[]
   );
 
-  const hasProblem = $derived(convergenceProblem || glmDriftProblem || boundaryProblem || laplaceProblem);
+  const hasProblem = $derived(convergenceProblem || boundaryProblem || laplaceProblem);
   const hasExclusion = $derived(exclusionLines.length > 0);
   const hasGridWarnings = $derived(gridWarnings.length > 0);
 
@@ -188,12 +164,6 @@
             <p>
               Convergence {(convergenceRate * 100).toFixed(1)}% — below {(thresholds.convergence_min * 100).toFixed(0)}%.
               Mixed-model fits may be unstable; consider more observations per cluster or more simulations.
-            </p>
-          {/if}
-          {#if glmDriftProblem}
-            <p>
-              GLM baseline probability drifted by {(glmDrift()! * 100).toFixed(1)}% from target
-              (threshold {(thresholds.glm_baseline_drift_max * 100).toFixed(0)}%).
             </p>
           {/if}
           {#if boundaryProblem}

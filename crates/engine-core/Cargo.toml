@@ -14,10 +14,10 @@ crate-type = ["rlib"]
 
 [dependencies]
 engine-contract = { path = "../engine-contract" }
-# loop_advanced = the unstable scratch-explicit hot-path surface. The 0.1.x line
-# is parity-stable, so patches inside it are accepted unpinned; a 0.2+ bump moves
-# the GLMM goldens and must be deliberate and reviewed.
-glmm = { version = "=0.3.2", default-features = false, features = ["loop_advanced"] }
+# loop_advanced = the unstable scratch-explicit hot-path surface, outside glmm's
+# semver guarantee, so the version is pinned exactly; any bump can move the GLMM
+# goldens and must be deliberate and reviewed.
+glmm = { version = "=0.6.2", default-features = false, features = ["loop_advanced"] }
 rayon        = "1.10"
 serde        = { version = "1", features = ["derive"] }
 # Used only by bin/throughput.rs (baseline JSON read/write); already in the
@@ -25,13 +25,6 @@ serde        = { version = "1", features = ["derive"] }
 serde_json   = "1"
 thiserror    = "2"
 thread_local = "1.1"
-# Pure-Rust BOBYQA — zero-alloc warm path, wasm-clean, bit-exact parity-pinned
-# vs PRIMA (native + wasm32-wasip1). BOBYQA drives the LMM/GLMM θ-search, so a
-# release that shifts tie-breaking or float-fusion order would move θ̂ and break
-# the frozen parity goldens. The 0.1.x line is parity-stable, so patches inside it
-# are accepted unpinned; a 0.2+ bump must be deliberate and reviewed — the caret
-# here stops at <0.2.0, so a minor bump is never picked up silently.
-bobyqa = "0.1"
 
 # Counter-based Philox4x32-10 core extracted from this crate (was src/philox.rs
 # plus the splitmix64/u32_to_unit_f32 leaf helpers in rng.rs). Its output IS the
@@ -40,18 +33,20 @@ bobyqa = "0.1"
 # stream, so a version that moved any output bit would break the goldens. The
 # 0.2.x line is frozen (KAT-pinned; 0.2.1 adds `fill_u32` and `key`, used by
 # SimRng and fill_words), so patches inside it are safe; the caret stops below
-# 0.3.0 so a minor bump is never picked up silently (same discipline as
-# bobyqa/pulp). default-features = false: the no_std, zero-dep core only, not
-# the rand_core RngCore wrapper — keeps the dep graph minimal and wasm-clean.
+# 0.3.0 so a minor bump is never picked up silently. default-features = false:
+# the no_std, zero-dep core only, not the rand_core RngCore wrapper — keeps the
+# dep graph minimal and wasm-clean.
 rand_philox = { version = "0.2.1", default-features = false }
 
 # Portable SIMD (x86 AVX/AVX-512, wasm simd128, NEON, scalar fallback) for the
-# fit-path transcendentals (simd_transcendental.rs). Already in the tree
-# transitively via faer; declared direct so engine-core can call it. Exact-pinned
-# for the same reason as bobyqa: pulp's codegen/lane choice sets the fitted-MLE
-# low bits, so a version bump can move the GLMM goldens — must be deliberate,
-# never picked up by a caret range. Keep == faer's transitive version.
-pulp = "=0.22.2"
+# central-branch normal draw (`rng.rs` `CentralHornerOp`). Already in the tree
+# transitively via faer and glmm; declared direct so engine-core can call it.
+# That kernel is bit-identical to its scalar twin, so the pulp version cannot
+# move its output. The version can move bits inside faer and glmm (instruction
+# set or lane-width choice changes reduction order in the fit and the
+# data-gen transcendentals); the lock files hold that, so a pulp move shows up
+# as a lock diff.
+pulp = "0.22"
 
 # wasm32 target: drop faer's `rayon` feature (pulls spindle → atomic-wait, which
 # has no wasm32 implementation) and `rand` (pulls rand 0.9 → getrandom 0.3, which
@@ -66,7 +61,6 @@ faer         = "0.24"
 
 [dev-dependencies]
 engine-contract = { path = "../engine-contract", features = ["test-fixtures"] }
-rmp-serde = "1"
 approx    = "0.5"
 dhat      = "0.3"
 libm      = "0.2"

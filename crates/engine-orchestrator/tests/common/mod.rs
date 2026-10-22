@@ -68,6 +68,7 @@ pub fn minimal_ols_contract() -> SimulationContract {
         posthoc: vec![],
         scenario,
         max_failed_fraction: 0.05,
+        curvature_hints: None,
     }
 }
 

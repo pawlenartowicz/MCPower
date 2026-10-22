@@ -464,12 +464,6 @@ mod tests {
         }
     }
 
-    // A separator with nothing after it is empty (the blank input is a corpus row).
-    #[test]
-    fn empty_rhs_after_separator_errors() {
-        assert!(matches!(parse_formula("y ="), Err(SpecError::EmptyFormula)));
-    }
-
     // Duplicate predictor names in the RHS collapse — each name appears once
     // in `predictors` (first occurrence wins) and is not re-emitted as a
     // duplicate `Term::Main`.

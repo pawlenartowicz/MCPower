@@ -3,10 +3,11 @@
     "seed": 2137,
     "alpha": 0.05,
     "target_power": 0.8,
-    "n_sims": { "ols": 1600, "mixed": 800, "anova": 1000 },
+    "n_sims": { "ols": 1600, "mixed": 800, "glmm": 400, "anova": 1000 },
     "max_failed_fraction": 0.1,
     "sample_size_bounds": { "from": 30, "to": 200, "by": "auto" },
-    "cluster_auto_count": 12
+    "cluster_auto_count": 12,
+    "nested_n_per_parent": 2
   },
   "estimation": {
     "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'rx' (fastmode: rx + Laplace) is the 1.1.0 default; 'hessian' is the accurate/AGQ opt-in. nagq: 1 = Laplace. df_method: 'between_within' (between-within denominator df for mixed fits) is the default; 'asymptotic' opts into the Wald z reference. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq, DfMethod::default) — change together.",
@@ -42,7 +43,6 @@
     "thresholds": {
       "convergence_min": 0.95,
       "lme_boundary_hit_max": 0.01,
-      "glm_baseline_drift_max": 0.05,
       "factor_exclusion_max": 0.0,
       "glmm_tau_sq_warn": 1.0
     },

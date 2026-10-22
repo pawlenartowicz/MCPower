@@ -100,6 +100,14 @@ def _required_n_headline_for(inner, pos, unit_divisor: int) -> Tuple[str, Option
     the numeric (footer max, header N≥) use this directly."""
     # int keys from the engine; the `fitted` dict is keyed by position int.
     f = (inner.get("fitted") or {}).get(pos)
+    key = "first_achieved_unit" if unit_divisor > 1 else "first_achieved"
+    return _crossing_headline(inner, f, inner[key].get(pos), unit_divisor)
+
+
+def _crossing_headline(inner, f, first_n, unit_divisor: int) -> Tuple[str, Optional[int]]:
+    """Fallback chain shared by the per-target and per-post-hoc-contrast
+    required-N cells: `f` is the cell's `CrossingFit` map (or None), `first_n`
+    its grid-empirical first N already in the requested unit (or None)."""
     if f is not None:
         status = f.get("status")
         if status == "fitted":
@@ -113,13 +121,11 @@ def _required_n_headline_for(inner, pos, unit_divisor: int) -> Tuple[str, Option
             if ceiling is None:
                 return "—", None
             return f"≥ {ceiling // unit_divisor}", None
-        # non_monotone: fall through to first_achieved below (grid value shown)
+        # non_monotone: fall through to the grid-empirical value below
 
     # Fallback: first_achieved (also covers non_monotone and missing fitted).
-    key = "first_achieved_unit" if unit_divisor > 1 else "first_achieved"
-    v = inner[key].get(pos)
-    if v is not None:
-        return str(v), v
+    if first_n is not None:
+        return str(first_n), first_n
     ceiling = _search_ceiling(inner)
     if ceiling is None:
         return "—", None
@@ -141,6 +147,34 @@ def fmt_required_n(inner, pos) -> str:
     string; never a bare '—' when the search ceiling is known."""
     display, _ = _required_n_headline(inner, pos)
     return display
+
+
+def posthoc_required_n_rows(scenarios, meta, unit_divisor: int, unit_label) -> list:
+    """Post-hoc rows of the sample-size Required N table: one span per factor,
+    then one row per pairwise contrast. Cells per scenario are `[unit, N]` when
+    `unit_label` is set, else `[N]`. `[]` when no scenario carries post-hoc
+    required-N results."""
+    if not any(s.get("posthoc_first_achieved") for _, s in scenarios):
+        return []
+
+    def cell(s, r, div):
+        b, c = r["block"], r["contrast"]
+        fits = s.get("posthoc_fitted") or []
+        f = fits[b].get(c) if b < len(fits) else None
+        key = "posthoc_first_achieved_unit" if div > 1 else "posthoc_first_achieved"
+        return _crossing_headline(s, f, s[key][b].get(c), div)[0]
+
+    out = []
+    for r in posthoc_rows(meta):
+        if r["kind"] == "posthoc_header":
+            out.append(("span", f"{r['label']}  (pairwise)")); continue
+        cells = ["  " + r["label"]]
+        for _, s in scenarios:
+            if unit_label:
+                cells.append(cell(s, r, unit_divisor))
+            cells.append(cell(s, r, 1))
+        out.append(("row", cells))
+    return out
 
 
 def fmt_target(target: float, decimals: int) -> str:
@@ -666,7 +700,6 @@ def render_short(result: Dict[str, Any], meta: Dict[str, Any], *, kind: str) -> 
     tables = main_power_tables(scenarios, meta, dec=dec, tdec=tdec, target=target, caption=None)
     out = header + "\n\n" + "\n\n".join(tables)
     factor_names = list(meta.get("factors", {}))
-    baseline_req = meta.get("baseline_prob_requested")
     min_cluster_size = meta.get("min_cluster_size")
     # Diagnose every scenario, not just scenario 0 — a degraded sweep scenario is
     # the whole point of running one. Prefix each message with its scenario name
@@ -675,7 +708,6 @@ def render_short(result: Dict[str, Any], meta: Dict[str, Any], *, kind: str) -> 
     warns = []
     for nm, scen in scenarios:
         for w in diagnostic_warnings(scen, factor_names=factor_names,
-                                     baseline_prob_requested=baseline_req,
                                      min_cluster_size=min_cluster_size):
             warns.append(f"! {f'{nm}: {w}' if multi else w} — see summary()")
     return out + ("\n" + "\n".join(warns) if warns else "")
@@ -707,18 +739,16 @@ def diagnostic_warnings(
     inner: Dict[str, Any],
     factor_names: Optional[List[str]] = None,
     *,
-    baseline_prob_requested: Optional[float] = None,
     min_cluster_size: Optional[int] = None,
 ) -> List[str]:
     """Core diagnostic message per configured threshold that trips; empty when
     clean. Callers add their own prefix/suffix (short form: '! … — see
     summary()'; long form: '! …' under a '⚠ Diagnostics' heading).
 
-    baseline_prob_requested / min_cluster_size are meta-level (one per run): the
-    requested GLM event probability (from set_baseline_probability) and the
-    smallest cluster size at the evaluated N. Both are None unless the run is a
-    binary-outcome GLM / GLMM; they drive the GLM-drift and Laplace-bias gates,
-    comparing against the realized values the per-scenario `inner` carries.
+    min_cluster_size is meta-level (one per run): the smallest cluster size at
+    the evaluated N. It is None unless the run is a binary-outcome GLM / GLMM; it
+    drives the Laplace-bias gate against the estimator extras the per-scenario
+    `inner` carries.
 
     Faithful mirror of .diagnostic_warnings in ports/r/R/output-report.R — the
     gate set, message wording, and order must change together across both."""
@@ -745,12 +775,6 @@ def diagnostic_warnings(
     if hit_rate > th["lme_boundary_hit_max"]:
         warns.append(f"high-τ̂ boundary {fmt_pct(hit_rate, 1)}")
     extras = inner.get("estimator_extras", {})
-    if (baseline_prob_requested is not None
-            and extras.get("estimator") == "glm"
-            and "baseline_prob_realized" in extras):
-        drift = abs(extras["baseline_prob_realized"] - baseline_prob_requested)
-        if drift > th["glm_baseline_drift_max"]:
-            warns.append(f"GLM baseline drift {drift:.3f}")
     th_excl = th["factor_exclusion_max"]
     for key, verb in (("factor_exclusion_counts", "excluded"),
                       ("factor_separation_counts", "separation-dropped")):
@@ -858,6 +882,7 @@ def _render_sample_size_short(result: Dict[str, Any], meta: Dict[str, Any], cfg:
                     table.append(("span", f"{row['label']}  (baseline: {row['baseline']})")); continue
                 label = ("  " if row["kind"] == "factor_level" else "") + row["label"]
                 table.append(("row", [label] + [fmt_required_n(s, row["pos"]) for _, s in scenarios]))
+    table += posthoc_required_n_rows(scenarios, meta, unit_divisor, unit_label)
     footers = []
     # Collect non_monotone warnings across scenarios (label → max_violation).
     non_monotone_items: List[Tuple[str, float]] = []

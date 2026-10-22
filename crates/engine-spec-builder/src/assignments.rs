@@ -48,8 +48,6 @@ pub enum VarTypeParams {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AssignmentValue {
-    /// Retained for back-compat; the parser now emits `VariableTypeWithParams`.
-    VariableType(String),
     /// Variable type plus its structured params (tuple syntax `(binary,0.3)` /
     /// `(factor,0.2,0.3,0.5)` and bare-form defaults), single-sourced from Rust.
     VariableTypeWithParams {
@@ -349,7 +347,7 @@ fn parse_var_type_value(value: &str) -> Result<(String, VarTypeParams), String> 
                 match p.parse::<f64>() {
                     Ok(v) => proportions.push(v),
                     Err(_) => {
-                        return Err("Invalid proportions. All values must be numeric".to_string())
+                        return Err("Invalid proportions. All values must be numeric".to_string());
                     }
                 }
             }

@@ -2,7 +2,7 @@
 
 Mirrors the correction= pattern: validated at find_power entry, normalised in
 spec_builder, forwarded into LinearSpec → project_contract. Only affects the
-clustered-binary GLMM estimator (WaldSe::affects); the OLS/LMM paths ignore it.
+clustered-binary GLMM estimator (the glmm fit options); the OLS/LMM paths ignore it.
 Which mode is more conservative is engine math, pinned in
 engine-orchestrator's wald_se_modes tests; here only the port wiring is proven.
 """

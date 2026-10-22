@@ -1,19 +1,19 @@
 //! Wall-clock cost of the two GLMM Wald-SE modes — pure Rust, no FFI.
 //!
-//! `#[ignore]`d (it is a manual benchmark, not a gate). Run ONLY on a stabilized
+//! A manual benchmark that asserts nothing. Run ONLY on a stabilized
 //! + clock-locked machine, single-threaded, pinned to one P-core:
 //!
 //! ```text
 //! RAYON_NUM_THREADS=1 taskset -c 0 \
-//!   cargo test --release -p engine-orchestrator --test wald_se_timing -- --ignored --nocapture
+//!   cargo run --release --bin wald_se_timing -p engine-core
 //! ```
 //!
 //! Times `run_batch_st` (single-threaded, the stable signal) under each mode on a
 //! fixed clustered-logit spec; reports MIN-of-3 elapsed (timing noise is one-sided)
 //! after a discarded warm-up. The two modes differ ONLY in the per-fit covariance
 //! step layered on the shared Laplace fit:
-//!   * rx       — Schur block solve            (opt-in speed knob)
-//!   * hessian  — FD-Hessian of the deviance   (per-fit, default)
+//!   * rx       — Schur block solve            (default)
+//!   * hessian  — FD-Hessian of the deviance   (per-fit, opt-in)
 
 use engine_contract::{ColumnId, SlopeTerm};
 use engine_core::batch::run_batch_st;
@@ -81,6 +81,7 @@ fn base_spec(k: u32) -> SimulationSpec {
         cluster_slope_design_cols: vec![],
         extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
+        curvature_hints: None,
     }
 }
 
@@ -125,9 +126,7 @@ fn best<F: FnMut()>(reps: usize, mut f: F) -> f64 {
     t
 }
 
-#[test]
-#[ignore = "manual wall-clock benchmark; run on a locked machine with --ignored --nocapture"]
-fn wald_se_mode_timing() {
+fn main() {
     let nt = std::fs::read_to_string("/sys/devices/system/cpu/intel_pstate/no_turbo")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "?".into());

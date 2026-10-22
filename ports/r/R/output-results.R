@@ -70,31 +70,38 @@
 #' @param boundary_hit_rate_tau_zero  Numeric vector; per-N tau=0 boundary rates.
 #' @param boundary_hit_rate_high_tau  Numeric vector; per-N high-tau boundary rates.
 #' @param threshold  Maximum acceptable failure rate in [0,1].
+#' @param clustered  Whether the model has random effects. Only then does the
+#'   message carry the tau boundary breakdown and the \code{n_clusters} hint.
 #' @return Invisibly NULL.
 #' @keywords internal
 .check_failure_threshold <- function(convergence_rate,
                                      boundary_hit_rate_tau_zero,
                                      boundary_hit_rate_high_tau,
-                                     threshold) {
+                                     threshold,
+                                     clustered = FALSE) {
   failure_rates <- 1.0 - convergence_rate
   worst_idx     <- which.max(failure_rates)
   worst_rate    <- failure_rates[[worst_idx]]
   if (worst_rate > threshold) {
     tz <- boundary_hit_rate_tau_zero[[worst_idx]]
     ht <- boundary_hit_rate_high_tau[[worst_idx]]
-    stop(sprintf(
-      paste0(
-        "LME convergence failure rate %.1f%% exceeds the configured threshold %.1f%% ",
-        "(sample-size index %d). ",
+    msg <- sprintf(paste0(
+      "Convergence failure rate %.1f%% exceeds the configured threshold %.1f%% ",
+      "(sample-size index %d). "),
+      worst_rate * 100, threshold * 100, worst_idx - 1L)
+    msg <- if (clustered) {
+      paste0(msg, sprintf(paste0(
         "Boundary-hit breakdown at that N: ",
         "tau_zero=%.1f%% (τ̂=0, common for small ICC), ",
         "high_tau=%.1f%% (τ̂ implausibly large, potential red flag). ",
         "Raise the threshold via set_max_failed_simulations() or increase ",
-        "n_clusters / sample size."
-      ),
-      worst_rate * 100, threshold * 100, worst_idx - 1L,
-      tz * 100, ht * 100
-    ), call. = FALSE)
+        "n_clusters / sample size."),
+        tz * 100, ht * 100))
+    } else {
+      paste0(msg, "Raise the threshold via set_max_failed_simulations() or ",
+             "increase the sample size.")
+    }
+    stop(msg, call. = FALSE)
   }
   invisible(NULL)
 }
@@ -106,12 +113,13 @@
 #'
 #' @param result     Named list returned by \code{.unwrap_scenario_result}.
 #' @param threshold  Maximum acceptable failure rate in [0,1].
+#' @param clustered  Whether the model has random effects.
 #' @return Invisibly NULL.
 #' @keywords internal
-.check_result_failure_threshold <- function(result, threshold) {
+.check_result_failure_threshold <- function(result, threshold, clustered = FALSE) {
   if ("scenarios" %in% names(result)) {
     for (scenario_dict in result$scenarios) {
-      .check_result_failure_threshold(scenario_dict, threshold)
+      .check_result_failure_threshold(scenario_dict, threshold, clustered)
     }
     return(invisible(NULL))
   }
@@ -126,7 +134,8 @@
                                               rep(0.0, length(cr))),
     boundary_hit_rate_high_tau = as.numeric(result[["boundary_hit_rate_high_tau"]] %||%
                                               rep(0.0, length(cr))),
-    threshold = threshold
+    threshold = threshold,
+    clustered = clustered
   )
 }
 

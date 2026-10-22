@@ -1,8 +1,8 @@
 //! Tauri command handlers for `find_power`, `find_sample_size`, `cancel_run`, `parse_formula`, and `set_n_threads`; each spawns a blocking task and emits progress events to the window.
 
 use engine_app_spec::{
-    effect_skeleton_json, power_plot_specs, run_find_power, run_find_sample_size,
-    sample_size_curve_specs, AppSpec, EffectDescriptor, PlotSpecs,
+    AppSpec, EffectDescriptor, PlotSpecs, effect_skeleton_json, power_plot_specs, run_find_power,
+    run_find_sample_size, sample_size_curve_specs,
 };
 use engine_orchestrator::{PowerResult, SampleSizeMethod, SampleSizeResult, ScenarioResult};
 use serde::Serialize;

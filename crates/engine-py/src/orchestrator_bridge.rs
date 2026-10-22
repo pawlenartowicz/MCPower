@@ -8,13 +8,13 @@
 
 use engine_contract::SimulationContract;
 use engine_orchestrator::{
-    power_result_to_host, sample_size_result_to_host, Ci, HostValue, PowerResult, ProgressEvent,
-    ProgressSink, SampleSizeResult, ScenarioResult,
+    Ci, HostValue, PowerResult, ProgressEvent, ProgressSink, SampleSizeResult, ScenarioResult,
+    power_result_to_host, sample_size_result_to_host,
 };
+use pyo3::IntoPyObjectExt;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
-use pyo3::IntoPyObjectExt;
 
 /// Decode the msgpack `Vec<SimulationContract>` blob produced by
 /// `_engine.build_contract_from_spec`. The Python frontend forwards this

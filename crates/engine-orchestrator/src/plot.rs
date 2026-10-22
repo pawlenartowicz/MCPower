@@ -18,7 +18,7 @@
 //! are port contract; the individual `*_spec` builders are internal-stability,
 //! exposed for tests, free to change at any minor version.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::grid::as_proportion;
 use crate::result::Ci;
@@ -226,10 +226,12 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
     // yOffset stacking and the fillOpacity ramp. Replaces the old mean-power sort
     // (colour no longer keys on scenario, so power-ordering it is meaningless).
     let scenario_order: Option<Value> = if multi {
-        Some(json!(scenarios
-            .iter()
-            .map(|sc| sc.label.as_str())
-            .collect::<Vec<_>>()))
+        Some(json!(
+            scenarios
+                .iter()
+                .map(|sc| sc.label.as_str())
+                .collect::<Vec<_>>()
+        ))
     } else {
         None
     };
@@ -906,11 +908,13 @@ mod exactly_k_curve_tests {
         let v: serde_json::Value = serde_json::from_str(&spec).unwrap();
         // Only the n=100 point contributes 3 rows; n=50 is skipped.
         assert_eq!(v["data"]["values"].as_array().unwrap().len(), 3);
-        assert!(v["data"]["values"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|r| r["n"] == 100));
+        assert!(
+            v["data"]["values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["n"] == 100)
+        );
     }
 }
 

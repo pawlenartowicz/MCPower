@@ -216,6 +216,7 @@ fn base_spec(k: u32) -> SimulationSpec {
         cluster_slope_design_cols: vec![],
         extra_slope_cols: Vec::new(),
         fit_columns: Vec::new(),
+        curvature_hints: None,
     }
 }
 
@@ -911,7 +912,9 @@ fn parse_args() -> Args {
         die("--save with --case would overwrite the full baseline with a partial run; drop one");
     }
     if args.save && args.mode_filter.is_some() {
-        die("--save with --scenarios would overwrite the full baseline with a partial run; drop one");
+        die(
+            "--save with --scenarios would overwrite the full baseline with a partial run; drop one",
+        );
     }
     if args.save && args.smoke {
         die("--smoke runs are untimed; nothing to save");
@@ -930,7 +933,9 @@ fn die(msg: &str) -> ! {
 
 fn main() {
     if cfg!(debug_assertions) {
-        die("refusing to run a debug build — use `cargo run --release --bin throughput -p engine-core`");
+        die(
+            "refusing to run a debug build — use `cargo run --release --bin throughput -p engine-core`",
+        );
     }
     let args = parse_args();
 

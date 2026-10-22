@@ -207,7 +207,7 @@ def test_warn_logit_not_emitted_for_ols() -> None:
 
 
 def test_set_heteroskedasticity_driver_warns_for_logit() -> None:
-    """set_heteroskedasticity_driver is OLS-only; a logit model must warn the user."""
+    """Heteroskedasticity is continuous-outcome only; a logit model must warn the user."""
     m = MCPower("y ~ x", family="logit")
     m.set_effects("x=0.5")
     m.set_baseline_probability(0.3)
@@ -215,13 +215,17 @@ def test_set_heteroskedasticity_driver_warns_for_logit() -> None:
         m.set_heteroskedasticity_driver(var=None)
 
 
-def test_set_heteroskedasticity_driver_warns_for_lme() -> None:
-    """set_heteroskedasticity_driver is OLS-only; an LME model must warn the user."""
+def test_set_heteroskedasticity_driver_no_warning_for_lme() -> None:
+    """The engine applies heteroskedasticity to linear mixed models, so no warning."""
     m = MCPower("y = x + (1|g)", family="lme")
     m.set_effects("x=0.3")
     m.set_cluster("g", n_clusters=20, ICC=0.2)
-    with pytest.warns(UserWarning, match="heteroskedasticity"):
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
         m.set_heteroskedasticity_driver(var=None)
+    het_warns = [x for x in w if "heteroskedasticity" in str(x.message).lower()
+                 and issubclass(x.category, UserWarning)]
+    assert len(het_warns) == 0
 
 
 def test_set_heteroskedasticity_driver_no_warning_for_ols() -> None:

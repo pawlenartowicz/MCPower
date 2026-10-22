@@ -2,7 +2,7 @@
 //!
 //! Migrated from `engine-spec-builder/src/project.rs` when the legacy
 //! `build_linear_spec` shim was removed; exercises the full contract path
-//! (`build_linear_contract` + `contract_to_simulation_spec`) end-to-end.
+//! (`build_contract` + `contract_to_simulation_spec`) end-to-end.
 
 use engine_core::spec::{Distribution, EstimatorSpec};
 use engine_spec_builder::input::{
@@ -64,8 +64,8 @@ fn simple_spec() -> LinearSpec {
 /// preserved only by strict-mode data upload, not the synthetic copula path.
 #[test]
 fn synthetic_binary_correlation_pair_is_rejected() {
-    use engine_spec_builder::input::CorrelationPair;
     use engine_spec_builder::SpecError;
+    use engine_spec_builder::input::CorrelationPair;
 
     let mut spec = simple_spec();
     spec.predictors[1].kind = VarKind::Binary { proportion: 0.4 };

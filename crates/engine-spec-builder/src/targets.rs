@@ -12,7 +12,10 @@ use crate::error::SpecError;
 /// `"overall"` (case-sensitive, mirrors the Python frontend) expands to
 /// every effect. Unknown names raise `UnknownTarget`. The output is
 /// deduplicated and sorted ascending.
-pub fn resolve_targets(targets: &[String], effect_names: &[String]) -> Result<Vec<u32>, SpecError> {
+pub(crate) fn resolve_targets(
+    targets: &[String],
+    effect_names: &[String],
+) -> Result<Vec<u32>, SpecError> {
     use std::collections::BTreeSet;
     let mut out: BTreeSet<u32> = BTreeSet::new();
     let expand_all = targets.iter().any(|t| t == "overall");

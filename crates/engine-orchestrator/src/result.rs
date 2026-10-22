@@ -168,9 +168,10 @@ fn nan_default() -> f64 {
 /// *refuses* to parse `null` back into an `f64` — which crashes the WASM merge
 /// path, since per-worker results round-trip through JSON and the
 /// `baseline_prob_realized` / `tau_squared_hat_mean` / `tau_estimate` fields
-/// carry NaN until the kernel surfaces the per-sim signal. Only deserialize is
-/// overridden: serialize stays default, so msgpack hosts (Py/R) keep carrying
-/// NaN natively and surface it unchanged — this codec is transparent for finite
+/// carry NaN when they have nothing to average. Only deserialize is
+/// overridden: serialize stays default. Py/R never read results back through
+/// serde: they receive a `HostValue` tree whose `f64` leaves carry NaN natively,
+/// so NaN reaches the host unchanged. This codec is transparent for finite
 /// values and for the native float-NaN msgpack already writes.
 fn nan_tolerant<'de, D>(d: D) -> Result<f64, D::Error>
 where
@@ -186,12 +187,13 @@ where
 pub enum EstimatorExtras {
     Ols {},
     Glm {
+        /// Mean realized event rate (mean of the generated binary y over the
+        /// rows fitted at this N), over every sim, converged or not. NaN unless
+        /// the outcome is Binary.
         #[serde(deserialize_with = "nan_tolerant")]
         baseline_prob_realized: f64,
-        /// Sum of per-sim realised baseline probabilities. Paired with
-        /// `baseline_prob_n` so `merge_power_results` can pool means via Σ/n.
-        /// Engine kernel does not yet surface per-sim baseline probs:
-        /// `aggregate_batch` populates 0.0 / 0 until the signal lands.
+        /// Σ of per-sim event rates, paired with `baseline_prob_n` so
+        /// `merge_power_results` can pool the mean via Σ/n.
         #[serde(default)]
         baseline_prob_sum: f64,
         #[serde(default)]
@@ -227,9 +229,9 @@ pub enum EstimatorExtras {
         joint_uncorrected_rate: f64,
         joint_corrected_rate: f64,
         /// Sum of per-sim τ̂ values. Paired with `tau_n` so
-        /// `merge_power_results` can pool means via Σ/n. Engine kernel does
-        /// not yet surface per-sim τ̂: `aggregate_batch` populates
-        /// 0.0 / 0 until the signal lands.
+        /// `merge_power_results` can pool means via Σ/n. The kernel surfaces
+        /// no per-sim τ̂ on the Mle path, so `aggregate_batch` writes 0.0 / 0
+        /// and `tau_estimate` stays NaN.
         #[serde(default)]
         tau_sum: f64,
         #[serde(default)]
@@ -273,8 +275,8 @@ impl EstimatorExtras {
     /// constructor — the two inputs are structurally different, but both
     /// enumerate the same variants and fields defined above.
     ///
-    /// `tau_estimate` / `baseline_prob_realized` carry `NaN` and the merge-support
-    /// sums carry `0` until the kernel surfaces the per-sim signals.
+    /// `tau_estimate` carries `NaN` and its merge-support sum `0`: the kernel
+    /// surfaces no per-sim τ̂ for the Mle path.
     pub(crate) fn from_batch(
         estimator: &EstimatorSpec,
         batch: &BatchResult,
@@ -296,8 +298,17 @@ impl EstimatorExtras {
                 let mut singular_n = 0u64;
                 let mut tau_sum = 0.0f64;
                 let mut tau_n = 0u64;
+                let mut rate_sum = 0.0f64;
+                let mut rate_n = 0u64;
                 for sim in 0..n_sims {
                     let idx = sim * n_ss + ss_idx;
+                    // The event rate is a property of the generated data, not of
+                    // the fit, so every sim counts, converged or not.
+                    let er = batch.event_rate.get(idx).copied().unwrap_or(f64::NAN);
+                    if er.is_finite() {
+                        rate_sum += er;
+                        rate_n += 1;
+                    }
                     if batch.converged[idx] != 0 {
                         singular_n += 1;
                         if batch.boundary_hit[idx] == 1 {
@@ -311,9 +322,13 @@ impl EstimatorExtras {
                     }
                 }
                 EstimatorExtras::Glm {
-                    baseline_prob_realized: f64::NAN,
-                    baseline_prob_sum: 0.0,
-                    baseline_prob_n: 0,
+                    baseline_prob_realized: if rate_n > 0 {
+                        rate_sum / rate_n as f64
+                    } else {
+                        f64::NAN
+                    },
+                    baseline_prob_sum: rate_sum,
+                    baseline_prob_n: rate_n,
                     singular_fit_rate: if singular_n > 0 {
                         singular_count as f64 / singular_n as f64
                     } else {
@@ -501,6 +516,18 @@ pub struct SampleSizeResult {
     /// test requested). Additive (serde default).
     #[serde(default)]
     pub fitted_overall: Option<CrossingFit>,
+    /// Grid-empirical required N per post-hoc contrast, from the per-N
+    /// **corrected** post-hoc counts. Nested like `PowerResult.posthoc`: one
+    /// inner vec per block (host `posthoc_requests` order), one entry per
+    /// contrast in canonical pair order. Empty when no post-hoc test was
+    /// requested. Additive (serde default).
+    #[serde(default)]
+    pub posthoc_first_achieved: Vec<Vec<Option<usize>>>,
+    /// Model-based crossing per post-hoc contrast, parallel to
+    /// `posthoc_first_achieved` (same nesting and order). Additive (serde
+    /// default).
+    #[serde(default)]
+    pub posthoc_fitted: Vec<Vec<CrossingFit>>,
     /// Cluster atom the grid was built on (1 when unclustered). Merge needs
     /// it to recompute `n_achievable` from pooled counts. Additive
     /// (serde default = 1).
@@ -610,17 +637,23 @@ pub enum OrchestratorError {
     },
     #[error("invalid cluster atom: atom must be >= 1")]
     InvalidClusterAtom,
-    #[error("after cluster snapping the [{from},{to}] range is empty (atom={atom}); widen bounds or reduce n_clusters/cluster_size")]
-    ClusterGridEmpty { from: usize, to: usize, atom: usize },
     #[error(
-        "range admits one sample size (snapped [{from},{to}], atom={atom}); nothing to search"
+        "after cluster snapping the [{from},{to}] range is empty (atom={atom}); widen bounds or reduce n_clusters/cluster_size"
     )]
+    ClusterGridEmpty { from: usize, to: usize, atom: usize },
+    #[error("range admits one sample size (snapped [{from},{to}], atom={atom}); nothing to search")]
     ClusterGridSinglePoint { from: usize, to: usize, atom: usize },
-    #[error("scenarios in this call disagree on the cluster atom ({a} vs {b}); a single shared grid cannot be a multiple of every atom")]
+    #[error(
+        "scenarios in this call disagree on the cluster atom ({a} vs {b}); a single shared grid cannot be a multiple of every atom"
+    )]
     MixedClusterAtoms { a: usize, b: usize },
-    #[error("FixedSize cluster regime needs cluster_size >= {min} (no within-cluster information below that); got {got}")]
+    #[error(
+        "FixedSize cluster regime needs cluster_size >= {min} (no within-cluster information below that); got {got}"
+    )]
     ClusterSizeTooSmall { got: usize, min: usize },
-    #[error("at N={n} the FixedSize regime yields only {got} cluster(s) (cluster_size={cluster_size}); need >= {min}. Raise sample_size to at least {min}*{cluster_size}.")]
+    #[error(
+        "at N={n} the FixedSize regime yields only {got} cluster(s) (cluster_size={cluster_size}); need >= {min}. Raise sample_size to at least {min}*{cluster_size}."
+    )]
     ClusterTooFewAtN {
         n: usize,
         cluster_size: usize,
@@ -634,11 +667,15 @@ pub enum OrchestratorError {
     },
     #[error("cannot merge incompatible results: {0}")]
     IncompatibleMerge(String),
-    #[error("sample-size unit {unit:?} does not fit the {regime} cluster regime (clusters needs fixed_size, cluster_size needs fixed_clusters)")]
+    #[error(
+        "sample-size unit {unit:?} does not fit the {regime} cluster regime (clusters needs fixed_size, cluster_size needs fixed_clusters)"
+    )]
     UnitRegimeMismatch { unit: String, regime: String },
     #[error("sample-size unit {unit:?} needs a clustered model; this model has no cluster")]
     UnitOnUnclustered { unit: String },
-    #[error("scenarios in this call disagree on the sample-size unit divisor ({a} vs {b}); the unit must mean the same thing in every scenario")]
+    #[error(
+        "scenarios in this call disagree on the sample-size unit divisor ({a} vs {b}); the unit must mean the same thing in every scenario"
+    )]
     UnitDivisorDiffersAcrossScenarios { a: usize, b: usize },
     #[error("unknown sample-size unit {0:?}; expected observations, clusters or cluster_size")]
     UnknownUnit(String),
@@ -773,6 +810,7 @@ mod result_counter_tests {
             overall: vec![],
             factor_excluded: vec![],
             tau_squared_hat: vec![],
+            event_rate: vec![],
             shape: ResultShape {
                 n_sims: 4,
                 n_sample_sizes: 1,
@@ -815,6 +853,7 @@ mod result_counter_tests {
             overall: vec![],
             factor_excluded: vec![],
             tau_squared_hat: vec![],
+            event_rate: vec![],
             shape: ResultShape {
                 n_sims: 2,
                 n_sample_sizes: 1,
@@ -873,6 +912,18 @@ mod result_counter_tests {
                 ci_lo: Some(80.0),
                 ci_hi: Some(110.0),
             }),
+            posthoc_first_achieved: vec![vec![Some(60), None]],
+            posthoc_fitted: vec![vec![
+                CrossingFit::Fitted {
+                    n_star: 57.5,
+                    n_achievable: 60,
+                    ci_lo: None,
+                    ci_hi: Some(70.0),
+                },
+                CrossingFit::NotReached {
+                    n_approx: Some(210),
+                },
+            ]],
             cluster_atom: 30,
             unit_divisor: 6,
             target_power: 0.8,
@@ -906,6 +957,7 @@ mod result_counter_tests {
             overall: vec![0, 0],
             factor_excluded: vec![],
             tau_squared_hat: vec![0.20, 0.30],
+            event_rate: vec![0.12, 0.18],
             shape: ResultShape {
                 n_sims: 2,
                 n_sample_sizes: 1,
@@ -922,6 +974,8 @@ mod result_counter_tests {
             singular_n,
             tau_squared_hat_mean,
             tau_squared_hat_n,
+            baseline_prob_realized,
+            baseline_prob_n,
             ..
         } = ex
         else {
@@ -931,6 +985,61 @@ mod result_counter_tests {
         assert!((singular_fit_rate - 0.5).abs() < 1e-12);
         assert_eq!(tau_squared_hat_n, 2);
         assert!((tau_squared_hat_mean - 0.25).abs() < 1e-12);
+        assert_eq!(baseline_prob_n, 2);
+        assert!((baseline_prob_realized - 0.15).abs() < 1e-12);
+    }
+
+    /// The event rate pools every sim with a finite rate, converged or not, and
+    /// is NaN when no sim carries one (a non-Binary outcome).
+    #[test]
+    fn glm_extras_event_rate_counts_unconverged_sims_and_skips_nan() {
+        use engine_core::spec::{BatchResult, ResultShape};
+        let batch = |event_rate: Vec<f64>| BatchResult {
+            uncorrected: vec![0; 3],
+            corrected: vec![0; 3],
+            posthoc_unc: vec![],
+            posthoc_cor: vec![],
+            converged: vec![1, 0, 1],
+            boundary_hit: vec![0; 3],
+            pinned_components: vec![0; 3],
+            joint_unc: vec![0; 3],
+            joint_cor: vec![0; 3],
+            overall: vec![],
+            factor_excluded: vec![],
+            tau_squared_hat: vec![f64::NAN; 3],
+            event_rate,
+            shape: ResultShape {
+                n_sims: 3,
+                n_sample_sizes: 1,
+                n_targets: 1,
+                posthoc_blocks: vec![],
+                n_factors: 0,
+                n_variance_components: 0,
+            },
+        };
+        let EstimatorExtras::Glm {
+            baseline_prob_realized,
+            baseline_prob_sum,
+            baseline_prob_n,
+            ..
+        } = EstimatorExtras::from_batch(&EstimatorSpec::Glm, &batch(vec![0.1, 0.3, f64::NAN]), 0)
+        else {
+            panic!("expected Glm")
+        };
+        assert_eq!(baseline_prob_n, 2);
+        assert!((baseline_prob_sum - 0.4).abs() < 1e-12);
+        assert!((baseline_prob_realized - 0.2).abs() < 1e-12);
+
+        let EstimatorExtras::Glm {
+            baseline_prob_realized,
+            baseline_prob_n,
+            ..
+        } = EstimatorExtras::from_batch(&EstimatorSpec::Glm, &batch(vec![f64::NAN; 3]), 0)
+        else {
+            panic!("expected Glm")
+        };
+        assert_eq!(baseline_prob_n, 0);
+        assert!(baseline_prob_realized.is_nan());
     }
 
     #[test]

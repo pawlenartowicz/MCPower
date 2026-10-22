@@ -55,8 +55,15 @@
 .required_n_headline_for <- function(inner, pos, unit_divisor = 1L) {
   # fitted is string-keyed by 0-based position index (IndexMap in Rust)
   key  <- as.character(pos - 1L)   # pos is 1-based (R); engine key is 0-based
-  f    <- inner$fitted[[key]]
+  fa_key <- if (unit_divisor > 1L) "first_achieved_unit" else "first_achieved"
+  .crossing_headline(inner, inner$fitted[[key]], inner[[fa_key]][[key]], unit_divisor)
+}
 
+# Fallback chain shared by the per-target and per-post-hoc-contrast required-N
+# cells: `f` is the cell's CrossingFit list (or NULL), `first_n` its
+# grid-empirical first N already in the requested unit (NULL/NA when never
+# reached). Returns list(display=, numeric=).
+.crossing_headline <- function(inner, f, first_n, unit_divisor = 1L) {
   if (!is.null(f)) {
     status <- f$status
     if (identical(status, "fitted")) {
@@ -72,15 +79,12 @@
       return(list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil %/% unit_divisor) else "—",
                   numeric = NULL))
     }
-    # non_monotone: fall through to first_achieved
+    # non_monotone: fall through to the grid-empirical value
   }
 
   # Fallback: first_achieved (also covers non_monotone and missing fitted).
-  # first_achieved is also string-keyed 0-based.
-  fa_key <- if (unit_divisor > 1L) "first_achieved_unit" else "first_achieved"
-  v <- inner[[fa_key]][[key]]
-  if (!is.null(v) && !is.na(v))
-    return(list(display = as.character(v), numeric = as.integer(v)))
+  if (!is.null(first_n) && !is.na(first_n))
+    return(list(display = as.character(first_n), numeric = as.integer(first_n)))
   ceil <- .search_ceiling(inner)
   list(display = if (!is.null(ceil)) sprintf("≥ %d", ceil %/% unit_divisor) else "—", numeric = NULL)
 }
@@ -278,12 +282,10 @@
 # (ports/py/mcpower/output/tables.py) — gate set, message wording, and order
 # change together. convergence reduces over N with the worst (min) point.
 #
-# baseline_prob_requested / min_cluster_size are meta-level (one per run): the
-# requested GLM event probability (from set_baseline_probability) and the
-# smallest cluster size at the evaluated N. Both NULL unless the run is a
-# binary-outcome GLM / GLMM; they drive the GLM-drift and Laplace-bias gates.
+# min_cluster_size is meta-level (one per run): the smallest cluster size at
+# the evaluated N. NULL unless the run is a binary-outcome GLM / GLMM; it
+# drives the Laplace-bias gate.
 .diagnostic_warnings <- function(inner, factor_names = NULL,
-                                 baseline_prob_requested = NULL,
                                  min_cluster_size = NULL) {
   th <- .report_config()$thresholds
   warns <- character(0)
@@ -301,17 +303,6 @@
       warns <- c(warns, sprintf("high-τ̂ boundary %s", .fmt_pct(hit_rate, 1)))
   }
   extras <- inner$estimator_extras
-  if (!is.null(baseline_prob_requested) &&
-      !is.null(extras) && identical(extras$estimator, "glm") &&
-      !is.null(extras$baseline_prob_realized)) {
-    drift <- abs(extras$baseline_prob_realized - baseline_prob_requested)
-    # baseline_prob_realized is NaN when the engine does not realize a baseline
-    # (e.g. non-clustered GLM): Python's `NaN > x` is False so no warning fires,
-    # but R errors on `if (NaN)`. Guard with is.na (catches NaN) to mirror
-    # Python. Mirrors tables.py diagnostic_warnings — change together.
-    if (!is.na(drift) && drift > th$glm_baseline_drift_max)
-      warns <- c(warns, sprintf("GLM baseline drift %.3f", drift))
-  }
   th_excl <- th$factor_exclusion_max %||% 0.0
   for (pair in list(list(key = "factor_exclusion_counts", verb = "excluded"),
                     list(key = "factor_separation_counts", verb = "separation-dropped"))) {
@@ -420,6 +411,35 @@
         cc <- cc + 1L
       }
     }
+  }
+  out
+}
+
+# Post-hoc rows of the sample-size Required N table: one span per factor, then
+# one row per pairwise contrast. Cells per scenario are (unit, N) when
+# `unit_label` is set, else (N). Empty list when no scenario carries post-hoc
+# required-N results. Mirrors tables.py:posthoc_required_n_rows.
+.posthoc_required_n_rows <- function(scen, meta, unit_divisor, unit_label) {
+  if (!any(vapply(scen, function(s) length(s$posthoc_first_achieved) > 0L, logical(1L))))
+    return(list())
+  cell <- function(s, r, div) {
+    key <- as.character(r$contrast - 1L)
+    f   <- s$posthoc_fitted[[r$block]][[key]]
+    fa  <- if (div > 1L) "posthoc_first_achieved_unit" else "posthoc_first_achieved"
+    .crossing_headline(s, f, s[[fa]][[r$block]][[key]], div)$display
+  }
+  out <- list()
+  for (r in .posthoc_descriptors(meta)) {
+    if (identical(r$kind, "posthoc_header")) {
+      out <- c(out, list(list(kind = "span", text = sprintf("%s  (pairwise)", r$label))))
+      next
+    }
+    cells <- paste0("  ", r$label)
+    for (s in scen) {
+      if (!is.null(unit_label)) cells <- c(cells, cell(s, r, unit_divisor))
+      cells <- c(cells, cell(s, r, 1L))
+    }
+    out <- c(out, list(list(kind = "row", cells = cells)))
   }
   out
 }
@@ -742,6 +762,8 @@
     }
   }
 
+  table <- c(table, .posthoc_required_n_rows(scen, meta, unit_divisor, unit_label))
+
   # footers: per-scenario max numeric headline (≥ ceiling when any row unreached);
   # collect non_monotone warnings across scenarios.
   footers <- character(0)
@@ -880,6 +902,7 @@
                                .required_n_headline_for(s, r$pos, unit_divisor)$display,
                                .req_n_cell(s, r$pos)))))
       }
+      table <- c(table, .posthoc_required_n_rows(scen, meta, unit_divisor, unit_label))
       return(.minimal_table(cfg$text$sample_size_caption,
                             list(list(header = cols$test, align = "l"),
                                  list(header = unit_label, align = "r"),
@@ -892,6 +915,7 @@
       if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
       table <- c(table, list(list(kind = "row", cells = c(.indent_label(r), .req_n_cell(s, r$pos)))))
     }
+    table <- c(table, .posthoc_required_n_rows(scen, meta, unit_divisor, NULL))
     return(.minimal_table(cfg$text$sample_size_caption,
                           list(list(header = cols$test, align = "l"),
                                list(header = cols$required_n, align = "r")), table))
@@ -929,6 +953,7 @@
       function(s) .req_n_cell(s, r$pos)))
     table <- c(table, list(list(kind = "row", cells = cells)))
   }
+  table <- c(table, .posthoc_required_n_rows(scen, meta, unit_divisor, unit_label))
   .minimal_table(cfg$text$sample_size_caption, columns, table)
 }
 
@@ -1253,7 +1278,7 @@
   warns <- character(0)
   for (nm in names(scenarios)) {
     for (w in .diagnostic_warnings(scenarios[[nm]], factor_names,
-                                   meta$baseline_prob_requested, meta$min_cluster_size)) {
+                                   min_cluster_size = meta$min_cluster_size)) {
       warns <- c(warns, if (multi) sprintf("%s: %s", nm, w) else w)
     }
   }
@@ -1306,7 +1331,7 @@ print.mcpower_result <- function(x, ...) {
   warns <- character(0)
   for (nm in names(scen)) {
     for (w in .diagnostic_warnings(scen[[nm]], factor_names,
-                                   meta$baseline_prob_requested, meta$min_cluster_size)) {
+                                   min_cluster_size = meta$min_cluster_size)) {
       warns <- c(warns, if (multi) sprintf("%s: %s", nm, w) else w)
     }
   }

@@ -11,20 +11,22 @@
 
 use crate::aggregation::aggregate_batch;
 use crate::cancel::CancellationToken;
-use crate::find_power::{lower_contracts, EngineSinkAdapter};
-use crate::grid::{build_grid, derive_sample_size_outputs, SampleSizeDerivations};
+use crate::find_power::{EngineSinkAdapter, lower_contracts};
+use crate::find_sample_size::sample_size_grid;
+use crate::grid::{SampleSizeDerivations, derive_sample_size_outputs};
 use crate::progress::{ProgressEvent, ProgressSink};
 use crate::result::{
     OrchestratorError, PowerResult, SampleSizeMethod, SampleSizeResult, Scenario, ScenarioResult,
 };
 use crate::scenario_loop::for_each_scenario;
-use engine_contract::SimulationContract;
+use engine_contract::{CurvatureHintParts, SimulationContract};
 use engine_core::ProgressSink as EngineProgressSink;
 
 /// Single-threaded twin of `find_power` (uses `run_batch_st`). Hosts call
 /// this once per worker and pool the parts with `merge_power_results`. Same
 /// parameters, same output shape — any change to `find_power` must land here
-/// too.
+/// too. `curvature_hints_power` starts as this does (snap N, then lower) —
+/// change together.
 ///
 /// # Errors
 /// Same failure set as `find_power`.
@@ -116,6 +118,8 @@ pub fn single_core_find_power(
 /// Single-threaded twin of `find_sample_size` (uses `run_batch_st`). Same
 /// parameters, same output shape — any change to `find_sample_size` must land
 /// here too; pool per-worker parts with `merge_sample_size_results`.
+/// `curvature_hints_sample_size` starts as this does (lower, then build the
+/// grid) — change together.
 ///
 /// # Errors
 /// Same failure set as `find_sample_size`.
@@ -132,13 +136,7 @@ pub fn single_core_find_sample_size(
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<SampleSizeResult>, OrchestratorError> {
     let scenarios = lower_contracts(contracts, base_seed)?;
-
-    let (from, to) = bounds;
-    let SampleSizeMethod::Grid { by, mode } = method;
-    let (atom, hard_min, mut grid_warnings) =
-        crate::find_sample_size::resolve_cluster_grid_params(contracts)?;
-    let (grid, build_warnings) = build_grid(from, to, by, mode, atom, hard_min)?;
-    grid_warnings.extend(build_warnings);
+    let (grid, atom, grid_warnings) = sample_size_grid(contracts, bounds, method)?;
 
     let total_scenarios = scenarios.len();
     let total_grid_points = grid.len();
@@ -186,6 +184,8 @@ pub fn single_core_find_sample_size(
                 fitted_joint: d.fitted_joint,
                 first_overall_achieved: d.first_overall_achieved,
                 fitted_overall: d.fitted_overall,
+                posthoc_first_achieved: d.posthoc_first_achieved,
+                posthoc_fitted: d.posthoc_fitted,
                 cluster_atom: atom,
                 unit_divisor,
                 target_power,
@@ -255,4 +255,59 @@ fn run_grid_for_scenario_st(
     let derivations = derive_sample_size_outputs(&aggs, grid, target_power, atom);
 
     Ok((aggs, derivations))
+}
+
+/// Curvature hints of a power run, one vector per contract in contract order
+/// (one entry, at the snapped N). A WASM-only building block, like
+/// `merge_*_results`, not a run entry: the main thread computes the hints
+/// once from the master seed and puts them in every worker's contracts
+/// (`SimulationContract.curvature_hints`), so all workers fit with the same
+/// hints. Python, R and Tauri do not expose it.
+///
+/// Starts as `single_core_find_power` does (snap N, then lower) — change
+/// together.
+///
+/// # Errors
+/// Same failure set as `single_core_find_power` before its sim loop.
+pub fn curvature_hints_power(
+    contracts: &[SimulationContract],
+    sample_size: usize,
+    base_seed: u64,
+) -> Result<Vec<Vec<Option<CurvatureHintParts>>>, OrchestratorError> {
+    let (sample_size, _) = crate::find_power::snap_single_n(contracts, sample_size)?;
+    let scenarios = lower_contracts(contracts, base_seed)?;
+    scenarios
+        .iter()
+        .map(|s| {
+            engine_core::batch::curvature_hint_parts(&s.spec, &[sample_size as u32], s.base_seed)
+                .map_err(OrchestratorError::from)
+        })
+        .collect()
+}
+
+/// Curvature hints of a sample-size run, one vector per contract in contract
+/// order (one entry per grid point). The sample-size counterpart of
+/// `curvature_hints_power`; same WASM-only role.
+///
+/// Starts as `single_core_find_sample_size` does (lower, then build the grid)
+/// — change together.
+///
+/// # Errors
+/// Same failure set as `single_core_find_sample_size` before its sim loop.
+pub fn curvature_hints_sample_size(
+    contracts: &[SimulationContract],
+    bounds: (usize, usize),
+    method: SampleSizeMethod,
+    base_seed: u64,
+) -> Result<Vec<Vec<Option<CurvatureHintParts>>>, OrchestratorError> {
+    let scenarios = lower_contracts(contracts, base_seed)?;
+    let (grid, _, _) = sample_size_grid(contracts, bounds, method)?;
+    let grid: Vec<u32> = grid.iter().map(|&n| n as u32).collect();
+    scenarios
+        .iter()
+        .map(|s| {
+            engine_core::batch::curvature_hint_parts(&s.spec, &grid, s.base_seed)
+                .map_err(OrchestratorError::from)
+        })
+        .collect()
 }

@@ -6,7 +6,7 @@ mod common;
 
 use common::{lme_spec, logit_spec};
 use engine_contract::{ClusterSizing, ClusterSpec, EstimatorSpec, OutcomeKind};
-use engine_orchestrator::{find_power, CancellationToken, EstimatorExtras};
+use engine_orchestrator::{CancellationToken, EstimatorExtras, find_power};
 use engine_spec_builder::build_contract;
 
 #[test]

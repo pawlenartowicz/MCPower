@@ -5,9 +5,6 @@
 #' @useDynLib mcpower, .registration = TRUE
 NULL
 
-#' Spike probe — returns the engine's view of the thread count machinery is wired.
-engine_r_ping <- function() .Call(wrap__engine_r_ping)
-
 #' Configure the rayon thread pool used by `find_power` / `find_sample_size`.
 #' Must be called before any engine invocation; a second call raises an error
 #' because the pool is already initialised. Mirrors `mcpower._engine.set_n_threads(n)`.

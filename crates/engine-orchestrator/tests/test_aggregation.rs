@@ -102,8 +102,8 @@ fn wilson_ci_known_values() {
 }
 
 use engine_core::{BatchResult, EstimatorSpec, ResultShape};
-use engine_orchestrator::aggregation::aggregate_batch;
 use engine_orchestrator::EstimatorExtras;
+use engine_orchestrator::aggregation::aggregate_batch;
 
 fn make_batch(unc: Vec<u8>, cor: Vec<u8>, converged: Vec<u8>, shape: ResultShape) -> BatchResult {
     // Boundary/joint buffers are read element-wise by `aggregate_batch`
@@ -124,6 +124,7 @@ fn make_batch(unc: Vec<u8>, cor: Vec<u8>, converged: Vec<u8>, shape: ResultShape
         overall: vec![],
         factor_excluded: vec![],
         tau_squared_hat: vec![],
+        event_rate: vec![],
         shape,
     }
 }
@@ -154,6 +155,7 @@ fn batch_with(n_sims: u32, n_targets: u32, unc: &[u8], cor: &[u8], overall: &[u8
         overall: overall.to_vec(),
         factor_excluded: vec![],
         tau_squared_hat: vec![],
+        event_rate: vec![],
         shape,
     }
 }
@@ -362,7 +364,7 @@ fn aggregate_batch_populates_success_counts() {
     assert_eq!(pr.success_counts_corrected, vec![2u64, 0]);
     assert_eq!(pr.convergence_count, 3);
     assert_eq!(pr.overall_significant_count, 0); // batch.overall empty
-                                                 // Rates must still equal counts/n_sims exactly.
+    // Rates must still equal counts/n_sims exactly.
     approx::assert_relative_eq!(pr.power_uncorrected[0], 2.0 / 3.0, max_relative = 1e-12);
     approx::assert_relative_eq!(pr.power_uncorrected[1], 1.0 / 3.0, max_relative = 1e-12);
 }

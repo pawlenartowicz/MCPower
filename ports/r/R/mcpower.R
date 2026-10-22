@@ -24,7 +24,7 @@ MCPower <- R6::R6Class(
     seed = NULL,             # base RNG seed (default 2137; NULL = seed 0, still deterministic)
     power = NULL,            # target power for find_sample_size (default 80)
     alpha = NULL,            # type-I error rate (default 0.05)
-    n_simulations = NULL,    # per-call MC count (default 1600)
+    n_simulations = NULL,    # per-call MC count; NULL until set_simulations (resolved per design at run time)
     max_failed_simulations = NULL,  # failed-sim tolerance (default 1.0)
     intercept = NULL,        # logit(p) once set_baseline_probability is called
 
@@ -97,9 +97,9 @@ MCPower <- R6::R6Class(
       self$seed <- as.integer(.sim$seed)
       self$power <- .sim$target_power * 100
       self$alpha <- .sim$alpha
-      # Family-aware: lme fits are more expensive, so they default to the
-      # lighter `mixed` budget; OLS and logit (GLM) use the `ols` budget.
-      self$n_simulations <- as.integer(.sim$n_sims[[if (family_norm == "lme") "mixed" else "ols"]])
+      # Unset until set_simulations(); resolved_n_simulations() fills it in at
+      # run time, once clustering is known.
+      self$n_simulations <- NULL
       self$max_failed_simulations <- .sim$max_failed_fraction
       self$intercept <- 0.0
 
@@ -262,6 +262,14 @@ MCPower <- R6::R6Class(
     },
 
     set_heteroskedasticity_driver = function(var = NULL) {
+      # The engine applies heteroskedasticity to continuous outcomes only (OLS
+      # and linear mixed); binary and count outcomes ignore it.
+      if (!identical(self$outcome_kind, "continuous")) {
+        warning(sprintf(paste0(
+          "set_heteroskedasticity_driver() has no effect for family=%s; ",
+          "heteroskedasticity applies to continuous outcomes only and will be ",
+          "ignored by the engine."), sQuote(self$family)), call. = FALSE)
+      }
       # driver_var_index: NULL means use the linear predictor Xβ as the driver.
       # Else validate and convert to 0-based non-factor predictor index.
       driver_var_index <- NULL
@@ -302,7 +310,9 @@ MCPower <- R6::R6Class(
     #'   modeled predictors. Default \code{NULL} (no cluster-level covariates).
     #' @param n_per_parent For nested random effects \code{(1|A/B)}: the number of
     #'   B-units per A-unit. Use with the child grouping var (e.g.
-    #'   \code{set_cluster("A:B", n_per_parent = 5)}).
+    #'   \code{set_cluster("A:B", n_per_parent = 5)}); defaults to the config
+    #'   value when omitted. Passing \code{n_clusters} or \code{cluster_size}
+    #'   for the child is an error.
     #' @param tau_squared Raw random-intercept variance, for
     #'   \code{family = "poisson"} only (Poisson has no residual-variance term
     #'   for \code{ICC} to divide against). Mutually exclusive with \code{ICC}.
@@ -418,6 +428,20 @@ MCPower <- R6::R6Class(
           icc_lo, icc_hi, icc_val, icc_lo, icc_hi
         ), call. = FALSE)
       }
+      # A nested child (1|A/B) is sized by n_per_parent against its parent; it
+      # has no slot for a total cluster count or a per-cluster row count.
+      if (grouping_var %in% private$nested_child_vars()) {
+        given <- c(n_clusters = !is.null(n_clusters),
+                   cluster_size = !is.null(cluster_size))
+        if (any(given)) {
+          parts <- strsplit(grouping_var, ":", fixed = TRUE)[[1L]]
+          stop(sprintf(
+            "%s is nested in %s; give n_per_parent (%ss per %s), not %s.",
+            parts[length(parts)], parts[1L], parts[length(parts)], parts[1L],
+            names(given)[given][1L]),
+            call. = FALSE)
+        }
+      }
       # n_clusters must be at least 2 when provided.
       if (!is.null(n_clusters) && as.integer(n_clusters) < 2L) {
         stop(sprintf(
@@ -441,7 +465,7 @@ MCPower <- R6::R6Class(
         icc          = as.numeric(ICC),
         # Poisson raw τ² (Decision 8); NULL for ICC-sized families.
         tau_squared  = if (!is.null(tau_squared)) as.numeric(tau_squared) else NULL,
-        n_per_parent = n_per_parent,   # NULL for crossed; integer for nested
+        n_per_parent = n_per_parent,   # NULL for crossed, or a nested child taking the config default
         raw_slopes   = if (!is.null(random_slopes) && length(random_slopes) > 0L)
                          random_slopes else NULL,
         # Cluster-level covariate names for THIS grouping var. Stored per group
@@ -890,8 +914,9 @@ MCPower <- R6::R6Class(
     #'   against a t with between-within denominator degrees of freedom --
     #'   between-cluster df if the predictor is cluster-level, within-cluster
     #'   df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-    #'   for OLS and unclustered GLM; not applied (falls back to Wald z) with
-    #'   crossed or nested extra groupings. Cluster-level predictors must be
+    #'   for OLS and unclustered GLM. With crossed or nested extra groupings
+    #'   an LME is tested at each fit's Satterthwaite df instead, and a GLMM
+    #'   against a Wald z. Cluster-level predictors must be
     #'   declared with \code{cluster_level_vars} (see \code{set_cluster}) for
     #'   the between df to apply. A fit whose random-effect variances all
     #'   collapse to zero (a singular fit) is tested against the residual df
@@ -914,7 +939,7 @@ MCPower <- R6::R6Class(
       # Logit pre-flight (model.py _validate_logit_runtime).
       private$validate_logit_runtime(names)
 
-      n <- if (!is.null(n_sims)) as.integer(n_sims) else as.integer(self$n_simulations)
+      n <- if (!is.null(n_sims)) as.integer(n_sims) else private$resolved_n_simulations()
       base_seed <- private$resolve_base_seed(seed)
 
       # Resolve tests to extract posthoc_factors for report_meta.
@@ -950,7 +975,8 @@ MCPower <- R6::R6Class(
       raw <- .unwrap_scenario_result(raw, names)
       # Post-batch: check that the failure rate (1 - convergence_rate) does not
       # exceed the configured threshold. Mirrors Python model.py find_power.
-      .check_result_failure_threshold(raw, self$max_failed_simulations)
+      .check_result_failure_threshold(raw, self$max_failed_simulations,
+                                      clustered = length(private$pending_clusters) > 0L)
       # min_cluster_size: explicit cluster_size, else sample_size %/% n_clusters
       # (primary grouping; smallest atomic cluster at the requested N). NULL unless
       # a clustered binary run (GLMM). Feeds both the transient Laplace warn and the
@@ -965,10 +991,7 @@ MCPower <- R6::R6Class(
           min_cs <- as.integer(sample_size) %/% as.integer(nc)
         }
       }
-      baseline_req <- if (identical(self$outcome_kind, "binary"))
-        private$pending_baseline_probability else NULL
       meta <- private$.build_report_meta(correction, posthoc_factors = wire_posthoc_factors,
-                                         baseline_prob_requested = baseline_req,
                                          min_cluster_size = min_cs)
       result <- .make_result(raw, meta, "find_power")
       # Surface engine preflight warnings exactly once per distinct message.
@@ -1029,8 +1052,9 @@ MCPower <- R6::R6Class(
     #'   against a t with between-within denominator degrees of freedom --
     #'   between-cluster df if the predictor is cluster-level, within-cluster
     #'   df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-    #'   for OLS and unclustered GLM; not applied (falls back to Wald z) with
-    #'   crossed or nested extra groupings. Cluster-level predictors must be
+    #'   for OLS and unclustered GLM. With crossed or nested extra groupings
+    #'   an LME is tested at each fit's Satterthwaite df instead, and a GLMM
+    #'   against a Wald z. Cluster-level predictors must be
     #'   declared with \code{cluster_level_vars} (see \code{set_cluster}) for
     #'   the between df to apply. A fit whose random-effect variances all
     #'   collapse to zero (a singular fit) is tested against the residual df
@@ -1056,7 +1080,7 @@ MCPower <- R6::R6Class(
       est <- private$resolve_estimation(wald_se, agq, df_method)
 
       names <- private$resolve_scenarios_arg(scenarios)
-      n <- if (!is.null(n_sims)) as.integer(n_sims) else as.integer(self$n_simulations)
+      n <- if (!is.null(n_sims)) as.integer(n_sims) else private$resolved_n_simulations()
       base_seed <- private$resolve_base_seed(seed)
 
       # Resolve tests to extract posthoc_factors for report_meta.
@@ -1108,7 +1132,8 @@ MCPower <- R6::R6Class(
         progress)
       raw <- .unwrap_scenario_result(raw, names)
       # Post-batch: check failure threshold (mirrors Python model.py find_sample_size).
-      .check_result_failure_threshold(raw, self$max_failed_simulations)
+      .check_result_failure_threshold(raw, self$max_failed_simulations,
+                                      clustered = length(private$pending_clusters) > 0L)
       # min_cluster_size: explicit cluster_size, else from_size %/% n_clusters
       # (lower bound of the search range). NULL unless a clustered binary run
       # (GLMM). Feeds both the transient Laplace warn and the persistent report
@@ -1130,8 +1155,6 @@ MCPower <- R6::R6Class(
           }
         }
       }
-      baseline_req <- if (identical(self$outcome_kind, "binary"))
-        private$pending_baseline_probability else NULL
       unit_cluster_name <- if (!identical(unit, "observations") &&
                                 length(private$pending_clusters) > 0L) {
         names(private$pending_clusters)[[1L]]
@@ -1139,7 +1162,6 @@ MCPower <- R6::R6Class(
         NULL
       }
       meta <- private$.build_report_meta(correction, posthoc_factors = wire_posthoc_factors,
-                                         baseline_prob_requested = baseline_req,
                                          min_cluster_size = min_cs,
                                          unit = unit, unit_cluster_name = unit_cluster_name)
       meta$target_power <- tp
@@ -1195,7 +1217,7 @@ MCPower <- R6::R6Class(
         outcome_kind = self$outcome_kind,
         estimator = self$estimator,
         effects = effects,
-        n_simulations = self$n_simulations,
+        n_simulations = private$resolved_n_simulations(),
         alpha = self$alpha,
         power_target = self$power,
         residual_distribution = private$residual_dist_name,
@@ -1409,11 +1431,40 @@ MCPower <- R6::R6Class(
       invisible(NULL)
     },
 
+    # model.py _resolved_n_simulations — the set_simulations() value, else the
+    # config default for the design: `glmm` for a clustered binary/count
+    # outcome, `mixed` for a clustered continuous one, `ols` otherwise.
+    resolved_n_simulations = function() {
+      if (!is.null(self$n_simulations)) return(as.integer(self$n_simulations))
+      budgets <- .sim_defaults()$n_sims
+      key <- if (length(private$pending_clusters) == 0L) {
+        "ols"
+      } else if (self$outcome_kind %in% c("binary", "count")) {
+        "glmm"
+      } else {
+        "mixed"
+      }
+      as.integer(budgets[[key]])
+    },
+
+    # model.py _nested_child_vars — grouping vars the formula parser flagged as
+    # nested children (`(1|A/B)` gives the composite "A:B").
+    nested_child_vars = function() {
+      parsed <- private$registry$`_random_effects_parsed`
+      out <- character(0)
+      for (re in parsed) {
+        if (!is.null(re$parent_var)) out <- c(out, re$grouping_var)
+      }
+      unique(out)
+    },
+
     # model.py _agq_eligible — whether the design admits AGQ (nagq > 1).
-    # Binary/count GLMM, single grouping factor, ≤3 REs per group (intercept +
-    # slopes). Mirrors contract invariant 25 + glmm assert_model_shape.
+    # Binary/count GLMM fitted by the GLM estimator, single grouping factor,
+    # ≤3 REs per group (intercept + slopes). Mirrors contract invariant 25 +
+    # glmm assert_model_shape.
     agq_eligible = function() {
       if (!self$outcome_kind %in% c("binary", "count")) return(FALSE)
+      if (!identical(self$estimator, "glm")) return(FALSE)
       if (length(private$pending_clusters) != 1L) return(FALSE)
       cfg <- private$pending_clusters[[1L]]
       n_re <- 1L + length(cfg$raw_slopes %||% list())  # intercept + slopes
@@ -1439,7 +1490,8 @@ MCPower <- R6::R6Class(
         warning(sprintf(paste0(
           "agq=%d is not available for this design; running at agq=1 (Laplace). ",
           "AGQ requires a clustered binary or count (logit/probit/poisson) model ",
-          "with a single grouping factor and at most 3 random effects per group."),
+          "fitted with the GLM estimator, a single grouping factor and at most ",
+          "3 random effects per group."),
           nagq), call. = FALSE)
         nagq <- 1L
       }
@@ -1494,7 +1546,7 @@ MCPower <- R6::R6Class(
     # effect_skeleton: parsed from private$skeleton_json (set by build_contract_bytes),
     # β-column aligned (intercept at 0); .build_rows renders names from it + factor levels.
     .build_report_meta = function(correction, posthoc_factors = character(0),
-                                  baseline_prob_requested = NULL, min_cluster_size = NULL,
+                                  min_cluster_size = NULL,
                                   unit = NULL, unit_cluster_name = NULL) {
       if (!private$applied) private$apply()
       reg <- private$registry
@@ -1529,11 +1581,9 @@ MCPower <- R6::R6Class(
         target_power = self$power,
         formula = self$equation,
         residual = private$residual_dist_name,
-        # Meta-level diagnostics inputs (one per run): requested GLM event
-        # probability (drives the live baseline-drift gate) and smallest cluster
-        # size at the evaluated N (drives the persistent Laplace line). NULL for
+        # Meta-level diagnostics input (one per run): smallest cluster size at
+        # the evaluated N (drives the persistent Laplace line). NULL for
         # OLS / non-binary / non-clustered. Mirrors Python _report_meta.
-        baseline_prob_requested = baseline_prob_requested,
         min_cluster_size = min_cluster_size,
         # find_sample_size only: `unit` is the wire value passed to the engine
         # ("observations" / "clusters" / "cluster_size"); `unit_cluster_name`
@@ -1628,7 +1678,8 @@ MCPower <- R6::R6Class(
       }
 
       enc <- .encode_outcome_and_clusters(
-        self$family, self$link, self$estimator, self$intercept, resolved_clusters)
+        self$family, self$link, self$estimator, self$intercept, resolved_clusters,
+        nested_vars = private$nested_child_vars())
 
       out <- build_contract_from_spec(
         json, enc$outcome_kind, enc$link, enc$estimator, enc$intercept,

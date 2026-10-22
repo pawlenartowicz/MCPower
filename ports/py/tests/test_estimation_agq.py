@@ -109,3 +109,16 @@ def test_baseline_rate_rejects_zero_and_negative():
         MCPower("y ~ x1", family="poisson").set_baseline_rate(0)
     with pytest.raises(ValueError):
         MCPower("y ~ x1", family="poisson").set_baseline_rate(-1)
+
+
+@pytest.mark.parametrize("estimator", ["mle", "ols"])
+def test_agq_ineligible_for_non_glm_estimator(estimator):
+    """Only the GLM estimator runs the quadrature; mle/ols fit a Gaussian model,
+    so an agq > 1 request warns and strips to Laplace instead of reaching the
+    engine."""
+    m = MCPower("y ~ x1 + (1|g)", family="logit", estimator=estimator)
+    m.set_cluster("g", ICC=0.2, n_clusters=20)
+    assert not m._agq_eligible()
+    with pytest.warns(UserWarning, match="GLM estimator"):
+        _, nagq, _ = m._resolve_estimation(None, 3, None)
+    assert nagq == 1

@@ -327,6 +327,50 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
                     .collect(),
             ),
         ),
+        // Per post-hoc block, per contrast, in `PowerResult.posthoc` order.
+        (
+            "posthoc_first_achieved",
+            HostValue::Seq(
+                ssr.posthoc_first_achieved
+                    .iter()
+                    .map(|block| {
+                        HostValue::IndexMap(block.iter().map(|v| HostValue::OptUsize(*v)).collect())
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "posthoc_first_achieved_unit",
+            HostValue::Seq(
+                ssr.posthoc_first_achieved
+                    .iter()
+                    .map(|block| {
+                        HostValue::IndexMap(
+                            block
+                                .iter()
+                                .map(|v| HostValue::OptUsize(v.map(in_unit)))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "posthoc_fitted",
+            HostValue::Seq(
+                ssr.posthoc_fitted
+                    .iter()
+                    .map(|block| {
+                        HostValue::IndexMap(
+                            block
+                                .iter()
+                                .map(|cf| crossing_fit_to_host(cf, div))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+        ),
         ("cluster_atom", HostValue::Usize(ssr.cluster_atom)),
         ("unit_divisor", HostValue::Usize(ssr.unit_divisor)),
     ])
@@ -655,6 +699,11 @@ mod tests {
                 ci_lo: Some(80.0),
                 ci_hi: None,
             }),
+            posthoc_first_achieved: vec![vec![Some(100), None]],
+            posthoc_fitted: vec![vec![
+                CrossingFit::AtOrBelowMin { n_min: 50 },
+                CrossingFit::NotReached { n_approx: None },
+            ]],
             cluster_atom: 10,
             unit_divisor: 1,
             target_power: 0.8,
@@ -702,6 +751,9 @@ mod tests {
                 "fitted",
                 "fitted_joint",
                 "fitted_overall",
+                "posthoc_first_achieved",
+                "posthoc_first_achieved_unit",
+                "posthoc_fitted",
                 "cluster_atom",
                 "unit_divisor",
             ]
@@ -723,6 +775,32 @@ mod tests {
                 assert!(matches!(items[1], HostValue::OptUsize(None)));
             }
             other => panic!("first_achieved not IndexMap: {other:?}"),
+        }
+        match field(&hv, "posthoc_first_achieved") {
+            HostValue::Seq(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    HostValue::IndexMap(items) => {
+                        assert!(matches!(items[0], HostValue::OptUsize(Some(100))));
+                        assert!(matches!(items[1], HostValue::OptUsize(None)));
+                    }
+                    other => panic!("block not IndexMap: {other:?}"),
+                }
+            }
+            other => panic!("posthoc_first_achieved not Seq: {other:?}"),
+        }
+        match field(&hv, "posthoc_fitted") {
+            HostValue::Seq(blocks) => match &blocks[0] {
+                HostValue::IndexMap(items) => {
+                    assert_eq!(items.len(), 2);
+                    assert!(matches!(
+                        field(&items[0], "status"),
+                        HostValue::Str(st) if st == "at_or_below_min"
+                    ));
+                }
+                other => panic!("block not IndexMap: {other:?}"),
+            },
+            other => panic!("posthoc_fitted not Seq: {other:?}"),
         }
     }
 

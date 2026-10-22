@@ -5,10 +5,11 @@ import config from '$configs/config.json';
 
 export const SIMULATION = config.simulation as {
   seed: number; alpha: number; target_power: number;
-  n_sims: { ols: number; mixed: number; anova: number };
+  n_sims: { ols: number; mixed: number; glmm: number; anova: number };
   max_failed_fraction: number;
   sample_size_bounds: { from: number; to: number; by: number | 'auto' };
   cluster_auto_count: number;
+  nested_n_per_parent: number;
 };
 // Cross-port estimation defaults; config.json is the single home for them, so
 // the port reads the default rather than repeating the literal.

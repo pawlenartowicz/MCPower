@@ -99,13 +99,23 @@ describe('generateScript (mixed)', () => {
     expect(out).not.toContain('set_seed');
   });
 
-  it('measures a GLMM outcome against the OLS sim default, so the app 800 is emitted', () => {
+  it('measures a GLMM outcome against the glmm sim default (400), so 800 is emitted', () => {
     const s = {
       ...mixedSpec({ kind: 'n_clusters', value: 20 }),
       outcome: { kind: 'binary' as const, baseline_probability: 0.3 },
     } as AppSpec;
     const out = generateMixedScript(s, 'find-power', { sample_size: 100 }, 'python');
     expect(out).toContain('model.set_simulations(800)');
+  });
+
+  it('omits set_simulations for a GLMM outcome at the glmm default (400)', () => {
+    const s = {
+      ...mixedSpec({ kind: 'n_clusters', value: 20 }),
+      n_sims: 400,
+      outcome: { kind: 'binary' as const, baseline_probability: 0.3 },
+    } as AppSpec;
+    const out = generateMixedScript(s, 'find-power', { sample_size: 100 }, 'python');
+    expect(out).not.toContain('set_simulations');
   });
 
   it('binary outcome → family="logit" + baseline probability', () => {

@@ -116,6 +116,8 @@ fn sample_size_result_survives_json_roundtrip_with_embedded_nan() {
         fitted_joint: vec![],
         first_overall_achieved: None,
         fitted_overall: None,
+        posthoc_first_achieved: vec![],
+        posthoc_fitted: vec![],
         cluster_atom: 1,
         unit_divisor: 1,
         target_power: 0.8,

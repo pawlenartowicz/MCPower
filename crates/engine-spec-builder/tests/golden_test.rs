@@ -100,15 +100,16 @@ fn linear_with_factor_3lvl() {
     run_case("linear_with_factor_3lvl.json");
 }
 
-// The two interaction cases below call build_linear_contract directly: they pin
+// The cases below call build_contract directly: they pin
 // the contract's DesignTerm::Interaction components, which the SimulationSpec
 // projection does not expose.
 
 #[test]
 fn linear_interaction_xi_xj_builds_with_interaction_term() {
     // y = x1 + x2 + x1:x2 now builds; the contract carries an Interaction term.
-    use engine_contract::{ids::ColumnId, DesignTerm};
-    use engine_spec_builder::build_linear_contract;
+    use engine_contract::OutcomeKind;
+    use engine_contract::{DesignTerm, ids::ColumnId};
+    use engine_spec_builder::build_contract;
     use engine_spec_builder::input::{
         Correction, EffectAssignment, HeteroskedasticityInput, LinearSpec, PredictorSpec,
         ResidualSpec, VarKind,
@@ -161,7 +162,8 @@ fn linear_interaction_xi_xj_builds_with_interaction_term() {
         nagq: 1,
     };
 
-    let contracts = build_linear_contract(&spec).expect("interaction now supported");
+    let contracts = build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![])
+        .expect("interaction now supported");
     let dt = contracts[0]
         .design_test
         .as_ref()
@@ -183,8 +185,9 @@ fn linear_interaction_xi_xj_builds_with_interaction_term() {
 fn linear_factor_interaction_builds_with_interaction_term() {
     // y = x1 + group + x1:group now builds; the contract carries at least one
     // Interaction term (one per non-reference level: x1:group[B], x1:group[C]).
-    use engine_contract::{ids::ColumnId, DesignTerm};
-    use engine_spec_builder::build_linear_contract;
+    use engine_contract::OutcomeKind;
+    use engine_contract::{DesignTerm, ids::ColumnId};
+    use engine_spec_builder::build_contract;
     use engine_spec_builder::input::{
         Correction, EffectAssignment, HeteroskedasticityInput, LinearSpec, PredictorSpec,
         ResidualSpec, VarKind,
@@ -250,7 +253,8 @@ fn linear_factor_interaction_builds_with_interaction_term() {
         nagq: 1,
     };
 
-    let contracts = build_linear_contract(&spec).expect("interaction now supported");
+    let contracts = build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![])
+        .expect("interaction now supported");
     let dt = contracts[0]
         .design_test
         .as_ref()
@@ -291,8 +295,9 @@ fn linear_factor_interaction_builds_with_interaction_term() {
 fn build_linear_contract_generation_column_kinds() {
     // A 3-level factor must become FactorSynthetic, not a Synthetic continuous
     // column — a silent demotion would pass the downstream oracle.
+    use engine_contract::OutcomeKind;
     use engine_contract::{ColumnSpec, SyntheticKind};
-    use engine_spec_builder::build_linear_contract;
+    use engine_spec_builder::build_contract;
     use engine_spec_builder::input::{
         Correction, EffectAssignment, HeteroskedasticityInput, LinearSpec, PredictorSpec,
         ResidualSpec, VarKind,
@@ -350,7 +355,8 @@ fn build_linear_contract_generation_column_kinds() {
         nagq: 1,
     };
 
-    let contracts = build_linear_contract(&spec).expect("build");
+    let contracts =
+        build_contract(&spec, OutcomeKind::Continuous, None, None, 0.0, vec![]).expect("build");
     let cols = &contracts[0].generation.columns;
     assert_eq!(cols.len(), 2);
     assert!(

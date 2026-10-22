@@ -87,7 +87,7 @@ def test_nested_formula_no_longer_raises():
     m.set_effects("treatment=0.5")
     m.set_cluster("school", ICC=0.15, n_clusters=10)
     # Must not raise — nested gate removed
-    m.set_cluster("school:classroom", ICC=0.10, n_clusters=30)
+    m.set_cluster("school:classroom", ICC=0.10, n_per_parent=3)
     assert "school:classroom" in m._pending_clusters
 
 
@@ -257,7 +257,7 @@ def test_clusters_json_nested_grouping():
     m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
     m.set_effects("treatment=0.5")
     m.set_cluster("school", ICC=0.15, n_clusters=10)
-    m.set_cluster("school:classroom", ICC=0.10, n_clusters=30, n_per_parent=3)
+    m.set_cluster("school:classroom", ICC=0.10, n_per_parent=3)
     m._effective_n_clusters = 10
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
@@ -288,6 +288,38 @@ def test_set_cluster_accepts_n_per_parent_alone():
     primary = specs[0]
     eg = primary["extra_groupings"][0]
     assert eg["relation"]["NestedWithin"]["n_per_parent"] == 4
+
+
+def test_nested_child_without_n_per_parent_uses_config_default():
+    """A nested child with no n_per_parent is NestedWithin at the config
+    default, not Crossed."""
+    from mcpower.config import get_simulation_defaults
+
+    m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
+    m.set_effects("treatment=0.5")
+    m.set_cluster("school", ICC=0.15, n_clusters=10)
+    m.set_cluster("school:classroom", ICC=0.10)
+    m._effective_n_clusters = 10
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    eg = _json.loads(clusters_json)[0]["extra_groupings"][0]
+    default = get_simulation_defaults()["nested_n_per_parent"]
+    assert eg["relation"] == {"NestedWithin": {"n_per_parent": default}}
+
+
+def test_nested_child_rejects_n_clusters():
+    m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
+    m.set_effects("treatment=0.5")
+    m.set_cluster("school", ICC=0.15, n_clusters=10)
+    with pytest.raises(ValueError, match="classroom is nested in school; give n_per_parent"):
+        m.set_cluster("school:classroom", ICC=0.10, n_clusters=30)
+
+
+def test_nested_child_rejects_cluster_size():
+    m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
+    m.set_effects("treatment=0.5")
+    m.set_cluster("school", ICC=0.15, n_clusters=10)
+    with pytest.raises(ValueError, match="give n_per_parent .*, not cluster_size"):
+        m.set_cluster("school:classroom", ICC=0.10, cluster_size=30)
 
 
 def test_set_cluster_n_per_parent_alone_passes_runtime_validation():
@@ -385,7 +417,7 @@ def test_find_power_nested_groupings_smoke():
     m = MCPower("y ~ treatment + (1|school/classroom)", family="lme")
     m.set_effects("treatment=0.5")
     m.set_cluster("school", ICC=0.15, n_clusters=10)
-    m.set_cluster("school:classroom", ICC=0.10, n_clusters=30, n_per_parent=3)
+    m.set_cluster("school:classroom", ICC=0.10, n_per_parent=3)
     result = m.find_power(sample_size=150, n_sims=50, seed=2137, verbose=False)
     pw = result["power_uncorrected"][0][0]  # single target (treatment)
     assert 0.0 <= pw <= 1.0

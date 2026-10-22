@@ -69,15 +69,30 @@ def test_to_dataframe_all_contrasts_only_has_one_row_per_contrast():
     assert df["ci_lo"].notna().all() and df["ci_hi"].notna().all()
 
 
-def test_sample_size_to_dataframe_all_contrasts_does_not_crash():
-    """Same target_test on find_sample_size: no contrast is computed for
-    required-N at the engine level, so the frame is empty, but it must carry
-    the full column set rather than raising KeyError on the Int64 cast."""
+def test_sample_size_to_dataframe_all_contrasts_has_required_n():
+    """target_test='all-contrasts' leaves target_indices empty; the frame carries
+    one row per C(3,2)=3 pairwise contrast with the required N from the engine's
+    per-contrast crossing, and the printed tables list the same contrasts."""
     m = _posthoc_only_model()
-    r = m.find_sample_size(from_size=40, to_size=200, by=40, target_test="all-contrasts", verbose=False)
+    r = m.find_sample_size(from_size=40, to_size=400, by=40, target_test="all-contrasts", verbose=False)
     df = r.to_dataframe()
     assert list(df.columns) == ["test", "scenario", "required_n", "ci_lo", "ci_hi"]
-    assert len(df) == 0
+    assert list(df["test"]) == ["2 vs 1", "3 vs 1", "3 vs 2"]
+    inner = r["posthoc_fitted"], r["posthoc_first_achieved"]
+    fits, firsts = inner[0][0], inner[1][0]
+    assert len(fits) == len(firsts) == 3
+    for c, req in enumerate(df["required_n"]):
+        f = fits[c]
+        expected = f["n_achievable"] if f["status"] == "fitted" else (
+            firsts[c] if f["status"] == "non_monotone" else None)
+        assert (pd.isna(req) and expected is None) or req == expected, (c, req, f)
+    # The 0.8 effect (3 vs 1) is reachable in this grid; a larger effect never
+    # needs more N than a smaller one.
+    req = dict(zip(df["test"], df["required_n"], strict=True))
+    assert not pd.isna(req["3 vs 1"])
+    assert req["3 vs 1"] <= req["2 vs 1"] or pd.isna(req["2 vs 1"])
+    for text in (repr(r), str(r.summary())):
+        assert "(pairwise)" in text and "3 vs 1" in text
 
 
 def test_sample_size_to_dataframe_required_n_conventions():

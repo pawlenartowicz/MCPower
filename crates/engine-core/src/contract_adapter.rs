@@ -227,6 +227,7 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         wald_se: c.wald_se,
         df_method: c.df_method,
         nagq: c.nagq,
+        curvature_hints: c.curvature_hints.clone(),
     })
 }
 
@@ -710,8 +711,11 @@ fn interaction_kernel_col(
     let base = 1 + n_non_factor + n_factor_dummies;
     let mut j = 0u32;
     for term in &c.design_generation.terms {
-        if let DesignTerm::Interaction { components: gen } = term {
-            if gen.as_slice() == components {
+        if let DesignTerm::Interaction {
+            components: generated,
+        } = term
+        {
+            if generated.as_slice() == components {
                 return base + j;
             }
             j += 1;
@@ -928,6 +932,22 @@ mod tests {
     }
 
     #[test]
+    fn adapter_copies_curvature_hints() {
+        let mut c = example1_simple_ols();
+        let hints = Some(vec![
+            Some(engine_contract::CurvatureHintParts {
+                dim: 2,
+                inv_hessian: vec![2.0, 0.5, 0.5, 1.0],
+                units: 4.0,
+            }),
+            None,
+        ]);
+        c.curvature_hints = hints.clone();
+        let s = contract_to_simulation_spec(&c).unwrap();
+        assert_eq!(s.curvature_hints, hints);
+    }
+
+    #[test]
     fn effect_sizes_layout_matches_design_matrix_columns() {
         let c = SimulationContract {
             generation: GenerationSpec {
@@ -1002,6 +1022,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         let s = contract_to_simulation_spec(&c).unwrap();
         // Engine layout: [intercept, x1, group[2], group[3]]
@@ -1066,6 +1087,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         let s = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(s.effect_sizes[0], logit_intercept);
@@ -1135,6 +1157,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         let s = contract_to_simulation_spec(&c).unwrap();
         // kernel cols: 0 intercept, 1 x1, 2 x2; design_test keeps {0, 1}.
@@ -1225,6 +1248,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         }
     }
 
@@ -1339,6 +1363,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         let s = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(
@@ -1438,6 +1463,7 @@ mod tests {
             }],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         c.validate().unwrap();
         let s = contract_to_simulation_spec(&c).unwrap();
@@ -1556,8 +1582,9 @@ mod tests {
         // Arbitrary Joint subsets (not the full omnibus shape) still error —
         // we don't yet have a per-joint contrast surface.
         // A contract with 3 non-intercept terms in design_test and a Joint
-        // covering only two of them (a single-term Joint never reaches the
-        // adapter: validate() requires Joint.len() >= 2).
+        // covering only two of them. Term count is not the test: a one-term
+        // Joint is the omnibus shape on a one-predictor model, and a subset
+        // on a larger one.
         let c = SimulationContract {
             generation: GenerationSpec {
                 columns: vec![
@@ -1630,6 +1657,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         c.validate().unwrap();
         match contract_to_simulation_spec(&c) {
@@ -1711,6 +1739,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
 
         // Same contract but using Contrast { positive: 1, negative: 0 }
@@ -1807,6 +1836,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         let spec = contract_to_simulation_spec(&c).unwrap();
         // Both B and C are real dummies (not Const) → goes to contrast_pairs.
@@ -1928,6 +1958,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         c.validate().unwrap();
         let s = contract_to_simulation_spec(&c).unwrap();
@@ -2000,6 +2031,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         }
     }
 
@@ -2123,6 +2155,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         c.validate().unwrap();
         let s = contract_to_simulation_spec(&c).unwrap();
@@ -2205,6 +2238,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         c.validate().unwrap();
         let s = contract_to_simulation_spec(&c).unwrap();
@@ -2356,6 +2390,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         };
         let s = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(s.factor_sampled, vec![Some(false), Some(true)]);

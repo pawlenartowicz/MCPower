@@ -38,8 +38,9 @@ controlling for `prior_gpa`? Students are nested in 30 classrooms.
   0.10 / 0.25 / 0.40 for small / medium / large.
 
 > [!note]
-> Mixed models default to **800 simulations** rather than the 1,600 used for OLS,
-> because each mixed-model fit is more expensive. Confidence intervals are
+> Mixed models default to **800 simulations** rather than the 1,600 used for OLS
+> (**400** when the outcome is binary or a count), because each mixed-model fit is
+> more expensive. Confidence intervals are
 > correspondingly a little wider; increase `n_sims` explicitly if you need tighter
 > Monte-Carlo uncertainty.
 
@@ -280,8 +281,9 @@ when a design falls outside them.
 Any mixed model (LME or clustered GLMM) also accepts `df_method`: the default
 `"between_within"` tests each fixed effect against a *t* with between-within
 denominator degrees of freedom (between-cluster df for a cluster-level
-predictor, within-cluster df otherwise), falling back to Wald z with a crossed
-or nested extra grouping; `"asymptotic"` opts into the Wald z. The calibration
+predictor, within-cluster df otherwise); with a crossed or nested extra
+grouping it uses Satterthwaite df for an LME and the Wald z for a GLMM.
+`"asymptotic"` opts into the Wald z. The calibration
 of both against lmerTest Satterthwaite is on the
 [[validation/validation_df_calibration|denominator-df calibration page]].
 

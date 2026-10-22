@@ -12,6 +12,9 @@
 //! counter-addressed by `(key, class, column, row)` — prefix-stable
 //! structurally, and contiguous counter runs are exactly the shape the blocked
 //! word fill + SIMD inverse-CDF (`fill_words` / `fill_normal_column`) need.
+//!
+//! Lemire, D. (2019), *Fast Random Integer Generation in an Interval*, ACM
+//! Transactions on Modeling and Computer Simulation 29(1) — as Lemire 2019.
 
 // The normal-inverse breakpoint/floor and the minimax polynomial coefficients
 // below are written to full decimal precision to document the derived f32 value
@@ -83,6 +86,22 @@ impl SimRng {
     #[inline]
     pub fn next_uniform(&mut self) -> f32 {
         u32_to_unit_f32(self.next_u32())
+    }
+
+    /// Uniform index in `0..n` from one `u32` draw: `(u · n) >> 32`, Lemire
+    /// 2019's multiply-shift without its rejection step. Each index receives
+    /// ⌊2³²/n⌋ or ⌈2³²/n⌉ of the 2³² inputs, so no index is over-weighted by
+    /// more than about n/2³² (2.3·10⁻⁴ at a million rows). Scaling
+    /// `next_uniform()` by `n` instead maps a 2²³-point grid onto the rows and
+    /// over-weights some by up to 2²³/n's rounding (12.5% at a million rows).
+    /// Exactly one draw per pick, so per-row consumption stays fixed.
+    #[inline]
+    pub fn next_index(&mut self, n: usize) -> usize {
+        debug_assert!(
+            n > 0 && n as u64 <= u64::from(u32::MAX) + 1,
+            "next_index: n out of range"
+        );
+        ((u64::from(self.next_u32()) * n as u64) >> 32) as usize
     }
 
     /// Standard normal (mean 0, SD 1), f32 — one uniform, inverse-CDF, no cache.

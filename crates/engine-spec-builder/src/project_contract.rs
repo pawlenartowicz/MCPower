@@ -18,13 +18,7 @@ use crate::skeleton::{EffectDescriptor, EffectSkeleton};
 use crate::targets::resolve_targets;
 use crate::upload::{apply_upload, measure_correlations};
 use crate::validate::{validate_effect_assignments, validate_pre_projection};
-use crate::variables::{build_predictor_table, PredictorTable};
-
-/// Thin wrapper that drops the `EffectSkeleton` for callers that only need the
-/// contracts. The lowering lives once in `build_linear_contract_with_skeleton`.
-pub fn build_linear_contract(spec: &LinearSpec) -> Result<Vec<SimulationContract>, SpecError> {
-    Ok(build_linear_contract_with_skeleton(spec)?.0)
-}
+use crate::variables::{PredictorTable, build_predictor_table};
 
 /// Project a validated `LinearSpec` into `Vec<SimulationContract>` **and** the
 /// `EffectSkeleton` (β-column-aligned, single source of the result-naming
@@ -91,7 +85,7 @@ pub fn build_linear_contract_with_skeleton(
             &predictor_names,
             table.non_factor_names.len(),
             upload,
-        );
+        )?;
         // Partial mode: measure empirical Spearman rank correlations (converted to
         // the latent-Gaussian scale), then overlay explicit pairs.
         // Strict mode flows through as a bootstrap frame (apply_upload sets
@@ -136,6 +130,7 @@ pub fn build_linear_contract_with_skeleton(
         posthoc,
         scenario: ContractScenario::default(),
         max_failed_fraction: spec.max_failed_fraction,
+        curvature_hints: None,
     };
 
     let mut out = Vec::with_capacity(scenarios.len());
@@ -224,7 +219,7 @@ pub fn build_contract_with_skeleton(
     // Only random intercepts are supported. Reject random-slope terms
     // explicitly so callers get a clear error instead of silently dropped
     // effects.
-    // formula is re-parsed here for the random-effect walk; build_linear_contract's parse result is not returned.
+    // formula is re-parsed here for the random-effect walk; the template builder's parse result is not returned.
     let parsed = parse_formula(&spec.formula)?;
     for re in &parsed.random_effects {
         if let crate::formula::RandomEffect::Slope { .. } = re {
@@ -570,7 +565,7 @@ fn effect_term_positions(table: &PredictorTable) -> Vec<u32> {
 /// descriptors are computed once during factor expansion
 /// (`PredictorTable::effect_descriptors`); this only reorders them from
 /// formula-term order into β-column order.
-pub fn build_effect_skeleton(table: &PredictorTable) -> EffectSkeleton {
+pub(crate) fn build_effect_skeleton(table: &PredictorTable) -> EffectSkeleton {
     let n_dummies: usize = table
         .factor_n_levels
         .iter()
@@ -691,7 +686,7 @@ fn build_target_terms(
                 _ => Some(i as u32),
             })
             .collect();
-        if joint_terms.len() >= 2 {
+        if !joint_terms.is_empty() {
             out.push(TestTarget::Joint { terms: joint_terms });
         }
     }
@@ -1018,6 +1013,12 @@ mod tests {
     use crate::input::*;
     use engine_contract::{EstimatorSpec, OutcomeKind};
 
+    /// Production entry point with the plain continuous / OLS / unclustered
+    /// arguments.
+    fn build_ols_contracts(spec: &LinearSpec) -> Result<Vec<SimulationContract>, SpecError> {
+        build_contract(spec, OutcomeKind::Continuous, None, None, 0.0, vec![])
+    }
+
     /// scenario_to_contract decodes the RE-distribution code and emits
     /// `lme: Some(..)` only when a non-default RE knob is present (non-Normal
     /// dist OR non-zero ICC jitter); else `lme: None`.
@@ -1117,7 +1118,7 @@ mod tests {
         // and emitted the default would fail here.
         let mut spec = simple_spec();
         spec.df_method = engine_contract::DfMethod::Asymptotic;
-        let mut contracts = build_linear_contract(&spec).unwrap();
+        let mut contracts = build_ols_contracts(&spec).unwrap();
         let c = contracts.pop().unwrap();
         assert_eq!(c.df_method, engine_contract::DfMethod::Asymptotic);
     }
@@ -1126,7 +1127,7 @@ mod tests {
     fn report_overall_appends_joint_with_all_non_intercept_terms() {
         let mut spec = simple_spec();
         spec.report_overall = true;
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         // design_test has 3 terms (Const, x1, x2), so non-intercept positions
         // are {1, 2}. We expect: 2 Marginals + 1 Joint.
         assert_eq!(c.test.targets.len(), 3);
@@ -1153,11 +1154,29 @@ mod tests {
         let mut spec = simple_spec();
         spec.targets = vec![]; // no per-effect/marginal/contrast tests
         spec.report_overall = true;
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         assert_eq!(c.test.targets.len(), 1);
         assert!(matches!(
             c.test.targets.first(),
             Some(TestTarget::Joint { .. })
+        ));
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn report_overall_alone_on_one_predictor_emits_one_term_joint() {
+        // A one-predictor overall test is a one-term Joint (the overall F, equal
+        // to the marginal t²), not an empty target list.
+        let mut spec = simple_spec();
+        spec.formula = "y = x1".into();
+        spec.predictors.truncate(1);
+        spec.effects.truncate(1);
+        spec.targets = vec![];
+        spec.report_overall = true;
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
+        assert!(matches!(
+            c.test.targets.as_slice(),
+            [TestTarget::Joint { terms }] if terms.len() == 1
         ));
         c.validate().unwrap();
     }
@@ -1169,7 +1188,7 @@ mod tests {
         let mut spec = simple_spec();
         spec.targets = vec![];
         spec.report_overall = false;
-        let err = build_linear_contract(&spec).unwrap_err();
+        let err = build_ols_contracts(&spec).unwrap_err();
         assert!(
             matches!(&err, SpecError::UnknownTarget { name } if name == "(empty)"),
             "expected UnknownTarget '(empty)', got {err:?}"
@@ -1194,7 +1213,7 @@ mod tests {
         spec.report_overall = true;
         spec.test_formula = Some("y = x1 + x2".into());
         spec.targets = vec!["x1".into()];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         // design_test is (Const, x1, x2) → Joint over {1, 2}, not the
         // generation design's {1, 2, 3}.
         assert_eq!(
@@ -1205,11 +1224,16 @@ mod tests {
             ]
         );
 
-        // A test design with one non-intercept term emits no Joint (a Joint
-        // needs >= 2 terms); only the marginal remains.
+        // A test design with one non-intercept term emits a one-term Joint.
         spec.test_formula = Some("y = x1".into());
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
-        assert_eq!(c.test.targets, vec![TestTarget::Marginal { term: 1 }]);
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
+        assert_eq!(
+            c.test.targets,
+            vec![
+                TestTarget::Marginal { term: 1 },
+                TestTarget::Joint { terms: vec![1] },
+            ]
+        );
     }
 
     #[test]
@@ -1219,7 +1243,7 @@ mod tests {
         // has Const + Direct{0}; design_generation still has all three terms.
         spec.test_formula = Some("y = x1".into());
         spec.targets = vec!["x1".into()];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         assert_eq!(c.design_generation.terms.len(), 3);
         let dt = c
             .design_test
@@ -1239,7 +1263,7 @@ mod tests {
     fn test_formula_rejects_predictor_not_in_generation() {
         let mut spec = simple_spec();
         spec.test_formula = Some("y = z".into()); // z is not in spec.predictors
-        let err = build_linear_contract(&spec).unwrap_err();
+        let err = build_ols_contracts(&spec).unwrap_err();
         assert!(matches!(err, SpecError::TestFormulaPredictorMissing { .. }));
     }
 
@@ -1280,7 +1304,7 @@ mod tests {
         ];
         spec.targets = vec!["group[B]".into(), "group[C]".into()];
         spec.test_formula = Some("y = group".into());
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         // design_test: Const + DummyOf{group, 1} + DummyOf{group, 2}
         let dt = c
             .design_test
@@ -1518,7 +1542,7 @@ mod tests {
         let mut spec = contrast_spec_base();
         spec.targets = vec![];
         spec.contrast_pairs = vec![("group[B]".into(), "group[NONEXISTENT]".into())];
-        let err = build_linear_contract(&spec).unwrap_err();
+        let err = build_ols_contracts(&spec).unwrap_err();
         assert!(
             matches!(err, SpecError::UnknownContrastName { .. }),
             "expected UnknownContrastName, got: {err:?}"
@@ -1530,10 +1554,7 @@ mod tests {
     // column IDs.
     #[test]
     fn empty_corr_is_identity_nonempty_is_matrix() {
-        let c = build_linear_contract(&simple_spec())
-            .unwrap()
-            .pop()
-            .unwrap();
+        let c = build_ols_contracts(&simple_spec()).unwrap().pop().unwrap();
         assert!(matches!(c.generation.correlations, Correlations::Identity));
 
         let mut spec = simple_spec();
@@ -1542,7 +1563,7 @@ mod tests {
             b: "x2".into(),
             value: 0.3,
         }];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         match c.generation.correlations {
             Correlations::Matrix {
                 continuous_columns, ..
@@ -1562,7 +1583,7 @@ mod tests {
         // then confirm the both-reference contrast adds nothing of its own.
         spec.targets = vec!["group[B]".into()];
         spec.contrast_pairs = vec![("group[A]".into(), "group[A]".into())];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         // Only the single marginal from `targets`; the both-reference contrast
         // contributed no target.
         assert_eq!(c.test.targets.len(), 1);
@@ -1576,7 +1597,7 @@ mod tests {
         let mut spec = contrast_spec_base();
         spec.targets = vec!["group[B]".into()];
         spec.contrast_pairs = vec![("group[B]".into(), "group[C]".into())];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         // The marginal from `targets` (group[B] → term 1) plus the contrast from
         // `contrast_pairs` (group[B] → positive 1, group[C] → negative 2).
         assert_eq!(
@@ -1811,7 +1832,7 @@ mod tests {
             targets: vec!["x1:x2".into()],
             ..simple_spec()
         };
-        let contracts = build_linear_contract(&spec).unwrap();
+        let contracts = build_ols_contracts(&spec).unwrap();
         let c = &contracts[0];
         // design_test is None (no test_formula); design_generation has 4 terms:
         // [Const(0), Direct(x1)=1, Direct(x2)=2, Interaction(x1:x2)=3]
@@ -1914,7 +1935,7 @@ mod tests {
     #[test]
     fn posthoc_requests_project_to_contract_posthoc() {
         let spec = anova_3level_spec();
-        let contracts = build_linear_contract(&spec).unwrap();
+        let contracts = build_ols_contracts(&spec).unwrap();
         assert_eq!(
             contracts[0].posthoc.len(),
             1,
@@ -1950,7 +1971,7 @@ mod tests {
     fn posthoc_empty_requests_keeps_posthoc_empty() {
         // No posthoc_requests → contract.posthoc must remain empty.
         let spec = contrast_spec_base(); // has posthoc_requests: vec![]
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         assert!(c.posthoc.is_empty());
     }
 
@@ -1963,7 +1984,7 @@ mod tests {
             factor: "x1".into(),
             posthoc_alpha: None,
         }];
-        let err = build_linear_contract(&spec).unwrap_err();
+        let err = build_ols_contracts(&spec).unwrap_err();
         assert!(
             matches!(err, SpecError::NotAFactorPredictor { ref name } if name == "x1"),
             "expected NotAFactorPredictor {{name: \"x1\"}}, got: {err:?}"
@@ -1982,7 +2003,7 @@ mod tests {
             factor: "nonexistent".into(),
             posthoc_alpha: None,
         }];
-        let err = build_linear_contract(&spec).unwrap_err();
+        let err = build_ols_contracts(&spec).unwrap_err();
         assert!(
             matches!(err, SpecError::UnknownPredictor { ref name } if name == "nonexistent"),
             "expected UnknownPredictor {{name: \"nonexistent\"}}, got: {err:?}"
@@ -2031,7 +2052,7 @@ mod tests {
         ];
         spec.targets = vec!["x1".into()];
         spec.cluster_level_vars = vec!["x1".into(), "group".into()];
-        let c = build_linear_contract(&spec).unwrap().pop().unwrap();
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         // Pins the build_columns ordering the resolver mirrors: non-factors
         // first ⇒ columns[0] is the continuous x1, columns[1] the factor.
         assert!(matches!(
@@ -2054,7 +2075,7 @@ mod tests {
     fn cluster_level_vars_unknown_name_errors() {
         let mut spec = simple_spec();
         spec.cluster_level_vars = vec!["nope".into()];
-        let err = build_linear_contract(&spec).unwrap_err();
+        let err = build_ols_contracts(&spec).unwrap_err();
         assert!(matches!(err, SpecError::UnknownPredictor { ref name } if name == "nope"));
     }
 
@@ -2338,7 +2359,7 @@ mod tests {
             df_method: Default::default(),
             nagq: 1,
         };
-        let contracts = build_linear_contract(&spec).unwrap();
+        let contracts = build_ols_contracts(&spec).unwrap();
         let c = &contracts[0];
         // Factor-only: the factor is the sole generation column → ColumnId(0).
         let factor_col = c.generation.columns[0].clone();
@@ -2369,7 +2390,7 @@ mod tests {
         for (col, _) in &dummies {
             assert_eq!(**col, factor_col_id, "dummy column id mismatch");
         }
-        let mut indices: Vec<u32> = dummies.iter().map(|(_, &li)| li).collect();
+        let mut indices: Vec<u32> = dummies.iter().map(|&(_, &li)| li).collect();
         indices.sort_unstable();
         assert_eq!(indices, vec![1, 2, 3], "dummy level_indices={indices:?}");
     }

@@ -5,7 +5,7 @@
 //! crashed `.summary()`.
 
 use engine_contract::{ColumnId, DesignSpec, DesignTerm, TestTarget};
-use engine_orchestrator::{find_power, CancellationToken};
+use engine_orchestrator::{CancellationToken, find_power};
 
 #[test]
 fn reduced_test_formula_dropping_leading_term_reports_skeleton_aligned_indices() {

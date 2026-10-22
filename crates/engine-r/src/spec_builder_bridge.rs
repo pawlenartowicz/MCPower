@@ -135,8 +135,8 @@ pub fn split_assignments(input: &str) -> Result<Vec<String>> {
 // ── Parser bridge ─────────────────────────────────────────────────────────────
 
 use engine_spec_builder::{
-    parse_assignments as rust_parse_assignments, parse_formula as rust_parse_formula,
     AssignmentKey, AssignmentKind, AssignmentValue, KnownNames, VarTypeParams,
+    parse_assignments as rust_parse_assignments, parse_formula as rust_parse_formula,
 };
 
 /// Serializable wrapper for a single assignment item — mirrors engine-py's
@@ -170,7 +170,6 @@ struct VarTypeInfoJson {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum AssignmentValueJson {
-    VariableType { variable_type: String },
     VariableTypeParams { variable_type: VarTypeInfoJson },
     Correlation { correlation: f64 },
     Effect { effect: f64 },
@@ -259,9 +258,6 @@ pub fn parse_assignments(input: &str, kind: &str, known_json: &str) -> Result<St
                 },
             };
             let value = match v {
-                AssignmentValue::VariableType(t) => AssignmentValueJson::VariableType {
-                    variable_type: t.clone(),
-                },
                 AssignmentValue::VariableTypeWithParams { var_type, params } => {
                     let info = match params {
                         VarTypeParams::Bare => VarTypeInfoJson {

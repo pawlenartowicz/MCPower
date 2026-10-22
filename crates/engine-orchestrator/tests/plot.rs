@@ -1,11 +1,11 @@
 //! Snapshot tests + schema sanity for engine_orchestrator::plot.
 
 use engine_orchestrator::{
-    plot::{
-        exactly_k_curve_spec, joint_detection_curve_spec, power_at_n_spec, power_plot_set,
-        sample_size_curve_spec, sample_size_plot_set, PlotOptions, PlotPoint, PlotScenario,
-    },
     Ci,
+    plot::{
+        PlotOptions, PlotPoint, PlotScenario, exactly_k_curve_spec, joint_detection_curve_spec,
+        power_at_n_spec, power_plot_set, sample_size_curve_spec, sample_size_plot_set,
+    },
 };
 use serde_json::Value;
 

@@ -13,7 +13,6 @@ export interface ReportConfig {
   thresholds: {
     convergence_min: number;
     lme_boundary_hit_max: number;
-    glm_baseline_drift_max: number;
     // Declared here so ConvergenceNotice reads typecheck; values from config.json.
     factor_exclusion_max: number;
     glmm_tau_sq_warn: number;

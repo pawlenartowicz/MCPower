@@ -40,7 +40,11 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 // `R_CheckUserInterrupt` and `R_ToplevelExec` are stable public R C-API symbols
 // exported by libR, but extendr-ffi 0.9 does not re-export them. Declare them
 // directly; they link against the same libR the rest of extendr binds to.
-extern "C" {
+#[expect(
+    unsafe_code,
+    reason = "declares the two libR C-API symbols extendr-ffi does not re-export"
+)]
+unsafe extern "C" {
     /// Checks for a pending user interrupt; **longjmps** (never returns
     /// normally on interrupt). MUST only be called inside an `R_ToplevelExec`
     /// containment — a bare call unwinds across Rust frames (UB).
@@ -54,10 +58,10 @@ extern "C" {
 /// Drives `R_CheckUserInterrupt` under it so the interrupt longjmp is caught.
 #[expect(
     unsafe_code,
-    reason = "interrupt containment — the only hand-written unsafe in the R adapter; bare R_CheckUserInterrupt longjmps and must run inside R_ToplevelExec"
+    reason = "interrupt containment — bare R_CheckUserInterrupt longjmps and must run inside R_ToplevelExec"
 )]
 unsafe extern "C" fn check_interrupt_trampoline(_: *mut c_void) {
-    R_CheckUserInterrupt();
+    unsafe { R_CheckUserInterrupt() };
 }
 
 /// `true` if the user pressed Ctrl-C / Escape since the last poll.

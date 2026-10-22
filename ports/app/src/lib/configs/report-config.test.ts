@@ -22,7 +22,6 @@ const SHAPE: Shape<ReportConfig> = {
   thresholds: {
     convergence_min: 'number',
     lme_boundary_hit_max: 'number',
-    glm_baseline_drift_max: 'number',
     factor_exclusion_max: 'number',
     glmm_tau_sq_warn: 'number',
   },

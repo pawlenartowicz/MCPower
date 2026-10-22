@@ -11,7 +11,7 @@ import pytest
 
 from mcpower.data.upload import detect_column_types
 
-GOLDEN_PATH = Path(__file__).resolve().parents[1] / "golden" / "upload_type_detection.json"
+GOLDEN_PATH = Path(__file__).resolve().parents[4] / "configs" / "upload_type_detection.json"
 
 
 def build_array_from_fixture(fx: dict) -> tuple:

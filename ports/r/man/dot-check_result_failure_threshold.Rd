@@ -4,12 +4,14 @@
 \alias{.check_result_failure_threshold}
 \title{Check result list (or multi-scenario envelope) against the failure threshold.}
 \usage{
-.check_result_failure_threshold(result, threshold)
+.check_result_failure_threshold(result, threshold, clustered = FALSE)
 }
 \arguments{
 \item{result}{Named list returned by \code{.unwrap_scenario_result}.}
 
 \item{threshold}{Maximum acceptable failure rate in \link{0,1}.}
+
+\item{clustered}{Whether the model has random effects.}
 }
 \value{
 Invisibly NULL.

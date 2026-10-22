@@ -20,8 +20,8 @@
 //! multi-element results.
 
 use engine_orchestrator::{
-    plot::{power_plot_set, sample_size_plot_set, PlotOptions, PlotPoint, PlotScenario},
     Ci,
+    plot::{PlotOptions, PlotPoint, PlotScenario, power_plot_set, sample_size_plot_set},
 };
 use extendr_api::error::Result;
 use extendr_api::prelude::*;

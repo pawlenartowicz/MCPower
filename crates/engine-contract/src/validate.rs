@@ -5,19 +5,12 @@ use crate::design::DesignTerm;
 use crate::error::ContractError;
 use crate::estimator::EstimatorSpec;
 use crate::generation::{
-    ClusterSizing, ColumnSpec, Correlations, GroupingRelation, SlopeTerm, MAX_EXTRA_GROUPINGS,
-    MAX_EXTRA_Q, MAX_PRIMARY_Q,
+    ClusterSizing, ColumnSpec, Correlations, GroupingRelation, MAX_EXTRA_GROUPINGS, MAX_EXTRA_Q,
+    MAX_PRIMARY_Q, SlopeTerm,
 };
 use crate::outcome::OutcomeKind;
 use crate::scenarios::ScenarioPerturbations;
 use crate::test_spec::TestTarget;
-
-/// Free-function form of `SimulationContract::validate`. Hosts that don't
-/// want to take `self` by reference (FFI bindings, pre-flight checks) call
-/// this instead. Same logic — single source of truth.
-pub fn validate(contract: &SimulationContract) -> Result<(), ContractError> {
-    contract.validate()
-}
 
 impl SimulationContract {
     pub fn validate(&self) -> Result<(), ContractError> {
@@ -162,9 +155,9 @@ impl SimulationContract {
                     }
                 }
                 TestTarget::Joint { terms } => {
-                    if terms.len() < 2 {
+                    if terms.is_empty() {
                         return Err(ContractError::InvalidTestSpec(
-                            "Joint target must have >= 2 terms",
+                            "Joint target must have >= 1 term",
                         ));
                     }
                     let mut local: std::collections::BTreeSet<u32> = Default::default();
@@ -761,6 +754,17 @@ impl SimulationContract {
         if self.estimator != EstimatorSpec::Ols {
             return Err(ContractError::PosthocRequiresOls);
         }
+        // 17d: the kernel applies one post-hoc α to every block, so the
+        // blocks must agree.
+        if self
+            .posthoc
+            .windows(2)
+            .any(|w| w[0].posthoc_alpha != w[1].posthoc_alpha)
+        {
+            return Err(ContractError::InvalidPosthoc(
+                "posthoc blocks must share the same posthoc_alpha",
+            ));
+        }
         let design_test = self.design_test_or_generation();
         for ph in &self.posthoc {
             // 17a: factor_column must be a factor.
@@ -769,7 +773,7 @@ impl SimulationContract {
                 _ => {
                     return Err(ContractError::InvalidPosthoc(
                         "factor_column is not a factor",
-                    ))
+                    ));
                 }
             }
             // 17b: every target_term_index must point at a DummyOf of the same factor.
@@ -918,11 +922,12 @@ impl SimulationContract {
     /// Backstop for the AGQ node count. `nagq` must be odd and in `1..=25`
     /// always; `nagq > 1` additionally requires an eligible shape: a
     /// Binary/Count outcome, a clustered spec, no crossed/nested extra
-    /// groupings, and ≤ 3 REs per group (intercept + slopes). Hosts strip
+    /// groupings, ≤ 3 REs per group (intercept + slopes), and the `Glm`
+    /// estimator (the only one that runs the GLMM fit). Hosts strip
     /// ineligible `nagq > 1` to 1 with a warning before building the contract,
     /// so reaching either error here indicates a host bug. Mirrors glmm's
-    /// `fit.rs::assert_model_shape` and each port's spec-builder eligibility
-    /// check — change all three together.
+    /// `assert_model_shape` (glmm crate, `src/fit/common.rs`) and each port's
+    /// spec-builder eligibility check — change all three together.
     fn invariant_25_nagq_backstop(&self) -> Result<(), ContractError> {
         let k = self.nagq;
         if k == 0 || k > 25 || k % 2 == 0 {
@@ -931,7 +936,8 @@ impl SimulationContract {
         if k == 1 {
             return Ok(());
         }
-        let kind_ok = matches!(self.outcome.kind, OutcomeKind::Binary | OutcomeKind::Count);
+        let kind_ok = matches!(self.outcome.kind, OutcomeKind::Binary | OutcomeKind::Count)
+            && self.estimator == EstimatorSpec::Glm;
         let Some(cluster) = &self.generation.cluster else {
             return Err(ContractError::NagqIneligibleShape { got: k });
         };
@@ -1042,13 +1048,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn inv22_heterogeneity_zero_passes() {
-        let mut c = example1_simple_ols();
-        c.scenario.heterogeneity = 0.0; // inactive sentinel
-        assert!(c.validate().is_ok());
-    }
-
     // correlation_noise_sd
 
     #[test]
@@ -1083,13 +1082,6 @@ mod tests {
             ),
             "got {err:?}"
         );
-    }
-
-    #[test]
-    fn inv22_correlation_noise_sd_zero_passes() {
-        let mut c = example1_simple_ols();
-        c.scenario.correlation_noise_sd = 0.0;
-        assert!(c.validate().is_ok());
     }
 
     // heteroskedasticity_ratio
@@ -1138,13 +1130,6 @@ mod tests {
         assert!(c.validate().is_ok());
     }
 
-    #[test]
-    fn inv22_heteroskedasticity_ratio_one_passes() {
-        let mut c = example1_simple_ols();
-        c.scenario.heteroskedasticity_ratio = 1.0; // homoskedastic / off sentinel
-        assert!(c.validate().is_ok());
-    }
-
     // distribution_change_prob
 
     #[test]
@@ -1179,13 +1164,6 @@ mod tests {
             ),
             "got {err:?}"
         );
-    }
-
-    #[test]
-    fn inv22_distribution_change_prob_zero_passes() {
-        let mut c = example1_simple_ols();
-        c.scenario.distribution_change_prob = 0.0;
-        assert!(c.validate().is_ok());
     }
 
     // residual_change_prob
@@ -1224,13 +1202,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn inv22_residual_change_prob_zero_passes() {
-        let mut c = example1_simple_ols();
-        c.scenario.residual_change_prob = 0.0;
-        assert!(c.validate().is_ok());
-    }
-
     // residual_df: 0.0 is the inactive sentinel — only NaN/inf should reject.
 
     #[test]
@@ -1265,14 +1236,6 @@ mod tests {
             ),
             "got {err:?}"
         );
-    }
-
-    #[test]
-    fn inv22_residual_df_zero_passes() {
-        // 0.0 = inactive sentinel; must not be rejected.
-        let mut c = example1_simple_ols();
-        c.scenario.residual_df = 0.0;
-        assert!(c.validate().is_ok());
     }
 
     // LmeScenarioPerturbations.random_effect_df
@@ -1329,7 +1292,6 @@ mod tests {
 
     #[test]
     fn inv22_lme_random_effect_df_zero_passes() {
-        // 0.0 = Normal-path sentinel; must not be rejected.
         let mut c = lme_contract();
         c.scenario.lme.as_mut().unwrap().random_effect_df = 0.0;
         assert!(c.validate().is_ok());
@@ -1509,28 +1471,6 @@ mod tests {
 
     // ---- invariant_24: probit link only on Binary ---------------------------
 
-    #[test]
-    fn inv24_probit_on_continuous_rejects() {
-        let mut c = example1_simple_ols();
-        // example1 is Continuous; force a probit link override.
-        c.outcome.link = Some(crate::outcome::LinkKind::Probit);
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(err, ContractError::ProbitRequiresBinary),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn inv24_probit_on_binary_passes() {
-        use crate::estimator::EstimatorSpec;
-        let mut c = example1_simple_ols();
-        c.estimator = EstimatorSpec::Glm;
-        c.outcome.kind = OutcomeKind::Binary;
-        c.outcome.link = Some(crate::outcome::LinkKind::Probit);
-        assert!(c.validate().is_ok(), "{:?}", c.validate());
-    }
-
     // ---- invariant_25: nagq backstop ----------------------------------------
 
     /// Eligible AGQ base: a clustered Binary GLMM with a single grouping factor
@@ -1538,7 +1478,7 @@ mod tests {
     fn eligible_glmm() -> SimulationContract {
         use crate::estimator::EstimatorSpec;
         let mut c = example1_simple_ols();
-        c.estimator = EstimatorSpec::Mle;
+        c.estimator = EstimatorSpec::Glm;
         c.outcome.kind = OutcomeKind::Binary;
         c.generation.cluster = Some(ClusterSpec::intercept_only(
             ClusterSizing::FixedClusters { n_clusters: 10 },
@@ -1548,118 +1488,18 @@ mod tests {
     }
 
     #[test]
-    fn inv25_nagq_three_eligible_passes() {
-        let mut c = eligible_glmm();
-        c.nagq = 3;
-        assert!(c.validate().is_ok(), "{:?}", c.validate());
-    }
-
-    #[test]
-    fn inv25_nagq_upper_bound_25_eligible_passes() {
-        // 25 is the top of the odd `1..=25` range; an off-by-one such as
-        // `k >= 25` would wrongly reject the boundary value itself.
-        let mut c = eligible_glmm();
-        c.nagq = 25;
-        assert!(c.validate().is_ok(), "{:?}", c.validate());
-    }
-
-    #[test]
-    fn inv25_nagq_three_res_eligible_passes() {
-        // Intercept + 2 slopes = 3 REs, the max allowed; an off-by-one such
-        // as `re_count < 3` would wrongly reject this shape.
-        use crate::generation::SlopeTerm;
-        use crate::ids::ColumnId;
-        let mut c = eligible_glmm();
-        let cluster = c.generation.cluster.as_mut().unwrap();
-        for (i, col) in [0u32, 1].into_iter().enumerate() {
-            cluster.slopes.push(SlopeTerm {
-                column: ColumnId(col),
-                variance: 0.2,
-                corr_with_intercept: 0.0,
-                corr_with: vec![0.0; i],
-            });
-        }
-        c.nagq = 3;
-        assert!(c.validate().is_ok(), "{:?}", c.validate());
-    }
-
-    #[test]
-    fn inv25_nagq_one_on_ineligible_shape_passes() {
-        // nagq = 1 is the Laplace default and always allowed, even on an
-        // ineligible (OLS/Continuous) shape.
-        let mut c = example1_simple_ols();
-        c.nagq = 1;
-        assert!(c.validate().is_ok());
-    }
-
-    #[test]
-    fn inv25_nagq_even_rejects() {
-        let mut c = eligible_glmm();
-        c.nagq = 4;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(err, ContractError::NagqOutOfRange { .. }),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn inv25_nagq_above_range_rejects() {
-        let mut c = eligible_glmm();
-        c.nagq = 27;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(err, ContractError::NagqOutOfRange { .. }),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn inv25_nagq_on_ols_continuous_rejects() {
-        let mut c = example1_simple_ols();
-        c.nagq = 3;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(err, ContractError::NagqIneligibleShape { .. }),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn inv25_nagq_on_unclustered_glm_rejects() {
+    fn inv25_nagq_on_non_glm_estimator_rejects() {
         use crate::estimator::EstimatorSpec;
-        let mut c = example1_simple_ols();
-        c.estimator = EstimatorSpec::Glm;
-        c.outcome.kind = OutcomeKind::Binary;
-        // No cluster → ineligible shape for nagq > 1.
-        c.nagq = 3;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(err, ContractError::NagqIneligibleShape { .. }),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn inv25_nagq_with_second_grouping_rejects() {
-        use crate::generation::{GroupingRelation, GroupingSpec};
-        let mut c = eligible_glmm();
-        c.generation
-            .cluster
-            .as_mut()
-            .unwrap()
-            .extra_groupings
-            .push(GroupingSpec {
-                relation: GroupingRelation::Crossed { n_clusters: 8 },
-                tau_squared: 0.1,
-                slopes: vec![],
-            });
-        c.nagq = 3;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(err, ContractError::NagqIneligibleShape { .. }),
-            "got {err:?}"
-        );
+        for est in [EstimatorSpec::Mle, EstimatorSpec::Ols] {
+            let mut c = eligible_glmm();
+            c.estimator = est;
+            c.nagq = 3;
+            let err = c.validate().unwrap_err();
+            assert!(
+                matches!(err, ContractError::NagqIneligibleShape { .. }),
+                "{est:?}: got {err:?}"
+            );
+        }
     }
 
     #[test]

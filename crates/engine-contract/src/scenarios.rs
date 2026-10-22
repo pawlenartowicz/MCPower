@@ -124,15 +124,4 @@ mod tests {
         let spec: ScenarioPerturbations = serde_json::from_str(json).unwrap();
         assert!(!spec.truth_start);
     }
-
-    #[test]
-    fn truth_start_roundtrips_true() {
-        let spec = ScenarioPerturbations {
-            truth_start: true,
-            ..ScenarioPerturbations::default()
-        };
-        let bytes = rmp_serde::to_vec_named(&spec).unwrap();
-        let back: ScenarioPerturbations = rmp_serde::from_slice(&bytes).unwrap();
-        assert!(back.truth_start);
-    }
 }

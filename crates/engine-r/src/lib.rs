@@ -15,12 +15,6 @@ mod progress;
 mod report_bridge;
 mod spec_builder_bridge;
 
-/// Spike probe — returns the engine's view of the thread count machinery is wired.
-#[extendr]
-fn engine_r_ping() -> String {
-    "engine-r-ok".to_string()
-}
-
 /// Configure the rayon thread pool used by `find_power` / `find_sample_size`.
 /// Must be called before any engine invocation; a second call raises an error
 /// because the pool is already initialised. Mirrors `mcpower._engine.set_n_threads(n)`.
@@ -34,7 +28,6 @@ fn set_n_threads(n: i32) -> Result<()> {
 
 extendr_module! {
     mod engine_r;
-    fn engine_r_ping;
     fn set_n_threads;
     use debug_bridge;
     use spec_builder_bridge;

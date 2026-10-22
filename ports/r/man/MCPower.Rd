@@ -205,7 +205,9 @@ modeled predictors. Default \code{NULL} (no cluster-level covariates).}
 
 \item{\code{n_per_parent}}{For nested random effects \code{(1|A/B)}: the number of
 B-units per A-unit. Use with the child grouping var (e.g.
-\code{set_cluster("A:B", n_per_parent = 5)}).}
+\code{set_cluster("A:B", n_per_parent = 5)}); defaults to the config
+value when omitted. Passing \code{n_clusters} or \code{cluster_size}
+for the child is an error.}
 
 \item{\code{tau_squared}}{Raw random-intercept variance, for
 \code{family = "poisson"} only (Poisson has no residual-variance term
@@ -308,8 +310,9 @@ tests: \code{"between_within"} (default) tests each fixed effect
 against a t with between-within denominator degrees of freedom --
 between-cluster df if the predictor is cluster-level, within-cluster
 df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-for OLS and unclustered GLM; not applied (falls back to Wald z) with
-crossed or nested extra groupings. Cluster-level predictors must be
+for OLS and unclustered GLM. With crossed or nested extra groupings
+an LME is tested at each fit's Satterthwaite df instead, and a GLMM
+against a Wald z. Cluster-level predictors must be
 declared with \code{cluster_level_vars} (see \code{set_cluster}) for
 the between df to apply. A fit whose random-effect variances all
 collapse to zero (a singular fit) is tested against the residual df
@@ -383,8 +386,9 @@ tests: \code{"between_within"} (default) tests each fixed effect
 against a t with between-within denominator degrees of freedom --
 between-cluster df if the predictor is cluster-level, within-cluster
 df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-for OLS and unclustered GLM; not applied (falls back to Wald z) with
-crossed or nested extra groupings. Cluster-level predictors must be
+for OLS and unclustered GLM. With crossed or nested extra groupings
+an LME is tested at each fit's Satterthwaite df instead, and a GLMM
+against a Wald z. Cluster-level predictors must be
 declared with \code{cluster_level_vars} (see \code{set_cluster}) for
 the between df to apply. A fit whose random-effect variances all
 collapse to zero (a singular fit) is tested against the residual df

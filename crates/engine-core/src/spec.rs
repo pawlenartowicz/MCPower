@@ -370,6 +370,11 @@ pub struct SimulationSpec {
     /// contract `nagq`; the eligibility backstop already ran in `validate()`.
     #[serde(default = "default_nagq_spec")]
     pub nagq: u8,
+    /// Host-supplied curvature hints, one per grid point. Copied from the
+    /// contract field of the same name, which owns the `None` / `Some(v)` /
+    /// `Some([])` rules; `None` runs the pilot in `run_batch`.
+    #[serde(default)]
+    pub curvature_hints: Option<Vec<Option<engine_contract::CurvatureHintParts>>>,
     /// Baseline intercept as metadata only: no engine code reads it. The
     /// kernel takes the baseline from `effect_sizes[0]` (the adapter folds the
     /// contract intercept there). OLS specs typically carry 0.0, Logit specs
@@ -602,6 +607,11 @@ pub struct BatchResult {
     /// path; NaN on every other path and on non-converged fits. Harvested into
     /// `EstimatorExtras::Glm.tau_squared_hat_*` over converged fits.
     pub tau_squared_hat: Vec<f64>,
+    /// Per-(sim, sample-size) realized event rate `mean(y[..N])` over the rows
+    /// fitted at that grid point (row-major `sim * n_ss + ss_idx`). Written for a
+    /// Binary outcome on every estimator path, converged or not; NaN for every
+    /// other outcome. Harvested into `EstimatorExtras::Glm.baseline_prob_*`.
+    pub event_rate: Vec<f64>,
     pub shape: ResultShape,
 }
 

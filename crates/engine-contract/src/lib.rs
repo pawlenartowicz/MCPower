@@ -11,9 +11,7 @@ pub mod estimator;
 pub mod generation;
 pub mod ids;
 pub mod outcome;
-pub mod plot_theme;
 pub mod scenarios;
-pub mod scenarios_config;
 pub mod test_spec;
 pub mod validate;
 
@@ -21,22 +19,20 @@ pub mod validate;
 pub mod fixtures;
 
 pub use config::{
-    config, validate_config, BaselineScenarioRule, Benchmarks, ByStep, Config, Limits, NSims,
-    ReportConfig, ReportFormat, ReportThresholds, SampleSizeBounds, Simulation, UploadConfig,
-    CONFIG_JSON,
+    BaselineScenarioRule, Benchmarks, ByStep, CONFIG_JSON, Config, Limits, NSims, ReportConfig,
+    ReportFormat, ReportThresholds, SampleSizeBounds, Simulation, UploadConfig, config,
+    validate_config,
 };
-pub use contract::SimulationContract;
+pub use contract::{CurvatureHintParts, SimulationContract};
 pub use design::{DesignSpec, DesignTerm};
 pub use distribution::Distribution;
 pub use error::ContractError;
 pub use estimator::{DfMethod, EstimatorSpec, WaldSe};
 pub use generation::{
     ClusterSizing, ClusterSpec, ColumnSpec, Correlations, GenerationSpec, GroupingRelation,
-    GroupingSpec, SlopeTerm, SyntheticKind, UploadedFrame, MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q,
+    GroupingSpec, MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q, SlopeTerm, SyntheticKind, UploadedFrame,
 };
 pub use ids::ColumnId;
 pub use outcome::{LinkKind, OutcomeKind, OutcomeSpec, ResidualDist, ResidualSpec};
 pub use scenarios::{LmeScenarioPerturbations, ScenarioPerturbations};
-pub use scenarios_config::validate_scenarios;
 pub use test_spec::{CorrectionMethod, PosthocSpec, TestSpec, TestTarget};
-pub use validate::validate;

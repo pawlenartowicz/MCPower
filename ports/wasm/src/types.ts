@@ -78,14 +78,10 @@ export interface FindPowerResponse {
   run_id: string;
   result: ScenarioResult<unknown>;
   plots: PlotSpecs;
-  /** Strict-bootstrap diagnostics (strict mode only). Empty array otherwise. */
-  warnings: string[];
 }
 export interface FindSampleSizeResponse {
   run_id: string;
   result: ScenarioResult<unknown>;
   plots: PlotSpecs;
-  /** Strict-bootstrap diagnostics (strict mode only). Empty array otherwise. */
-  warnings: string[];
 }
 export type SampleSizeMethod = { Grid: { by: unknown; mode: 'Linear' | 'Log' } };

@@ -185,6 +185,17 @@ pub(crate) fn wald_se_to_glmm(wald_se: engine_contract::WaldSe) -> glmm::WaldSe 
     }
 }
 
+/// The `fit_on` options for one spec: glmm's defaults plus the spec's `wald_se`
+/// and `nagq`, with the caller's target set (the full one for the batch
+/// workspace, a reduced one for the cold reduced/exclusion fits).
+pub(crate) fn fit_options(spec: &SimulationSpec, target_indices: Vec<u32>) -> glmm::FitOptions {
+    let mut opts = glmm::FitOptions::default();
+    opts.target_indices = target_indices;
+    opts.wald_se = wald_se_to_glmm(spec.wald_se);
+    opts.nagq = spec.nagq;
+    opts
+}
+
 /// The per-grid-point `fit_on` inputs for one mixed-model batch: a workspace and
 /// the level ids for every sample-size grid point, plus the frozen options each
 /// call must present unchanged. `None` for OLS / unclustered GLM, which never
@@ -238,12 +249,7 @@ pub fn build_mixed_workspaces(
     // cold reduced fits may vary it on their own workspace. nagq's eligibility
     // backstop ran in validate() — mirrors glmm's `assert_model_shape`, change
     // together.
-    let opts = glmm::FitOptions {
-        target_indices: spec.target_indices.clone(),
-        wald_se: wald_se_to_glmm(spec.wald_se),
-        nagq: spec.nagq,
-        ..Default::default()
-    };
+    let opts = fit_options(spec, spec.target_indices.clone());
     let model = cluster_to_model_spec(
         cluster,
         family,

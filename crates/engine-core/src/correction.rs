@@ -1,8 +1,10 @@
 //! Multiple-testing correction methods on t² test statistics.
 //!
-//! All branches compare in `t²` space — never sqrt the SE, never abs(β).
-//! For Holm / BH the targets are sorted by `t²` descending (NaN sinks to the
-//! end, ascending target index breaks ties).
+//! `apply_correction` compares in `t²` space — never sqrt the SE, never
+//! abs(β). For Holm / BH the targets are sorted by `t²` descending (NaN sinks
+//! to the end, ascending target index breaks ties). `apply_correction_p`
+//! decides from per-target p-values instead, for draws whose targets each sit
+//! at their own Satterthwaite df, where Holm / BH sort the p-values ascending.
 
 use crate::spec::CorrectionMethod;
 
@@ -90,17 +92,90 @@ pub fn apply_correction(
     }
 }
 
+/// Multiple-testing decisions from per-target two-sided p-values, for tests
+/// whose targets each sit at their own df (Satterthwaite), where no
+/// rank-indexed threshold row can serve every target.
+///
+/// - `p`: per-target p-value (length `T`); NaN → fail. `m = T` counts every
+///   slot, NaN included, as `apply_correction` counts a NaN t².
+/// - Holm / BH: the decisions of R's `p.adjust(p, "holm" | "BH") <= alpha`,
+///   walked over the p-values sorted ascending (NaN last, ascending target
+///   index breaks ties): Holm rejects ranks `k = 0, 1, …` while
+///   `p ≤ α/(m − k)` and stops at its first failure; BH rejects every rank up
+///   to the largest `k` with `p ≤ (k + 1)·α/m`. On a round that dropped a
+///   target (a NaN slot) this departs from `p.adjust`, which counts only the
+///   non-NA p-values in `m`; counting the slot is the more conservative
+///   choice and matches the t² path.
+/// - Tukey HSD has no t p-value (it is a studentized-range test); its callers
+///   decide it from `critvals::tukey_tail_sq`, so it never reaches here.
+pub(crate) fn apply_correction_p(
+    correction_method: CorrectionMethod,
+    p: &[f64],
+    alpha: f64,
+    out: &mut [u8],
+) {
+    let t = p.len();
+    debug_assert_eq!(out.len(), t, "out length must match p");
+    out.fill(0);
+    if t == 0 {
+        return;
+    }
+    let m = t as f64;
+    match correction_method {
+        CorrectionMethod::None => {
+            for (o, &pi) in out.iter_mut().zip(p) {
+                *o = u8::from(pi <= alpha);
+            }
+        }
+        CorrectionMethod::Bonferroni => {
+            for (o, &pi) in out.iter_mut().zip(p) {
+                *o = u8::from(pi <= alpha / m);
+            }
+        }
+        CorrectionMethod::Holm => {
+            let order = sort_indices(p, false);
+            for (k, &i) in order.iter().enumerate() {
+                if p[i as usize] <= alpha / (m - k as f64) {
+                    out[i as usize] = 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        CorrectionMethod::BenjaminiHochberg => {
+            let order = sort_indices(p, false);
+            let last_sig = (0..t)
+                .rev()
+                .find(|&k| p[order[k] as usize] <= (k + 1) as f64 * alpha / m);
+            if let Some(last) = last_sig {
+                for &i in &order[..=last] {
+                    out[i as usize] = 1;
+                }
+            }
+        }
+        CorrectionMethod::TukeyHsd => {
+            unreachable!("Tukey HSD is decided from critvals::tukey_tail_sq")
+        }
+    }
+}
+
 /// Sort `0..t_sq.len()` indices by `t_sq[i]` descending using `f64::total_cmp`.
 /// Ties on equal `t²` break on ascending index (deterministic).
 /// NaN sorts to the end under descending order via `total_cmp` (NaN is total-cmp
 /// greater than all real values; we want failures to land at the end, so we put
 /// NaNs last by special-casing in the comparator).
 pub(crate) fn sort_indices_desc(t_sq: &[f64]) -> Vec<u32> {
-    let n = t_sq.len();
+    sort_indices(t_sq, true)
+}
+
+/// `sort_indices_desc`'s ordering, ascending or descending by value; NaN sinks
+/// to the end either way and ties break on ascending index.
+fn sort_indices(v: &[f64], descending: bool) -> Vec<u32> {
+    let n = v.len();
     let mut idx: Vec<u32> = (0..n as u32).collect();
     idx.sort_by(|&a, &b| {
-        let va = t_sq[a as usize];
-        let vb = t_sq[b as usize];
+        let va = v[a as usize];
+        let vb = v[b as usize];
         let a_nan = va.is_nan();
         let b_nan = vb.is_nan();
         match (a_nan, b_nan) {
@@ -108,8 +183,12 @@ pub(crate) fn sort_indices_desc(t_sq: &[f64]) -> Vec<u32> {
             (true, false) => std::cmp::Ordering::Greater, // NaN sinks to end
             (false, true) => std::cmp::Ordering::Less,
             (false, false) => {
-                // descending by value (total_cmp), tie-break ascending by index
-                vb.total_cmp(&va).then(a.cmp(&b))
+                let by_value = if descending {
+                    vb.total_cmp(&va)
+                } else {
+                    va.total_cmp(&vb)
+                };
+                by_value.then(a.cmp(&b))
             }
         }
     });
@@ -453,5 +532,62 @@ mod tests {
             out_bonf[1], 0,
             "Bonferroni: target1 (t²=25 < crit=30) must fail without pull-through"
         );
+    }
+
+    /// Per-target p-values from (t², df), each target at its own df, as the
+    /// Satterthwaite path computes them.
+    fn p_values(t_sq: &[f64], df: &[f64]) -> Vec<f64> {
+        t_sq.iter()
+            .zip(df)
+            .map(|(&t, &d)| crate::critvals::t_tail_sq(t, d))
+            .collect()
+    }
+
+    fn decide(method: CorrectionMethod, p: &[f64]) -> Vec<u8> {
+        let mut out = vec![9u8; p.len()];
+        apply_correction_p(method, p, 0.05, &mut out);
+        out
+    }
+
+    /// Holm and BH on p-values match R's `p.adjust(p, "holm" | "BH") <= 0.05`
+    /// when the targets carry different df, so the order by t² and the order by
+    /// p disagree. Target 0 has the larger t² (6.5 at df 8, p = 0.0342) and
+    /// target 1 the smaller one (6.0 at df 200, p = 0.0152): sorting by t²
+    /// tests target 0 first against α/2 and Holm would reject nothing, while
+    /// `p.adjust` rejects both.
+    #[test]
+    fn p_corrections_match_r_p_adjust_when_t_sq_and_p_order_disagree() {
+        use CorrectionMethod::*;
+        let p = p_values(&[6.5, 6.0], &[8.0, 200.0]);
+        assert_eq!(decide(Holm, &p), vec![1, 1]);
+        assert_eq!(decide(BenjaminiHochberg, &p), vec![1, 1]);
+        assert_eq!(decide(Bonferroni, &p), vec![0, 1]);
+        assert_eq!(decide(None, &p), vec![1, 1]);
+
+        // Holm stops at its first failure; BH's step-up pulls the earlier ranks
+        // through (p = 0.0342, 0.0152, 0.0329 → p.adjust: Holm F T F, BH T T T).
+        let p = p_values(&[6.5, 6.0, 5.0], &[8.0, 200.0, 30.0]);
+        assert_eq!(decide(Holm, &p), vec![0, 1, 0]);
+        assert_eq!(decide(BenjaminiHochberg, &p), vec![1, 1, 1]);
+        assert_eq!(decide(Bonferroni, &p), vec![0, 1, 0]);
+
+        // p = 0.0342, 0.0152, 0.0533 → p.adjust: Holm and BH both F T F.
+        let p = p_values(&[6.5, 6.0, 4.4], &[8.0, 200.0, 15.0]);
+        assert_eq!(decide(Holm, &p), vec![0, 1, 0]);
+        assert_eq!(decide(BenjaminiHochberg, &p), vec![0, 1, 0]);
+    }
+
+    /// A NaN p-value (a target the round dropped) never passes and counts in
+    /// `m`, as a NaN t² does in `apply_correction`.
+    #[test]
+    fn p_corrections_nan_fails_and_counts_in_m() {
+        use CorrectionMethod::*;
+        let p = [0.02, f64::NAN];
+        assert_eq!(decide(None, &p), vec![1, 0]);
+        // α/m = 0.025 with m = 2: 0.02 passes; with m = 1 it would too, so
+        // pin m through a value between α/2 and α.
+        assert_eq!(decide(Bonferroni, &[0.03, f64::NAN]), vec![0, 0]);
+        assert_eq!(decide(Holm, &[0.03, f64::NAN]), vec![0, 0]);
+        assert_eq!(decide(BenjaminiHochberg, &[0.03, f64::NAN]), vec![0, 0]);
     }
 }

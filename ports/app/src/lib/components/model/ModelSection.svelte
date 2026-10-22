@@ -17,7 +17,7 @@
   import BaselineRateInput from './BaselineRateInput.svelte';
   import ModelOptionsDialog from './ModelOptionsDialog.svelte';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
-  import { OUTCOME_KINDS, type OutcomeKind } from '$lib/domain/family';
+  import { OUTCOME_KINDS, mixedDefaultSimulations, mixedOutcomeKind, type OutcomeKind } from '$lib/domain/family';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
   let modelOptionsOpen = $state(false);
@@ -34,6 +34,11 @@
     if (familyStore.active === 'regression') {
       familyStore.regressionOutcome = kind;
     } else if (familyStore.active === 'mixed' && cfg.cluster) {
+      // Move the simulation count with the outcome only while it still sits at the
+      // previous outcome's default; a count the user edited stays.
+      if (cfg.advanced.simulations === mixedDefaultSimulations(mixedOutcomeKind(cfg.cluster))) {
+        cfg.advanced.simulations = mixedDefaultSimulations(kind);
+      }
       cfg.cluster.outcomeKind = kind;
       if ((kind === 'logit' || kind === 'probit') && cfg.cluster.baselineProbability === undefined) {
         cfg.cluster.baselineProbability = 0.2;

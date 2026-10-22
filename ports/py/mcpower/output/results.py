@@ -61,6 +61,7 @@ def _check_failure_threshold(
     boundary_hit_rate_tau_zero: List[float],
     boundary_hit_rate_high_tau: List[float],
     threshold: float,
+    clustered: bool = False,
 ) -> None:
     """Raise RuntimeError if any per-N failure rate exceeds *threshold*.
 
@@ -74,6 +75,8 @@ def _check_failure_threshold(
         boundary_hit_rate_high_tau: Per-N fraction of sims where τ̂ too high.
         threshold: Maximum acceptable failure rate (0–1).  If 1.0, the check
             never raises.
+        clustered: Whether the model has random effects. Only then does the
+            message carry the τ boundary breakdown and the ``n_clusters`` hint.
 
     Raises:
         RuntimeError: if ``max(failure_rates) > threshold``.
@@ -84,16 +87,25 @@ def _check_failure_threshold(
     if worst_rate > threshold:
         tz = boundary_hit_rate_tau_zero[worst_idx]
         ht = boundary_hit_rate_high_tau[worst_idx]
-        raise RuntimeError(
-            f"LME convergence failure rate {worst_rate:.1%} exceeds the "
+        msg = (
+            f"Convergence failure rate {worst_rate:.1%} exceeds the "
             f"configured threshold {threshold:.1%} "
             f"(sample-size index {worst_idx}). "
-            f"Boundary-hit breakdown at that N: "
-            f"tau_zero={tz:.1%} (τ̂=0, common for small ICC), "
-            f"high_tau={ht:.1%} (τ̂ implausibly large, potential red flag). "
-            f"Raise the threshold via set_max_failed_simulations() or increase "
-            f"n_clusters / sample size."
         )
+        if clustered:
+            msg += (
+                f"Boundary-hit breakdown at that N: "
+                f"tau_zero={tz:.1%} (τ̂=0, common for small ICC), "
+                f"high_tau={ht:.1%} (τ̂ implausibly large, potential red flag). "
+                f"Raise the threshold via set_max_failed_simulations() or increase "
+                f"n_clusters / sample size."
+            )
+        else:
+            msg += (
+                "Raise the threshold via set_max_failed_simulations() or "
+                "increase the sample size."
+            )
+        raise RuntimeError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -250,15 +262,39 @@ class SampleSizeResult(dict):
         ci_lo/ci_hi: outward-rounded integers when status == fitted and bound
         present, NA otherwise. Both cast to pandas nullable Int64.
 
+        Post-hoc pairwise contrasts (target_test="all-contrasts") get one row
+        each, labelled like the printed table, with the same required_n / ci
+        convention.
+
         Always carries the full column set, even when there are no rows (e.g. a
         pure post-hoc query with an empty target_indices), so the Int64 cast
-        below never hits a missing-column error. Post-hoc pairwise contrasts
-        (target_test="all-contrasts") carry no required-N search result here —
-        the engine does not compute a per-contrast crossing for them."""
+        below never hits a missing-column error."""
         import math
         import pandas as pd
         columns = ["test", "scenario", "required_n", "ci_lo", "ci_hi"]
         rows = []
+
+        def add_row(label, scen_name, f, first_n):
+            # required_n convention (see docstring above).
+            if f is not None and f.get("status") == "fitted":
+                req = f["n_achievable"]
+            elif f is None or f.get("status") == "non_monotone":
+                req = first_n
+            else:
+                # at_or_below_min or not_reached: no single integer to export.
+                req = None
+            # ci_lo/ci_hi: only when fitted and both bounds are not None.
+            if f is not None and f.get("status") == "fitted":
+                ci_lo_raw = f.get("ci_lo")
+                ci_hi_raw = f.get("ci_hi")
+                ci_lo = math.floor(ci_lo_raw) if ci_lo_raw is not None else None
+                ci_hi = math.ceil(ci_hi_raw) if ci_hi_raw is not None else None
+            else:
+                ci_lo = None
+                ci_hi = None
+            rows.append({"test": label, "scenario": scen_name,
+                         "required_n": req, "ci_lo": ci_lo, "ci_hi": ci_hi})
+
         for scen_name, inner in _scenarios(self):
             fitted_map = inner.get("fitted") or {}
             for r in build_rows(inner["target_indices"], self._meta,
@@ -266,26 +302,17 @@ class SampleSizeResult(dict):
                 if r["kind"] == "factor_header":
                     continue
                 pos = r["pos"]
-                f = fitted_map.get(pos)
-                # required_n convention (see docstring above).
-                if f is not None and f.get("status") == "fitted":
-                    req = f["n_achievable"]
-                elif f is None or f.get("status") == "non_monotone":
-                    req = inner["first_achieved"].get(pos)
-                else:
-                    # at_or_below_min or not_reached: no single integer to export.
-                    req = None
-                # ci_lo/ci_hi: only when fitted and both bounds are not None.
-                if f is not None and f.get("status") == "fitted":
-                    ci_lo_raw = f.get("ci_lo")
-                    ci_hi_raw = f.get("ci_hi")
-                    ci_lo = math.floor(ci_lo_raw) if ci_lo_raw is not None else None
-                    ci_hi = math.ceil(ci_hi_raw) if ci_hi_raw is not None else None
-                else:
-                    ci_lo = None
-                    ci_hi = None
-                rows.append({"test": r["label"], "scenario": scen_name,
-                             "required_n": req, "ci_lo": ci_lo, "ci_hi": ci_hi})
+                add_row(r["label"], scen_name, fitted_map.get(pos),
+                        inner["first_achieved"].get(pos))
+            ph_fits = inner.get("posthoc_fitted") or []
+            ph_first = inner.get("posthoc_first_achieved") or []
+            for r in posthoc_rows(self._meta):
+                if r["kind"] == "posthoc_header" or r["block"] >= len(ph_first):
+                    continue
+                b, c = r["block"], r["contrast"]
+                add_row(r["label"], scen_name,
+                        ph_fits[b].get(c) if b < len(ph_fits) else None,
+                        ph_first[b].get(c))
         df = pd.DataFrame(rows, columns=columns)
         # Nullable integer dtype: NAs propagate correctly in downstream arithmetic.
         df["ci_lo"] = df["ci_lo"].astype("Int64")

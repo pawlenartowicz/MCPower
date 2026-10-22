@@ -1,8 +1,8 @@
 //! Lightweight cooperative cancellation. Checked at every N-point boundary
 //! and inside the `engine_core::ProgressSink` shim `EngineSinkAdapter`.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Shared cancellation flag (`Arc<AtomicBool>`); clones observe the same
 /// flag. Hosts flip it (Python's `KeyboardInterrupt`, a Tauri cancel command,

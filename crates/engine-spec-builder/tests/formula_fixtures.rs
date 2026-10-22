@@ -14,11 +14,11 @@
 use std::path::{Path, PathBuf};
 
 use engine_spec_builder::{
-    parse_assignments, parse_formula, AssignmentKey, AssignmentKind, AssignmentValue, Assignments,
-    KnownNames, VarTypeParams,
+    AssignmentKey, AssignmentKind, AssignmentValue, Assignments, KnownNames, VarTypeParams,
+    parse_assignments, parse_formula,
 };
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/formula-fixtures")
@@ -80,7 +80,6 @@ fn assignments_json(a: &Assignments) -> Value {
                 AssignmentKey::Pair(x, y) => json!({ "pair": [x, y] }),
             };
             let value = match value {
-                AssignmentValue::VariableType(t) => json!({ "variable_type": t }),
                 AssignmentValue::VariableTypeWithParams { var_type, params } => {
                     let info = match params {
                         VarTypeParams::Bare => json!({ "type": var_type }),

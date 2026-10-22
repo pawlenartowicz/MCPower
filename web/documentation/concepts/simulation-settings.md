@@ -8,7 +8,7 @@ Power in MCPower is estimated by **simulation** — the engine generates many sy
 
 ## Simulation count
 
-The number of simulated datasets sets the **precision** of the estimate: more simulations narrow the confidence interval around the power number but take longer. The defaults balance the two — **1,600** simulations for OLS and other single-fit designs, **800** for mixed-effects models (each fit costs more). Raising the count helps when two designs report nearly identical power and you need to tell them apart.
+The number of simulated datasets sets the **precision** of the estimate: more simulations narrow the confidence interval around the power number but take longer. The defaults balance the two — **1,600** simulations for OLS and other single-fit designs, **800** for mixed-effects models with a continuous outcome and **400** for mixed-effects models with a binary or count outcome (each fit costs more). Raising the count helps when two designs report nearly identical power and you need to tell them apart.
 
 ## Alpha
 
@@ -60,11 +60,14 @@ reference instead: Student *t* on the residual df N − p for an LME, Wald z
 for a GLMM. For an LME on a balanced design this is also where a Satterthwaite
 reference puts the df of a cluster-level effect, so the two agree there.
 
-`df_method="between_within"` falls back to Wald z when the design has a
-crossed or nested extra grouping. When the design leaves fewer than one
-between-cluster df (`g − p_between < 1`: at least as many cluster-level
-columns, intercept included, as clusters) or fewer than one within-cluster
-df, the run stops with an error naming the counts; pick
+When the design has a crossed or nested extra grouping, the between-within
+split is not defined, so `df_method="between_within"` tests an LME's fixed
+effects against a *t* at each simulated fit's Satterthwaite degrees of
+freedom (as lmerTest computes them), and a GLMM's against a Wald z. A fit
+whose Satterthwaite pass fails is tested against the Wald z. When the design
+leaves fewer than one between-cluster df (`g − p_between < 1`: at least as
+many cluster-level columns, intercept included, as clusters) or fewer than one
+within-cluster df, the run stops with an error naming the counts; pick
 `df_method="asymptotic"` or add clusters. It has no effect on OLS or unclustered
 GLM, which already use their exact reference distributions. Its calibration
 against lmerTest Satterthwaite is on the

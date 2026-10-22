@@ -7,12 +7,12 @@
 //! so the wire shapes are pinned here, where `cargo test` runs them.
 
 use engine_app_spec::{
-    parse_formula, run_single_core_find_power, AppSpec, EffectSize, LinearSpec, LogitSpec,
-    NullEmitter, ParsedFormula, TestSelection, VarType,
+    AppSpec, EffectSize, LinearSpec, LogitSpec, NullEmitter, ParsedFormula, PoissonSpec,
+    TestSelection, VarType, parse_formula, run_single_core_find_power,
 };
 use engine_contract::CorrectionMethod;
 use engine_orchestrator::{
-    merge_power_results, CancellationToken, EstimatorExtras, PowerResult, ScenarioResult,
+    CancellationToken, EstimatorExtras, PowerResult, ScenarioResult, merge_power_results,
 };
 use serde_json::json;
 
@@ -98,8 +98,8 @@ fn contrast_bearing_spec_ep1_vector_lengths_survive_wire_and_merge() {
     });
 
     let cancel = CancellationToken::new();
-    let part =
-        run_single_core_find_power(&spec, 80, 200, 11, &NullEmitter, &cancel).expect("run ok");
+    let part = run_single_core_find_power(&spec, 80, 200, 11, None, &NullEmitter, &cancel)
+        .expect("run ok");
 
     // Wire round-trip: same path the WASM worker takes handing results to the
     // main thread over the JS boundary.
@@ -146,41 +146,45 @@ fn contrast_bearing_spec_ep1_vector_lengths_survive_wire_and_merge() {
     );
 }
 
-/// EP-2: NaN-bearing GLM extras survive the JSON wire and `merge_power_results`.
+/// EP-2: GLM extras survive the JSON wire and `merge_power_results`, NaN
+/// fields included.
 ///
 /// `serde_json` renders `f64::NAN` as JSON `null` and rejects `null` back as an
-/// `f64` unless the field uses the `nan_tolerant` deserializer. Any logit result
-/// from a single-core (WASM worker) run carries exactly two structural NaN fields:
-///   - `baseline_prob_realized` — computed as `sum/n`, but per-worker `n == 0`
-///     (the accumulator is filled only at `merge_power_results` time, not in the
-///     single-core path's `EstimatorExtras::from_batch`)
-///   - `tau_squared_hat_mean` — `tau_sum/tau_n`, with `tau_n == 0` for any
-///     unclustered logit spec (no Laplace random-effect estimates)
+/// `f64` unless the field uses the `nan_tolerant` deserializer. A single-core
+/// (WASM worker) unclustered logit part carries a finite realized event rate
+/// (`baseline_prob_realized`, the mean of the generated binary y) and a NaN
+/// `tau_squared_hat_mean` (no random effect, so `tau_n == 0`); a Poisson part
+/// carries a NaN event rate too, since the rate is defined for a Binary outcome
+/// only.
 ///
 /// The production WASM path is: worker calls `run_single_core_find_power` →
 /// `serde_json::to_string` → postMessage → main thread `serde_json::from_str` →
-/// `merge_power_results`. This test pins that `nan_tolerant` guards those fields,
-/// so removing the guard later breaks this test rather than silently crashing a
-/// live browser merge.
+/// `merge_power_results`. This test pins that `nan_tolerant` guards those
+/// fields and that the finite rate crosses the wire unchanged, so removing the
+/// guard later breaks this test rather than silently crashing a live browser
+/// merge.
 #[test]
 fn nan_bearing_extras_survive_json_wire_and_merge() {
+    let parsed_formula = ParsedFormula {
+        outcome: "y".into(),
+        predictors: vec!["x1".into()],
+        interaction_terms: vec![],
+    };
+    let var_types = vec![VarType::Numeric {
+        name: "x1".into(),
+        distribution: Default::default(),
+        pinned: false,
+    }];
+    let effects = vec![EffectSize {
+        name: "x1".into(),
+        value: 0.3,
+    }];
     // A minimal unclustered logit spec — `baseline_probability` anchors the
     // GLM intercept; effects are small so the run doesn't take long.
-    let spec = AppSpec::Logit(LogitSpec {
-        parsed_formula: ParsedFormula {
-            outcome: "y".into(),
-            predictors: vec!["x1".into()],
-            interaction_terms: vec![],
-        },
-        var_types: vec![VarType::Numeric {
-            name: "x1".into(),
-            distribution: Default::default(),
-            pinned: false,
-        }],
-        effects: vec![EffectSize {
-            name: "x1".into(),
-            value: 0.3,
-        }],
+    let logit = AppSpec::Logit(LogitSpec {
+        parsed_formula: parsed_formula.clone(),
+        var_types: var_types.clone(),
+        effects: effects.clone(),
         correlations: None,
         alpha: 0.05,
         target_power: 0.8,
@@ -197,71 +201,94 @@ fn nan_bearing_extras_survive_json_wire_and_merge() {
         test_formula: None,
         outcome_options: None,
     });
+    let poisson = AppSpec::Poisson(PoissonSpec {
+        parsed_formula,
+        var_types,
+        effects,
+        correlations: None,
+        alpha: 0.05,
+        target_power: 0.8,
+        n_sims: 64,
+        seed: 2137,
+        tests: TestSelection::All,
+        correction: CorrectionMethod::None,
+        wald_se: Default::default(),
+        scenarios: vec![],
+        csv: None,
+        baseline_rate: 2.0,
+        test_formula: None,
+        outcome_options: None,
+        agq: 1,
+    });
 
     let cancel = CancellationToken::new();
-    let part =
-        run_single_core_find_power(&spec, 80, 64, 11, &NullEmitter, &cancel).expect("run ok");
-
-    // The single-core result must carry GLM extras with NaN in both structural
-    // placeholders: baseline_prob_realized (accumulator only filled at merge,
-    // never in from_batch) and tau_squared_hat_mean (tau_n==0, no RE estimates).
-    let (_, pr) = &part.scenarios[0];
-    let EstimatorExtras::Glm {
-        baseline_prob_realized,
-        tau_squared_hat_mean,
-        ..
-    } = &pr.estimator_extras
-    else {
-        panic!("logit run must yield Glm extras");
+    let extras = |r: &ScenarioResult<PowerResult>| match &r.scenarios[0].1.estimator_extras {
+        EstimatorExtras::Glm {
+            baseline_prob_realized,
+            tau_squared_hat_mean,
+            ..
+        } => (*baseline_prob_realized, *tau_squared_hat_mean),
+        other => panic!("a GLM run must yield Glm extras, got {other:?}"),
     };
+    let wire = |r: &ScenarioResult<PowerResult>| -> ScenarioResult<PowerResult> {
+        let json = serde_json::to_string(r).expect("serializes");
+        assert!(
+            json.contains("null"),
+            "NaN must appear as JSON null before the wire: {json}"
+        );
+        serde_json::from_str(&json).expect("EP-2: JSON null→NaN decode must not fail")
+    };
+
+    // Logit: finite event rate, NaN τ̂² (unclustered).
+    let part = run_single_core_find_power(&logit, 80, 64, 11, None, &NullEmitter, &cancel)
+        .expect("run ok");
+    let (rate, tau) = extras(&part);
     assert!(
-        baseline_prob_realized.is_nan(),
-        "baseline_prob_realized must be NaN before merge (n==0 in from_batch)"
+        rate > 0.0 && rate < 1.0,
+        "logit event rate must be a finite proportion, got {rate}"
     );
     assert!(
-        tau_squared_hat_mean.is_nan(),
+        tau.is_nan(),
         "tau_squared_hat_mean must be NaN for unclustered logit (tau_n==0)"
     );
-
-    // JSON wire: serde_json encodes NaN as null; nan_tolerant must decode it back.
-    let json = serde_json::to_string(&part).expect("serializes");
-    assert!(
-        json.contains("null"),
-        "NaN must appear as JSON null before the wire: {json}"
-    );
-    let back: ScenarioResult<PowerResult> =
-        serde_json::from_str(&json).expect("EP-2: JSON null→NaN decode must not fail");
-
-    let EstimatorExtras::Glm {
-        baseline_prob_realized: bp_back,
-        tau_squared_hat_mean: tau_back,
-        ..
-    } = &back.scenarios[0].1.estimator_extras
-    else {
-        panic!("extras must remain Glm after JSON round-trip");
-    };
-    assert!(
-        bp_back.is_nan(),
-        "baseline_prob_realized must survive JSON null→NaN"
+    let back = wire(&part);
+    let (rate_back, tau_back) = extras(&back);
+    assert_eq!(
+        rate_back.to_bits(),
+        rate.to_bits(),
+        "the event rate must cross the JSON wire unchanged"
     );
     assert!(
         tau_back.is_nan(),
         "tau_squared_hat_mean must survive JSON null→NaN"
     );
-
-    // Merge path: two decoded worker parts merged by the WASM main thread.
-    // The merge must succeed (not panic or error on the NaN extras) and keep
-    // the Glm extras variant; the merged extras' values are the orchestrator
-    // merge's own contract.
+    let alone = merge_power_results(std::slice::from_ref(&back)).expect("merge of one part ok");
+    assert_eq!(
+        extras(&alone).0.to_bits(),
+        rate.to_bits(),
+        "merging one part must reproduce its event rate"
+    );
     let merged = merge_power_results(&[back.clone(), back])
         .expect("EP-2: merge must not fail on NaN extras");
-    let (_, merged_pr) = &merged.scenarios[0];
-    assert!(
-        matches!(merged_pr.estimator_extras, EstimatorExtras::Glm { .. }),
-        "merged extras must remain Glm"
-    );
     assert_eq!(
-        merged_pr.n_sims, 128,
+        merged.scenarios[0].1.n_sims, 128,
         "merged n_sims must sum the two parts"
+    );
+
+    // Poisson: no Binary outcome, so the event rate is NaN through the wire
+    // and the merge.
+    let part = run_single_core_find_power(&poisson, 80, 64, 11, None, &NullEmitter, &cancel)
+        .expect("run ok");
+    assert!(extras(&part).0.is_nan(), "a Poisson part has no event rate");
+    let back = wire(&part);
+    assert!(
+        extras(&back).0.is_nan(),
+        "baseline_prob_realized must survive JSON null→NaN"
+    );
+    let merged = merge_power_results(&[back.clone(), back])
+        .expect("EP-2: merge must not fail on NaN extras");
+    assert!(
+        extras(&merged).0.is_nan(),
+        "a merge with no event rate behind it stays NaN"
     );
 }

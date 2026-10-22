@@ -10,7 +10,7 @@ import {
   valueToLabel,
 } from './upload-detect';
 import type { CsvData } from './app-spec';
-import fixture from './__fixtures__/upload_type_detection.json';
+import fixture from '$configs/upload_type_detection.json';
 
 // ---------------------------------------------------------------------------
 // Golden fixture shape helpers

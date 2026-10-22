@@ -249,9 +249,9 @@ class MCPower:
         self.seed: Optional[int] = _sim["seed"]
         self.power: float = _sim["target_power"] * 100.0
         self.alpha: float = _sim["alpha"]
-        # Family-aware: lme fits are more expensive, so they default to the
-        # lighter `mixed` budget; OLS and logit (GLM) use the `ols` budget.
-        self.n_simulations: int = _sim["n_sims"]["mixed" if family_norm == "lme" else "ols"]
+        # Unset until `set_simulations`; `_resolved_n_simulations` fills it in
+        # at run time, once clustering is known.
+        self.n_simulations: Optional[int] = None
         # Post-batch gate — fraction of unconverged sims tolerated before raising.
         self.max_failed_simulations: float = _sim["max_failed_fraction"]
 
@@ -429,8 +429,9 @@ class MCPower:
                 SlopeTerm).
             n_per_parent: For nested random effects ``(1|A/B)``: the number of
                 B-level units per A-level unit (fixed, not derived from sample_size).
-                Required when the grouping_var is of the form ``"A:B"`` (the parser
-                encodes ``(1|A/B)`` as a composite ``"A:B"`` grouping).
+                Applies to the composite ``"A:B"`` grouping the parser makes of
+                ``(1|A/B)``; defaults to the config value when omitted. Passing
+                ``n_clusters`` for such a grouping is an error.
             cluster_level_vars: Names of predictors in the model formula that
                 are measured at the cluster level (i.e. constant within each
                 cluster, varying across clusters). These are sent to the engine
@@ -455,6 +456,7 @@ class MCPower:
         # encodes `(1|A/B)` as a `parent_var` plus a composite "A:B" entry.
         parsed_re = self._registry._random_effects_parsed
         parsed_grouping_vars = [re["grouping_var"] for re in parsed_re]
+        is_nested_child = grouping_var in self._nested_child_vars()
 
         from .spec.validators import _validate_cluster_config
 
@@ -489,6 +491,7 @@ class MCPower:
             cluster_size,
             parsed_grouping_vars,
             n_per_parent,
+            is_nested_child,
         ).raise_if_invalid()
 
         if cluster_level_vars:
@@ -747,11 +750,12 @@ class MCPower:
                 )
             driver_var_index = non_factor.index(var)
 
-        # Heteroskedasticity is an OLS-only DGP feature; warn for other families.
-        if self.family not in ("ols", None):
+        # The engine applies heteroskedasticity to continuous outcomes only
+        # (OLS and linear mixed); binary and count outcomes ignore it.
+        if self.outcome_kind != "continuous":
             warnings.warn(
                 f"set_heteroskedasticity_driver() has no effect for family={self.family!r}; "
-                "heteroskedasticity is an OLS-only DGP parameter and will be ignored by the engine.",
+                "heteroskedasticity applies to continuous outcomes only and will be ignored by the engine.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -792,13 +796,39 @@ class MCPower:
                 "Valid values: 'between_within' (default) or 'asymptotic'."
             )
 
+    def _resolved_n_simulations(self) -> int:
+        """The simulation count: the user's ``set_simulations`` value, else the
+        config default for the design — ``glmm`` for a clustered binary/count
+        outcome, ``mixed`` for a clustered continuous one, ``ols`` otherwise."""
+        if self.n_simulations is not None:
+            return int(self.n_simulations)
+        from .config import get_simulation_defaults
+        budgets = get_simulation_defaults()["n_sims"]
+        if not self._pending_clusters:
+            return int(budgets["ols"])
+        if self.outcome_kind in ("binary", "count"):
+            return int(budgets["glmm"])
+        return int(budgets["mixed"])
+
+    def _nested_child_vars(self) -> set:
+        """Grouping vars the formula parser flagged as nested children of a
+        parent (``(1|A/B)`` gives the composite ``"A:B"``)."""
+        return {
+            re["grouping_var"]
+            for re in self._registry._random_effects_parsed
+            if re.get("parent_var") is not None
+        }
+
     def _agq_eligible(self) -> bool:
         """Whether the current design admits adaptive Gauss–Hermite quadrature
         (``agq > 1``). Mirrors the contract backstop (invariant 25) and glmm's
         ``assert_model_shape`` — change all three together: a Binary/Count GLMM
         with a single grouping factor and at most 3 random effects per group
-        (intercept + slopes)."""
+        (intercept + slopes), fitted by the GLM estimator (``estimator="mle"``
+        and ``"ols"`` fit a Gaussian model with no quadrature)."""
         if self.outcome_kind not in ("binary", "count"):
+            return False
+        if self.estimator != "glm":
             return False
         # Clustered (GLMM) with exactly one grouping factor — crossed/nested
         # extra groupings (a second _pending_clusters entry) are ineligible.
@@ -834,8 +864,8 @@ class MCPower:
             _warnings.warn(
                 f"agq={nagq} is not available for this design; running at "
                 "agq=1 (Laplace). AGQ requires a clustered binary or count "
-                "(logit/probit/poisson) model with a single grouping factor "
-                "and at most 3 random effects per group.",
+                "(logit/probit/poisson) model fitted with the GLM estimator, "
+                "a single grouping factor and at most 3 random effects per group.",
                 stacklevel=3,
             )
             nagq = 1
@@ -1379,7 +1409,7 @@ class MCPower:
 
         # Validate extra groupings. A crossed grouping must have n_clusters
         # explicitly (no sample_size derivation for secondary groupings); a
-        # nested grouping (n_per_parent set) is sized by that count instead.
+        # nested child grouping is sized by its n_per_parent instead.
         for extra_var, extra_cfg in items[1:]:
             _validate_cluster_config(
                 extra_var,
@@ -1388,6 +1418,7 @@ class MCPower:
                 extra_cfg.get("cluster_size"),
                 parsed_grouping_vars,
                 extra_cfg.get("n_per_parent"),
+                extra_var in self._nested_child_vars(),
             ).raise_if_invalid()
 
         # Derive effective n_clusters from the primary grouping only.
@@ -1771,8 +1802,8 @@ class MCPower:
 
         The primary (first) grouping carries sizing + tau_squared. Additional
         groupings are folded into extra_groupings with a Crossed or Nested
-        relation — Nested when n_per_parent is set (composite "A:B" grouping
-        var from (1|A/B) formula syntax), Crossed otherwise.
+        relation — Nested for a composite "A:B" grouping var from (1|A/B)
+        formula syntax (or when n_per_parent is set), Crossed otherwise.
 
         Per-grouping τ² is family/link-aware — see `_re_tau_squared`.
         """
@@ -1781,6 +1812,8 @@ class MCPower:
                 "a clustered DGP requires set_cluster(...) before "
                 "to_simulation_spec(); no cluster configured"
             )
+        from .config import get_simulation_defaults
+
         items = list(self._pending_clusters.items())
         primary_var, primary_cfg = items[0]
 
@@ -1813,10 +1846,13 @@ class MCPower:
                 _tau = self._re_tau_squared(_cfg)
                 _n_per_parent = _cfg.get("n_per_parent")
                 _n_cls = _cfg.get("n_clusters")
-                if _n_per_parent is not None:
+                if _n_per_parent is not None or _gvar in self._nested_child_vars():
                     # Nested: (1|A/B) composite grouping. n_per_parent is
-                    # the B-units-per-A-unit count (fixed by the user, not
-                    # derived from sample_size — matches engine GroupingRelation::NestedWithin).
+                    # the B-units-per-A-unit count (fixed by the user or the
+                    # config default, not derived from sample_size — matches
+                    # engine GroupingRelation::NestedWithin).
+                    if _n_per_parent is None:
+                        _n_per_parent = get_simulation_defaults()["nested_n_per_parent"]
                     _relation: Dict[str, Any] = {
                         "NestedWithin": {"n_per_parent": int(_n_per_parent)}
                     }
@@ -1923,8 +1959,9 @@ class MCPower:
         effect against a t with between-within denominator degrees of
         freedom — between-cluster df if the predictor is cluster-level,
         within-cluster df otherwise; ``"asymptotic"`` tests against a Wald z.
-        Ignored for OLS and unclustered GLM; not applied (falls back to Wald
-        z) with crossed or nested extra groupings. Cluster-level predictors
+        Ignored for OLS and unclustered GLM. With crossed or nested extra
+        groupings an LME is tested at each fit's Satterthwaite df instead, and
+        a GLMM against a Wald z. Cluster-level predictors
         must be declared with ``cluster_level_vars`` (see
         :meth:`set_cluster`) for the between df to apply. A fit whose random-effect variances all collapse
         to zero (a singular fit) is tested against the residual df ``N - p``
@@ -1967,7 +2004,7 @@ class MCPower:
         # N is snapped to the cluster atom inside the engine (find_power); the
         # snapped value comes back on the result and is surfaced as a warning.
         self._validate_lme_runtime(int(sample_size), names)
-        n = int(n_sims) if n_sims is not None else int(self.n_simulations)
+        n = int(n_sims) if n_sims is not None else self._resolved_n_simulations()
         # base_seed: explicit `seed=` kwarg wins; else self.seed (default 2137);
         # else 0 as a final fallback.
         base_seed = (
@@ -2044,13 +2081,11 @@ class MCPower:
                 if _w is not None:
                     warnings.warn(_w, UserWarning, stacklevel=2)
                     break
-        _baseline_req = (self._pending_baseline_probability
-                         if self.outcome_kind == "binary" else None)
         wire_posthoc_factors = [r["factor"] for r in payload.get("posthoc_requests", [])]
         result = make_power_result(result, self._report_meta(
             correction=correction, posthoc_factors=wire_posthoc_factors,
             effect_skeleton=effect_skeleton,
-            baseline_prob_requested=_baseline_req, min_cluster_size=_min_cs))
+            min_cluster_size=_min_cs))
         if verbose:
             print(result)
         if self._uploaded_data_mode == "strict" and self._uploaded_data_n > 0:
@@ -2070,7 +2105,7 @@ class MCPower:
         return result
 
     def _report_meta(self, *, correction, posthoc_factors=None, effect_skeleton=None,
-                     baseline_prob_requested=None, min_cluster_size=None,
+                     min_cluster_size=None,
                      unit=None, unit_cluster_name=None):
         """Label + header context the result object needs to render. The port
         owns labels (joined to the engine's integer target_indices).
@@ -2084,11 +2119,10 @@ class MCPower:
         post-hoc contrasts were requested. Used to build posthoc_factors in the
         returned dict, which maps position → factor name + ordered level labels.
 
-        baseline_prob_requested / min_cluster_size: meta-level diagnostics inputs
-        (one per run, not per scenario). The requested GLM event probability
-        (drives the live baseline-drift gate) and the smallest cluster size at
-        the evaluated N (drives the persistent Laplace-bias line). Both None for
-        OLS / non-binary / non-clustered runs. Consumed by diagnostic_warnings.
+        min_cluster_size: meta-level diagnostics input (one per run, not per
+        scenario): the smallest cluster size at the evaluated N (drives the
+        persistent Laplace-bias line). None for OLS / non-binary / non-clustered
+        runs. Consumed by diagnostic_warnings.
 
         unit / unit_cluster_name: find_sample_size only. ``unit`` is the wire
         value passed to the engine (``"observations"`` / ``"clusters"`` /
@@ -2120,7 +2154,6 @@ class MCPower:
             "target_power": self.power / 100.0,  # stored as 80.0, render as 0.8
             "formula": self.equation,
             "residual": self._residual_dist_name,
-            "baseline_prob_requested": baseline_prob_requested,
             "min_cluster_size": min_cluster_size,
             "unit": unit,
             "unit_cluster_name": unit_cluster_name,
@@ -2247,7 +2280,7 @@ class MCPower:
         self._validate_logit_runtime(names)
         self._validate_lme_runtime(None, names)
 
-        n = int(n_sims) if n_sims is not None else int(self.n_simulations)
+        n = int(n_sims) if n_sims is not None else self._resolved_n_simulations()
         base_seed = (
             int(seed)
             if seed is not None
@@ -2332,8 +2365,6 @@ class MCPower:
                 if _w is not None:
                     warnings.warn(_w, UserWarning, stacklevel=2)
                     break
-        _baseline_req = (self._pending_baseline_probability
-                         if self.outcome_kind == "binary" else None)
         wire_posthoc_factors = [r["factor"] for r in payload.get("posthoc_requests", [])]
         _unit_cluster_name = (
             next(iter(self._pending_clusters), None) if unit != "observations" else None
@@ -2341,7 +2372,7 @@ class MCPower:
         result = make_sample_size_result(result, self._report_meta(
             correction=correction, posthoc_factors=wire_posthoc_factors,
             effect_skeleton=effect_skeleton,
-            baseline_prob_requested=_baseline_req, min_cluster_size=_min_cs,
+            min_cluster_size=_min_cs,
             unit=unit, unit_cluster_name=_unit_cluster_name))
         if verbose:
             print(result)
@@ -2391,6 +2422,7 @@ class MCPower:
             boundary_hit_rate_tau_zero=result.get("boundary_hit_rate_tau_zero", [0.0] * len(cr)),
             boundary_hit_rate_high_tau=result.get("boundary_hit_rate_high_tau", [0.0] * len(cr)),
             threshold=self.max_failed_simulations,
+            clustered=bool(self._pending_clusters),
         )
 
     def summary(self) -> Dict[str, Any]:
@@ -2407,7 +2439,7 @@ class MCPower:
                 [float(b) for b in self._registry.get_effect_sizes()],
                 strict=False,
             )),
-            "n_simulations": self.n_simulations,
+            "n_simulations": self._resolved_n_simulations(),
             "alpha": self.alpha,
             "power_target": self.power,
             "residual_distribution": self._residual_dist_name,

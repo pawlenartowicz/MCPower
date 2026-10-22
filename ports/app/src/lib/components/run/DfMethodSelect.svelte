@@ -43,7 +43,8 @@
   <p class="mt-1 text-xs text-muted-foreground">
     Between-within tests each fixed effect against a t rather than a Wald z — between-cluster
     df if the predictor is cluster-level, within-cluster df otherwise. Mark cluster-level
-    predictors (cluster settings → Cluster-level variables) for the between df to apply;
-    crossed or nested extra groupings fall back to Wald z.
+    predictors (cluster settings → Cluster-level variables) for the between df to apply.
+    With crossed or nested extra groupings, a linear mixed model uses Satterthwaite df and a
+    GLMM uses Wald z.
   </p>
 </div>

@@ -287,8 +287,9 @@ describe('JointDistTab — fitted_joint crossing fits', () => {
     const tab = makeSampleSizeTab(fitted_joint);
     const { getByText, queryByText } = render(JointDistTab, { props: { tab } });
     // k=2 row (j=0): fitted_joint[1] → n_achievable=120; k=1 row (j=1): fitted_joint[0] → n_achievable=60.
-    expect(getByText('120')).toBeTruthy();
-    expect(getByText('60')).toBeTruthy();
+    const rowText = (label: string) => getByText(label).closest('tr')?.textContent?.replace(/\s+/g, ' ').trim();
+    expect(rowText('≥ 2 of 2 tests')).toBe('≥ 2 of 2 tests120');
+    expect(rowText('≥ 1 of 2 tests')).toBe('≥ 1 of 2 tests60');
     // Grid values 50 and 100 should NOT appear (overridden).
     expect(queryByText('50')).toBeNull();
     expect(queryByText('100')).toBeNull();

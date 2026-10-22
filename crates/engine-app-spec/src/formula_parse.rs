@@ -5,7 +5,7 @@
 //! `{dependent, predictors, terms:[{kind,..}], random_effects:[{kind,..}]}`.
 //! This keeps the cross-port formula-effect suite byte-comparable across hosts.
 
-use engine_spec_builder::{parse_formula as sb_parse, RandomEffect, Term};
+use engine_spec_builder::{RandomEffect, Term, parse_formula as sb_parse};
 use serde::Serialize;
 
 use crate::error::AdapterError;

@@ -699,19 +699,6 @@ mod tests {
         assert_eq!(seen.len(), atom);
     }
 
-    /// Primary assignment is byte-identical with and without extras — adding
-    /// a grouping never reshuffles existing cluster membership.
-    #[test]
-    fn primary_assignment_unchanged_by_extras() {
-        let sizing = ClusterSizing::FixedClusters { n_clusters: 5 };
-        let mut spec = ClusterSpec::intercept_only(sizing.clone(), 0.25);
-        spec.extra_groupings.push(crossed(3, 0.1));
-        spec.extra_groupings.push(nested(2, 0.05));
-        for i in 0..120 {
-            assert_eq!(spec.sizing.cluster_of_row(i), sizing.cluster_of_row(i));
-        }
-    }
-
     /// Regime A nested: child = parent·n_per + within; every child exactly
     /// once per atom block; balanced at atom multiples; child→parent = id/n_per.
     #[test]

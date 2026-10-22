@@ -2,8 +2,8 @@
 //! (`configs/formula-fixtures/assignments/`, driven by `tests/formula_fixtures.rs`).
 
 use engine_spec_builder::{
-    parse_assignments, AssignmentKey, AssignmentKind, AssignmentValue, KnownNames, SpecError,
-    VarTypeParams,
+    AssignmentKey, AssignmentKind, AssignmentValue, KnownNames, SpecError, VarTypeParams,
+    parse_assignments,
 };
 
 fn known_owned() -> (Vec<String>, Vec<String>) {

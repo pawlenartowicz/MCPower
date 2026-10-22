@@ -152,7 +152,7 @@ mod tests {
     use crate::rng::SimRng;
     use crate::workspace::SimWorkspace;
     use faer::Mat;
-    use glmm::loop_advanced::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
+    use glmm::loop_advanced::{OlsScratch, OlsSuffStats, fit_suff_stats_t_sq};
 
     /// Posthoc contrast **golden** on a 3-level factor + continuous covariate,
     /// pinned against an external R `lm` oracle (scripts/posthoc_contrast_golden.R).

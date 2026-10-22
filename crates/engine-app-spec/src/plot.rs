@@ -11,8 +11,8 @@
 //! joint-detection curve must match the corrected joint required-N table.
 
 use engine_orchestrator::{
-    power_plot_set, sample_size_plot_set, PlotOptions, PlotPoint, PlotScenario, PowerResult,
-    SampleSizeResult, ScenarioResult,
+    PlotOptions, PlotPoint, PlotScenario, PowerResult, SampleSizeResult, ScenarioResult,
+    power_plot_set, sample_size_plot_set,
 };
 use serde::Serialize;
 

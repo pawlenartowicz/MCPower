@@ -12,7 +12,7 @@ use crate::data_gen::generate_sim_data;
 use crate::spec::{Distribution, EstimatorSpec, OutcomeKind, SimulationSpec};
 use crate::workspace::SimWorkspace;
 use faer::Mat;
-use glmm::loop_advanced::{glm_irls_fit, GlmScratch, MAX_IRLS_ITERS};
+use glmm::loop_advanced::{GlmScratch, MAX_IRLS_ITERS, glm_irls_fit};
 use glmm::{BinomialLink, Family};
 
 /// Every fixture in this file is built via `logit_spec` (binomial/logit) —

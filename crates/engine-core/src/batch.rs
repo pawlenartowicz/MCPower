@@ -26,21 +26,21 @@ use std::sync::OnceLock;
 
 use rayon::prelude::*;
 
-use crate::correction::apply_correction;
+use crate::correction::{apply_correction, apply_correction_p};
 use crate::critvals::{BetweenWithinDf, CritValueTable};
 use crate::data_gen::generate_sim_data;
 use crate::posthoc::evaluate_posthoc;
 use crate::spec::{
-    BatchResult, CorrectionMethod, DfMethod, EngineError, EstimatorSpec, PosthocBlockShape,
-    ProgressSink, ResultShape, SimulationSpec,
+    BatchResult, CorrectionMethod, DfMethod, EngineError, EstimatorSpec, OutcomeKind,
+    PosthocBlockShape, ProgressSink, ResultShape, SimulationSpec,
 };
 use crate::workspace::{ReducedCritEntry, SimWorkspace};
-use glmm::loop_advanced::{fit_suff_stats_t_sq, ols_contrast_t_sq, OlsScratch, OlsSuffStats};
+use glmm::loop_advanced::{OlsScratch, OlsSuffStats, fit_suff_stats_t_sq, ols_contrast_t_sq};
 
 /// Process-wide BOBYQA objective-eval counters — bench diagnostics only
 /// (`bin/throughput.rs` reads before/after deltas around a row's warm-up run
-/// to report evals/fit). Fed once per LMM/GLMM fit at the `fit_on`
-/// call sites below; relaxed atomics, one add per multi-millisecond fit, so
+/// to report evals/fit). Fed once per LMM/GLMM fit of a counted sim at the
+/// fit call sites below (the curvature-hint pilot's fits are skipped); relaxed atomics, one add per multi-millisecond fit, so
 /// the hot loop is unaffected and results cannot move.
 pub mod optim_diag {
     use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -193,6 +193,12 @@ pub fn run_batch_st_capture(
     Ok((res, stat))
 }
 
+/// Sim id of the curvature-hint pilot draw. `n_sims` is a `u32`, so every
+/// counted sim has an id below this one, and both stream tags
+/// (`scenarios::STREAM_TAG_*`) set bits above 32, so no tagged stream of a
+/// counted sim lands on it either.
+const PILOT_SIM_ID: usize = u32::MAX as usize;
+
 fn run_batch_impl(
     spec: &SimulationSpec,
     sample_sizes: &[u32],
@@ -202,6 +208,453 @@ fn run_batch_impl(
     sequential: bool,
     mut stat_capture: Option<&mut Vec<f64>>, // (n_sims, n_targets) row-major; sequential only
 ) -> Result<BatchResult, EngineError> {
+    let (spec_with_tables, crit, crit_boundary, posthoc_correction_crit_sq) =
+        prepare_run(spec, sample_sizes)?;
+    let spec = &spec_with_tables;
+    let n_predictors_total = n_predictors(spec);
+    let n_targets = spec.target_indices.len() + spec.contrast_pairs.len();
+
+    let n_sample_sizes = sample_sizes.len();
+    let n_targets_u32 = n_targets as u32;
+    let n_sample_sizes_u32 = n_sample_sizes as u32;
+
+    // Posthoc support — Σ C(kᵢ, 2) across blocks, where kᵢ = dummies+1.
+    let posthoc_blocks: Vec<PosthocBlockShape> = posthoc_block_shapes(spec);
+    let posthoc_n_contrasts: usize = posthoc_blocks.iter().map(|b| b.n_contrasts as usize).sum();
+    let posthoc_contrasts: Vec<Vec<f64>> = build_posthoc_contrasts(spec)?;
+
+    // ---------------- 3. Result allocation ----------------
+    let n_sims_usize = n_sims as usize;
+    let main_cell_count = n_sims_usize * n_sample_sizes * n_targets;
+    let posthoc_cell_count = n_sims_usize * n_sample_sizes * posthoc_n_contrasts;
+    let converged_count = n_sims_usize * n_sample_sizes;
+
+    let mut uncorrected = vec![0u8; main_cell_count];
+    let mut corrected = vec![0u8; main_cell_count];
+    let mut posthoc_unc = vec![0u8; posthoc_cell_count];
+    let mut posthoc_cor = vec![0u8; posthoc_cell_count];
+    let mut converged = vec![0u8; converged_count];
+    let mut boundary_hit = vec![0u8; converged_count];
+    // Parallel to boundary_hit: per-component pinned bitmask (general lmm path);
+    // Brent path writes bit 0 = boundary_hit == 1; OLS/Glm leave 0.
+    let mut pinned_components = vec![0u64; converged_count];
+    // Parallel to converged: estimated random-intercept variance τ̂² (GLMM branch
+    // only). NaN-initialised; only the Glm+cluster path writes it, so every other
+    // estimator leaves NaN (mirrors the contract — finite ⇒ a GLMM fit ran).
+    let mut tau_squared_hat = vec![f64::NAN; converged_count];
+    // Parallel to converged: realized event rate mean(y[..N]) of the rows fitted
+    // at each grid point. Written for a Binary outcome whatever the estimator
+    // (a property of the data, not of the fit); NaN for every other outcome.
+    let mut event_rate = vec![f64::NAN; converged_count];
+    // Joint Wald-χ² significance buffers — `(n_sims × n_sample_sizes)`,
+    // sim-major.
+    let mut joint_unc = vec![0u8; converged_count];
+    let mut joint_cor = vec![0u8; converged_count];
+    let overall_count = if spec.report_overall {
+        n_sims_usize * n_sample_sizes
+    } else {
+        0
+    };
+    let mut overall = vec![0u8; overall_count];
+
+    // n_factors used both in the early-exit guard and in the parallel loop.
+    let n_factors = spec.factor_n_levels.len();
+
+    if n_sims == 0 {
+        return Ok(BatchResult {
+            uncorrected,
+            corrected,
+            posthoc_unc,
+            posthoc_cor,
+            converged,
+            boundary_hit,
+            pinned_components,
+            joint_unc,
+            joint_cor,
+            overall,
+            factor_excluded: vec![],
+            tau_squared_hat: vec![f64::NAN; n_sims_usize * n_sample_sizes],
+            event_rate: vec![f64::NAN; n_sims_usize * n_sample_sizes],
+            shape: ResultShape {
+                n_sims: 0,
+                n_sample_sizes: n_sample_sizes_u32,
+                n_targets: n_targets_u32,
+                posthoc_blocks: posthoc_blocks.clone(),
+                n_factors: n_factors as u32,
+                n_variance_components: if spec.estimator == EstimatorSpec::Mle
+                    || (spec.estimator == EstimatorSpec::Glm && spec.cluster.is_some())
+                {
+                    spec.cluster
+                        .as_ref()
+                        .map_or(0, |c| c.n_variance_components()) as u32
+                } else {
+                    0
+                },
+            },
+        });
+    }
+
+    // ---------------- 4. Parallel sim loop ----------------
+    // factor_excluded: (n_sims × n_sample_sizes × n_factors), sim-major.
+    // Empty when the spec has no factors — mirrors the posthoc/overall gate pattern.
+    // (n_factors declared above the n_sims == 0 guard, so it's in scope here.)
+    let factor_excl_stride = n_sample_sizes * n_factors;
+    let mut factor_excluded = vec![0u8; n_sims_usize * n_sample_sizes * n_factors];
+
+    let progress_counter = AtomicU64::new(0);
+    let cancelled = std::sync::atomic::AtomicBool::new(false);
+
+    let main_row = n_targets;
+    // Debug stat capture buffer: (n_sims, n_targets) row-major, NaN-initialised.
+    // Populated only on the sequential path (sample-size index 0 per sim).
+    if let Some(cap) = stat_capture.as_deref_mut() {
+        cap.clear();
+        cap.resize(n_sims as usize * main_row, f64::NAN);
+    }
+    let posthoc_row = posthoc_n_contrasts;
+    let sim_main_stride = n_sample_sizes * main_row;
+    let sim_posthoc_stride = n_sample_sizes * posthoc_row;
+    let sim_converged_stride = n_sample_sizes;
+
+    let cancelled_ref = &cancelled;
+    let counter_ref = &progress_counter;
+
+    // Report ~50 times per run, regardless of n_sims.
+    let progress_step = (n_sims as u64 / 50).max(1);
+
+    let new_workspace = || new_sim_workspace(spec, sample_sizes);
+
+    // ---------------- 4a. Curvature-hint pilot ----------------
+    // Host-supplied hints replace the pilot. A part glmm rejects is no hint
+    // for its grid point, the same as a pilot that did not converge.
+    let hints = match &spec.curvature_hints {
+        Some(parts) => {
+            if !parts.is_empty() && parts.len() != sample_sizes.len() {
+                return Err(EngineError::InvalidSpec(format!(
+                    "curvature_hints has {} entries but the grid has {} points",
+                    parts.len(),
+                    sample_sizes.len()
+                )));
+            }
+            parts
+                .iter()
+                .map(|p| {
+                    p.as_ref().and_then(|p| {
+                        glmm::loop_advanced::CurvatureHint::from_parts(
+                            p.dim,
+                            &p.inv_hessian,
+                            p.units,
+                        )
+                    })
+                })
+                .collect()
+        }
+        None => pilot_hints(
+            spec,
+            sample_sizes,
+            base_seed,
+            &crit,
+            crit_boundary.as_ref(),
+            cancelled_ref,
+        )?,
+    };
+    let hints = &hints[..];
+
+    // One mutable slice per sim, collected serially. Posthoc is Option so the
+    // no-contrasts case (empty backing Vec) still yields n_sims iterations
+    // rather than truncating the zipped parallel iterator to length 0.
+    //
+    // Main buffers: when sim_main_stride == 0 (n_targets == 0), the backing
+    // Vec is empty and chunks_exact_mut(0) would panic. Mirror the posthoc
+    // empty-buffer pattern: produce n_sims empty &mut [] slices instead.
+    let unc_per_sim: Vec<&mut [u8]> = if sim_main_stride == 0 {
+        (0..n_sims_usize).map(|_| &mut [][..]).collect()
+    } else {
+        uncorrected.chunks_exact_mut(sim_main_stride).collect()
+    };
+    let cor_per_sim: Vec<&mut [u8]> = if sim_main_stride == 0 {
+        (0..n_sims_usize).map(|_| &mut [][..]).collect()
+    } else {
+        corrected.chunks_exact_mut(sim_main_stride).collect()
+    };
+    let conv_per_sim: Vec<&mut [u8]> = converged.chunks_exact_mut(sim_converged_stride).collect();
+    let bh_per_sim: Vec<&mut [u8]> = boundary_hit
+        .chunks_exact_mut(sim_converged_stride)
+        .collect();
+    let pc_per_sim: Vec<&mut [u64]> = pinned_components
+        .chunks_exact_mut(sim_converged_stride)
+        .collect();
+    // τ̂² and event-rate rows travel as one pair so the zip below stays one level.
+    let tau_per_sim: Vec<(&mut [f64], &mut [f64])> = tau_squared_hat
+        .chunks_exact_mut(sim_converged_stride)
+        .zip(event_rate.chunks_exact_mut(sim_converged_stride))
+        .collect();
+    let joint_unc_per_sim: Vec<&mut [u8]> =
+        joint_unc.chunks_exact_mut(sim_converged_stride).collect();
+    let joint_cor_per_sim: Vec<&mut [u8]> =
+        joint_cor.chunks_exact_mut(sim_converged_stride).collect();
+    let post_unc_per_sim: Vec<Option<&mut [u8]>> = if posthoc_n_contrasts == 0 {
+        (0..n_sims_usize).map(|_| None).collect()
+    } else {
+        posthoc_unc
+            .chunks_exact_mut(sim_posthoc_stride)
+            .map(Some)
+            .collect()
+    };
+    let post_cor_per_sim: Vec<Option<&mut [u8]>> = if posthoc_n_contrasts == 0 {
+        (0..n_sims_usize).map(|_| None).collect()
+    } else {
+        posthoc_cor
+            .chunks_exact_mut(sim_posthoc_stride)
+            .map(Some)
+            .collect()
+    };
+    let overall_per_sim: Vec<Option<&mut [u8]>> = if spec.report_overall {
+        overall
+            .chunks_exact_mut(sim_converged_stride)
+            .map(Some)
+            .collect()
+    } else {
+        (0..n_sims_usize).map(|_| None).collect()
+    };
+    // factor_excluded per-sim slices: empty-stride guard mirrors the unc_per_sim pattern
+    // (chunks_exact_mut(0) panics; n_factors == 0 → produce n_sims empty &mut [] slices).
+    let fx_per_sim: Vec<&mut [u8]> = if factor_excl_stride == 0 {
+        (0..n_sims_usize).map(|_| &mut [][..]).collect()
+    } else {
+        factor_excluded
+            .chunks_exact_mut(factor_excl_stride)
+            .collect()
+    };
+
+    // The per-sim body (`run_one_sim`) is family-agnostic at the call site.
+    // Dispatch differs only in `for` vs `try_for_each_init`; the body, the
+    // cancellation check, and the progress reporting are identical between
+    // sequential and parallel paths.
+    let result: Result<(), EngineError> = if sequential {
+        // Sequential dispatch — one workspace, no rayon. Used by `run_batch_st`
+        // and the WASM-friendly orchestrator entry `single_core_find_power`.
+        let mut ws = new_workspace();
+        let zipped = unc_per_sim
+            .into_iter()
+            .zip(cor_per_sim)
+            .zip(conv_per_sim)
+            .zip(bh_per_sim)
+            .zip(pc_per_sim)
+            .zip(tau_per_sim)
+            .zip(post_unc_per_sim)
+            .zip(post_cor_per_sim)
+            .zip(joint_unc_per_sim)
+            .zip(joint_cor_per_sim)
+            .zip(overall_per_sim)
+            .zip(fx_per_sim)
+            .enumerate();
+        let mut step_result: Result<(), EngineError> = Ok(());
+        for (
+            sim_id,
+            (
+                (
+                    (
+                        (
+                            (
+                                ((((((unc, cor), conv), bh), pc), (tau, er)), post_unc_slice),
+                                post_cor_slice,
+                            ),
+                            joint_unc_slice,
+                        ),
+                        joint_cor_slice,
+                    ),
+                    overall_slice,
+                ),
+                fx,
+            ),
+        ) in zipped
+        {
+            let stat_row = stat_capture
+                .as_deref_mut()
+                .map(|v| &mut v[sim_id * main_row..(sim_id + 1) * main_row]);
+            if let Err(e) = run_one_sim(
+                &mut ws,
+                sim_id,
+                spec,
+                sample_sizes,
+                base_seed,
+                &crit,
+                crit_boundary.as_ref(),
+                &posthoc_contrasts,
+                &posthoc_correction_crit_sq,
+                n_predictors_total,
+                main_row,
+                posthoc_row,
+                n_factors,
+                unc,
+                cor,
+                conv,
+                bh,
+                pc,
+                tau,
+                er,
+                joint_unc_slice,
+                joint_cor_slice,
+                post_unc_slice,
+                post_cor_slice,
+                overall_slice,
+                fx,
+                cancelled_ref,
+                stat_row,
+                hints,
+            ) {
+                step_result = Err(e);
+                break;
+            }
+            if let Err(e) = report_progress(
+                counter_ref,
+                cancelled_ref,
+                progress_step,
+                n_sims as u64,
+                sink,
+            ) {
+                step_result = Err(e);
+                break;
+            }
+        }
+        step_result
+    } else {
+        pool().install(|| {
+            unc_per_sim
+                .into_par_iter()
+                .zip(cor_per_sim)
+                .zip(conv_per_sim)
+                .zip(bh_per_sim)
+                .zip(pc_per_sim)
+                .zip(tau_per_sim)
+                .zip(post_unc_per_sim)
+                .zip(post_cor_per_sim)
+                .zip(joint_unc_per_sim)
+                .zip(joint_cor_per_sim)
+                .zip(overall_per_sim)
+                .zip(fx_per_sim)
+                .enumerate()
+                .try_for_each_init(
+                    new_workspace,
+                    |ws,
+                     (
+                        sim_id,
+                        (
+                            (
+                                (
+                                    (
+                                        (
+                                            (
+                                                (((((unc, cor), conv), bh), pc), (tau, er)),
+                                                mut post_unc_slice,
+                                            ),
+                                            mut post_cor_slice,
+                                        ),
+                                        joint_unc_slice,
+                                    ),
+                                    joint_cor_slice,
+                                ),
+                                mut overall_slice,
+                            ),
+                            fx,
+                        ),
+                    )| {
+                        run_one_sim(
+                            ws,
+                            sim_id,
+                            spec,
+                            sample_sizes,
+                            base_seed,
+                            &crit,
+                            crit_boundary.as_ref(),
+                            &posthoc_contrasts,
+                            &posthoc_correction_crit_sq,
+                            n_predictors_total,
+                            main_row,
+                            posthoc_row,
+                            n_factors,
+                            unc,
+                            cor,
+                            conv,
+                            bh,
+                            pc,
+                            tau,
+                            er,
+                            joint_unc_slice,
+                            joint_cor_slice,
+                            post_unc_slice.as_deref_mut(),
+                            post_cor_slice.as_deref_mut(),
+                            overall_slice.as_deref_mut(),
+                            fx,
+                            cancelled_ref,
+                            None, // stat capture is sequential-only
+                            hints,
+                        )?;
+                        report_progress(
+                            counter_ref,
+                            cancelled_ref,
+                            progress_step,
+                            n_sims as u64,
+                            sink,
+                        )?;
+                        Ok(())
+                    },
+                )
+        })
+    };
+    result?;
+
+    Ok(BatchResult {
+        uncorrected,
+        corrected,
+        posthoc_unc,
+        posthoc_cor,
+        converged,
+        boundary_hit,
+        pinned_components,
+        joint_unc,
+        joint_cor,
+        overall,
+        factor_excluded,
+        tau_squared_hat,
+        event_rate,
+        shape: ResultShape {
+            n_sims,
+            n_sample_sizes: n_sample_sizes_u32,
+            n_targets: n_targets_u32,
+            posthoc_blocks,
+            n_factors: n_factors as u32,
+            n_variance_components: if spec.estimator == EstimatorSpec::Mle
+                || (spec.estimator == EstimatorSpec::Glm && spec.cluster.is_some())
+            {
+                spec.cluster
+                    .as_ref()
+                    .map_or(0, |c| c.n_variance_components()) as u32
+            } else {
+                0
+            },
+        },
+    })
+}
+
+/// Validates a run and prepares what every sim of it reads: the spec with its
+/// lookup tables filled, and the crit tables (live, collapsed twin, posthoc
+/// correction). Shared by `run_batch_impl` and `curvature_hints`, so the
+/// debug path's pilot runs on exactly the batch's inputs.
+#[allow(clippy::type_complexity)]
+fn prepare_run(
+    spec: &SimulationSpec,
+    sample_sizes: &[u32],
+) -> Result<
+    (
+        SimulationSpec,
+        CritValueTable,
+        Option<CritValueTable>,
+        Vec<Vec<f64>>,
+    ),
+    EngineError,
+> {
     // ---------------- 1. Validation ----------------
     // The mixed arms' grid-sequential θ̂ warm-start carries the previous grid
     // point's θ̂ forward, which is only meaningful walking ascending N. Nothing
@@ -269,7 +722,7 @@ fn run_batch_impl(
 
     let n_non_factor = spec.n_non_factor as usize;
     let n_factor_dummies = spec.n_factor_dummies as usize;
-    let n_predictors_total = 1 + n_non_factor + n_factor_dummies + spec.interactions.len();
+    let n_predictors_total = n_predictors(spec);
     if spec.correlation.len() != n_non_factor * n_non_factor {
         return Err(EngineError::InvalidSpec(format!(
             "correlation length {} does not match n_non_factor² = {}",
@@ -310,7 +763,6 @@ fn run_batch_impl(
             expected_props
         )));
     }
-    let n_marginal_targets = spec.target_indices.len();
     for &ti in &spec.target_indices {
         if (ti as usize) >= n_predictors_total {
             return Err(EngineError::InvalidSpec(format!(
@@ -330,7 +782,6 @@ fn run_batch_impl(
             )));
         }
     }
-    let n_targets = n_marginal_targets + spec.contrast_pairs.len();
 
     // PSD validation of correlation: a trial Cholesky of an owned copy.
     if n_non_factor > 0 {
@@ -352,10 +803,6 @@ fn run_batch_impl(
     spec_with_tables.t3_table = Some(crate::marginals::T3PpfTable::build_default());
     spec_with_tables.het_coeffs = spec_with_tables.compute_het_coeffs();
     let spec = &spec_with_tables;
-
-    let n_sample_sizes = sample_sizes.len();
-    let n_targets_u32 = n_targets as u32;
-    let n_sample_sizes_u32 = n_sample_sizes as u32;
 
     // ---------------- 2. CritValueTable ----------------
     // One authority for every df-dependent threshold: the same builder also
@@ -380,433 +827,204 @@ fn run_batch_impl(
     let p_between_entry = crate::critvals::between_column_count(spec, Some(&entry_kept_cols));
     let (crit, crit_boundary, posthoc_correction_crit_sq) =
         build_crit_tables(spec, sample_sizes, p_entry as u32, p_between_entry)?;
+    Ok((
+        spec_with_tables,
+        crit,
+        crit_boundary,
+        posthoc_correction_crit_sq,
+    ))
+}
 
-    // Posthoc support — Σ C(kᵢ, 2) across blocks, where kᵢ = dummies+1.
-    let posthoc_blocks: Vec<PosthocBlockShape> = posthoc_block_shapes(spec);
-    let posthoc_n_contrasts: usize = posthoc_blocks.iter().map(|b| b.n_contrasts as usize).sum();
-    let posthoc_contrasts: Vec<Vec<f64>> = build_posthoc_contrasts(spec)?;
+/// Intercept + continuous + factor dummies + interactions: the full-design width.
+fn n_predictors(spec: &SimulationSpec) -> usize {
+    1 + spec.n_non_factor as usize + spec.n_factor_dummies as usize + spec.interactions.len()
+}
 
-    // ---------------- 3. Result allocation ----------------
-    let n_sims_usize = n_sims as usize;
-    let main_cell_count = n_sims_usize * n_sample_sizes * n_targets;
-    let posthoc_cell_count = n_sims_usize * n_sample_sizes * posthoc_n_contrasts;
-    let converged_count = n_sims_usize * n_sample_sizes;
+/// One sim workspace, as the pilot and both dispatch paths build it.
+fn new_sim_workspace(spec: &SimulationSpec, sample_sizes: &[u32]) -> SimWorkspace {
+    let n_predictors_total = n_predictors(spec);
+    let n_targets = spec.target_indices.len() + spec.contrast_pairs.len();
+    let mut ws = SimWorkspace::new(
+        *sample_sizes.last().expect("sample_sizes is non-empty") as usize,
+        n_predictors_total,
+        spec.n_non_factor as usize,
+        spec.factor_n_levels.len(),
+        spec.cluster.as_ref(),
+    );
+    // The OLS branch reuses lme_joint_rhs as t² scratch over ALL test
+    // targets (marginals + contrasts), which can exceed P when a factor's
+    // full pairwise contrast set is requested — grow it up front so the
+    // hot loop stays allocation-free. LME consumers only take [..P] views,
+    // so the extra tail is inert there.
+    ws.lme_joint_rhs
+        .resize(n_predictors_total.max(n_targets), 0.0);
+    // One `fit_on` workspace + ids per grid point; `None` for OLS /
+    // unclustered GLM. Bound before the assignment so the `&ws.*` id borrows
+    // end before `ws.mixed*` is written.
+    let mixed_built = crate::mixed_workspace::build_mixed_workspaces(
+        spec,
+        sample_sizes,
+        n_predictors_total,
+        &ws.cluster_ids,
+        &ws.extra_grouping_ids,
+    );
+    if let Some((mixed, mixed_ids, mixed_opts)) = mixed_built {
+        ws.mixed = mixed;
+        ws.mixed_ids = mixed_ids;
+        ws.mixed_opts = mixed_opts;
+    }
+    ws
+}
 
-    let mut uncorrected = vec![0u8; main_cell_count];
-    let mut corrected = vec![0u8; main_cell_count];
-    let mut posthoc_unc = vec![0u8; posthoc_cell_count];
-    let mut posthoc_cor = vec![0u8; posthoc_cell_count];
-    let mut converged = vec![0u8; converged_count];
-    let mut boundary_hit = vec![0u8; converged_count];
-    // Parallel to boundary_hit: per-component pinned bitmask (general lmm path);
-    // Brent path writes bit 0 = boundary_hit == 1; OLS/Glm leave 0.
-    let mut pinned_components = vec![0u64; converged_count];
-    // Parallel to converged: estimated random-intercept variance τ̂² (GLMM branch
-    // only). NaN-initialised; only the Glm+cluster path writes it, so every other
-    // estimator leaves NaN (mirrors the contract — finite ⇒ a GLMM fit ran).
-    let mut tau_squared_hat = vec![f64::NAN; converged_count];
-    // Joint Wald-χ² significance buffers — `(n_sims × n_sample_sizes)`,
-    // sim-major.
-    let mut joint_unc = vec![0u8; converged_count];
-    let mut joint_cor = vec![0u8; converged_count];
-    let overall_count = if spec.report_overall {
-        n_sims_usize * n_sample_sizes
-    } else {
-        0
-    };
-    let mut overall = vec![0u8; overall_count];
-
-    // n_factors used both in the early-exit guard and in the parallel loop.
-    let n_factors = spec.factor_n_levels.len();
-
-    if n_sims == 0 {
-        return Ok(BatchResult {
-            uncorrected,
-            corrected,
-            posthoc_unc,
-            posthoc_cor,
-            converged,
-            boundary_hit,
-            pinned_components,
-            joint_unc,
-            joint_cor,
-            overall,
-            factor_excluded: vec![],
-            tau_squared_hat: vec![f64::NAN; n_sims_usize * n_sample_sizes],
-            shape: ResultShape {
-                n_sims: 0,
-                n_sample_sizes: n_sample_sizes_u32,
-                n_targets: n_targets_u32,
-                posthoc_blocks: posthoc_blocks.clone(),
-                n_factors: n_factors as u32,
-                n_variance_components: if spec.estimator == EstimatorSpec::Mle
-                    || (spec.estimator == EstimatorSpec::Glm && spec.cluster.is_some())
-                {
-                    spec.cluster
-                        .as_ref()
-                        .map_or(0, |c| c.n_variance_components()) as u32
-                } else {
-                    0
-                },
-            },
+/// The curvature-hint pilot.
+///
+/// One extra draw on a reserved sim id, fitted on the calling thread before
+/// the sims are dispatched. Each grid point's hot-path mixed workspace then
+/// yields a frozen curvature hint (glmm `curvature_hint`) that every sim's
+/// fit at that grid point starts its gradient search from. The hints are a
+/// function of (spec, sample_sizes, base_seed) alone, so results do not
+/// depend on the thread count. A grid point has no hint where the pilot did
+/// not converge, where it fitted a reduced model (the hot-path workspace
+/// was not the one fitted), or where glmm's search takes none (the BOBYQA
+/// routes). Empty, with no pilot run, for OLS / unclustered GLM and for the
+/// shapes below, which never read a hint. The gradient-route conditions
+/// mirror glmm's `gradient_route_plan` (GLMM) and `lmm_outer_optimizer` +
+/// `group_regression_shape` (LMM) — recheck them on every glmm bump.
+fn pilot_hints(
+    spec: &SimulationSpec,
+    sample_sizes: &[u32],
+    base_seed: u64,
+    crit: &CritValueTable,
+    crit_boundary: Option<&CritValueTable>,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<Option<glmm::loop_advanced::CurvatureHint>>, EngineError> {
+    let n_predictors_total = n_predictors(spec);
+    let run_pilot = spec
+        .cluster
+        .as_ref()
+        .is_some_and(|cluster| match spec.estimator {
+            EstimatorSpec::Ols => false,
+            // A GLMM with a random slope does not gain from the hint (26.1 → 26.4
+            // evaluations per fit from a truth start, 32.0 → 32.9 from a blind one).
+            // Without slopes, the Laplace gradient route needs a second grouping
+            // (n_θ ≥ 2); the AGQ one takes the single-intercept shape.
+            EstimatorSpec::Glm => {
+                cluster.slopes.is_empty()
+                    && cluster.extra_groupings.iter().all(|g| g.slopes.is_empty())
+                    && (spec.nagq > 1 || !cluster.extra_groupings.is_empty())
+            }
+            // An LMM under a `test_formula` only ever fits the reduced model.
+            // The LMM gradient route needs primary random slopes and no other
+            // grouping, and the fit reads the hint only from a truth or carried
+            // start, which a single grid point without `truth_start` never has.
+            EstimatorSpec::Mle => {
+                !cluster.slopes.is_empty()
+                    && cluster.extra_groupings.is_empty()
+                    && (sample_sizes.len() > 1 || spec.scenario.truth_start)
+                    && (spec.fit_columns.is_empty() || spec.fit_columns.len() >= n_predictors_total)
+            }
         });
+    if !run_pilot {
+        return Ok(Vec::new());
     }
-
-    // ---------------- 4. Parallel sim loop ----------------
-    let max_n = *sample_sizes.last().unwrap() as usize;
-    // factor_excluded: (n_sims × n_sample_sizes × n_factors), sim-major.
-    // Empty when the spec has no factors — mirrors the posthoc/overall gate pattern.
-    // (n_factors declared above the n_sims == 0 guard, so it's in scope here.)
-    let factor_excl_stride = n_sample_sizes * n_factors;
-    let mut factor_excluded = vec![0u8; n_sims_usize * n_sample_sizes * n_factors];
-
-    let progress_counter = AtomicU64::new(0);
-    let cancelled = std::sync::atomic::AtomicBool::new(false);
-
-    let main_row = n_targets;
-    // Debug stat capture buffer: (n_sims, n_targets) row-major, NaN-initialised.
-    // Populated only on the sequential path (sample-size index 0 per sim).
-    if let Some(cap) = stat_capture.as_deref_mut() {
-        cap.clear();
-        cap.resize(n_sims as usize * main_row, f64::NAN);
-    }
-    let posthoc_row = posthoc_n_contrasts;
-    let sim_main_stride = n_sample_sizes * main_row;
-    let sim_posthoc_stride = n_sample_sizes * posthoc_row;
-    let sim_converged_stride = n_sample_sizes;
-
-    let cancelled_ref = &cancelled;
-    let counter_ref = &progress_counter;
-
-    // Report ~50 times per run, regardless of n_sims.
-    let progress_step = (n_sims as u64 / 50).max(1);
-
-    // One mutable slice per sim, collected serially. Posthoc is Option so the
-    // no-contrasts case (empty backing Vec) still yields n_sims iterations
-    // rather than truncating the zipped parallel iterator to length 0.
-    //
-    // Main buffers: when sim_main_stride == 0 (n_targets == 0), the backing
-    // Vec is empty and chunks_exact_mut(0) would panic. Mirror the posthoc
-    // empty-buffer pattern: produce n_sims empty &mut [] slices instead.
-    let unc_per_sim: Vec<&mut [u8]> = if sim_main_stride == 0 {
-        (0..n_sims_usize).map(|_| &mut [][..]).collect()
-    } else {
-        uncorrected.chunks_exact_mut(sim_main_stride).collect()
-    };
-    let cor_per_sim: Vec<&mut [u8]> = if sim_main_stride == 0 {
-        (0..n_sims_usize).map(|_| &mut [][..]).collect()
-    } else {
-        corrected.chunks_exact_mut(sim_main_stride).collect()
-    };
-    let conv_per_sim: Vec<&mut [u8]> = converged.chunks_exact_mut(sim_converged_stride).collect();
-    let bh_per_sim: Vec<&mut [u8]> = boundary_hit
-        .chunks_exact_mut(sim_converged_stride)
-        .collect();
-    let pc_per_sim: Vec<&mut [u64]> = pinned_components
-        .chunks_exact_mut(sim_converged_stride)
-        .collect();
-    let tau_per_sim: Vec<&mut [f64]> = tau_squared_hat
-        .chunks_exact_mut(sim_converged_stride)
-        .collect();
-    let joint_unc_per_sim: Vec<&mut [u8]> =
-        joint_unc.chunks_exact_mut(sim_converged_stride).collect();
-    let joint_cor_per_sim: Vec<&mut [u8]> =
-        joint_cor.chunks_exact_mut(sim_converged_stride).collect();
-    let post_unc_per_sim: Vec<Option<&mut [u8]>> = if posthoc_n_contrasts == 0 {
-        (0..n_sims_usize).map(|_| None).collect()
-    } else {
-        posthoc_unc
-            .chunks_exact_mut(sim_posthoc_stride)
-            .map(Some)
-            .collect()
-    };
-    let post_cor_per_sim: Vec<Option<&mut [u8]>> = if posthoc_n_contrasts == 0 {
-        (0..n_sims_usize).map(|_| None).collect()
-    } else {
-        posthoc_cor
-            .chunks_exact_mut(sim_posthoc_stride)
-            .map(Some)
-            .collect()
-    };
-    let overall_per_sim: Vec<Option<&mut [u8]>> = if spec.report_overall {
-        overall
-            .chunks_exact_mut(sim_converged_stride)
-            .map(Some)
-            .collect()
-    } else {
-        (0..n_sims_usize).map(|_| None).collect()
-    };
-    // factor_excluded per-sim slices: empty-stride guard mirrors the unc_per_sim pattern
-    // (chunks_exact_mut(0) panics; n_factors == 0 → produce n_sims empty &mut [] slices).
-    let fx_per_sim: Vec<&mut [u8]> = if factor_excl_stride == 0 {
-        (0..n_sims_usize).map(|_| &mut [][..]).collect()
-    } else {
-        factor_excluded
-            .chunks_exact_mut(factor_excl_stride)
-            .collect()
-    };
-
-    // The per-sim body (`run_one_sim`) is family-agnostic at the call site.
-    // Dispatch differs only in `for` vs `try_for_each_init`; the body, the
-    // cancellation check, and the progress reporting are identical between
-    // sequential and parallel paths.
-    let result: Result<(), EngineError> = if sequential {
-        // Sequential dispatch — one workspace, no rayon. Used by `run_batch_st`
-        // and the WASM-friendly orchestrator entry `single_core_find_power`.
-        let mut ws = SimWorkspace::new(
-            max_n,
-            n_predictors_total,
-            n_non_factor,
-            n_factors,
-            spec.cluster.as_ref(),
-        );
-        // The OLS branch reuses lme_joint_rhs as t² scratch over ALL test
-        // targets (marginals + contrasts), which can exceed P when a factor's
-        // full pairwise contrast set is requested — grow it up front so the
-        // hot loop stays allocation-free. LME consumers only take [..P] views,
-        // so the extra tail is inert there. Mirrors the rayon init below —
-        // change together.
-        ws.lme_joint_rhs
-            .resize(n_predictors_total.max(n_targets), 0.0);
-        // One `fit_on` workspace + ids per grid point; `None` for OLS /
-        // unclustered GLM. Bound before the assignment so the `&ws.*` id borrows
-        // end before `ws.mixed*` is written. Mirrors the rayon init below —
-        // change together.
-        let mixed_built = crate::mixed_workspace::build_mixed_workspaces(
-            spec,
-            sample_sizes,
-            n_predictors_total,
-            &ws.cluster_ids,
-            &ws.extra_grouping_ids,
-        );
-        if let Some((mixed, mixed_ids, mixed_opts)) = mixed_built {
-            ws.mixed = mixed;
-            ws.mixed_ids = mixed_ids;
-            ws.mixed_opts = mixed_opts;
-        }
-        let zipped = unc_per_sim
-            .into_iter()
-            .zip(cor_per_sim)
-            .zip(conv_per_sim)
-            .zip(bh_per_sim)
-            .zip(pc_per_sim)
-            .zip(tau_per_sim)
-            .zip(post_unc_per_sim)
-            .zip(post_cor_per_sim)
-            .zip(joint_unc_per_sim)
-            .zip(joint_cor_per_sim)
-            .zip(overall_per_sim)
-            .zip(fx_per_sim)
-            .enumerate();
-        let mut step_result: Result<(), EngineError> = Ok(());
-        for (
-            sim_id,
-            (
-                (
-                    (
-                        (
-                            (
-                                ((((((unc, cor), conv), bh), pc), tau), post_unc_slice),
-                                post_cor_slice,
-                            ),
-                            joint_unc_slice,
-                        ),
-                        joint_cor_slice,
-                    ),
-                    overall_slice,
-                ),
-                fx,
-            ),
-        ) in zipped
-        {
-            let stat_row = stat_capture
-                .as_deref_mut()
-                .map(|v| &mut v[sim_id * main_row..(sim_id + 1) * main_row]);
-            if let Err(e) = run_one_sim(
-                &mut ws,
-                sim_id,
-                spec,
-                sample_sizes,
-                base_seed,
-                &crit,
-                crit_boundary.as_ref(),
-                &posthoc_contrasts,
-                &posthoc_correction_crit_sq,
-                n_predictors_total,
-                main_row,
-                posthoc_row,
-                n_factors,
-                unc,
-                cor,
-                conv,
-                bh,
-                pc,
-                tau,
-                joint_unc_slice,
-                joint_cor_slice,
-                post_unc_slice,
-                post_cor_slice,
-                overall_slice,
-                fx,
-                cancelled_ref,
-                stat_row,
-            ) {
-                step_result = Err(e);
-                break;
-            }
-            if let Err(e) = report_progress(
-                counter_ref,
-                cancelled_ref,
-                progress_step,
-                n_sims as u64,
-                sink,
-            ) {
-                step_result = Err(e);
-                break;
-            }
-        }
-        step_result
-    } else {
-        pool().install(|| {
-            unc_per_sim
-                .into_par_iter()
-                .zip(cor_per_sim)
-                .zip(conv_per_sim)
-                .zip(bh_per_sim)
-                .zip(pc_per_sim)
-                .zip(tau_per_sim)
-                .zip(post_unc_per_sim)
-                .zip(post_cor_per_sim)
-                .zip(joint_unc_per_sim)
-                .zip(joint_cor_per_sim)
-                .zip(overall_per_sim)
-                .zip(fx_per_sim)
-                .enumerate()
-                .try_for_each_init(
-                    || {
-                        let mut ws = SimWorkspace::new(
-                            max_n,
-                            n_predictors_total,
-                            n_non_factor,
-                            n_factors,
-                            spec.cluster.as_ref(),
-                        );
-                        // OLS t² scratch over all test targets — mirrors the
-                        // sequential site above, change together.
-                        ws.lme_joint_rhs
-                            .resize(n_predictors_total.max(n_targets), 0.0);
-                        // Per-grid-point `fit_on` workspaces — mirrors the
-                        // sequential site above, change together.
-                        let mixed_built = crate::mixed_workspace::build_mixed_workspaces(
-                            spec,
-                            sample_sizes,
-                            n_predictors_total,
-                            &ws.cluster_ids,
-                            &ws.extra_grouping_ids,
-                        );
-                        if let Some((mixed, mixed_ids, mixed_opts)) = mixed_built {
-                            ws.mixed = mixed;
-                            ws.mixed_ids = mixed_ids;
-                            ws.mixed_opts = mixed_opts;
-                        }
-                        ws
-                    },
-                    |ws,
-                     (
-                        sim_id,
-                        (
-                            (
-                                (
-                                    (
-                                        (
-                                            (
-                                                (((((unc, cor), conv), bh), pc), tau),
-                                                mut post_unc_slice,
-                                            ),
-                                            mut post_cor_slice,
-                                        ),
-                                        joint_unc_slice,
-                                    ),
-                                    joint_cor_slice,
-                                ),
-                                mut overall_slice,
-                            ),
-                            fx,
-                        ),
-                    )| {
-                        run_one_sim(
-                            ws,
-                            sim_id,
-                            spec,
-                            sample_sizes,
-                            base_seed,
-                            &crit,
-                            crit_boundary.as_ref(),
-                            &posthoc_contrasts,
-                            &posthoc_correction_crit_sq,
-                            n_predictors_total,
-                            main_row,
-                            posthoc_row,
-                            n_factors,
-                            unc,
-                            cor,
-                            conv,
-                            bh,
-                            pc,
-                            tau,
-                            joint_unc_slice,
-                            joint_cor_slice,
-                            post_unc_slice.as_deref_mut(),
-                            post_cor_slice.as_deref_mut(),
-                            overall_slice.as_deref_mut(),
-                            fx,
-                            cancelled_ref,
-                            None, // stat capture is sequential-only
-                        )?;
-                        report_progress(
-                            counter_ref,
-                            cancelled_ref,
-                            progress_step,
-                            n_sims as u64,
-                            sink,
-                        )?;
-                        Ok(())
-                    },
-                )
-        })
-    };
-    result?;
-
-    Ok(BatchResult {
-        uncorrected,
-        corrected,
-        posthoc_unc,
-        posthoc_cor,
-        converged,
-        boundary_hit,
-        pinned_components,
-        joint_unc,
-        joint_cor,
-        overall,
-        factor_excluded,
-        tau_squared_hat,
-        shape: ResultShape {
-            n_sims,
-            n_sample_sizes: n_sample_sizes_u32,
-            n_targets: n_targets_u32,
-            posthoc_blocks,
-            n_factors: n_factors as u32,
-            n_variance_components: if spec.estimator == EstimatorSpec::Mle
-                || (spec.estimator == EstimatorSpec::Glm && spec.cluster.is_some())
-            {
-                spec.cluster
-                    .as_ref()
-                    .map_or(0, |c| c.n_variance_components()) as u32
+    let n_sample_sizes = sample_sizes.len();
+    let n_targets = spec.target_indices.len() + spec.contrast_pairs.len();
+    let n_factors = spec.factor_n_levels.len();
+    let sim_main_stride = n_sample_sizes * n_targets;
+    let mut ws = new_sim_workspace(spec, sample_sizes);
+    let mut conv = vec![0u8; n_sample_sizes];
+    let mut fx = vec![0u8; n_sample_sizes * n_factors];
+    run_one_sim(
+        &mut ws,
+        PILOT_SIM_ID,
+        spec,
+        sample_sizes,
+        base_seed,
+        crit,
+        crit_boundary,
+        // Posthoc is Ols-only (`prepare_run` rejects it elsewhere) and the pilot
+        // fits only mixed models, so it has no posthoc contrasts.
+        &[],
+        &[],
+        n_predictors_total,
+        n_targets,
+        0,
+        n_factors,
+        &mut vec![0u8; sim_main_stride],
+        &mut vec![0u8; sim_main_stride],
+        &mut conv,
+        &mut vec![0u8; n_sample_sizes],
+        &mut vec![0u64; n_sample_sizes],
+        &mut vec![f64::NAN; n_sample_sizes],
+        &mut vec![f64::NAN; n_sample_sizes],
+        &mut vec![0u8; n_sample_sizes],
+        &mut vec![0u8; n_sample_sizes],
+        None,
+        None,
+        spec.report_overall
+            .then(|| vec![0u8; n_sample_sizes])
+            .as_deref_mut(),
+        &mut fx,
+        cancelled,
+        None,
+        &[],
+    )?;
+    Ok((0..n_sample_sizes)
+        .map(|k| {
+            let full_fit = fx[k * n_factors..(k + 1) * n_factors]
+                .iter()
+                .all(|&c| c == 0);
+            if conv[k] == 1 && full_fit {
+                glmm::loop_advanced::curvature_hint(&mut ws.mixed[k])
             } else {
-                0
-            },
-        },
-    })
+                None
+            }
+        })
+        .collect())
+}
+
+/// The curvature hints `run_batch` / `run_batch_st` fit with for `(spec,
+/// sample_sizes, base_seed)`: one per grid point, or empty where no pilot
+/// runs. Lets the debug path fit provided data the way the hot loop does.
+pub(crate) fn curvature_hints(
+    spec: &SimulationSpec,
+    sample_sizes: &[u32],
+    base_seed: u64,
+) -> Result<Vec<Option<glmm::loop_advanced::CurvatureHint>>, EngineError> {
+    let (spec, crit, crit_boundary, _) = prepare_run(spec, sample_sizes)?;
+    pilot_hints(
+        &spec,
+        sample_sizes,
+        base_seed,
+        &crit,
+        crit_boundary.as_ref(),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+}
+
+/// The curvature hints `run_batch` / `run_batch_st` would compute for
+/// `(spec, sample_sizes, base_seed)`, as plain numbers: one per grid point, or
+/// empty where no pilot runs. A host computes them once and puts them in
+/// `spec.curvature_hints` of every single-core part, so all parts fit with
+/// the same hints. Ignores any hints already on `spec`.
+///
+/// # Errors
+/// Same failure set as `run_batch` before its sim loop.
+pub fn curvature_hint_parts(
+    spec: &SimulationSpec,
+    sample_sizes: &[u32],
+    base_seed: u64,
+) -> Result<Vec<Option<engine_contract::CurvatureHintParts>>, EngineError> {
+    Ok(curvature_hints(spec, sample_sizes, base_seed)?
+        .into_iter()
+        .map(|h| {
+            h.map(|h| engine_contract::CurvatureHintParts {
+                dim: h.dim(),
+                inv_hessian: h.inv_hessian().to_vec(),
+                units: h.units(),
+            })
+        })
+        .collect())
 }
 
 /// Per-sim body shared by `run_batch` (parallel) and `run_batch_st` (serial).
@@ -846,6 +1064,7 @@ fn run_one_sim(
     bh: &mut [u8],
     pc: &mut [u64],
     tau_hat: &mut [f64], // per-N τ̂² row; NaN except where the GLMM branch writes it
+    event_rate: &mut [f64], // per-N mean(y[..N]) row; written for a Binary outcome only
     joint_unc_slice: &mut [u8],
     joint_cor_slice: &mut [u8],
     mut post_unc_slice: Option<&mut [u8]>,
@@ -854,6 +1073,7 @@ fn run_one_sim(
     fx: &mut [u8], // (n_sample_sizes × n_factors) exclusion codes for this sim
     cancelled_ref: &std::sync::atomic::AtomicBool,
     mut stat_sink: Option<&mut [f64]>, // nt-wide row for sample-size index 0, or None
+    hints: &[Option<glmm::loop_advanced::CurvatureHint>], // per grid point; empty = none
 ) -> Result<(), EngineError> {
     if cancelled_ref.load(Ordering::Relaxed) {
         return Err(EngineError::Cancelled);
@@ -882,6 +1102,19 @@ fn run_one_sim(
         }
         for (d, &s) in ws.y_full_f64[..n_w].iter_mut().zip(&ws.y_full[..n_w]) {
             *d = s as f64;
+        }
+    }
+
+    // Realized event rate per grid point: the fits read the prefix y[..N], so
+    // one running sum over the ascending grid gives every point's mean.
+    if spec.outcome_kind == OutcomeKind::Binary {
+        let mut sum = 0.0f64;
+        let mut last = 0usize;
+        for (slot, &n) in event_rate.iter_mut().zip(sample_sizes) {
+            let n = n as usize;
+            sum += ws.y_full_f64[last..n].iter().sum::<f64>();
+            last = n;
+            *slot = sum / n as f64;
         }
     }
 
@@ -1260,6 +1493,7 @@ fn run_one_sim(
             // Brent path is gone (Brent → BOBYQA; a deliberate numeric move on the
             // scalar-intercept case, handled in a later verification task).
             let cluster = spec.cluster.as_ref().expect("Mle requires ClusterSpec");
+            let satterthwaite = crate::critvals::uses_satterthwaite(spec);
             // Grid-sequential warm-start: no carry into the first grid point of this
             // sim. Reset per sim so nothing crosses sims (work-stolen order is
             // non-deterministic — the carry is safe only walked in ascending N by the
@@ -1369,13 +1603,23 @@ fn run_one_sim(
                             (ws.has_prev || spec.scenario.truth_start).then(|| glmm::StartValues {
                                 beta: spec.effect_sizes.clone(),
                                 theta,
+                                dispersion: None,
                             });
-                        let view = glmm::loop_advanced::fit_on(
+                        // The curvature hint describes the deviance near its
+                        // optimum, so only a fit that starts near it (truth or
+                        // carried θ̂) reads it. From the blind start it costs a
+                        // slope LMM evaluations at a single N (17 → 18–19 per
+                        // fit) where a truth start saves them (10.7 → 8.4).
+                        let hint = start
+                            .as_ref()
+                            .and_then(|_| hints.get(n_idx).and_then(Option::as_ref));
+                        let view = glmm::loop_advanced::fit_on_hinted(
                             &mut ws.mixed[n_idx],
                             &ws.x_rowmajor[..n_usize * p],
                             &ws.y_full_f64[..n_usize],
                             &ws.mixed_ids[n_idx],
                             start.as_ref(),
+                            hint,
                             &ws.mixed_opts,
                         );
                         (&spec.target_indices[..], view)
@@ -1414,12 +1658,8 @@ fn run_one_sim(
                         // Its OWN FitOptions — target_indices is the reduced set
                         // (differs from the hot workspace's frozen opts). wald_se is
                         // inert for a Gaussian LMM; mirror the batch opts anyway.
-                        let opts_red = glmm::FitOptions {
-                            target_indices: excl_targets.clone(),
-                            wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
-                            nagq: spec.nagq,
-                            ..Default::default()
-                        };
+                        let opts_red =
+                            crate::mixed_workspace::fit_options(spec, excl_targets.clone());
                         // The exclusion fit drops all random slopes, so its θ warm
                         // start must too: `include_slopes = false` yields one intercept
                         // scalar τ per grouping. β is ignored by the LMM arm.
@@ -1428,10 +1668,11 @@ fn run_one_sim(
                             .iter()
                             .map(|&cj| spec.effect_sizes[cj as usize])
                             .collect();
-                        let start = spec
-                            .scenario
-                            .truth_start
-                            .then_some(glmm::StartValues { beta, theta });
+                        let start = spec.scenario.truth_start.then_some(glmm::StartValues {
+                            beta,
+                            theta,
+                            dispersion: None,
+                        });
                         let (sized, sized_ids, perm) =
                             glmm::loop_advanced::spec_sized_from_ids_pub(&model, ids);
                         red_ws = Some(glmm::loop_advanced::build_workspace(
@@ -1448,13 +1689,29 @@ fn run_one_sim(
                         (&excl_targets[..], view)
                     };
                 let diag = view.diagnostics();
-                optim_diag::record_fit(view.n_eval(), diag.converged, diag.boundary_hit == 1);
+                if sim_id != PILOT_SIM_ID {
+                    optim_diag::record_fit(view.n_eval(), diag.converged, diag.boundary_hit == 1);
+                }
 
                 let converged = diag.converged;
                 let joint_t_sq = view.joint_t_sq();
-                // Predictor-indexed (module-header invariant): hot path length p,
-                // cold path length p_red.
-                let t_sq = view.t_sq();
+
+                // Target t² in target-rank order, NaN when not converged or at a
+                // dropped target. `view.t_sq()` is PREDICTOR-indexed
+                // (module-header invariant): length p on the hot fit, p_red on the
+                // reduced one, which `targets_fit` indexes.
+                let n_t = spec.target_indices.len();
+                let reduced_slots = needs_reduced_fit.then_some(&excl_target_slots[..]);
+                if converged {
+                    gather_targets(
+                        view.t_sq(),
+                        targets_fit,
+                        reduced_slots,
+                        &mut ws.compact_t_sq_scratch[..n_t],
+                    );
+                } else {
+                    ws.compact_t_sq_scratch[..n_t].fill(f64::NAN);
+                }
 
                 // Grid-sequential warm-start update — HOT path only (the reduced/
                 // exclusion cold fit strips slopes → a different n_theta, so its θ̂
@@ -1471,13 +1728,47 @@ fn run_one_sim(
                     }
                 }
 
+                // Satterthwaite df of this draw's targets (`uses_satterthwaite`).
+                // glmm's pass needs the view dropped and leaves the kernel's factor
+                // and σ̂² off θ̂, so every read off the fit happens above. A draw
+                // whose pass fails, or that gets a non-finite or non-positive df on
+                // a kept target (no t distribution there), keeps the asymptotic
+                // table below. A df in (0, 1) is used unclamped, as lmerTest does.
+                drop(view);
+                let satt_ok = satterthwaite && converged && {
+                    let fit_ws = match red_ws.as_mut() {
+                        Some(w) => w,
+                        None => &mut ws.mixed[n_idx],
+                    };
+                    let df = &mut ws.satt_df[..p_red];
+                    glmm::loop_advanced::satterthwaite(fit_ws, df).is_ok()
+                        && targets_fit.iter().all(|&c| {
+                            let d = df[c as usize];
+                            d.is_finite() && d > 0.0
+                        })
+                };
+                if satt_ok {
+                    gather_targets(
+                        &ws.satt_df[..p_red],
+                        targets_fit,
+                        reduced_slots,
+                        &mut ws.satt_target_df[..n_t],
+                    );
+                    for j in 0..n_t {
+                        ws.satt_p[j] = crate::critvals::t_tail_sq(
+                            ws.compact_t_sq_scratch[j],
+                            ws.satt_target_df[j],
+                        );
+                    }
+                }
+
                 // Every df-dependent threshold for this round, from one source —
                 // mirrors the OLS arm's `crit_src` split, change together. The
                 // reduced round only needs its own table when a df actually backs
                 // the thresholds, i.e. under the between-within reference: the
                 // asymptotic mixed crit is Wald-z and df-free, so the full table is
                 // exact there and stays bit-identical. Disjoint-field borrow of ws
-                // (the cache vs the fit buffers held by `view`).
+                // (the cache vs the scratch buffers read below).
                 //
                 // A collapsed fit (every variance component pinned at zero) is
                 // decided against the collapsed twin of whichever table applies —
@@ -1540,41 +1831,52 @@ fn run_one_sim(
                 // for LME designs. Under exclusion the joint test runs over the
                 // reduced target set (excluded targets are untestable by definition).
                 let k_red = targets_fit.len(); // spec.target_indices.len() hot, excl_targets.len() cold
-                let joint_crit = if !needs_reduced_fit {
-                    crit_src.joint_t_crit_sq[crit_idx]
-                } else if k_red == 0 {
-                    f64::INFINITY // no testable targets ⇒ joint never significant
-                } else if crit_src.has_df() {
-                    // A df on an Mle build means the between-within reference is
-                    // active: the joint statistic goes against k · F(k, df_joint)
-                    // with df_joint the smallest df among the targets that survived
-                    // exclusion, read off the REDUCED table. Mirrors the joint arm of
-                    // `CritValueTable::build_with_tukey_k` and the GLMM joint site
-                    // below — change together.
-                    let dfs = &crit_src.df_per_target[crit_idx];
-                    let df_joint = excl_target_slots
-                        .iter()
-                        .map(|&s| dfs[s])
-                        .fold(f64::INFINITY, f64::min);
-                    k_red as f64
-                        * crate::critvals::f_ppf(
-                            1.0 - spec.crit_values.alpha,
-                            k_red as f64,
-                            df_joint,
-                        )
-                } else {
-                    // Reduced target set: χ² df must match k_red. This is the one
-                    // reduced-df crit NOT served by the (N, p_red) cache the OLS/GLM
-                    // arms use: k_red is a TARGET count, not a column count, so the
-                    // cache key cannot express it. Explicit recompute stays.
-                    crate::critvals::chi2_ppf(1.0 - spec.crit_values.alpha, k_red as f64)
-                };
+                let alpha = spec.crit_values.alpha;
                 // A `Solver::Sparse`-routed design (extra-grouping random slopes)
                 // yields a `Prebuilt` FitView whose `joint_t_sq` is NaN — a
                 // deliberate degradation: do NOT reconstruct the joint Wald. NaN
-                // fails the `> joint_crit` comparison (NaN compares false), so it
-                // falls through to a non-significant joint decision.
-                let joint_sig = converged && joint_t_sq.is_finite() && joint_t_sq > joint_crit;
+                // fails both comparisons below, so it falls through to a
+                // non-significant joint decision.
+                let joint_sig = if satt_ok {
+                    // Upper F tail of joint_t²/k at (k, df_min), df_min the smallest
+                    // Satterthwaite df among the kept targets (`f64::min` skips the
+                    // NaN at dropped slots): a Satterthwaite F df would need glmm's
+                    // `contrast_f`, which the loop tier does not expose. Mirrors the
+                    // between-within joint, which takes the smallest df of the set.
+                    let df_min = ws.satt_target_df[..n_t]
+                        .iter()
+                        .fold(f64::INFINITY, |a, &d| a.min(d));
+                    k_red > 0
+                        && joint_t_sq.is_finite()
+                        && crate::critvals::f_tail(joint_t_sq / k_red as f64, k_red as f64, df_min)
+                            <= alpha
+                } else {
+                    let joint_crit = if !needs_reduced_fit {
+                        crit_src.joint_t_crit_sq[crit_idx]
+                    } else if k_red == 0 {
+                        f64::INFINITY // no testable targets ⇒ joint never significant
+                    } else if crit_src.has_df() {
+                        // A df on an Mle build means the between-within reference is
+                        // active: the joint statistic goes against k · F(k, df_joint)
+                        // with df_joint the smallest df among the targets that survived
+                        // exclusion, read off the REDUCED table. Mirrors the joint arm of
+                        // `CritValueTable::build_with_tukey_k` and the GLMM joint site
+                        // below — change together.
+                        let dfs = &crit_src.df_per_target[crit_idx];
+                        let df_joint = excl_target_slots
+                            .iter()
+                            .map(|&s| dfs[s])
+                            .fold(f64::INFINITY, f64::min);
+                        k_red as f64 * crate::critvals::f_ppf(1.0 - alpha, k_red as f64, df_joint)
+                    } else {
+                        // Reduced target set: χ² df must match k_red. This is the one
+                        // reduced-df crit NOT served by the (N, p_red) cache the OLS/GLM
+                        // arms use: k_red is a TARGET count, not a column count, so the
+                        // cache key cannot express it. Explicit recompute stays.
+                        crate::critvals::chi2_ppf(1.0 - alpha, k_red as f64)
+                    };
+                    converged && joint_t_sq.is_finite() && joint_t_sq > joint_crit
+                };
                 joint_unc_slice[n_idx] = u8::from(joint_sig);
                 joint_cor_slice[n_idx] = u8::from(joint_sig);
 
@@ -1582,26 +1884,18 @@ fn run_one_sim(
                 let row_end = row_start + main_row;
                 let unc_slice = &mut unc[row_start..row_end];
                 unc_slice.fill(0);
-                // Per-target under the between-within denominator df; one repeated
-                // value everywhere else. Mirrors the OLS and GLMM marginal reads —
-                // change together.
-                let t_crit_unc = &crit_src.t_crit_sq_uncorrected[crit_idx];
-                // PREDICTOR-indexed gather (module-header invariant).
-                // Hot path: t_sq is indexed by original predictor position (0..P);
-                //   gather via spec.target_indices.
-                // Cold path: t_sq is indexed by reduced predictor position (0..p_red);
-                //   gather via excl_col_remap[ti] (PREDICTOR-indexed, reduced).
-                // Dropped slots → NaN (never significant).
-                if converged {
-                    for (j, &ti) in spec.target_indices.iter().enumerate() {
-                        let tj = if !needs_reduced_fit {
-                            t_sq[ti as usize]
-                        } else {
-                            match excl_col_remap[ti as usize] {
-                                r if r >= 0 => t_sq[r as usize],
-                                _ => f64::NAN,
-                            }
-                        };
+                let all_t_sq = &ws.compact_t_sq_scratch[..n_t];
+                if satt_ok {
+                    for (u, &pj) in unc_slice.iter_mut().zip(&ws.satt_p[..n_t]) {
+                        *u = u8::from(pj <= alpha);
+                    }
+                } else if converged {
+                    // Per-target under the between-within denominator df; one
+                    // repeated value everywhere else. Mirrors the OLS and GLMM
+                    // marginal reads — change together. Dropped slots are NaN
+                    // (never significant).
+                    let t_crit_unc = &crit_src.t_crit_sq_uncorrected[crit_idx];
+                    for (j, &tj) in all_t_sq.iter().enumerate() {
                         if !tj.is_nan() && tj > t_crit_unc[j] {
                             unc_slice[j] = 1;
                         }
@@ -1613,38 +1907,40 @@ fn run_one_sim(
                 if n_idx == 0 {
                     if let Some(row) = stat_sink.as_deref_mut() {
                         row.fill(f64::NAN);
-                        if converged {
-                            for (j, &ti) in spec.target_indices.iter().enumerate() {
-                                row[j] = if !needs_reduced_fit {
-                                    t_sq[ti as usize]
-                                } else {
-                                    match excl_col_remap[ti as usize] {
-                                        r if r >= 0 => t_sq[r as usize],
-                                        _ => f64::NAN,
-                                    }
-                                };
-                            }
-                        }
+                        row[..n_t].copy_from_slice(all_t_sq);
                     }
                 }
                 let cor_slice = &mut cor[row_start..row_end];
-                if converged {
-                    // Build full-width (n_targets) t² buffer for apply_correction,
-                    // NaN at dropped target slots. Mirrors the GLM arm's all_t_sq pattern.
-                    let n_t = spec.target_indices.len();
-                    let all_t_sq = &mut ws.compact_t_sq_scratch[..n_t];
-                    all_t_sq.fill(f64::NAN);
-                    if !needs_reduced_fit {
-                        // Hot path: gather PREDICTOR-indexed t_sq into target-compact buffer.
-                        for (k, &ti) in spec.target_indices.iter().enumerate() {
-                            all_t_sq[k] = t_sq[ti as usize];
+                if satt_ok {
+                    // Each target at its own df: Holm and BH become R's
+                    // `p.adjust` on the p-values (the between-within table instead
+                    // refers every rank to the smallest df of the set); Tukey is
+                    // the studentized-range test at the target's df, read as its
+                    // upper tail so no quantile search runs per draw.
+                    if spec.correction_method == CorrectionMethod::TukeyHsd {
+                        cor_slice.fill(0);
+                        for (j, &ti) in spec.target_indices.iter().enumerate() {
+                            let k = tukey_k_for_kernel_col(
+                                ti,
+                                spec.n_non_factor,
+                                &spec.factor_n_levels,
+                            );
+                            let tail = crate::critvals::tukey_tail_sq(
+                                all_t_sq[j],
+                                k,
+                                ws.satt_target_df[j],
+                            );
+                            cor_slice[j] = u8::from(tail <= alpha);
                         }
                     } else {
-                        // Cold path: scatter remapped values; dropped slots stay NaN.
-                        for (k, &slot) in excl_target_slots.iter().enumerate() {
-                            all_t_sq[slot] = t_sq[targets_fit[k] as usize];
-                        }
+                        apply_correction_p(
+                            spec.correction_method,
+                            &ws.satt_p[..n_t],
+                            alpha,
+                            cor_slice,
+                        );
                     }
+                } else if converged {
                     apply_correction(
                         spec.correction_method,
                         all_t_sq,
@@ -1764,13 +2060,13 @@ fn run_one_sim(
                     // cold can settle in different optima. Mirrors
                     // introspect::fit_provided_data's clustered-GLMM arm — change
                     // together.
-                    let theta = crate::mixed_workspace::truth_theta(cluster, true);
                     // β warm start is unconditional (mirrors the retired `fit_glmm`,
-                    // which took β separately from the θ-only start); θ must equal the
-                    // kernel's blind start when `truth_start` is off — glmm's None-θ
-                    // path seeds every entry to `glmm::THETA0`, and passing that
-                    // constant explicitly reproduces it bit-for-bit (a Some-θ start
-                    // clamps `THETA0.max(THETA_TRUTH_FLOOR)`, and THETA0 is the larger).
+                    // which took β separately from the θ-only start). With
+                    // `truth_start` off, θ is left empty: glmm reads an empty θ as no
+                    // θ start and runs its blind path (diagonals THETA0, off-diagonals
+                    // 0). An explicit all-THETA0 θ would put +0.707 correlation on
+                    // every random-slope pair, never match that blind point, and pay
+                    // the start guard's two extra Laplace solves.
                     // Grid-sequential warm start: after the first converged grid
                     // point of this sim, seed θ from the carried θ̂ (same population
                     // θ). Safe on both the full and test_formula-reduced GLMM fits —
@@ -1783,44 +2079,54 @@ fn run_one_sim(
                     let start_theta = if ws.has_prev {
                         ws.theta_carry.clone()
                     } else if spec.scenario.truth_start {
-                        theta
+                        crate::mixed_workspace::truth_theta(cluster, true)
                     } else {
-                        vec![glmm::THETA0; theta.len()]
+                        Vec::new()
                     };
                     let start = Some(glmm::StartValues {
                         beta: fit_beta.to_vec(),
                         theta: start_theta,
+                        dispersion: None,
                     });
 
                     // Non-reduced uses the frozen batch opts (target_indices =
                     // spec.target_indices); the reduced fit needs the reduced target
                     // set, so it presents its own opts (target_indices is not frozen
                     // by `fit_on` — only nagq/weights/offset/parallel_inner are, which
-                    // match `..Default::default()` + spec.nagq here).
+                    // match the batch opts, as both come from `fit_options(spec, …)`).
                     let opts_red;
                     let opts_ref: &glmm::FitOptions = if test_reduces {
-                        opts_red = glmm::FitOptions {
-                            target_indices: reduced_targets.clone(),
-                            wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
-                            nagq: spec.nagq,
-                            ..Default::default()
-                        };
+                        opts_red =
+                            crate::mixed_workspace::fit_options(spec, reduced_targets.clone());
                         &opts_red
                     } else {
                         &ws.mixed_opts
                     };
 
-                    let view = glmm::loop_advanced::fit_on(
+                    // Unlike the LMM arm, every start reads the curvature hint,
+                    // the blind one included: there it cuts the evaluations per
+                    // fit by about a third (single N, 480 rows, 500 sims: crossed
+                    // 18.8 → 11.3, nested 20.9 → 14.3, crossed + nested 25.3 →
+                    // 17.6, AGQ intercept 12.3 → 7.9), with identical power and
+                    // convergence.
+                    let view = glmm::loop_advanced::fit_on_hinted(
                         &mut ws.mixed[n_idx],
                         x_fit,
                         y_slice,
                         &ws.mixed_ids[n_idx],
                         start.as_ref(),
+                        hints.get(n_idx).and_then(Option::as_ref),
                         opts_ref,
                     );
 
                     let diag = view.diagnostics();
-                    optim_diag::record_fit(view.n_eval(), diag.converged, diag.boundary_hit == 1);
+                    if sim_id != PILOT_SIM_ID {
+                        optim_diag::record_fit(
+                            view.n_eval(),
+                            diag.converged,
+                            diag.boundary_hit == 1,
+                        );
+                    }
                     let converged = diag.converged;
                     let joint_t_sq = view.joint_t_sq();
                     // Predictor-indexed, fitted width (p_red under test_formula, else
@@ -2334,7 +2640,7 @@ fn build_posthoc_contrasts(spec: &SimulationSpec) -> Result<Vec<Vec<f64>>, Engin
     for block in &spec.posthoc {
         let dummies = &block.target_indices;
         let k = dummies.len() + 1; // number of levels (1 reference + dummies)
-                                   // Range-check all dummy indices.
+        // Range-check all dummy indices.
         for &ti in dummies {
             if (ti as usize) >= p {
                 return Err(EngineError::InvalidSpec(format!(
@@ -2385,6 +2691,39 @@ fn tukey_k_for_kernel_col(col: u32, n_non_factor: u32, factor_n_levels: &[i32]) 
     }
     // Past the last factor's dummies — shouldn't happen for a validated spec.
     f64::NAN
+}
+
+/// Per-target Tukey `k` (the level count `L` of the factor each target belongs
+/// to) for `CritValueTable::build_with_tukey_k`; empty unless the spec uses
+/// `TukeyHsd`. Target order matches the per-N correction row: marginals first
+/// (in `target_indices` order), then contrasts (in `contrast_pairs` order).
+/// Shared by the hot-path tables and the debug-mode tables in introspect.rs.
+pub(crate) fn tukey_k_per_target(spec: &SimulationSpec) -> Vec<f64> {
+    if spec.correction_method != CorrectionMethod::TukeyHsd {
+        return Vec::new();
+    }
+    let mut k = Vec::with_capacity(spec.target_indices.len() + spec.contrast_pairs.len());
+    for &col in &spec.target_indices {
+        k.push(tukey_k_for_kernel_col(
+            col,
+            spec.n_non_factor,
+            &spec.factor_n_levels,
+        ));
+    }
+    for &(pos, _neg) in &spec.contrast_pairs {
+        // A contrast tests β_pos − β_neg. Tukey HSD compares means within a
+        // single factor; the positive side identifies that factor. If pos
+        // and neg live in different factors (or one is non-factor), `k` is
+        // taken from pos's factor — a same-factor pairwise contrast (the only
+        // sensible Tukey target) has both sides in the same block, so `k` is
+        // that factor's `L` either way.
+        k.push(tukey_k_for_kernel_col(
+            pos,
+            spec.n_non_factor,
+            &spec.factor_n_levels,
+        ));
+    }
+    k
 }
 
 /// Build per-sample-size correction thresholds for one posthoc block.
@@ -2485,36 +2824,7 @@ fn build_crit_tables(
     p_between: u32,
 ) -> Result<(CritValueTable, Option<CritValueTable>, Vec<Vec<f64>>), EngineError> {
     let n_targets = spec.target_indices.len() + spec.contrast_pairs.len();
-    // Per-target Tukey `k` (the factor level count `L` of the factor each target
-    // belongs to). Only consumed by the TukeyHsd arm; cheap to always compute.
-    // Target order matches the per-N correction row: marginals first (in
-    // `target_indices` order), then contrasts (in `contrast_pairs` order).
-    let tukey_k_per_target: Vec<f64> = if spec.correction_method == CorrectionMethod::TukeyHsd {
-        let mut k = Vec::with_capacity(n_targets);
-        for &col in &spec.target_indices {
-            k.push(tukey_k_for_kernel_col(
-                col,
-                spec.n_non_factor,
-                &spec.factor_n_levels,
-            ));
-        }
-        for &(pos, _neg) in &spec.contrast_pairs {
-            // A contrast tests β_pos − β_neg. Tukey HSD compares means within a
-            // single factor; the positive side identifies that factor. If pos
-            // and neg live in different factors (or one is non-factor), `k` is
-            // taken from pos's factor — a same-factor pairwise contrast (the only
-            // sensible Tukey target) has both sides in the same block, so `k` is
-            // that factor's `L` either way.
-            k.push(tukey_k_for_kernel_col(
-                pos,
-                spec.n_non_factor,
-                &spec.factor_n_levels,
-            ));
-        }
-        k
-    } else {
-        Vec::new()
-    };
+    let tukey_k_per_target = tukey_k_per_target(spec);
     let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between);
     let crit = CritValueTable::build_with_tukey_k(
         &spec.crit_values,
@@ -2571,6 +2881,23 @@ fn build_crit_tables(
         }
     };
     Ok((crit, crit_boundary, posthoc_correction_crit_sq))
+}
+
+/// Gather a mixed fit's PREDICTOR-indexed per-coefficient values (`t²`, df)
+/// into target-rank order: `targets_fit[k]` is target `k`'s fitted column, and
+/// `reduced_slots[k]` its slot when a reduced fit dropped some targets (`None`
+/// on the hot fit, where slot = `k`). Dropped slots are NaN.
+fn gather_targets(
+    src: &[f64],
+    targets_fit: &[u32],
+    reduced_slots: Option<&[usize]>,
+    dst: &mut [f64],
+) {
+    dst.fill(f64::NAN);
+    for (k, &col) in targets_fit.iter().enumerate() {
+        let slot = reduced_slots.map_or(k, |s| s[k]);
+        dst[slot] = src[col as usize];
+    }
 }
 
 /// Whether a mixed fit collapsed to its single-level model: every diagonal
@@ -3213,6 +3540,227 @@ mod tests {
                 extra_groupings: vec![],
             }),
             ..crate::test_support::base_spec()
+        }
+    }
+
+    /// `y ~ x1 + x2 + (1 | g) + (1 | h)` with `h` crossed with `g` (6 × 4
+    /// levels), `x1` cluster-level and `x2` within-cluster, under the
+    /// between-within reference — a design the between/within split does not
+    /// cover, so its targets are tested at each draw's Satterthwaite df.
+    fn crossed_lme_spec() -> SimulationSpec {
+        let mut spec = minimal_lme_spec();
+        spec.df_method = DfMethod::BetweenWithin;
+        spec.n_non_factor = 2;
+        spec.correlation = vec![1.0, 0.0, 0.0, 1.0];
+        spec.var_types = vec![Distribution::Normal; 2];
+        spec.var_params = vec![0.0; 2];
+        spec.between_var_indices = vec![1];
+        spec.effect_sizes = vec![0.0, 0.6, 0.25];
+        spec.target_indices = vec![1, 2];
+        spec.correction_method = CorrectionMethod::Holm;
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 6 },
+            tau_squared: 0.3,
+            slopes: vec![],
+            extra_groupings: vec![engine_contract::GroupingSpec {
+                relation: engine_contract::GroupingRelation::Crossed { n_clusters: 4 },
+                tau_squared: 0.2,
+                slopes: vec![],
+            }],
+        });
+        spec
+    }
+
+    /// Re-fit sim `sim_id`'s draw through the provided-data path, which
+    /// reports that fit's per-target df and squared statistics.
+    fn refit_draw(
+        spec: &SimulationSpec,
+        sim_id: u64,
+        n: usize,
+        seed: u64,
+    ) -> crate::introspect::IntrospectResults {
+        let p = n_predictors(spec);
+        let mut ws = SimWorkspace::new(
+            n,
+            p,
+            spec.n_non_factor as usize,
+            spec.factor_n_levels.len(),
+            spec.cluster.as_ref(),
+        );
+        generate_sim_data(spec, sim_id, seed, &mut ws).unwrap();
+        let mut design = vec![0.0; n * p];
+        for j in 0..p {
+            for i in 0..n {
+                design[j * n + i] = ws.x_full[(i, j)] as f64;
+            }
+        }
+        let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
+        let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
+        crate::introspect::fit_provided_data(spec, seed, &design, n, p, &outcome, Some(&cids))
+            .unwrap()
+    }
+
+    /// A crossed Gaussian LMM under the between-within reference decides every
+    /// draw at that draw's own Satterthwaite df: each target's uncorrected flag
+    /// is `p ≤ α` with `p` the t tail at the df the provided-data fit of the
+    /// same draw reports, and the Holm flags are R's `p.adjust(p, "holm")`
+    /// decisions on those p-values. The run must also contain draws where the
+    /// asymptotic Wald z decides otherwise, or the check would not discriminate.
+    fn assert_each_draw_at_satterthwaite_df(spec: &SimulationSpec) {
+        let m = spec.target_indices.len();
+        let (n, n_sims, seed) = (96usize, 32u32, 2137u64);
+        let (batch, stat_sq) = run_batch_st_capture(spec, &[n as u32], n_sims, seed).unwrap();
+        let z = crate::critvals::norm_ppf(0.975);
+        let (mut converged, mut differs_from_z) = (0, 0);
+        for sim in 0..n_sims as usize {
+            if batch.converged[sim] == 0 {
+                continue;
+            }
+            converged += 1;
+            let r = refit_draw(spec, sim as u64, n, seed);
+            assert_eq!(
+                r.df_per_target.len(),
+                m,
+                "sim {sim}: Satterthwaite df per target"
+            );
+            let mut p = vec![0.0; m];
+            for j in 0..m {
+                let t_sq = stat_sq[sim * m + j];
+                let refit_t_sq = r.statistic[j] * r.statistic[j];
+                assert!(
+                    (t_sq - refit_t_sq).abs() <= 1e-12 * t_sq,
+                    "sim {sim}: same fit"
+                );
+                p[j] = crate::critvals::t_tail_sq(t_sq, r.df_per_target[j]);
+                assert_eq!(
+                    batch.uncorrected[sim * m + j],
+                    u8::from(p[j] <= 0.05),
+                    "sim {sim} target {j}: t² {t_sq} at df {}",
+                    r.df_per_target[j]
+                );
+                if u8::from(t_sq > z * z) != batch.uncorrected[sim * m + j] {
+                    differs_from_z += 1;
+                }
+            }
+            let mut holm = vec![0u8; m];
+            crate::correction::apply_correction_p(CorrectionMethod::Holm, &p, 0.05, &mut holm);
+            assert_eq!(
+                &batch.corrected[sim * m..(sim + 1) * m],
+                &holm[..],
+                "sim {sim}: Holm"
+            );
+        }
+        assert!(
+            converged >= 28,
+            "expected nearly every fit to converge, got {converged}"
+        );
+        assert!(
+            differs_from_z >= 2,
+            "Satterthwaite and Wald z must disagree on some draws"
+        );
+    }
+
+    #[test]
+    fn crossed_lme_decides_each_draw_at_its_satterthwaite_df() {
+        assert_each_draw_at_satterthwaite_df(&crossed_lme_spec());
+    }
+
+    /// The same on the `test_formula` reduced fit, whose one-shot workspace
+    /// and compact column order differ from the hot fit's: the test design
+    /// keeps `{intercept, x2}`, so the target's fitted column (1) is not its
+    /// design column (2). `x2` is made cluster-level so its df is small and
+    /// Satterthwaite departs from Wald z.
+    #[test]
+    fn crossed_lme_reduced_fit_decides_each_draw_at_its_satterthwaite_df() {
+        let mut spec = crossed_lme_spec();
+        spec.between_var_indices = vec![2];
+        spec.effect_sizes = vec![0.0, 0.25, 0.6];
+        spec.target_indices = vec![2];
+        spec.fit_columns = vec![0, 2];
+        assert_each_draw_at_satterthwaite_df(&spec);
+    }
+
+    /// Tukey HSD on a crossed LMM decides each draw at the target's own
+    /// Satterthwaite df. For a 2-level factor the studentized range at k = 2 is
+    /// the two-sided t, so the factor target's flag must equal `t tail ≤ α` at
+    /// the draw's df; the continuous target has no Tukey k and never passes.
+    #[test]
+    fn crossed_lme_tukey_decides_each_draw_at_its_satterthwaite_df() {
+        let mut spec = lme_factor_spec(0.3, 0.45, vec![0.5, 0.5], 0);
+        spec.df_method = DfMethod::BetweenWithin;
+        spec.correction_method = CorrectionMethod::TukeyHsd;
+        spec.cluster = crossed_lme_spec().cluster;
+        let (n, n_sims, seed) = (96usize, 48u32, 2137u64);
+        let (batch, stat_sq) = run_batch_st_capture(&spec, &[n as u32], n_sims, seed).unwrap();
+        let (mut converged, mut wrong_k_differs) = (0, 0);
+        for sim in 0..n_sims as usize {
+            if batch.converged[sim] == 0 {
+                continue;
+            }
+            converged += 1;
+            let r = refit_draw(&spec, sim as u64, n, seed);
+            let (t_sq, df) = (stat_sq[sim * 2 + 1], r.df_per_target[1]);
+            let p = crate::critvals::t_tail_sq(t_sq, df);
+            assert_eq!(
+                batch.corrected[sim * 2 + 1],
+                u8::from(p <= 0.05),
+                "sim {sim}"
+            );
+            assert_eq!(batch.corrected[sim * 2], 0, "sim {sim}: continuous target");
+            // A k = 3 lookup would decide this draw differently.
+            if (crate::critvals::tukey_tail_sq(t_sq, 3.0, df) <= 0.05) != (p <= 0.05) {
+                wrong_k_differs += 1;
+            }
+        }
+        assert!(
+            converged >= 40,
+            "expected nearly every fit to converge, got {converged}"
+        );
+        assert!(
+            wrong_k_differs >= 2,
+            "the draws must discriminate k = 2 from k = 3"
+        );
+    }
+
+    /// Against the asymptotic reference on the same draws, the Satterthwaite t
+    /// can only reject less: every p-value grows, so no uncorrected, Holm, BH or
+    /// joint flag turns on, on the hot fit and on the `test_formula` reduced fit
+    /// alike, and some turn off.
+    #[test]
+    fn crossed_satterthwaite_only_removes_rejections() {
+        let (n, n_sims, seed) = (96u32, 48u32, 2137u64);
+        for (correction, fit_columns) in [
+            (CorrectionMethod::Holm, vec![]),
+            (CorrectionMethod::BenjaminiHochberg, vec![]),
+            (CorrectionMethod::Bonferroni, vec![0, 1]),
+        ] {
+            let mut bw = crossed_lme_spec();
+            bw.correction_method = correction;
+            if !fit_columns.is_empty() {
+                bw.target_indices = vec![1];
+            }
+            bw.fit_columns = fit_columns.clone();
+            let mut asym = bw.clone();
+            asym.df_method = DfMethod::Asymptotic;
+            let b = run_batch(&bw, &[n], n_sims, seed, None).unwrap();
+            let a = run_batch(&asym, &[n], n_sims, seed, None).unwrap();
+            let label = format!("{correction:?}, fit_columns {fit_columns:?}");
+            assert_eq!(b.converged, a.converged, "{label}: same fits");
+            for (bs, as_) in [
+                (&b.uncorrected, &a.uncorrected),
+                (&b.corrected, &a.corrected),
+                (&b.joint_unc, &a.joint_unc),
+            ] {
+                assert!(
+                    bs.iter().zip(as_.iter()).all(|(&x, &y)| x <= y),
+                    "{label}: a flag turned on"
+                );
+            }
+            let count = |v: &[u8]| v.iter().map(|&x| x as u32).sum::<u32>();
+            assert!(
+                count(&b.uncorrected) < count(&a.uncorrected),
+                "{label}: some rejection must turn off"
+            );
         }
     }
 
@@ -4509,6 +5057,7 @@ mod tests {
                 target_indices: vec![2, 3], // dummy column indices for the 3-level factor
             }],
             factor_min_level_count: 5,
+            // target_indices stays [1]: x1 only, as a sanity check
             ..crate::test_support::base_spec()
         };
 
@@ -4724,6 +5273,7 @@ mod tests {
             effect_sizes,
             report_overall: true,
             factor_min_level_count,
+            // target_indices stays [1]: x1 only (null β=0 for the FPR test)
             ..crate::test_support::base_spec()
         }
     }
@@ -4750,6 +5300,7 @@ mod tests {
             intercept,
             report_overall: true,
             factor_min_level_count,
+            // target_indices stays [1]: x1 only (null for the FPR test)
             ..crate::test_support::base_spec()
         }
     }

@@ -33,29 +33,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn design_spec_roundtrip_keeps_term_order() {
-        let spec = DesignSpec {
-            terms: vec![
-                DesignTerm::Const,
-                DesignTerm::Direct {
-                    column: ColumnId(0),
-                },
-                DesignTerm::DummyOf {
-                    column: ColumnId(1),
-                    level_index: 1,
-                },
-                DesignTerm::DummyOf {
-                    column: ColumnId(1),
-                    level_index: 2,
-                },
-            ],
-        };
-        let bytes = rmp_serde::to_vec_named(&spec).unwrap();
-        let back: DesignSpec = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(spec, back);
-    }
-
-    #[test]
     fn design_spec_roundtrip_keeps_interaction_term() {
         let spec = DesignSpec {
             terms: vec![

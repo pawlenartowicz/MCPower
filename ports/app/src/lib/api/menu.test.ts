@@ -143,6 +143,36 @@ describe('routeMenuEvent — run shortcuts', () => {
     spy.mockRestore();
     familyStore.active = 'regression';
   });
+
+  it('run.find_power does not run when the adapter returns a spec alongside blocking errors', () => {
+    vi.mocked(familyConfigToAppSpec).mockReturnValueOnce({
+      spec: { family: 'linear' },
+      errors: ['alpha must be set'],
+      warnings: [],
+    } as any);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = vi.spyOn(runStore, 'startFindPower').mockResolvedValue(undefined);
+    routeMenuEvent('run.find_power');
+    expect(spy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('alpha must be set');
+    spy.mockRestore();
+    warn.mockRestore();
+  });
+
+  it('run.find_n does not run when the adapter returns a spec alongside blocking errors', () => {
+    vi.mocked(familyConfigToAppSpec).mockReturnValueOnce({
+      spec: { family: 'linear' },
+      errors: ['target power must be set'],
+      warnings: [],
+    } as any);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = vi.spyOn(runStore, 'startFindSampleSize').mockResolvedValue(undefined);
+    routeMenuEvent('run.find_n');
+    expect(spy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('target power must be set');
+    spy.mockRestore();
+    warn.mockRestore();
+  });
 });
 
 describe('routeMenuEvent — export results', () => {

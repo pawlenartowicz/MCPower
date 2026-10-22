@@ -39,7 +39,7 @@ async function startFindPowerFromShortcut() {
   const { spec, errors } = familyConfigToAppSpec(
     familyStore.active, cfg, familyStore.regressionOutcome,
   );
-  if (!spec) { console.warn(errors[0] ?? 'cannot run yet'); return; }
+  if (!spec || errors.length > 0) { console.warn(errors[0] ?? 'cannot run yet'); return; }
   await runStore.startFindPower(spec, cfg.findPower.n);
 }
 
@@ -49,7 +49,7 @@ async function startFindSampleSizeFromShortcut() {
   const { spec, errors } = familyConfigToAppSpec(
     familyStore.active, cfg, familyStore.regressionOutcome,
   );
-  if (!spec) { console.warn(errors[0] ?? 'cannot run yet'); return; }
+  if (!spec || errors.length > 0) { console.warn(errors[0] ?? 'cannot run yet'); return; }
   const ssb = cfg.findSampleSize;
   const by =
     ssb.by === 'auto'

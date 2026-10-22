@@ -75,11 +75,8 @@ pub fn marginal_uniform(z: f64, a: f64, b: f64) -> f64 {
 /// standard-normal squares (when df is integral). For non-integer `df`, falls
 /// back to the same formula with `df.round()` squared normals — integer df is
 /// the common case in practice, so the non-integer path is best-effort.
+/// `df` must be finite and positive.
 pub fn sample_t(rng: &mut SimRng, df: f64) -> f64 {
-    if !df.is_finite() || df <= 0.0 {
-        // Degenerate — fall back to standard normal (f32 draw widened to f64).
-        return rng.next_normal() as f64;
-    }
     let z = rng.next_normal() as f64;
     let df_int = df.round() as i64;
     // Sum of df squared standard normals — chi-squared(df) when df is integer.
@@ -89,11 +86,7 @@ pub fn sample_t(rng: &mut SimRng, df: f64) -> f64 {
         chi2 += g * g;
     }
     let denom = (chi2 / df).sqrt();
-    if denom <= 0.0 {
-        z
-    } else {
-        z / denom
-    }
+    if denom <= 0.0 { z } else { z / denom }
 }
 
 #[cfg(test)]
@@ -130,18 +123,6 @@ mod tests {
             prev = cur;
             z += 0.1;
         }
-    }
-
-    #[test]
-    fn sample_t_degenerate_df_safe() {
-        // A degenerate df (0 or NaN) falls back to exactly one standard-normal
-        // draw from the same stream.
-        let mut rng = SimRng::new(1, 1);
-        let mut reference = SimRng::new(1, 1);
-        let x = sample_t(&mut rng, 0.0);
-        assert_eq!(x, reference.next_normal() as f64);
-        let y = sample_t(&mut rng, f64::NAN);
-        assert_eq!(y, reference.next_normal() as f64);
     }
 
     // -----------------------------------------------------------------

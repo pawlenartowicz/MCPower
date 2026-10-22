@@ -7,18 +7,19 @@
 //!    projection; the two must stay in sync.
 
 use engine_orchestrator::{
-    bounds_to_rows, find_power, find_sample_size, resolve_unit_divisor, single_core_find_power,
-    single_core_find_sample_size, CancellationToken, PowerResult, SampleSizeMethod,
-    SampleSizeResult, ScenarioResult,
+    CancellationToken, CurvatureHintParts, OrchestratorError, PowerResult, SampleSizeMethod,
+    SampleSizeResult, ScenarioResult, bounds_to_rows, curvature_hints_power,
+    curvature_hints_sample_size, find_power, find_sample_size, resolve_unit_divisor,
+    single_core_find_power, single_core_find_sample_size,
 };
 use engine_spec_builder::upload::standardize_continuous;
 
 use crate::{
+    AppSpec,
     app_spec::{ClusterDim, EffectSize, MixedOutcome, MixedSpec, SampleSizeUnit},
     assemble::{assemble_spec, assemble_spec_with_skeleton},
     error::AdapterError,
     progress::{EmitterSink, ProgressEmitter},
-    AppSpec,
 };
 
 /// Translate `spec` → contracts via `assemble_spec_with_skeleton`, then call the
@@ -93,15 +94,21 @@ pub fn run_find_sample_size(
 
 /// Single-core twin of `run_find_power` (WASM worker pool); change together.
 /// `n_sims` and `base_seed` are caller-supplied per worker (not read from the spec).
+/// `hints` are the run's curvature hints from `run_curvature_hints_power`, one
+/// vector per scenario; `None` lets the engine run its own pilot.
+/// `run_curvature_hints_power` starts as this does — change together.
+#[allow(clippy::too_many_arguments)]
 pub fn run_single_core_find_power(
     spec: &AppSpec,
     sample_size: usize,
     n_sims: usize,
     base_seed: u64,
+    hints: Option<Vec<Vec<Option<CurvatureHintParts>>>>,
     emitter: &dyn ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<PowerResult>, AdapterError> {
-    let (contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
+    let (mut contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
+    set_curvature_hints(&mut contracts, hints)?;
     let mut sink = EmitterSink::new(emitter);
     let mut result = single_core_find_power(
         &contracts,
@@ -118,16 +125,22 @@ pub fn run_single_core_find_power(
 /// Single-core twin of `run_find_sample_size` (Grid only, WASM worker pool);
 /// change together. `n_sims` and `base_seed` are per-worker; `target_power` is
 /// read from the spec (run-level, shared).
+/// `hints` as in `run_single_core_find_power`, from
+/// `run_curvature_hints_sample_size`, which starts as this does (assemble, unit
+/// divisor, bounds to rows) — change together.
+#[allow(clippy::too_many_arguments)]
 pub fn run_single_core_find_sample_size(
     spec: &AppSpec,
     bounds: (usize, usize),
     method: SampleSizeMethod,
     n_sims: usize,
     base_seed: u64,
+    hints: Option<Vec<Vec<Option<CurvatureHintParts>>>>,
     emitter: &dyn ProgressEmitter,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<SampleSizeResult>, AdapterError> {
-    let (contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
+    let (mut contracts, _skeleton, warnings) = assemble_spec_with_skeleton(spec)?;
+    set_curvature_hints(&mut contracts, hints)?;
     let target_power = run_inputs_of(spec).target_power;
     let unit_divisor = resolve_unit_divisor(&contracts, unit_of(spec))?;
     let (bounds, method) = bounds_to_rows(bounds, method, unit_divisor);
@@ -145,6 +158,58 @@ pub fn run_single_core_find_sample_size(
     )?;
     attach_assemble_warnings(&mut result.scenarios, &warnings, |r| &mut r.grid_warnings);
     Ok(result)
+}
+
+/// The curvature hints of a `run_single_core_find_power` run, one vector per
+/// scenario. The WASM main thread computes them once from the master seed and
+/// hands them to every worker. Starts as `run_single_core_find_power` does —
+/// change together.
+pub fn run_curvature_hints_power(
+    spec: &AppSpec,
+    sample_size: usize,
+    base_seed: u64,
+) -> Result<Vec<Vec<Option<CurvatureHintParts>>>, AdapterError> {
+    let (contracts, _skeleton, _warnings) = assemble_spec_with_skeleton(spec)?;
+    Ok(curvature_hints_power(&contracts, sample_size, base_seed)?)
+}
+
+/// The curvature hints of a `run_single_core_find_sample_size` run, one vector
+/// per scenario. Starts as `run_single_core_find_sample_size` does (assemble,
+/// unit divisor, bounds to rows) — change together.
+pub fn run_curvature_hints_sample_size(
+    spec: &AppSpec,
+    bounds: (usize, usize),
+    method: SampleSizeMethod,
+    base_seed: u64,
+) -> Result<Vec<Vec<Option<CurvatureHintParts>>>, AdapterError> {
+    let (contracts, _skeleton, _warnings) = assemble_spec_with_skeleton(spec)?;
+    let unit_divisor = resolve_unit_divisor(&contracts, unit_of(spec))?;
+    let (bounds, method) = bounds_to_rows(bounds, method, unit_divisor);
+    Ok(curvature_hints_sample_size(
+        &contracts, bounds, method, base_seed,
+    )?)
+}
+
+/// Write one hint vector into each assembled contract, in order.
+fn set_curvature_hints(
+    contracts: &mut [engine_contract::SimulationContract],
+    hints: Option<Vec<Vec<Option<CurvatureHintParts>>>>,
+) -> Result<(), AdapterError> {
+    let Some(hints) = hints else {
+        return Ok(());
+    };
+    if hints.len() != contracts.len() {
+        return Err(OrchestratorError::InvalidScenarios(format!(
+            "{} curvature hint vectors for {} scenarios",
+            hints.len(),
+            contracts.len()
+        ))
+        .into());
+    }
+    for (c, h) in contracts.iter_mut().zip(hints) {
+        c.curvature_hints = Some(h);
+    }
+    Ok(())
 }
 
 /// Append assemble-time host warnings (currently only an ineligible `agq`

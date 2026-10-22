@@ -37,11 +37,7 @@ pub fn wilson_ci(k: u64, n: u64) -> Ci {
 /// on an empty batch, so it does *not* use this helper.
 #[inline]
 fn rate(k: u64, n: usize) -> f64 {
-    if n == 0 {
-        0.0
-    } else {
-        k as f64 / n as f64
-    }
+    if n == 0 { 0.0 } else { k as f64 / n as f64 }
 }
 
 use crate::result::{EstimatorExtras, PosthocPower, PowerResult};
@@ -298,6 +294,7 @@ mod tests {
             overall: vec![],
             factor_excluded: vec![],
             tau_squared_hat: vec![],
+            event_rate: vec![],
             shape,
         }
     }
@@ -434,6 +431,7 @@ mod tests {
             overall: vec![],
             factor_excluded: vec![],
             tau_squared_hat: vec![],
+            event_rate: vec![],
             shape,
         };
         let aggs = aggregate_batch(&batch, &[1], &[], &EstimatorSpec::Ols);
@@ -575,6 +573,7 @@ mod tests {
             overall: vec![],
             factor_excluded,
             tau_squared_hat: vec![],
+            event_rate: vec![],
             shape,
         };
         let aggs = aggregate_batch(&batch, &[0], &[], &EstimatorSpec::Ols);

@@ -1,5 +1,5 @@
 //! Tests for the eager Vega-Lite spec emitters in engine-app-spec::plot.
-use engine_app_spec::{power_plot_specs, sample_size_curve_specs, PlotSpecs};
+use engine_app_spec::{PlotSpecs, power_plot_specs, sample_size_curve_specs};
 use engine_orchestrator::{
     ByValue, GridMode, PowerResult, SampleSizeMethod, SampleSizeResult, ScenarioResult,
 };
@@ -73,6 +73,8 @@ fn ss_scenarios(labels: &[&str]) -> ScenarioResult<SampleSizeResult> {
                         fitted_joint: vec![],
                         first_overall_achieved: None,
                         fitted_overall: None,
+                        posthoc_first_achieved: vec![],
+                        posthoc_fitted: vec![],
                         cluster_atom: 1,
                         unit_divisor: 1,
                         target_power: 0.8,

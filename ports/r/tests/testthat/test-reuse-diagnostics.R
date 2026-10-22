@@ -2,9 +2,9 @@
 # Mirrors mcpower/ports/py/tests/test_reuse_diagnostics.py exactly.
 
 test_that("reuse_fraction closed-form golden values", {
-  expect_lt(abs(mcpower:::.reuse_fraction(1000L, 1000L) - 26.0), 1.0)
+  expect_lt(abs(mcpower:::.reuse_fraction(1000L, 1000L) - 26.42), 0.005)
   expect_lt(abs(mcpower:::.reuse_fraction(1000L, 2000L) - 59.0), 1.0)
-  expect_gte(mcpower:::.reuse_fraction(1000L, 999L), 0.0)
+  expect_lt(abs(mcpower:::.reuse_fraction(1000L, 999L) - 26.39), 0.005)
 })
 
 test_that("reuse_fraction edge cases", {

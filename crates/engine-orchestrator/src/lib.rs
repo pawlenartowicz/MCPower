@@ -25,20 +25,24 @@ pub use crate::cancel::CancellationToken;
 pub use crate::find_power::find_power;
 pub use crate::find_sample_size::find_sample_size;
 pub use crate::merge::{merge_power_results, merge_sample_size_results};
-pub use crate::plot::{power_plot_set, sample_size_plot_set, PlotOptions, PlotPoint, PlotScenario};
+pub use crate::plot::{PlotOptions, PlotPoint, PlotScenario, power_plot_set, sample_size_plot_set};
 pub use crate::progress::{NoOpSink, ProgressEvent, ProgressSink};
 pub use crate::result::{
     ByValue, Ci, CrossingFit, EstimatorExtras, GridMode, OrchestratorError, PosthocPower,
     PowerResult, SampleSizeMethod, SampleSizeResult, ScenarioResult,
 };
-pub use crate::result_host::{power_result_to_host, sample_size_result_to_host, HostValue};
-pub use crate::single_core::{single_core_find_power, single_core_find_sample_size};
-pub use crate::unit::{bounds_to_rows, resolve_unit_divisor, SampleSizeUnit};
+pub use crate::result_host::{HostValue, power_result_to_host, sample_size_result_to_host};
+pub use crate::single_core::{
+    curvature_hints_power, curvature_hints_sample_size, single_core_find_power,
+    single_core_find_sample_size,
+};
+pub use crate::unit::{SampleSizeUnit, bounds_to_rows, resolve_unit_divisor};
 
+pub use engine_contract::CurvatureHintParts;
 pub use engine_contract::{
-    config, validate_config, BaselineScenarioRule, Benchmarks, ByStep, Config, Limits, NSims,
-    ReportConfig, ReportFormat, ReportThresholds, SampleSizeBounds, Simulation, UploadConfig,
-    CONFIG_JSON,
+    BaselineScenarioRule, Benchmarks, ByStep, CONFIG_JSON, Config, Limits, NSims, ReportConfig,
+    ReportFormat, ReportThresholds, SampleSizeBounds, Simulation, UploadConfig, config,
+    validate_config,
 };
 
 /// The workspace `configs/scenarios.json`, embedded at build time. Single source

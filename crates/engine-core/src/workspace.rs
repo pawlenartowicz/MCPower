@@ -4,7 +4,6 @@
 //! including the per-sim scenario design slots (perturbed Σ/L, var types,
 //! residual choice, τ²) that `data_gen::populate_design` overwrites every sim.
 
-use crate::correlation::EvdScratch;
 use crate::spec::{Distribution, ResidualDist};
 use faer::Mat;
 
@@ -113,10 +112,6 @@ pub struct SimWorkspace {
     /// when there is no cluster. Read by the per-sim cluster-effect draw.
     pub tau_squared_design: f64,
 
-    /// EVD workspace used by `psd_repair_and_factor` when scenario
-    /// perturbations push the correlation matrix off the PSD cone.
-    pub evd_scratch: EvdScratch,
-
     // ------------------------------------------------------------------
     // OLS fit scratch — written by `fit_suff_stats_t_sq` and consumed by posthoc.
     // Sized for the largest possible fit (p predictors).
@@ -143,6 +138,16 @@ pub struct SimWorkspace {
     /// `n_targets` test ranks. Reused per (sim, N); only the first `n_targets`
     /// slots are touched. Disjoint from every field the LME fit view borrows.
     pub compact_t_sq_scratch: Vec<f64>,
+    /// Length-`P` Satterthwaite df of the last mixed fit, PREDICTOR-indexed as
+    /// glmm's `satterthwaite` writes it (NaN off the fitted targets; only the
+    /// first `p` slots of a reduced fit are touched). Read only on draws tested
+    /// at Satterthwaite df (`critvals::uses_satterthwaite`).
+    pub satt_df: Vec<f64>,
+    /// Length-`P` per-target df for those draws, gathered from `satt_df` into
+    /// target-rank order like `compact_t_sq_scratch`; NaN at dropped targets.
+    pub satt_target_df: Vec<f64>,
+    /// Length-`P` per-target two-sided p-value for those draws, same order.
+    pub satt_p: Vec<f64>,
     /// Per-contrast `t²` staging buffer for `evaluate_posthoc`. Its length is
     /// the posthoc contrast count (`Σ k(k−1)/2` over factor blocks), which is
     /// **not** bounded by `P` and is unknown at workspace construction — so it
@@ -341,8 +346,6 @@ impl SimWorkspace {
             residual_df_design: 0.0,
             tau_squared_design: 0.0,
 
-            evd_scratch: EvdScratch::new(),
-
             fit_betas: vec![0.0; n_predictors],
             fit_var_diag: vec![0.0; n_predictors],
             fit_t_sq: vec![0.0; n_predictors],
@@ -351,6 +354,9 @@ impl SimWorkspace {
             fit_rhs: Mat::<f64>::zeros(max_n.max(n_predictors), 1),
 
             compact_t_sq_scratch: vec![0.0; n_predictors],
+            satt_df: vec![0.0; n_predictors],
+            satt_target_df: vec![0.0; n_predictors],
+            satt_p: vec![0.0; n_predictors],
             posthoc_t_sq_scratch: Vec::new(),
 
             suff_xtx: Mat::<f64>::zeros(n_predictors, n_predictors),

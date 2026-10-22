@@ -5,7 +5,6 @@ enums/counts/booleans, sensible numeric ranges. Does NOT assert bit-equal floats
 the FFI boundary because Python may derive base_seed differently from Rust.
 """
 
-import math
 
 from mcpower import MCPower
 
@@ -43,10 +42,9 @@ def test_logit_parity():
     assert result["n_sims"] == 800
     fx = result["estimator_extras"]
     assert fx["estimator"] == "glm"
-    # The kernel does not yet surface a realized baseline probability;
-    # the engine carries NaN as a placeholder (aggregation.rs:96).
+    # Realized baseline probability is the mean event rate of the generated y.
     assert "baseline_prob_realized" in fx
-    assert math.isnan(fx["baseline_prob_realized"])
+    assert 0.0 < fx["baseline_prob_realized"] < 1.0
 
 
 def test_lme_parity():

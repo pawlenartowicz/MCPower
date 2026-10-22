@@ -1,7 +1,7 @@
 //! `ProgressEmitter` trait, `EmitterSink` adapter, and `serialize_event`; one trait, host transports (Tauri `WindowEmitter`, WASM `postMessage`) plug in.
 
 use engine_orchestrator::{ProgressEvent, ProgressSink};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Host-transport seam: each shell (Tauri `WindowEmitter`, WASM `postMessage`) implements this
 /// to receive serialised progress events from the engine via [`EmitterSink`].

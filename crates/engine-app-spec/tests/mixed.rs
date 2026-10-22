@@ -4,8 +4,8 @@ use serde::Serialize;
 
 /// A minimal Mixed spec: `y ~ x + (1|school)`, one numeric predictor, one effect.
 fn minimal_mixed(cluster_dim: ClusterDim) -> MixedSpec {
-    use engine_app_spec::app_spec::{ParsedFormula, TestSelection, VarType};
     use engine_app_spec::EffectSize;
+    use engine_app_spec::app_spec::{ParsedFormula, TestSelection, VarType};
     MixedSpec {
         parsed_formula: ParsedFormula {
             outcome: "y".into(),
@@ -230,8 +230,8 @@ fn eligible_binary_glmm_keeps_agq_with_no_warning() {
 // ── driver tests ──────────────────────────────────────────────────────────────
 
 use engine_app_spec::{
-    run_find_power, run_find_sample_size, run_single_core_find_power,
-    run_single_core_find_sample_size, NullEmitter,
+    NullEmitter, run_find_power, run_find_sample_size, run_single_core_find_power,
+    run_single_core_find_sample_size,
 };
 use engine_orchestrator::{ByValue, CancellationToken, GridMode, SampleSizeMethod};
 
@@ -281,9 +281,17 @@ fn run_single_core_find_sample_size_cluster_size_atom_snapped() {
         by: ByValue::Fixed(30),
         mode: GridMode::Linear,
     };
-    let res =
-        run_single_core_find_sample_size(&spec, (50, 250), method, 20, 2137, &NullEmitter, &cancel)
-            .expect("cluster_size + single_core_find_sample_size supported");
+    let res = run_single_core_find_sample_size(
+        &spec,
+        (50, 250),
+        method,
+        20,
+        2137,
+        None,
+        &NullEmitter,
+        &cancel,
+    )
+    .expect("cluster_size + single_core_find_sample_size supported");
     let (_, ss) = &res.scenarios[0];
     let ns: Vec<usize> = ss.grid_or_trace.iter().map(|p| p.n).collect();
     assert_eq!(
@@ -361,7 +369,7 @@ fn run_single_core_find_power_surfaces_agq_strip_warning_in_grid_warnings() {
     }];
     let spec = AppSpec::Mixed(m);
     let cancel = CancellationToken::new();
-    let res = run_single_core_find_power(&spec, 200, 20, 2137, &NullEmitter, &cancel)
+    let res = run_single_core_find_power(&spec, 200, 20, 2137, None, &NullEmitter, &cancel)
         .expect("single_core find_power ok");
     let (_, pr) = &res.scenarios[0];
     assert!(
@@ -380,7 +388,6 @@ struct AssembleSummary {
     coefficient_count: usize,
     generation_column_count: usize,
     alpha: f64,
-    correction_code: i32,
     outcome_kind_is_continuous: bool,
 }
 
@@ -392,7 +399,6 @@ fn build_summary_mixed(contracts: &[engine_contract::SimulationContract]) -> Ass
         coefficient_count: c.outcome.coefficients.len(),
         generation_column_count: c.generation.columns.len(),
         alpha: c.test.alpha,
-        correction_code: c.test.correction.code(),
         outcome_kind_is_continuous: c.outcome.kind == engine_contract::OutcomeKind::Continuous,
     }
 }
@@ -483,9 +489,17 @@ fn run_single_core_find_sample_size_in_clusters_scales_bounds_and_reports_the_di
         by: ByValue::Fixed(5),
         mode: GridMode::Linear,
     };
-    let res =
-        run_single_core_find_sample_size(&spec, (10, 50), method, 20, 2137, &NullEmitter, &cancel)
-            .expect("clusters unit on the single-core path is supported");
+    let res = run_single_core_find_sample_size(
+        &spec,
+        (10, 50),
+        method,
+        20,
+        2137,
+        None,
+        &NullEmitter,
+        &cancel,
+    )
+    .expect("clusters unit on the single-core path is supported");
     let (_, ss) = &res.scenarios[0];
     assert_eq!(ss.unit_divisor, 8);
     let ns: Vec<usize> = ss.grid_or_trace.iter().map(|p| p.n).collect();
@@ -508,4 +522,159 @@ fn run_find_sample_size_rejects_a_unit_the_regime_cannot_express() {
     let err = run_find_sample_size(&spec, (10, 50), method, &NullEmitter, &cancel)
         .expect_err("cluster_size unit under FixedSize must fail");
     assert_eq!(err.host_kind(), "cluster_setup", "got: {err}");
+}
+
+// ── Shared curvature hints (WASM worker pool) ─────────────────────────────────
+
+use engine_app_spec::{AdapterError, run_curvature_hints_power, run_curvature_hints_sample_size};
+use engine_orchestrator::{CurvatureHintParts, OrchestratorError};
+
+/// Binary outcome, 20 clusters crossed with 8: the crossed-intercept GLMM
+/// takes a curvature hint. The cluster atom is 20 × 8 = 160.
+fn crossed_glmm() -> AppSpec {
+    let mut m = minimal_mixed(ClusterDim::NClusters { value: 20 });
+    m.outcome = MixedOutcome::Binary {
+        baseline_probability: 0.3,
+        link: Default::default(),
+    };
+    m.extra_groupings = vec![AppGroupingSpec {
+        tau_squared: 0.25,
+        relation: AppGroupingRelation::Crossed { n_clusters: 8 },
+        cluster_name: Some("teacher".into()),
+        slopes: vec![],
+    }];
+    AppSpec::Mixed(m)
+}
+
+type HintBits = Vec<Vec<Option<(usize, u64, Vec<u64>)>>>;
+
+fn bits(hints: &[Vec<Option<CurvatureHintParts>>]) -> HintBits {
+    hints
+        .iter()
+        .map(|scenario| {
+            scenario
+                .iter()
+                .map(|p| {
+                    p.as_ref().map(|p| {
+                        let m = p.inv_hessian.iter().map(|x| x.to_bits()).collect();
+                        (p.dim, p.units.to_bits(), m)
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Hints go through JSON, as they do between the WASM main thread and a
+/// worker, and every f64 must come back bit for bit.
+fn through_json(hints: &[Vec<Option<CurvatureHintParts>>]) -> Vec<Vec<Option<CurvatureHintParts>>> {
+    let json = serde_json::to_string(hints).unwrap();
+    let back: Vec<Vec<Option<CurvatureHintParts>>> = serde_json::from_str(&json).unwrap();
+    assert_eq!(bits(&back), bits(hints), "hint bits changed through JSON");
+    back
+}
+
+/// N = 500 is not a multiple of the 160 atom, so the run snaps it to 480. The
+/// hints must be taken at the snapped N, or the hinted run differs from the
+/// worker's own pilot.
+#[test]
+fn hinted_power_matches_own_pilot_through_json() {
+    let spec = crossed_glmm();
+    let cancel = CancellationToken::new();
+    let hints = run_curvature_hints_power(&spec, 500, 2137).unwrap();
+    assert!(hints[0].iter().any(Option::is_some), "pilot gave no hint");
+    let back = through_json(&hints);
+    let own = run_single_core_find_power(&spec, 500, 8, 2137, None, &NullEmitter, &cancel).unwrap();
+    let given =
+        run_single_core_find_power(&spec, 500, 8, 2137, Some(back), &NullEmitter, &cancel).unwrap();
+    assert_eq!(
+        serde_json::to_string(&own).unwrap(),
+        serde_json::to_string(&given).unwrap()
+    );
+}
+
+#[test]
+fn hinted_sample_size_matches_own_pilot_through_json() {
+    let spec = crossed_glmm();
+    let cancel = CancellationToken::new();
+    let method = SampleSizeMethod::Grid {
+        by: ByValue::Fixed(160),
+        mode: GridMode::Linear,
+    };
+    let hints = run_curvature_hints_sample_size(&spec, (160, 640), method, 2137).unwrap();
+    assert!(hints[0].iter().any(Option::is_some), "pilot gave no hint");
+    let back = through_json(&hints);
+    let own = run_single_core_find_sample_size(
+        &spec,
+        (160, 640),
+        method,
+        8,
+        2137,
+        None,
+        &NullEmitter,
+        &cancel,
+    )
+    .unwrap();
+    let given = run_single_core_find_sample_size(
+        &spec,
+        (160, 640),
+        method,
+        8,
+        2137,
+        Some(back),
+        &NullEmitter,
+        &cancel,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_string(&own).unwrap(),
+        serde_json::to_string(&given).unwrap()
+    );
+}
+
+#[test]
+fn hint_count_mismatch_is_an_error() {
+    let spec = crossed_glmm();
+    let cancel = CancellationToken::new();
+    let err = run_single_core_find_power(
+        &spec,
+        480,
+        2,
+        2137,
+        Some(vec![vec![], vec![]]),
+        &NullEmitter,
+        &cancel,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            AdapterError::Orchestrator(OrchestratorError::InvalidScenarios(_))
+        ),
+        "{err:?}"
+    );
+}
+
+/// Supplied hints reach the engine: `Some([])` per scenario skips the pilot, so
+/// the run differs from the one that runs its own. Without this, the equality
+/// tests above would also pass if the driver dropped the hints.
+#[test]
+fn supplied_hints_reach_the_engine() {
+    let spec = crossed_glmm();
+    let cancel = CancellationToken::new();
+    let own = run_single_core_find_power(&spec, 480, 8, 2137, None, &NullEmitter, &cancel).unwrap();
+    let empty = run_single_core_find_power(
+        &spec,
+        480,
+        8,
+        2137,
+        Some(vec![vec![]]),
+        &NullEmitter,
+        &cancel,
+    )
+    .unwrap();
+    assert_ne!(
+        serde_json::to_string(&own).unwrap(),
+        serde_json::to_string(&empty).unwrap()
+    );
 }

@@ -18,8 +18,8 @@
 //! in the order they appear in the list, matching user-supplied scenario order.
 
 use engine_orchestrator::{
-    plot::{power_plot_set, sample_size_plot_set, PlotOptions, PlotPoint, PlotScenario},
     Ci,
+    plot::{PlotOptions, PlotPoint, PlotScenario, power_plot_set, sample_size_plot_set},
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;

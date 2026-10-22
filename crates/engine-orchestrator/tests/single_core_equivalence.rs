@@ -5,7 +5,7 @@
 //! the twins are bit-identical; see `test_find_power.rs`.)
 
 use engine_orchestrator::{
-    find_power, merge_power_results, single_core_find_power, CancellationToken,
+    CancellationToken, find_power, merge_power_results, single_core_find_power,
 };
 
 mod common;

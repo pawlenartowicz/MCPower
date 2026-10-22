@@ -297,7 +297,9 @@ class VariableRegistry:
         1. Removes original factor predictor entries.
         2. Adds ``n_levels - 1`` dummy ``PredictorVar`` instances per factor
            (reference-coded, level 1 omitted).
-        3. Creates main ``Effect`` entries for each dummy.
+        3. Creates main ``Effect`` entries for each dummy of a factor that has
+           a main term in the formula (a factor seen only inside interactions
+           keeps its dummy predictor columns but gets no main effects).
         4. Expands interactions involving factors into per-level interactions.
         5. Re-indexes all column indices.
         """
@@ -326,6 +328,10 @@ class VariableRegistry:
 
         # Create dummy variables and effects for each factor
         for factor_name, factor_info in self._factors.items():
+            has_main_term = (
+                factor_name in original_effects
+                and original_effects[factor_name].effect_type == "main"
+            )
             n_levels = factor_info["n_levels"]
             level_labels = factor_info.get("level_labels")
             reference_level = factor_info.get("reference_level", 1)
@@ -350,15 +356,15 @@ class VariableRegistry:
                 )
                 new_predictors[dummy_name] = dummy_pred
 
-                dummy_eff = Effect(
-                    name=dummy_name,
-                    effect_type="main",
-                    var_names=[dummy_name],
-                    column_index=col_idx,
-                    factor_source=factor_name,
-                    factor_level=level,
-                )
-                new_effects[dummy_name] = dummy_eff
+                if has_main_term:
+                    new_effects[dummy_name] = Effect(
+                        name=dummy_name,
+                        effect_type="main",
+                        var_names=[dummy_name],
+                        column_index=col_idx,
+                        factor_source=factor_name,
+                        factor_level=level,
+                    )
 
                 self._factor_dummies[dummy_name] = {
                     "factor_name": factor_name,

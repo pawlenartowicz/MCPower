@@ -66,6 +66,36 @@ describe('ModelSection outcome toggle', () => {
     expect(familyStore.activeOutcome).toBe('linear');
   });
 
+  it('mixed → Logit/Poisson moves the default sim count to the glmm default; Continuous restores mixed', async () => {
+    familyStore.active = 'mixed';
+    const { container } = render(ModelSection);
+    await tick();
+    expect(familyStore.byFamily.mixed.advanced.simulations).toBe(800);
+
+    await fireEvent.click(toggleButton(container, 'Logit'));
+    await tick();
+    expect(familyStore.byFamily.mixed.advanced.simulations).toBe(400);
+
+    await fireEvent.click(toggleButton(container, 'Poisson'));
+    await tick();
+    expect(familyStore.byFamily.mixed.advanced.simulations).toBe(400);
+
+    await fireEvent.click(toggleButton(container, 'Continuous'));
+    await tick();
+    expect(familyStore.byFamily.mixed.advanced.simulations).toBe(800);
+  });
+
+  it('mixed → Logit keeps a sim count the user edited', async () => {
+    familyStore.active = 'mixed';
+    familyStore.byFamily.mixed.advanced.simulations = 1234;
+    const { container } = render(ModelSection);
+    await tick();
+
+    await fireEvent.click(toggleButton(container, 'Logit'));
+    await tick();
+    expect(familyStore.byFamily.mixed.advanced.simulations).toBe(1234);
+  });
+
   it('mixed → Poisson seeds baseline rate and raw τ²', async () => {
     familyStore.active = 'mixed';
     const { container } = render(ModelSection);

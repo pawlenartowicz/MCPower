@@ -13,7 +13,8 @@
 //! bump the version.
 //!
 //! Word widths track the draw precision: the f32 data-plane draws
-//! (`next_normal`, `next_uniform`, `scenario_rng`) pin `f32::to_bits()` (`u32`);
+//! (`next_normal`, `next_uniform`, `scenario_rng`) pin `f32::to_bits()` (`u32`),
+//! and the integer draws (`next_categorical`, `next_index`) pin the indices;
 //! the f64 transform plane (`phi`, `marginal_uniform`, `sample_t`) pins
 //! `f64::to_bits()` (`u64`). The `phi`/`marginal_uniform` goldens move only
 //! with a sanctioned reproducibility-contract change to the transform internals
@@ -92,6 +93,14 @@ const GOLDEN_CATEGORICALS: [usize; 64] = [
     2, 1, 1, 2, 2, 0, 0, 2, 2, 1, 1, 2, 2, 0, 2, 0,
     2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 1, 2, 2, 2, 1,
     2, 2, 0, 2, 2, 2, 2, 0, 0, 2, 2, 0, 0, 1, 2, 0,
+];
+
+#[rustfmt::skip]
+const GOLDEN_INDICES: [usize; 32] = [
+    713675, 600477, 729834, 603452, 418938, 166045, 148007, 134608,
+    588918, 336628, 508656, 764357, 873168, 400603, 794393, 476518,
+    154000, 751189, 797694, 410097, 715599, 277586, 65276, 858529,
+    491662, 321521, 421362, 414380, 961027, 238135, 354701, 39205,
 ];
 
 #[rustfmt::skip]
@@ -232,4 +241,13 @@ fn golden_sample_t() {
         .map(|_| sample_t(&mut rng, 30.0).to_bits())
         .collect();
     assert_bits("sample_t df=30", &got, &GOLDEN_SAMPLE_T_DF30);
+}
+
+#[test]
+fn golden_next_index() {
+    // A million-row frame (the native upload ceiling) plus 3, so n is not a
+    // power of two and the multiply-shift actually rounds.
+    let mut rng = SimRng::new(42, 3);
+    let got: Vec<usize> = (0..32).map(|_| rng.next_index(1_000_003)).collect();
+    assert_eq!(got, GOLDEN_INDICES, "next_index stream moved");
 }

@@ -65,13 +65,19 @@ fn invariant_3_test_target_well_formed_rejects_duplicate_marginal() {
 }
 
 #[test]
-fn invariant_3_test_target_well_formed_rejects_short_joint() {
+fn invariant_3_test_target_well_formed_rejects_empty_joint() {
     let mut c = baseline();
-    c.test.targets = vec![TestTarget::Joint { terms: vec![1] }];
+    c.test.targets = vec![TestTarget::Joint { terms: vec![] }];
     assert!(matches!(
         c.validate(),
         Err(ContractError::InvalidTestSpec(_))
     ));
+    // A one-term Joint is the overall test of a one-predictor model (F = t²).
+    c.test.targets = vec![TestTarget::Joint { terms: vec![1] }];
+    assert!(
+        !matches!(c.validate(), Err(ContractError::InvalidTestSpec(_))),
+        "one-term Joint must pass invariant 3"
+    );
 }
 
 #[test]
@@ -446,10 +452,12 @@ fn invariant_17_posthoc_requires_factor_column() {
         target_term_indices: vec![1],
         posthoc_alpha: None,
     }];
-    assert!(matches!(
+    assert_eq!(
         c.validate(),
-        Err(ContractError::InvalidPosthoc(_))
-    ));
+        Err(ContractError::InvalidPosthoc(
+            "factor_column is not a factor"
+        ))
+    );
 }
 
 #[test]
@@ -513,6 +521,56 @@ fn invariant_17_posthoc_target_must_be_dummy_of_factor() {
             assert_eq!(msg, "posthoc target must be a DummyOf of factor_column");
         }
         other => panic!("expected InvalidPosthoc(17b), got {other:?}"),
+    }
+}
+
+#[test]
+fn invariant_17_posthoc_blocks_must_share_alpha() {
+    // Two valid blocks over the same 3-level factor: equal alphas validate,
+    // differing alphas (including Some vs None) are rejected.
+    let mut c = baseline();
+    c.generation.columns[1] = ColumnSpec::FactorSynthetic {
+        n_levels: 3,
+        proportions: vec![0.5, 0.3, 0.2],
+        sampled_proportions: None,
+    };
+    c.design_generation.terms = vec![
+        DesignTerm::Const,
+        DesignTerm::Direct {
+            column: ColumnId(0),
+        },
+        DesignTerm::DummyOf {
+            column: ColumnId(1),
+            level_index: 1,
+        },
+        DesignTerm::DummyOf {
+            column: ColumnId(1),
+            level_index: 2,
+        },
+    ];
+    c.outcome.coefficients = vec![0.0, 0.5, 0.3, 0.2];
+    c.test.targets = vec![TestTarget::Marginal { term: 1 }];
+    let block = |alpha| PosthocSpec {
+        factor_column: ColumnId(1),
+        target_term_indices: vec![2, 3],
+        posthoc_alpha: alpha,
+    };
+
+    c.posthoc = vec![block(Some(0.01)), block(Some(0.01))];
+    assert!(c.validate().is_ok(), "{:?}", c.validate());
+
+    for (a, b) in [
+        (Some(0.01), Some(0.05)),
+        (Some(0.01), None),
+        (None, Some(0.01)),
+    ] {
+        c.posthoc = vec![block(a), block(b)];
+        match c.validate() {
+            Err(ContractError::InvalidPosthoc(msg)) => {
+                assert_eq!(msg, "posthoc blocks must share the same posthoc_alpha");
+            }
+            other => panic!("expected InvalidPosthoc(alpha) for {a:?}/{b:?}, got {other:?}"),
+        }
     }
 }
 
@@ -583,6 +641,7 @@ fn example2_logit_with_uploaded_data_validates_cleanly() {
         posthoc: vec![],
         scenario: ScenarioPerturbations::default(),
         max_failed_fraction: 0.03,
+        curvature_hints: None,
     };
     assert!(c.validate().is_ok(), "Example 2 must validate cleanly");
     // Confirm the validated contract is the intended logit+upload shape, not an
@@ -659,7 +718,7 @@ fn nagq_even_or_out_of_range_rejected() {
     c.outcome.kind = OutcomeKind::Binary;
     c.estimator = EstimatorSpec::Glm;
     c.generation.cluster = Some(some_valid_cluster_spec());
-    for bad in [0u8, 2, 4, 26, 100] {
+    for bad in [0u8, 2, 4, 26, 27, 100] {
         c.nagq = bad;
         assert!(
             matches!(c.validate(), Err(ContractError::NagqOutOfRange { got }) if got == bad),

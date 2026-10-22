@@ -107,3 +107,28 @@ def test_two_factor_interaction_cartesian_product():
     reg.expand_factors()
     # Only one non-ref level per factor → one product term; no reference combos.
     assert _interaction_names(reg) == ["a[hi]:b[treat]"]
+
+
+def test_interaction_only_factor_registers_no_main_effects():
+    """y ~ cyl:x has no main term for cyl, so the registry keeps the dummy
+    columns but registers only the two interaction effects, and the spec
+    builds with matching effect and coefficient counts."""
+    from mcpower import MCPower
+
+    m = MCPower("y ~ cyl:x")
+    m.set_variable_type("cyl=(factor,3)")
+    m.set_effects("cyl[2]:x=0.3, cyl[3]:x=0.4")
+    m._apply()
+    reg = m._registry
+    assert reg.effect_names == ["cyl[2]:x", "cyl[3]:x"]
+    assert "cyl[2]" in reg.predictor_names and "cyl[3]" in reg.predictor_names
+    spec = m.to_simulation_spec()
+    assert spec["outcome"]["coefficients"][-2:] == [0.3, 0.4]
+    assert [t["term"] for t in spec["test"]["targets"] if t["kind"] == "marginal"] == [4, 5]
+
+
+def test_factor_with_main_term_still_registers_main_dummies():
+    reg = VariableRegistry("y ~ cyl + cyl:x")
+    reg.set_variable_type("cyl", "factor", n_levels=3)
+    reg.expand_factors()
+    assert reg.effect_names == ["cyl[2]", "cyl[3]", "cyl[2]:x", "cyl[3]:x"]

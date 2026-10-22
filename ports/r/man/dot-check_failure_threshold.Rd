@@ -9,7 +9,8 @@ exceed the configured threshold.}
   convergence_rate,
   boundary_hit_rate_tau_zero,
   boundary_hit_rate_high_tau,
-  threshold
+  threshold,
+  clustered = FALSE
 )
 }
 \arguments{
@@ -20,6 +21,9 @@ exceed the configured threshold.}
 \item{boundary_hit_rate_high_tau}{Numeric vector; per-N high-tau boundary rates.}
 
 \item{threshold}{Maximum acceptable failure rate in \link{0,1}.}
+
+\item{clustered}{Whether the model has random effects. Only then does the
+message carry the tau boundary breakdown and the \code{n_clusters} hint.}
 }
 \value{
 Invisibly NULL.

@@ -67,5 +67,6 @@ pub fn example1_simple_ols() -> SimulationContract {
         posthoc: vec![],
         scenario: ScenarioPerturbations::default(),
         max_failed_fraction: 0.03,
+        curvature_hints: None,
     }
 }

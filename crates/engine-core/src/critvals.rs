@@ -1,12 +1,16 @@
 //! Precomputed Student-t critical values.
 //!
-//! Per the hot-loop invariant, the per-sim path must never call Student-t
-//! CDF/inv-CDF and must never sqrt-then-compare. All thresholds are precomputed
-//! once per `run_batch` into a `CritValueTable`; the per-sim path then performs
-//! only `t_sq > t_crit_sq` comparisons.
+//! Per the hot-loop invariant, the per-sim path must never call a Student-t
+//! inverse CDF and must never sqrt-then-compare. Thresholds are precomputed once
+//! per `run_batch` into a `CritValueTable`; the per-sim path then performs only
+//! `t_sq > t_crit_sq` comparisons.
 //!
-//! Only `t_ppf` is exposed — no `t_cdf` / `t_sf` / `p_value` (those are not
-//! needed on the per-sim comparison path).
+//! One exception: a draw tested at its own Satterthwaite df
+//! ([`uses_satterthwaite`]) has no df known before the fit, so it is decided
+//! from tail probabilities instead — [`t_tail_sq`] and [`f_tail`], one
+//! incomplete-beta evaluation each, a fraction of one `t_ppf` Newton search,
+//! and [`tukey_tail_sq`] under Tukey HSD, one studentized-range CDF quadrature
+//! where the threshold would run a Newton search over it.
 //!
 //! **NR** = Press, Teukolsky, Vetterling & Flannery (2007), *Numerical Recipes:
 //! The Art of Scientific Computing*, 3rd ed., Cambridge University Press.
@@ -195,11 +199,18 @@ fn t_cdf(x: f64, df: f64) -> f64 {
     }
     let z = df / (df + x * x);
     let half = 0.5 * betai(0.5 * df, 0.5, z);
-    if x >= 0.0 {
-        1.0 - half
-    } else {
-        half
+    if x >= 0.0 { 1.0 - half } else { half }
+}
+
+/// Two-sided Student-t tail `P(|T| ≥ |t|)` for `T ~ t(df)`, from `t_sq = t²`:
+/// `I_{df/(df + t²)}(df/2, 1/2)`, the tail itself rather than `1 − t_cdf`, so a
+/// small p-value keeps its relative precision. Defined for any `df > 0`,
+/// fractional df in (0, 1) included. NaN `t_sq` → NaN (never `≤ α`).
+pub(crate) fn t_tail_sq(t_sq: f64, df: f64) -> f64 {
+    if t_sq.is_nan() {
+        return f64::NAN;
     }
+    betai(0.5 * df, 0.5, df / (df + t_sq))
 }
 
 /// Student-t inverse CDF (quantile function).
@@ -279,11 +290,7 @@ pub fn t_ppf(p: f64, df: f64) -> f64 {
         }
     }
 
-    if upper {
-        x
-    } else {
-        -x
-    }
+    if upper { x } else { -x }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,10 +388,6 @@ pub fn chi2_ppf(p: f64, k: f64) -> f64 {
     // pdf(x; k) = (x/2)^{k/2 - 1} · exp(-x/2) / (2 Γ(k/2))
     //   ⇒ ln pdf = (k/2 - 1) ln(x/2) - x/2 - ln 2 - ln Γ(k/2).
     let a = 0.5 * k;
-    let ln_norm = -a.ln().mul_add(0.0, 0.0) - std::f64::consts::LN_2 - ln_gamma(a);
-    // ^ small trick: we'll recompute pdf directly each iter; ln_norm includes
-    //   `- ln 2 - ln Γ(k/2)` which is the part of `ln pdf` not depending on x.
-    let _ = ln_norm; // silence; we inline below for clarity.
     for _ in 0..80 {
         let cdf = gamma_inc_p(a, 0.5 * x);
         // PDF of χ²(k) at x.
@@ -440,6 +443,16 @@ fn f_cdf(x: f64, dfn: f64, dfd: f64) -> f64 {
     }
     let z = dfd / (dfd + dfn * x);
     1.0 - betai(0.5 * dfd, 0.5 * dfn, z)
+}
+
+/// Upper F tail `P(X ≥ x)` for `X ~ F(dfn, dfd)`:
+/// `I_{dfd/(dfd + dfn·x)}(dfd/2, dfn/2)`, the tail itself rather than
+/// `1 − f_cdf`. NaN `x` → NaN (never `≤ α`).
+pub(crate) fn f_tail(x: f64, dfn: f64, dfd: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    betai(0.5 * dfd, 0.5 * dfn, dfd / (dfd + dfn * x))
 }
 
 /// Inverse CDF of F(dfn, dfd) at probability `p ∈ (0, 1)`.
@@ -669,6 +682,18 @@ fn studentized_range_cdf(q: f64, k: f64, df: f64) -> f64 {
     gl_graded(u_max, panels, grade, g).min(1.0)
 }
 
+/// Tukey HSD upper tail for a pairwise t statistic, from `t_sq = t²`:
+/// `P(W ≥ √2·|t|)` for the studentized range `W` with `k` means and `df` error
+/// df — one CDF quadrature, where the threshold `q_tukey_ppf(1 − α, k, df)`
+/// runs a Newton search over it. `tail ≤ α` decides as `t² > (q / √2)²` does.
+/// NaN where the quantile is (`k ≤ 1`, `df < 2`, non-finite inputs).
+pub(crate) fn tukey_tail_sq(t_sq: f64, k: f64, df: f64) -> f64 {
+    if !t_sq.is_finite() || !k.is_finite() || k <= 1.0 || !df.is_finite() || df < 2.0 {
+        return f64::NAN;
+    }
+    1.0 - studentized_range_cdf(std::f64::consts::SQRT_2 * t_sq.sqrt(), k, df)
+}
+
 /// Inverse CDF (quantile) of the studentized-range distribution: returns the
 /// `p`-quantile `q` such that `P(W ≤ q) = p` for `k` groups and `df` error df.
 ///
@@ -817,15 +842,18 @@ pub fn between_column_count(spec: &SimulationSpec, kept: Option<&[u32]>) -> u32 
 
 impl BetweenWithinDf {
     /// Resolve the between-within inputs for `spec`, or `None` when the
-    /// asymptotic reference applies: `df_method` is `Asymptotic`, the fit is
-    /// not mixed (`Ols`, or `Glm` without a cluster spec), or the design
-    /// carries crossed / nested extra groupings, for which the between/within
-    /// partition of the residual df is not defined. `p_between` is supplied by
-    /// the caller so a reduced-model rebuild can pass its own count.
+    /// asymptotic table applies: `df_method` is `Asymptotic`, the fit is not
+    /// mixed (`Ols`, or `Glm` without a cluster spec), or the design carries
+    /// crossed / nested extra groupings, for which the between/within partition
+    /// of the residual df is not defined. In that last case a Gaussian LMM is
+    /// tested at per-draw Satterthwaite df instead ([`uses_satterthwaite`]),
+    /// the table serving only draws whose df pass fails; a GLMM stays on it.
+    /// `p_between` is supplied by the caller so a reduced-model rebuild can
+    /// pass its own count.
     ///
     /// The clustered-`Glm` half of the predicate below is the same condition
-    /// `WaldSe::affects` uses; `Mle` is in scope here and not there, so the two
-    /// are not interchangeable.
+    /// under which `wald_se` is read (clustered-binary GLMM); `Mle` is in scope
+    /// here and not there, so the two are not interchangeable.
     pub fn resolve(
         spec: &SimulationSpec,
         sample_sizes: &[u32],
@@ -893,6 +921,23 @@ impl BetweenWithinDf {
     }
 }
 
+/// Whether a run tests its targets at each draw's Satterthwaite df: a Gaussian
+/// LMM (`Mle`) under `DfMethod::BetweenWithin` whose cluster spec carries a
+/// crossed or nested extra grouping — exactly the designs
+/// [`BetweenWithinDf::resolve`] leaves on the asymptotic table because the
+/// between/within partition is not defined there. Such a draw is decided from
+/// per-target p-values ([`t_tail_sq`], [`f_tail`]) at glmm's lmerTest-style
+/// Satterthwaite df; a draw whose df pass fails keeps the asymptotic table. A
+/// GLMM has no Satterthwaite df and stays on Wald z.
+pub fn uses_satterthwaite(spec: &SimulationSpec) -> bool {
+    spec.estimator == EstimatorSpec::Mle
+        && spec.df_method == DfMethod::BetweenWithin
+        && spec
+            .cluster
+            .as_ref()
+            .is_some_and(|c| !c.extra_groupings.is_empty())
+}
+
 // ---------------------------------------------------------------------------
 // CritValueTable
 // ---------------------------------------------------------------------------
@@ -910,7 +955,8 @@ pub struct CritValueTable {
     /// Denominator df behind each entry of `t_crit_sq_uncorrected`, same shape.
     /// Inner rows are EMPTY whenever no df enters the threshold — every
     /// standard-normal (Wald-z) build, which is `Glm`/`Mle` under
-    /// `DfMethod::Asymptotic` and every fallback in [`BetweenWithinDf::resolve`].
+    /// `DfMethod::Asymptotic` and every fallback in [`BetweenWithinDf::resolve`]
+    /// (per-draw Satterthwaite df never enter a table).
     /// OLS repeats its residual df `N − P` per target.
     pub df_per_target: Vec<Vec<f64>>,
     /// Outer length = `sample_sizes.len()`; inner length = `n_targets`.
@@ -1873,6 +1919,80 @@ mod tests {
                 "t_ppf({p}, {df}): got {got}, expected {expected}, rel {rel}"
             );
         }
+    }
+
+    /// The two-sided t tail from t², against R `2 * pt(-sqrt(t2), df)`: small
+    /// df including df in (0, 1) (Satterthwaite df are used unclamped), the
+    /// common range, tiny tails (read as the tail, not `1 − cdf`) and the
+    /// large-df end where `t_ppf` stops refining.
+    #[test]
+    fn t_tail_sq_matches_r_pt() {
+        let cases: &[(f64, f64, f64)] = &[
+            (4.0, 10.0, 0.07338803477074039),
+            (6.5, 8.0, 0.0342007509575183),
+            (6.0, 200.0, 0.015166386776196894),
+            (1.0, 0.5, 0.6022432216826441),
+            (9.0, 0.3, 0.5013376896876196),
+            (0.01, 0.7, 0.9413093831519195),
+            (100.0, 3.0, 0.0021283990584141494),
+            (30.0, 1e4, 4.425112733379192e-08),
+            (25.0, 1e5, 5.742701678641648e-07),
+            (40.0, 2e5, 2.544964061546022e-10),
+            (25.0, 1e6, 5.733997870890735e-07),
+            (0.0, 5.0, 1.0),
+        ];
+        for &(t_sq, df, expected) in cases {
+            let got = t_tail_sq(t_sq, df);
+            let rel = (got - expected).abs() / expected;
+            assert!(
+                rel < 1e-9,
+                "t_tail_sq({t_sq}, {df}): got {got}, expected {expected}, rel {rel}"
+            );
+        }
+        assert!(t_tail_sq(f64::NAN, 10.0).is_nan());
+        assert_eq!(t_tail_sq(f64::INFINITY, 10.0), 0.0);
+    }
+
+    /// The Tukey HSD tail decides exactly as the table's threshold
+    /// `(q_tukey_ppf(1 − α, k, df) / √2)²` does: just below the threshold the
+    /// tail is above α, just above it the tail is below α, at a fractional
+    /// df too. Undefined k or df (the quantile's NaN cases) give NaN.
+    #[test]
+    fn tukey_tail_sq_crosses_alpha_at_the_table_threshold() {
+        for (k, df) in [(3.0, 10.0), (4.0, 25.5), (5.0, 2.7)] {
+            let q = q_tukey_ppf(0.95, k, df) / std::f64::consts::SQRT_2;
+            let crit_sq = q * q;
+            let below = tukey_tail_sq(crit_sq * (1.0 - 1e-4), k, df);
+            let above = tukey_tail_sq(crit_sq * (1.0 + 1e-4), k, df);
+            assert!(
+                below > 0.05 && above < 0.05,
+                "k {k} df {df}: {below} / {above}"
+            );
+        }
+        assert!(tukey_tail_sq(4.0, f64::NAN, 10.0).is_nan());
+        assert!(tukey_tail_sq(4.0, 3.0, 1.5).is_nan());
+        assert!(tukey_tail_sq(f64::NAN, 3.0, 10.0).is_nan());
+    }
+
+    /// The upper F tail, against R `pf(x, dfn, dfd, lower.tail = FALSE)`,
+    /// including a denominator df in (0, 1).
+    #[test]
+    fn f_tail_matches_r_pf() {
+        let cases: &[(f64, f64, f64, f64)] = &[
+            (3.0, 2.0, 10.0, 0.09536743164062497),
+            (1.5, 4.0, 0.6, 0.6198941601055998),
+            (10.0, 3.0, 1e5, 1.38296715935822e-06),
+            (2.0, 1.0, 5.0, 0.21643722926968564),
+        ];
+        for &(x, dfn, dfd, expected) in cases {
+            let got = f_tail(x, dfn, dfd);
+            let rel = (got - expected).abs() / expected;
+            assert!(
+                rel < 1e-9,
+                "f_tail({x}, {dfn}, {dfd}): got {got}, expected {expected}, rel {rel}"
+            );
+        }
+        assert!(f_tail(f64::NAN, 2.0, 10.0).is_nan());
     }
 
     // -----------------------------------------------------------------

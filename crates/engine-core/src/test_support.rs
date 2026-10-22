@@ -57,5 +57,6 @@ pub(crate) fn base_spec() -> SimulationSpec {
         cluster_slope_design_cols: vec![],
         extra_slope_cols: vec![],
         fit_columns: vec![],
+        curvature_hints: None,
     }
 }

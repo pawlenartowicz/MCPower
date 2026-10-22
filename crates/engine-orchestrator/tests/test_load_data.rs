@@ -4,9 +4,10 @@
 mod common;
 
 use engine_contract::{
-    ClusterSizing, ClusterSpec, GroupingRelation, GroupingSpec, OutcomeKind, WaldSe,
+    ClusterSizing, ClusterSpec, ColumnId, GroupingRelation, GroupingSpec, OutcomeKind, SlopeTerm,
+    WaldSe,
 };
-use engine_orchestrator::debug::{debug_load_data, debug_report, StageMask};
+use engine_orchestrator::debug::{StageMask, debug_load_data, debug_report};
 use engine_spec_builder::build_contract;
 
 #[test]
@@ -171,6 +172,81 @@ fn load_data_reproduces_mle_sim0_statistic_and_crit_bit_for_bit() {
     }
 }
 
+// Bit-equivalence on shapes whose fits start from the batch pilot's curvature
+// hint: a crossed-intercept GLMM (reads it from any start) and a one-slope LMM
+// under `truth_start` (reads it from the truth start). load_data must rerun the
+// same pilot, or its fit takes a different BFGS path than sim 0's.
+#[test]
+fn load_data_reproduces_hinted_sim0_statistic_bit_for_bit() {
+    let glmm = build_contract(
+        &common::logit_spec(),
+        OutcomeKind::Binary,
+        None,
+        None,
+        -0.5,
+        vec![ClusterSpec {
+            sizing: ClusterSizing::FixedClusters { n_clusters: 25 },
+            tau_squared: 0.3,
+            slopes: vec![],
+            extra_groupings: vec![GroupingSpec {
+                relation: GroupingRelation::Crossed { n_clusters: 10 },
+                tau_squared: 0.2,
+                slopes: vec![],
+            }],
+        }],
+    )
+    .unwrap()
+    .remove(0);
+    let mut slope_lmm = build_contract(
+        &common::lme_spec(),
+        OutcomeKind::Continuous,
+        None,
+        None,
+        0.0,
+        vec![ClusterSpec {
+            sizing: ClusterSizing::FixedClusters { n_clusters: 25 },
+            tau_squared: 0.3,
+            slopes: vec![SlopeTerm {
+                column: ColumnId(0),
+                variance: 0.1,
+                corr_with_intercept: 0.0,
+                corr_with: vec![],
+            }],
+            extra_groupings: vec![],
+        }],
+    )
+    .unwrap()
+    .remove(0);
+    slope_lmm.scenario.truth_start = true;
+
+    let (n, n_sims, seed) = (500usize, 8usize, 555u64);
+    for (c, label) in [(&glmm, "crossed GLMM"), (&slope_lmm, "slope LMM")] {
+        let report = debug_report(c, seed, n, n_sims, StageMask::all()).unwrap();
+        let d = report.data.expect("data");
+        let stats = report.stats.expect("stats");
+        let ld = debug_load_data(
+            c,
+            seed,
+            &d.design.data,
+            d.design.nrow,
+            d.design.ncol,
+            &d.outcome,
+            d.cluster_ids.as_deref(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ld.targets.len(), stats.targets.len());
+        for (t, tgt) in ld.targets.iter().enumerate() {
+            assert_eq!(
+                tgt.statistic.to_bits(),
+                stats.targets[t].statistic[0].to_bits(),
+                "{label} target {t}: load_data statistic != sim-0 pipeline statistic"
+            );
+        }
+    }
+}
+
 // M2 general path: the data stage carries layout-derived extra_grouping_ids,
 // and load_data surfaces per-grouping variance components τ̂²_g = θ̂_g²·σ̂².
 #[test]
@@ -236,10 +312,11 @@ fn debug_surfaces_extra_grouping_ids_and_variance_components() {
     .unwrap();
     assert!(ld.converged, "general-path fit converged");
     assert_eq!(ld.variance_components.len(), 3); // primary + crossed + nested
-    assert!(ld
-        .variance_components
-        .iter()
-        .all(|v| v.is_finite() && *v >= 0.0));
+    assert!(
+        ld.variance_components
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0)
+    );
     assert!(ld.sigma_sq_hat.is_finite() && ld.sigma_sq_hat > 0.0);
 }
 

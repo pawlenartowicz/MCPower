@@ -4,6 +4,7 @@
 //! calls the real `run_batch_st`; for observation it re-walks the same per-sim
 //! seed chain. Single-threaded, fully deterministic.
 
+use crate::EngineError;
 use crate::batch::run_batch_st;
 use crate::batch::run_batch_st_capture;
 use crate::critvals::CritValueTable;
@@ -11,9 +12,8 @@ use crate::data_gen::generate_sim_data;
 use crate::rng::pcg_mix64;
 use crate::spec::{BatchResult, EstimatorSpec, SimulationSpec};
 use crate::workspace::SimWorkspace;
-use crate::EngineError;
-use glmm::loop_advanced::{fit_suff_stats_t_sq, OlsScratch, OlsSuffStats};
-use glmm::loop_advanced::{glm_irls_fit, GlmScratch};
+use glmm::loop_advanced::{GlmScratch, glm_irls_fit};
+use glmm::loop_advanced::{OlsScratch, OlsSuffStats, fit_suff_stats_t_sq};
 
 /// Which observations to capture. Engine-core-local (orchestrator maps its
 /// `StageMask` onto this — engine-core never depends on orchestrator types).
@@ -73,9 +73,13 @@ pub struct IntrospectResults {
     pub target_cols: Vec<u32>,
     pub converged: bool,
     /// Per-target (squared) uncorrected threshold — see
-    /// [`IntrospectCrit::crit_sq_uncorrected_per_target`].
+    /// [`IntrospectCrit::crit_sq_uncorrected_per_target`]. On a fit tested at
+    /// Satterthwaite df (`critvals::uses_satterthwaite`) the marginal entries
+    /// are `t_ppf(1 − α/2, df)²` at this fit's df instead of a table row.
     pub crit_sq_uncorrected_per_target: Vec<f64>,
-    /// Per-target denominator df — see [`IntrospectCrit::df_per_target`].
+    /// Per-target denominator df — see [`IntrospectCrit::df_per_target`]. On a
+    /// fit tested at Satterthwaite df, this fit's df per marginal target (NaN
+    /// on contrast slots, which the mixed arm does not test).
     pub df_per_target: Vec<f64>,
     /// Estimated variance components: the diagonals of each grouping's RE
     /// covariance D = σ̂²·ΛΛ′. Order [primary (q_p entries), extras in
@@ -167,9 +171,12 @@ fn capture_sim0_data(
 /// by generation, then dispatched through the *identical* kernel each
 /// `run_one_sim` arm uses — OLS (`OlsSuffStats::add_rows` →
 /// `fit_suff_stats_t_sq`), unclustered GLM (`glm_irls_fit`), or the mixed arms
-/// (clustered GLMM / LMM) via `build_workspace` + `fit_on` — so this is the
-/// shipped solver, not a parallel impl (proven by the orchestrator
-/// bit-equivalence tests).
+/// (clustered GLMM / LMM) via `build_workspace` + `fit_on_hinted` — so this is
+/// the shipped solver, not a parallel impl (proven by the orchestrator
+/// bit-equivalence tests). `base_seed` is the scenario base seed of the batch
+/// run being mirrored: the mixed arms rerun that run's curvature-hint pilot at
+/// `[nrow]` (`batch::curvature_hints`) and fit with its hint, as every sim of a
+/// single-N batch does.
 ///
 /// `design` is column-major `nrow * ncol` (the shape `capture_sim0_data`
 /// emits). All three estimator arms are wired.
@@ -183,6 +190,7 @@ fn capture_sim0_data(
 /// generation design; the reduction happens on the way into the fit.
 pub fn fit_provided_data(
     spec: &SimulationSpec,
+    base_seed: u64,
     design: &[f64],
     nrow: usize,
     ncol: usize,
@@ -267,13 +275,35 @@ pub fn fit_provided_data(
         .map(|&cj| spec.effect_sizes[cj as usize])
         .collect();
     let n_test_targets = fit_targets.len();
+    // The mixed arms' curvature hint: the one a single-N batch at `nrow` fits
+    // every sim with (empty for OLS / unclustered GLM and for shapes that run no
+    // pilot). A `(spec, nrow)` the batch rejects has no hot-loop fit to mirror,
+    // so it fits unhinted.
+    let hints = if spec.cluster.is_some() && spec.estimator != EstimatorSpec::Ols {
+        crate::batch::curvature_hints(spec, &[nrow as u32], base_seed).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let hint = hints.first().and_then(Option::as_ref);
 
     // Dispatch on the estimator — each arm mirrors the corresponding
     // `run_one_sim` arm exactly (same kernel, same injected bytes).
     #[allow(clippy::type_complexity)]
     // `pinned`: the mixed fit's pinned-component bitmask (0 for OLS / unclustered
     // GLM) — decides whether the collapsed crit table applies below.
-    let (betas, se, statistic, converged, variance_components, sigma_sq_hat, re_corr, pinned): (
+    // `satt_df`: the targets' Satterthwaite df, `Some` only where the hot loop
+    // tests at them (Gaussian LMM arm) — replaces the table's row below.
+    let (
+        betas,
+        se,
+        statistic,
+        converged,
+        variance_components,
+        sigma_sq_hat,
+        re_corr,
+        pinned,
+        satt_df,
+    ): (
         Vec<f64>,
         Vec<f64>,
         Vec<f64>,
@@ -282,6 +312,7 @@ pub fn fit_provided_data(
         f64,
         Vec<f64>,
         u64,
+        Option<Vec<f64>>,
     ) = match spec.estimator {
         EstimatorSpec::Ols => {
             // OLS — suff-stats then closed-form fit. var_diag / t_sq are
@@ -333,6 +364,7 @@ pub fn fit_provided_data(
                 f64::NAN,
                 vec![],
                 0,
+                None,
             )
         }
         EstimatorSpec::Glm if spec.cluster.is_some() => {
@@ -372,12 +404,7 @@ pub fn fit_provided_data(
             // needs its own (target_indices is not frozen by `fit_on`).
             let opts_red;
             let opts = if reduces {
-                opts_red = glmm::FitOptions {
-                    target_indices: fit_targets.clone(),
-                    wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
-                    nagq: spec.nagq,
-                    ..Default::default()
-                };
+                opts_red = crate::mixed_workspace::fit_options(spec, fit_targets.clone());
                 &opts_red
             } else {
                 &opts
@@ -391,26 +418,27 @@ pub fn fit_provided_data(
             // Truth-start under the scenario's `truth_start` assumption: seed the
             // optimizer at the DGP-truth [β | θ] (well-behaved estimation) or start
             // blind. β is warm unconditionally (mirrors the retired `fit_glmm`, which
-            // took β separately); when `truth_start` is off, θ must equal glmm's
-            // blind None-θ seed (every entry THETA0 = 1.0) — passing it explicitly
-            // reproduces that bit-for-bit. NOT a speed knob — the MLE is
-            // start-sensitive. MIRRORS batch.rs's Glm+cluster arm — change together.
-            let theta = crate::mixed_workspace::truth_theta(cluster, true);
+            // took β separately); when `truth_start` is off, θ is left empty, which
+            // glmm reads as its blind start (diagonals THETA0, off-diagonals 0). NOT
+            // a speed knob — the MLE is start-sensitive. MIRRORS batch.rs's
+            // Glm+cluster arm — change together.
             let start_theta = if spec.scenario.truth_start {
-                theta
+                crate::mixed_workspace::truth_theta(cluster, true)
             } else {
-                vec![1.0; theta.len()]
+                Vec::new()
             };
             let start = glmm::StartValues {
                 beta: fit_beta.clone(),
                 theta: start_theta,
+                dispersion: None,
             };
-            let view = glmm::loop_advanced::fit_on(
+            let view = glmm::loop_advanced::fit_on_hinted(
                 &mut mixed[0],
                 &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
                 &ids[0],
                 Some(&start),
+                hint,
                 opts,
             );
             let converged = view.converged();
@@ -445,6 +473,7 @@ pub fn fit_provided_data(
                 fit.dispersion, // ≡ 1.0 for binomial/Poisson (dispersion fixed)
                 re_corr,
                 pinned,
+                None,
             )
         }
         EstimatorSpec::Glm => {
@@ -496,6 +525,7 @@ pub fn fit_provided_data(
                 f64::NAN,
                 vec![],
                 0,
+                None,
             )
         }
         EstimatorSpec::Mle => {
@@ -533,12 +563,7 @@ pub fn fit_provided_data(
             // β-dimension at the full width, so it cannot express the stripped
             // reduced model. Same construction as batch.rs's cold reduced fit.
             let (mut mixed, ids, opts) = if reduces {
-                let opts = glmm::FitOptions {
-                    target_indices: fit_targets.clone(),
-                    wald_se: crate::mixed_workspace::wald_se_to_glmm(spec.wald_se),
-                    nagq: spec.nagq,
-                    ..Default::default()
-                };
+                let opts = crate::mixed_workspace::fit_options(spec, fit_targets.clone());
                 let raw = glmm::GroupIds {
                     primary: ws.cluster_ids[..nrow].to_vec(),
                     extra: ws
@@ -549,8 +574,7 @@ pub fn fit_provided_data(
                 };
                 let (sized, sized_ids, perm) =
                     glmm::loop_advanced::spec_sized_from_ids_pub(&model, &raw);
-                let w =
-                    glmm::loop_advanced::build_workspace(&sized, perm, nrow, p_fit, &opts);
+                let w = glmm::loop_advanced::build_workspace(&sized, perm, nrow, p_fit, &opts);
                 (vec![w], vec![sized_ids.into_owned()], opts)
             } else {
                 crate::mixed_workspace::build_mixed_workspaces(
@@ -580,13 +604,18 @@ pub fn fit_provided_data(
             let start = spec.scenario.truth_start.then(|| glmm::StartValues {
                 beta: fit_beta.clone(),
                 theta,
+                dispersion: None,
             });
-            let view = glmm::loop_advanced::fit_on(
+            // Only a fit from the truth start reads the hint (batch.rs's Mle
+            // arm). A reduced fit never has one: no pilot runs under a
+            // `test_formula`.
+            let view = glmm::loop_advanced::fit_on_hinted(
                 &mut mixed[0],
                 &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
                 &ids[0],
                 start.as_ref(),
+                start.as_ref().and(hint),
                 &opts,
             );
             let converged = view.converged();
@@ -615,6 +644,24 @@ pub fn fit_provided_data(
                 &opts,
             );
             let (variance_components, re_corr) = unpack_varcorr(&fit);
+            // The targets' Satterthwaite df on the workspace `into_fit` released,
+            // under the hot loop's rule (batch.rs Mle arm — change together):
+            // only where `uses_satterthwaite`, on a converged fit, and with a
+            // finite positive df on every target; otherwise the table stands.
+            let satt_df = if crate::critvals::uses_satterthwaite(spec) && converged {
+                let mut df = vec![f64::NAN; p_fit];
+                glmm::loop_advanced::satterthwaite(&mut mixed[0], &mut df)
+                    .ok()
+                    .map(|()| {
+                        fit_targets
+                            .iter()
+                            .map(|&t| df[t as usize])
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|d| d.iter().all(|&x| x.is_finite() && x > 0.0))
+            } else {
+                None
+            };
             (
                 betas,
                 se,
@@ -624,6 +671,7 @@ pub fn fit_provided_data(
                 fit.dispersion, // σ̂² (NaN on a degenerate LMM fit — varcorr is then empty too)
                 re_corr,
                 pinned,
+                satt_df,
             )
         }
     };
@@ -636,6 +684,19 @@ pub fn fit_provided_data(
     // introspect.rs — distinct from `n_test_targets` above. A collapsed mixed
     // fit swaps in the collapsed table, as the hot path does.
     let table = build_crit_table_for_fit(spec, nrow as u32, pinned)?;
+    let mut crit_sq_uncorrected_per_target = table.t_crit_sq_uncorrected[0].clone();
+    let mut df_per_target = table.df_per_target[0].clone();
+    // A draw tested at Satterthwaite df reports them and the cutoff
+    // `t_ppf(1 − α/2, df)²` per target; contrast slots, which the mixed arm does
+    // not test, keep the table's threshold and carry a NaN df.
+    if let Some(df) = satt_df {
+        df_per_target = vec![f64::NAN; crit_sq_uncorrected_per_target.len()];
+        for (j, &d) in df.iter().enumerate() {
+            let t = crate::critvals::t_ppf(1.0 - spec.crit_values.alpha / 2.0, d);
+            crit_sq_uncorrected_per_target[j] = t * t;
+            df_per_target[j] = d;
+        }
+    }
 
     // Report betas in the CALLER's design-column space: hosts index this vector
     // by the same column ids they passed in (and that `target_cols` carries).
@@ -656,8 +717,8 @@ pub fn fit_provided_data(
         statistic,
         target_cols: spec.target_indices.clone(),
         converged,
-        crit_sq_uncorrected_per_target: table.t_crit_sq_uncorrected[0].clone(),
-        df_per_target: table.df_per_target[0].clone(),
+        crit_sq_uncorrected_per_target,
+        df_per_target,
         variance_components,
         sigma_sq_hat,
         re_corr,
@@ -781,7 +842,7 @@ fn build_debug_table(
         n_targets(spec) as u32,
         spec.correction_method,
         spec.estimator,
-        &[],
+        &crate::batch::tukey_k_per_target(spec),
         bw,
     )
 }
@@ -902,7 +963,8 @@ mod tests {
     #[test]
     fn introspect_glm_cluster_emits_variance_components() {
         let (spec, design, nrow, ncol, outcome, ids) = glmm_intercept_provided_fixture();
-        let res = fit_provided_data(&spec, &design, nrow, ncol, &outcome, Some(&ids)).unwrap();
+        let res =
+            fit_provided_data(&spec, 2137, &design, nrow, ncol, &outcome, Some(&ids)).unwrap();
         assert!(res.converged);
         assert_eq!(res.variance_components.len(), 1); // [τ̂²]
         assert!(res.variance_components[0] >= 0.0 && res.variance_components[0].is_finite());
@@ -1164,6 +1226,7 @@ mod tests {
             posthoc: vec![],
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
+            curvature_hints: None,
         }
     }
 
@@ -1275,7 +1338,7 @@ mod tests {
         }
         let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
         let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
-        let r = fit_provided_data(&spec, &design, n, p, &outcome, Some(&cids)).unwrap();
+        let r = fit_provided_data(&spec, 2137, &design, n, p, &outcome, Some(&cids)).unwrap();
         assert!(r.converged);
         // q_p=1 (primary) + q_g=2 (extra intercept+slope) = 3 components.
         assert_eq!(
@@ -1331,7 +1394,7 @@ mod tests {
         }
         let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
         let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
-        let r = fit_provided_data(&spec, &design, n, p, &outcome, Some(&cids)).unwrap();
+        let r = fit_provided_data(&spec, 2137, &design, n, p, &outcome, Some(&cids)).unwrap();
         assert!(r.converged);
         assert_eq!(r.variance_components.len(), 1); // [τ̂²], scalar random intercept
         assert!(r.variance_components[0].is_finite() && r.variance_components[0] >= 0.0);
@@ -1376,7 +1439,8 @@ mod tests {
             }
             let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
             let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
-            let r = fit_provided_data(&spec, &design, n, p, &outcome, Some(&cids)).unwrap();
+            let r = fit_provided_data(&spec, 2137 + seed, &design, n, p, &outcome, Some(&cids))
+                .unwrap();
             if !r.converged {
                 continue;
             }
@@ -1394,10 +1458,11 @@ mod tests {
                 r.df_per_target
             );
             let t = crate::critvals::t_ppf(0.975, expected);
-            assert!(r
-                .crit_sq_uncorrected_per_target
-                .iter()
-                .all(|&c| (c - t * t).abs() < 1e-12));
+            assert!(
+                r.crit_sq_uncorrected_per_target
+                    .iter()
+                    .all(|&c| (c - t * t).abs() < 1e-12)
+            );
         }
         assert!(
             seen_collapsed && seen_live,
@@ -1464,7 +1529,7 @@ mod tests {
         let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
         let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
 
-        let r = fit_provided_data(&spec, &design, n, p_full, &outcome, Some(&cids))
+        let r = fit_provided_data(&spec, 8, &design, n, p_full, &outcome, Some(&cids))
             .expect("the reduced fit has between-within df to spare and must build a crit table");
         assert!(r.converged);
         assert!(
@@ -1486,6 +1551,99 @@ mod tests {
         assert_eq!(r.betas.len(), p_full);
         assert!(r.betas[0].is_finite() && r.betas[1].is_finite());
         assert!(r.betas[2..].iter().all(|b| b.is_nan()));
+    }
+
+    /// A Gaussian LMM with a crossed or nested extra grouping, under the
+    /// between-within reference, reports each target's Satterthwaite df and
+    /// the cutoff `t_ppf(1 − α/2, df)²` at it. The df must equal glmm's stable
+    /// path (`fit_cold`, `Fit::coef_df`) on the same data — which glmm gates
+    /// against lmerTest — so this pins that the provided-data fit runs the pass
+    /// on the right workspace and reads the target entries. The crossed design
+    /// with an extra-grouping random slope takes glmm's sparse route.
+    #[test]
+    fn fit_provided_data_crossed_and_nested_lmm_report_satterthwaite_df() {
+        use engine_contract::{
+            ClusterSizing, ClusterSpec, ColumnId, DfMethod, EstimatorSpec, GroupingRelation,
+            GroupingSpec, SlopeTerm,
+        };
+        let slope = SlopeTerm {
+            column: ColumnId(0),
+            variance: 0.12,
+            corr_with_intercept: 0.0,
+            corr_with: vec![],
+        };
+        for (relation, slopes) in [
+            (GroupingRelation::Crossed { n_clusters: 4 }, vec![]),
+            (GroupingRelation::NestedWithin { n_per_parent: 2 }, vec![]),
+            (GroupingRelation::Crossed { n_clusters: 4 }, vec![slope]),
+        ] {
+            let mut c = minimal_ols_contract();
+            c.estimator = EstimatorSpec::Mle;
+            c.df_method = DfMethod::BetweenWithin;
+            let mut cluster =
+                ClusterSpec::intercept_only(ClusterSizing::FixedClusters { n_clusters: 6 }, 0.25);
+            cluster.extra_groupings = vec![GroupingSpec {
+                relation: relation.clone(),
+                tau_squared: 0.15,
+                slopes,
+            }];
+            c.generation.cluster = Some(cluster);
+            let spec = contract_to_simulation_spec(&c).unwrap();
+            let p = (1 + spec.n_non_factor + spec.n_factor_dummies) as usize;
+            let n = 96usize;
+            let mut ws = SimWorkspace::new(
+                n,
+                p,
+                spec.n_non_factor as usize,
+                spec.factor_n_levels.len(),
+                spec.cluster.as_ref(),
+            );
+            crate::data_gen::generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
+            let mut design = vec![0.0; n * p];
+            let mut x_rowmajor = vec![0.0; n * p];
+            for j in 0..p {
+                for i in 0..n {
+                    design[j * n + i] = ws.x_full[(i, j)] as f64;
+                    x_rowmajor[i * p + j] = ws.x_full[(i, j)] as f64;
+                }
+            }
+            let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
+            let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
+            let r = fit_provided_data(&spec, 2137, &design, n, p, &outcome, Some(&cids)).unwrap();
+            assert!(r.converged, "{relation:?}");
+
+            let model = crate::mixed_workspace::cluster_to_model_spec(
+                spec.cluster.as_ref().unwrap(),
+                glmm::Family::Gaussian,
+                &spec.cluster_slope_design_cols,
+                &spec.extra_slope_cols,
+            );
+            let ids = glmm::GroupIds {
+                primary: cids.clone(),
+                extra: ws
+                    .extra_grouping_ids
+                    .iter()
+                    .map(|v| v[..n].to_vec())
+                    .collect(),
+            };
+            let opts = crate::mixed_workspace::fit_options(&spec, spec.target_indices.clone());
+            let stable = glmm::fit_cold(&x_rowmajor, &outcome, n, p, &model, &ids, &opts);
+            let expected: Vec<f64> = spec
+                .target_indices
+                .iter()
+                .map(|&t| stable.coef_df[t as usize])
+                .collect();
+
+            assert_eq!(r.df_per_target.len(), expected.len(), "{relation:?}");
+            for (j, (&got, &want)) in r.df_per_target.iter().zip(&expected).enumerate() {
+                assert!(
+                    want.is_finite() && ((got - want) / want).abs() < 1e-3,
+                    "{relation:?} target {j}: df {got}, stable path {want}"
+                );
+                let t = crate::critvals::t_ppf(0.975, got);
+                assert_eq!(r.crit_sq_uncorrected_per_target[j], t * t, "{relation:?}");
+            }
+        }
     }
 
     /// `fit_provided_data` on a (1+x1|g) spec surfaces [τ̂₀², τ̂₁²] in
@@ -1537,7 +1695,7 @@ mod tests {
         let outcome: Vec<f64> = ws.y_full[..n].iter().map(|&v| v as f64).collect();
         let cids: Vec<u32> = ws.cluster_ids[..n].to_vec();
 
-        let r = fit_provided_data(&spec, &design, n, p, &outcome, Some(&cids)).unwrap();
+        let r = fit_provided_data(&spec, 2137, &design, n, p, &outcome, Some(&cids)).unwrap();
         // q_p = 2 → 2 primary RE variances; no extras.
         assert_eq!(r.variance_components.len(), 2, "expect [τ̂₀², τ̂₁²]");
         assert!(

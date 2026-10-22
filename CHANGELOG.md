@@ -5,6 +5,58 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each language
 port keeps its own version, so a version listed here may reach Python, R, the
 desktop app, and the web app on different dates.
 
+## [1.4.1] — 2026-10-22
+
+### Added
+- Sample-size searches (`find_sample_size`, Python and R) report a required N
+  for each post-hoc pairwise contrast (`target_test="all-contrasts"`): one
+  "(pairwise)" span per factor in the printed Required N table, and one row per
+  contrast in the Python `to_dataframe()` / R `as_tibble()` required-N frames.
+- Config key `simulation.nested_n_per_parent` (default 2): a nested `(1|A/B)`
+  grouping with no `n_per_parent` uses it.
+- `simulation.n_sims.glmm` (default 400) in `configs/config.json`.
+
+### Changed
+- **Default simulation count for clustered binary and count (GLMM) models is
+  400.** In 1.4.0 a Python/R `MCPower` with a logit or Poisson outcome used
+  1,600 even when clustered. Pass `set_simulations(1600)` to reproduce 1.4.0
+  run sizes. The app and web app switch the default when the outcome moves
+  between Continuous and Logit/Poisson, unless the count was edited.
+- **`MCPower.n_simulations` is `None` until `set_simulations()` is called**
+  (Python and R). The count a run uses is resolved at run time from the design;
+  reports show the resolved value.
+- **Crossed or nested extra grouping under `df_method="between_within"`:** an
+  LME is tested against a *t* at each fit's Satterthwaite df, as lmerTest
+  computes it; a fit whose Satterthwaite pass fails falls back to Wald z. A
+  GLMM still uses Wald z. Holm and Benjamini-Hochberg decisions for these fits
+  use p-values, matching R's `p.adjust`. Power can differ from 1.4.0;
+  `df_method="asymptotic"` gives the 1.4.0 numbers.
+- Heteroskedasticity applies to all continuous outcomes, including linear mixed
+  models; the "no effect" warning fires only for binary and count outcomes.
+- A nested child grouping given `n_clusters` or `cluster_size` is an error
+  asking for `n_per_parent` (Python and R).
+- AGQ (`agq`/`nagq` > 1) is eligible only with the GLM estimator; otherwise it
+  is stripped to Laplace with a warning.
+- The convergence-failure error reads "Convergence failure rate ..."; the
+  τ-boundary breakdown and `n_clusters` hint appear only for clustered models.
+- App and web app: the GLM extras line reads "event rate = X% · baseline Y%".
+- Building the R package from source needs rustc >= 1.85.
+
+### Fixed
+- A factor that appears only inside interactions no longer gets spurious
+  main-effect rows for its dummy columns (Python and R).
+- `debug_report` / `load_data`: the first simulated dataset uses the same
+  heteroskedasticity coefficients as the fits.
+- App and web app: the run menu no longer starts a run when the form has
+  blocking errors.
+- App and web app: the correlation editor shows the measured correlation for
+  untouched uploaded continuous pairs.
+
+### Removed
+- The "GLM baseline drift" warning, the app's matching convergence notice, and
+  `glm_baseline_drift_max` in `configs/config.json`; `baseline_prob_requested`
+  is no longer in the report meta.
+
 ## [1.4.0] — 2026-09-06
 
 ### Added

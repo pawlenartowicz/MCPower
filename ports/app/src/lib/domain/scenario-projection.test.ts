@@ -10,9 +10,9 @@ import {
 // These tables are the parity guard: they MUST equal the engine's `DIST_CODES` /
 // `RESIDUAL_CODES` (engine-spec-builder `project_contract.rs`, which Python
 // reads via `get_dist_codes()` / `get_residual_codes()`) verbatim, or app
-// scenario numbers silently diverge from Python at equal X.Y.
-describe('scenario code tables match Python constants', () => {
-  it('DIST_CODE matches Python _DIST_CODE', () => {
+// scenario numbers silently diverge from the engine's at equal X.Y.
+describe('scenario code tables match the engine tables', () => {
+  it('DIST_CODE matches the engine DIST_CODES', () => {
     expect(DIST_CODE).toEqual({
       normal: 0,
       binary: 1,

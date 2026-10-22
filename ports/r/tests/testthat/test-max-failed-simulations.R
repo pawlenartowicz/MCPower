@@ -66,6 +66,22 @@ test_that(".check_failure_threshold: error message includes rate and threshold",
   expect_true(grepl("10", err))
 })
 
+test_that(".check_failure_threshold: tau hints only for clustered models", {
+  args <- list(convergence_rate           = c(0.75),
+               boundary_hit_rate_tau_zero = c(0.20),
+               boundary_hit_rate_high_tau = c(0.05),
+               threshold                  = 0.10)
+  plain <- tryCatch(do.call(mcpower:::.check_failure_threshold, args),
+                    error = function(e) conditionMessage(e))
+  expect_match(plain, "^Convergence failure rate 25.0%")
+  expect_false(grepl("LME|tau|n_clusters", plain))
+  clus <- tryCatch(do.call(mcpower:::.check_failure_threshold,
+                           c(args, list(clustered = TRUE))),
+                   error = function(e) conditionMessage(e))
+  expect_true(grepl("tau_zero", clus) && grepl("high_tau", clus) &&
+                grepl("n_clusters", clus))
+})
+
 # ── End-to-end: OLS never raises at max_failed_simulations=0.0 ───────────────
 
 test_that("find_power OLS never raises at max_failed_simulations=0.0", {

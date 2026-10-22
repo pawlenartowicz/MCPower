@@ -58,7 +58,7 @@ test_that("registry exposes equation and dependent", {
   expect_equal(reg$predictor_names, c("x1", "x2"))
 })
 
-test_that("registry reshapes interactions into effects", {
+test_that("registry reshapes interactions into effects (APIC-19)", {
   reg <- mcpower:::RVariableRegistry$new("y ~ x1 + x2 + x1:x2")
   expect_equal(reg$effect_names, c("x1", "x2", "x1:x2"))
   eff <- reg$get_effect("x1:x2")
@@ -67,7 +67,7 @@ test_that("registry reshapes interactions into effects", {
   expect_equal(eff$column_indices, c(0L, 1L))
 })
 
-test_that("registry tolerates = as ~ synonym", {
+test_that("registry tolerates = as ~ synonym (APIC-20)", {
   reg <- mcpower:::RVariableRegistry$new("y = x1 + x2")
   expect_equal(reg$dependent, "y")
   expect_equal(reg$non_factor_names, c("x1", "x2"))
@@ -88,7 +88,7 @@ test_that("registry set_variable_types handles a binary predictor", {
   expect_equal(p$proportion, 0.3)
 })
 
-test_that("registry handles a factor predictor", {
+test_that("registry handles a factor predictor and stores factor_info (APIC-59)", {
   reg <- mcpower:::RVariableRegistry$new("y ~ g")
   reg$set_variable_types("g=(factor,3)")
   expect_equal(reg$factor_names, "g")
@@ -99,7 +99,7 @@ test_that("registry handles a factor predictor", {
   expect_equal(reg$non_factor_names, character(0))
 })
 
-test_that("registry expand_factors creates reference-coded dummies", {
+test_that("registry expand_factors creates reference-coded dummies (APIC-57)", {
   reg <- mcpower:::RVariableRegistry$new("y ~ x1 + g")
   reg$set_variable_types("g=(factor,3)")
   reg$expand_factors()
@@ -131,7 +131,7 @@ test_that("registry set_effects rejects unknown effects like Python", {
   expect_error(reg$set_effects("zzz=0.5"), "Effect validation failed")
 })
 
-test_that("registry builds correlation matrix from spec", {
+test_that("registry builds a symmetric correlation matrix from spec (APIC-58)", {
   reg <- mcpower:::RVariableRegistry$new("y ~ x1 + x2 + x3")
   reg$set_correlation_spec("corr(x1,x2)=0.3")
   m <- reg$get_correlation_matrix()
@@ -142,14 +142,14 @@ test_that("registry builds correlation matrix from spec", {
   expect_equal(diag(m), c(1, 1, 1))
 })
 
-test_that("registry bare-parens correlation form normalises like Python", {
+test_that("registry bare-parens correlation form normalises like Python (APIC-22)", {
   reg <- mcpower:::RVariableRegistry$new("y ~ x1 + x2")
   reg$set_correlation_spec("(x1,x2)=0.4")
   m <- reg$get_correlation_matrix()
   expect_equal(m[1, 2], 0.4)
 })
 
-test_that("registry detects random intercept and cluster effects", {
+test_that("registry detects random intercept and cluster effects (APIC-18)", {
   reg <- mcpower:::RVariableRegistry$new("y ~ x1 + (1|g)")
   expect_equal(length(reg$`_random_effects_parsed`), 1L)
   re <- reg$`_random_effects_parsed`[[1]]
@@ -173,7 +173,7 @@ test_that("registry rejects random-effects-only formula", {
   expect_error(mcpower:::RVariableRegistry$new("y ~ (1|g)"))
 })
 
-test_that("correction aliases normalize like Python", {
+test_that("correction aliases normalize like Python (APIC-63)", {
   expect_equal(mcpower:::.correction_for_rust("BH"), "benjamini_hochberg")
   expect_equal(mcpower:::.correction_for_rust("Benjamini-Hochberg"), "benjamini_hochberg")
   expect_equal(mcpower:::.correction_for_rust("fdr"), "benjamini_hochberg")
@@ -286,15 +286,17 @@ test_that("to_linear_spec_json reshapes a factor predictor into levels/proportio
   expect_equal(eff_names, c("f1[2]", "f1[3]"))
 })
 
-test_that("to_linear_spec_json emits non-zero correlations only", {
+test_that("to_linear_spec_json emits non-zero correlations only (APIC-61)", {
   reg <- mcpower:::RVariableRegistry$new("y ~ x1 + x2")
   reg$set_effects("x1=0.5, x2=0.3")
-  reg$set_correlation_spec("(x1,x2)=0.4")
-  payload <- mcpower:::.to_linear_spec_list(reg, scenario_names = "optimistic",
+  spec <- function() mcpower:::.to_linear_spec_list(reg, scenario_names = "optimistic",
                alpha = 0.05, correction = NULL, target_test = NULL,
                heteroskedasticity = list(driver_var_index = NULL),
                residual_name = "normal", max_failed = 1.0,
                test_formula = NULL)
+  expect_equal(length(spec()$correlations), 0L)
+  reg$set_correlation_spec("(x1,x2)=0.4")
+  payload <- spec()
   expect_equal(length(payload$correlations), 1L)
   expect_equal(payload$correlations[[1]], list(a = "x1", b = "x2", value = 0.4))
 })
@@ -399,7 +401,8 @@ test_that("MCPower constructor sets defaults mirroring Python", {
   expect_equal(m$seed, 2137)
   expect_equal(m$power, 80)
   expect_equal(m$alpha, 0.05)
-  expect_equal(m$n_simulations, 1600)
+  expect_null(m$n_simulations)  # resolved per design at run time
+  expect_equal(m$.__enclos_env__$private$resolved_n_simulations(), 1600L)
 })
 
 test_that("MCPower estimator defaults derive from family", {
@@ -458,7 +461,7 @@ test_that("MCPower set_residual_distribution validates and stores; all five cano
   expect_false(MCPower$new("y ~ x1")$summary()$residual_pinned)
 })
 
-test_that("MCPower set_baseline_probability computes intercept = logit(p)", {
+test_that("MCPower set_baseline_probability computes intercept = logit(p) (APIC-41)", {
   m <- MCPower$new("y ~ x1", family = "logit")$set_baseline_probability(0.3)
   m$summary()  # forces apply
   expect_equal(m$intercept, log(0.3 / 0.7))
@@ -471,7 +474,7 @@ test_that("MCPower set_cluster shapes pending state for encode", {
   expect_equal(pc$g$n_clusters, 20)
 })
 
-test_that("MCPower set_heteroskedasticity_driver builds the engine spec", {
+test_that("MCPower set_heteroskedasticity_driver builds the engine spec; bad var raises (APIC-74)", {
   m <- MCPower$new("y ~ x1 + x2")
   m$set_heteroskedasticity_driver()  # off -> null driver (ratio is scenario-only)
   hs0 <- m$.__enclos_env__$private$heteroskedasticity
@@ -481,37 +484,40 @@ test_that("MCPower set_heteroskedasticity_driver builds the engine spec", {
   m$set_heteroskedasticity_driver("x1")
   hs <- m$.__enclos_env__$private$heteroskedasticity
   expect_equal(hs$driver_var_index, 0L)
+  expect_error(MCPower$new("y ~ x1")$set_heteroskedasticity_driver("zzz"))
 })
 
-# Item #13 — set_heteroskedasticity_driver silent no-op for logit/LME
-test_that("set_heteroskedasticity_driver is a no-op for logit: same power with and without", {
-  # Logit model with explicit seed for determinism.
-  make_logit <- function() {
-    MCPower$new("y ~ x1", family = "logit")$
-      set_effects("x1=0.5")$
-      set_baseline_probability(0.3)$
-      set_simulations(200)
-  }
-  res_plain <- make_logit()$find_power(200, seed = 2137, progress_callback = FALSE)
-  res_het   <- make_logit()$
-    set_heteroskedasticity_driver("x1")$
-    find_power(200, seed = 2137, progress_callback = FALSE)
-  # The engine ignores het for logit DGP: results must be byte-identical.
-  expect_identical(res_plain$power_uncorrected, res_het$power_uncorrected)
+# The driver only matters when the active scenario sets lambda > 1 ("realistic"
+# is 2.0). With driver = NULL the variance follows the linear predictor, which
+# for y ~ x1 + x2 with only x1 active equals x1; so driver "x2" is the case
+# that must move the seeded result. Mean-locked outcomes (binary/count) have no
+# free residual variance, so the driver must change nothing there.
+.het_powers <- function(m, driver) {
+  if (!is.null(driver)) suppressWarnings(m$set_heteroskedasticity_driver(driver))
+  m$find_power(200, seed = 2137, scenarios = "realistic",
+               progress_callback = FALSE, verbose = FALSE)$power_uncorrected[[1]]
+}
+
+test_that("set_heteroskedasticity_driver moves OLS results when lambda > 1", {
+  make <- function() MCPower$new("y ~ x1 + x2")$
+    set_effects("x1=0.5, x2=0.0")$set_simulations(300)
+  expect_false(identical(.het_powers(make(), NULL), .het_powers(make(), "x2")))
 })
 
-test_that("set_heteroskedasticity_driver is a no-op for LME: same power with and without", {
-  make_lme <- function() {
-    MCPower$new("y ~ x1 + (1|g)", family = "lme")$
-      set_effects("x1=0.5")$
-      set_cluster("g", ICC = 0.1, n_clusters = 20)$
-      set_simulations(100)
-  }
-  res_plain <- make_lme()$find_power(200, seed = 2137, progress_callback = FALSE)
-  res_het   <- make_lme()$
-    set_heteroskedasticity_driver("x1")$
-    find_power(200, seed = 2137, progress_callback = FALSE)
-  expect_identical(res_plain$power_uncorrected, res_het$power_uncorrected)
+test_that("set_heteroskedasticity_driver moves LME results when lambda > 1", {
+  make <- function() MCPower$new("y ~ x1 + x2 + (1|g)", family = "lme")$
+    set_effects("x1=0.5, x2=0.0")$
+    set_cluster("g", ICC = 0.1, n_clusters = 20)$
+    set_simulations(300)
+  expect_false(identical(.het_powers(make(), NULL), .het_powers(make(), "x2")))
+})
+
+test_that("set_heteroskedasticity_driver leaves logit results unchanged when lambda > 1", {
+  make <- function() MCPower$new("y ~ x1 + x2", family = "logit")$
+    set_effects("x1=0.5, x2=0.2")$
+    set_baseline_probability(0.3)$
+    set_simulations(300)
+  expect_identical(.het_powers(make(), NULL), .het_powers(make(), "x2"))
 })
 
 test_that("summary returns the documented keys", {

@@ -118,7 +118,7 @@ This knob decides whether each simulated dataset hits your requested group propo
 
 ### Heteroskedasticity
 
-Linear models assume the error variance is constant, but real error often grows or shrinks along a predictor. The `heteroskedasticity_ratio` knob (λ) sets how lopsided the variance is: λ is the residual-variance ratio between the high and low ends of the driver, so λ = 4 means 4× the variance at the high end. Total noise is held fixed — only its pattern tilts. λ = 1 turns it off; presets use 2.0 (realistic) and 4.0 (doomer). Linear models only.
+Linear models assume the error variance is constant, but real error often grows or shrinks along a predictor. The `heteroskedasticity_ratio` knob (λ) sets how lopsided the variance is: λ is the residual-variance ratio between the high and low ends of the driver, so λ = 4 means 4× the variance at the high end. Total noise is held fixed — only its pattern tilts. λ = 1 turns it off; presets use 2.0 (realistic) and 4.0 (doomer). It applies to continuous outcomes, including linear mixed models.
 
 **Definition.** Linear models assume constant error variance (homoskedasticity). In real data the error variance often depends on the predicted value — or on a specific predictor — violating that assumption.
 

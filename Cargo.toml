@@ -13,11 +13,10 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.4.0"              # single source for the eight internal engine-* crates (all publish=false);
+version = "1.4.1"              # single source for the eight internal engine-* crates (all publish=false);
                               # ports version independently
-edition = "2021"
-rust-version = "1.85"          # floor set by the bobyqa dep (edition 2024, MSRV 1.85);
-                               # the workspace's own needs (`#[expect]`, lint `reason =`) stop at 1.81
+edition = "2024"
+rust-version = "1.85"          # first release with edition 2024; glmm and its bobyqa set the same floor
 license = "GPL-3.0-or-later"
 
 [workspace.lints.rust]

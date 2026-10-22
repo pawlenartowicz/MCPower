@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 ///     to coefficients. The builder validates that every parsed effect has
 ///     an entry.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinearSpec {
     /// R-style formula: `"y = x1 + x2 + x1:x2"` or `"y ~ x1 + x2"`.
     pub formula: String,
@@ -101,6 +102,7 @@ fn default_nagq_input() -> u8 {
 
 /// One all-pairwise post-hoc request for a single factor.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PosthocRequest {
     /// Factor predictor name to run all-pairwise post-hoc on.
     pub factor: String,
@@ -150,6 +152,7 @@ pub enum VarKind {
 
 /// One effect-name → coefficient-size assignment.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EffectAssignment {
     pub name: String,
     pub size: f64,
@@ -157,6 +160,7 @@ pub struct EffectAssignment {
 
 /// A pairwise correlation `value` between non-factor predictors `a` and `b`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CorrelationPair {
     pub a: String,
     pub b: String,
@@ -177,6 +181,7 @@ pub use engine_contract::CorrectionMethod as Correction;
 /// predictor Xβ. The variance ratio λ is scenario-only — there is no model
 /// pin. The `None` default is scenario-driven, lp-based het.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HeteroskedasticityInput {
     #[serde(default)]
     pub driver_var_index: Option<u32>,
@@ -184,6 +189,7 @@ pub struct HeteroskedasticityInput {
 
 /// Residual error-term distribution, and whether the user pinned it.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResidualSpec {
     /// Canonical name: "normal", "right_skewed", "left_skewed",
     /// "high_kurtosis", or "uniform" (the `RESIDUAL_CODES` table). No df —
@@ -225,6 +231,7 @@ pub enum UploadColumnType {
 /// One uploaded column. `values` are raw (un-standardized) numerics; for a
 /// factor, `values` are level codes 0..k-1 and `labels[code]` is the display name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UploadColumn {
     pub name: String,
     pub col_type: UploadColumnType,
@@ -235,6 +242,7 @@ pub struct UploadColumn {
 
 /// An uploaded predictor frame: faithfulness `mode`, row count, and typed columns.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UploadInput {
     pub mode: UploadMode,
     pub n_rows: u32,
@@ -247,6 +255,7 @@ pub struct UploadInput {
 /// (for `residual_dists`) tables. The builder copies these integers straight into
 /// `ScenarioPerturbations` — no name → code translation happens in Rust.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScenarioInput {
     pub name: String,
     /// Scenario contribution to the β-jitter SD (additive with the model baseline); 0.0 = off.
@@ -326,9 +335,8 @@ mod tests {
             "alpha": 0.05,
             "correction": "bonferroni",
             "targets": ["overall"],
-            "heterogeneity": 0.0,
             "heteroskedasticity": {},
-            "residual": {"distribution": "normal", "df": 0.0},
+            "residual": {"distribution": "normal"},
             "max_failed_fraction": 0.1,
             "scenarios": [],
             "posthoc_requests": [{"factor": "dose_group"}]
@@ -337,5 +345,40 @@ mod tests {
         assert_eq!(spec.posthoc_requests.len(), 1);
         assert_eq!(spec.posthoc_requests[0].factor, "dose_group");
         assert_eq!(spec.posthoc_requests[0].posthoc_alpha, None);
+    }
+
+    #[test]
+    fn unknown_keys_are_rejected_in_linear_spec_and_nested_structs() {
+        let base = |extra_top: &str, residual: &str| {
+            format!(
+                r#"{{
+                "formula": "y = x1",
+                "predictors": [{{"name": "x1", "kind": "normal"}}],
+                "effects": [{{"name": "x1", "size": 0.5}}],
+                "correlations": [],
+                "alpha": 0.05,
+                "correction": "none",
+                "targets": ["x1"],
+                {extra_top}
+                "heteroskedasticity": {{}},
+                "residual": {residual},
+                "max_failed_fraction": 0.1,
+                "scenarios": []
+            }}"#
+            )
+        };
+        let ok = base("", r#"{"distribution": "normal"}"#);
+        assert!(serde_json::from_str::<LinearSpec>(&ok).is_ok());
+
+        let top = base(r#""heterogeneity": 0.0,"#, r#"{"distribution": "normal"}"#);
+        let err = serde_json::from_str::<LinearSpec>(&top).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field `heterogeneity`"),
+            "{err}"
+        );
+
+        let nested = base("", r#"{"distribution": "normal", "df": 0.0}"#);
+        let err = serde_json::from_str::<LinearSpec>(&nested).unwrap_err();
+        assert!(err.to_string().contains("unknown field `df`"), "{err}");
     }
 }

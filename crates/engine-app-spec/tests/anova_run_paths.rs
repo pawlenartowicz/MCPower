@@ -3,8 +3,8 @@
 //! contrast pairs, and tukey_hsd correction — end to end through the orchestrator.
 
 use engine_app_spec::{
-    run_find_power, AppSpec, EffectSize, LinearSpec, NullEmitter, ParsedFormula, TestSelection,
-    VarType,
+    AppSpec, EffectSize, LinearSpec, NullEmitter, ParsedFormula, TestSelection, VarType,
+    run_find_power,
 };
 use engine_contract::CorrectionMethod;
 use engine_orchestrator::CancellationToken;

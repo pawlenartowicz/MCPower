@@ -27,13 +27,19 @@ pub struct Simulation {
     pub max_failed_fraction: f64,
     pub sample_size_bounds: SampleSizeBounds,
     pub cluster_auto_count: u32,
+    /// Default lower-level clusters per parent cluster for a nested extra
+    /// grouping (`(1|school/classroom)`) when the host is not given one.
+    pub nested_n_per_parent: u32,
 }
 
 /// Default sim counts per model family.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NSims {
     pub ols: u32,
+    /// Clustered model with a continuous outcome (LMM).
     pub mixed: u32,
+    /// Clustered model with a binary or count outcome (GLMM).
+    pub glmm: u32,
     pub anova: u32,
 }
 
@@ -118,7 +124,6 @@ pub struct ReportFormat {
 pub struct ReportThresholds {
     pub convergence_min: f64,
     pub lme_boundary_hit_max: f64,
-    pub glm_baseline_drift_max: f64,
     /// Max tolerated per-factor exclusion rate; 0.0 = warn on any exclusion
     /// ("silent when healthy").
     #[serde(default = "default_factor_exclusion_max")]

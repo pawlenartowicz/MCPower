@@ -6,9 +6,9 @@
 //! predictor count P, which the engine workspace must tolerate.
 
 use engine_app_spec::{
+    AppSpec, EffectSize, LinearSpec, NullEmitter, ParsedFormula, TestSelection, VarType,
     power_plot_specs, run_single_core_find_power, run_single_core_find_sample_size,
-    sample_size_curve_specs, AppSpec, EffectSize, LinearSpec, NullEmitter, ParsedFormula,
-    TestSelection, VarType,
+    sample_size_curve_specs,
 };
 use engine_contract::CorrectionMethod;
 use engine_orchestrator::{ByValue, CancellationToken, GridMode, SampleSizeMethod};
@@ -63,7 +63,7 @@ fn one_way_anova_spec(k: usize, correction: CorrectionMethod) -> AppSpec {
 fn assert_power_runs(k: usize, correction: CorrectionMethod) {
     let cancel = CancellationToken::default();
     let spec = one_way_anova_spec(k, correction);
-    let result = run_single_core_find_power(&spec, 120, 60, 2137, &NullEmitter, &cancel)
+    let result = run_single_core_find_power(&spec, 120, 60, 2137, None, &NullEmitter, &cancel)
         .unwrap_or_else(|e| panic!("k={k} pairwise-contrast power run failed: {e}"));
     let (_, pr) = &result.scenarios[0];
     // k−1 reference pairs collapse to marginals; C(k−1,2) dummy pairs stay contrasts.
@@ -72,10 +72,11 @@ fn assert_power_runs(k: usize, correction: CorrectionMethod) {
     assert_eq!(pr.target_indices.len(), n_marginals);
     assert_eq!(pr.contrast_pairs.len(), n_contrasts);
     assert_eq!(pr.power_uncorrected.len(), n_marginals + n_contrasts);
-    assert!(pr
-        .power_uncorrected
-        .iter()
-        .all(|&p| (0.0..=1.0).contains(&p)));
+    assert!(
+        pr.power_uncorrected
+            .iter()
+            .all(|&p| (0.0..=1.0).contains(&p))
+    );
 }
 
 #[test]
@@ -110,9 +111,17 @@ fn assert_sample_size_covers_contrasts(k: usize) {
         by: ByValue::Auto { count: 6 },
         mode: GridMode::Linear,
     };
-    let ssr =
-        run_single_core_find_sample_size(&spec, (20, 200), method, 60, 2137, &NullEmitter, &cancel)
-            .unwrap_or_else(|e| panic!("k={k} pairwise-contrast sample-size grid run failed: {e}"));
+    let ssr = run_single_core_find_sample_size(
+        &spec,
+        (20, 200),
+        method,
+        60,
+        2137,
+        None,
+        &NullEmitter,
+        &cancel,
+    )
+    .unwrap_or_else(|e| panic!("k={k} pairwise-contrast sample-size grid run failed: {e}"));
     let (_, sres) = &ssr.scenarios[0];
     // Required-N derivations must carry one slot per power-vector entry —
     // marginals then contrasts — not just per target_indices entry.
@@ -135,7 +144,7 @@ fn pairwise_contrasts_k3_plot_specs() {
     let cancel = CancellationToken::default();
     let spec = one_way_anova_spec(3, CorrectionMethod::None);
 
-    let pr = run_single_core_find_power(&spec, 120, 60, 2137, &NullEmitter, &cancel)
+    let pr = run_single_core_find_power(&spec, 120, 60, 2137, None, &NullEmitter, &cancel)
         .expect("k=3 power run failed");
     let blocks = power_plot_specs(&pr, 0.8, false).blocks;
     assert!(!blocks.is_empty(), "power plot specs must be emitted");
@@ -156,9 +165,17 @@ fn pairwise_contrasts_k3_plot_specs() {
         by: ByValue::Auto { count: 6 },
         mode: GridMode::Linear,
     };
-    let ssr =
-        run_single_core_find_sample_size(&spec, (20, 200), method, 60, 2137, &NullEmitter, &cancel)
-            .expect("k=3 sample-size run failed");
+    let ssr = run_single_core_find_sample_size(
+        &spec,
+        (20, 200),
+        method,
+        60,
+        2137,
+        None,
+        &NullEmitter,
+        &cancel,
+    )
+    .expect("k=3 sample-size run failed");
     let blocks = sample_size_curve_specs(&ssr, 0.8, false).blocks;
     assert!(!blocks.is_empty(), "curve plot specs must be emitted");
 }

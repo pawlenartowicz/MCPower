@@ -11,7 +11,7 @@ use engine_contract::{
     ClusterSizing, ClusterSpec, ColumnId, EstimatorSpec, GroupingRelation, GroupingSpec,
     SimulationContract, SlopeTerm,
 };
-use engine_orchestrator::{find_power, CancellationToken, EstimatorExtras};
+use engine_orchestrator::{CancellationToken, EstimatorExtras, find_power};
 
 fn crossed_slope_contract() -> SimulationContract {
     let slope = |v: f64, rho: f64| SlopeTerm {

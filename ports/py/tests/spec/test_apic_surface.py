@@ -408,7 +408,7 @@ def test_set_max_failed_simulations_range():  # APIC-77
         ("residual_dists", "nonexistent_dist", "unknown residual distribution 'nonexistent_dist'"),
     ],
 )
-def test_scenario_dict_rejects_unknown_distribution(key, name, message):  # APIC-80
+def test_unknown_scenario_distribution_rejected_at_spec_build(key, name, message):  # APIC-80
     m = MCPower("y = x1")
     m.set_effects("x1=0.5")
     m.set_scenario_configs({"realistic": {key: [name]}})

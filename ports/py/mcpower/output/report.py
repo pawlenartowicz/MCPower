@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from ..config import get_report_config
 from .tables import (
-    build_rows, diagnostic_warnings, fmt_ci, fmt_pct, fmt_required_n,
+    build_rows, diagnostic_warnings, fmt_ci, fmt_pct, fmt_required_n, posthoc_required_n_rows,
     joint_distribution, main_power_tables, minimal_table, target_label_map,
     unit_display_label,
     _has_overall_required_n, _overall_label, _overall_label_by_estimator,
@@ -342,6 +342,7 @@ class Report:
                     table.append(("row", [label,
                                            _required_n_headline_for(scen, r["pos"], unit_divisor)[0],
                                            fmt_required_n(scen, r["pos"])]))
+                table += posthoc_required_n_rows(scenarios, self._meta, unit_divisor, unit_label)
                 return minimal_table(cfg["text"]["sample_size_caption"],
                                      [(cols["test"], "l"), (unit_label, "r"), (cols["required_n"], "r")], table)
             if _has_overall_required_n(scen):
@@ -351,6 +352,7 @@ class Report:
                     table.append(("span", f"{r['label']}  (baseline: {r['baseline']})")); continue
                 label = ("  " if r["kind"] == "factor_level" else "") + r["label"]
                 table.append(("row", [label, fmt_required_n(scen, r["pos"])]))
+            table += posthoc_required_n_rows(scenarios, self._meta, unit_divisor, None)
             return minimal_table(cfg["text"]["sample_size_caption"],
                                  [(cols["test"], "l"), (cols["required_n"], "r")], table)
         names = [nm for nm, _ in scenarios]
@@ -384,6 +386,7 @@ class Report:
                 lambda s, pos=r["pos"]: _required_n_headline_for(s, pos, unit_divisor)[0],
                 lambda s, pos=r["pos"]: fmt_required_n(s, pos))
             table.append(("row", cells))
+        table += posthoc_required_n_rows(scenarios, self._meta, unit_divisor, unit_label)
         return minimal_table(cfg["text"]["sample_size_caption"],
                              columns, table)
 
@@ -491,13 +494,11 @@ class Report:
         # carry a "{scenario}: " prefix when >1 (mirrors tables.render_short).
         scenarios = _scenarios(self._result)
         factor_names = list(self._meta.get("factors", {}))
-        baseline_req = self._meta.get("baseline_prob_requested")
         min_cluster_size = self._meta.get("min_cluster_size")
         multi = len(scenarios) > 1
         warns = []
         for nm, scen in scenarios:
             for w in diagnostic_warnings(scen, factor_names=factor_names,
-                                         baseline_prob_requested=baseline_req,
                                          min_cluster_size=min_cluster_size):
                 warns.append(f"{nm}: {w}" if multi else w)
         if not warns:

@@ -11,8 +11,8 @@ mod common;
 use common::{lme_spec, logit_spec, minimal_ols_contract};
 
 use engine_contract::{ClusterSizing, ClusterSpec, DfMethod, OutcomeKind, SimulationContract};
-use engine_orchestrator::debug::{debug_report, StageMask};
-use engine_orchestrator::{find_power, single_core_find_power, CancellationToken};
+use engine_orchestrator::debug::{StageMask, debug_report};
+use engine_orchestrator::{CancellationToken, find_power, single_core_find_power};
 use engine_spec_builder::build_contract;
 
 const N: usize = 120;

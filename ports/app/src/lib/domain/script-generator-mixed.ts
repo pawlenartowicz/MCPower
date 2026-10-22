@@ -130,9 +130,9 @@ export function generateMixedScript(
   const probit = s.outcome?.kind === 'binary' && s.outcome.link === 'probit';
   const glmm = binaryOutcome || poissonOutcome;
   const family = poissonOutcome ? 'poisson' : binaryOutcome ? (probit ? 'probit' : 'logit') : 'lme';
-  // A GLMM outcome (family "logit"/"probit"/"poisson") uses the OLS sim budget
-  // (1600); "lme" (Gaussian) uses the mixed budget (800).
-  const simsDefault = glmm ? SIMULATION.n_sims.ols : SIMULATION.n_sims.mixed;
+  // Python/R default a clustered binary/count model (GLMM) to the glmm budget and
+  // a clustered Gaussian one to the mixed budget when n_simulations is unset.
+  const simsDefault = glmm ? SIMULATION.n_sims.glmm : SIMULATION.n_sims.mixed;
 
   const lang = langFor(language);
   const lines: string[] = [];

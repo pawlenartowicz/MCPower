@@ -9,10 +9,11 @@ use crate::progress::{ProgressEvent, ProgressSink};
 use crate::result::{OrchestratorError, PowerResult, Scenario, ScenarioResult};
 use crate::scenario_loop::for_each_scenario;
 use engine_contract::{ClusterSizing, SimulationContract};
-use engine_core::contract_adapter::contract_to_simulation_spec;
-use engine_core::rng::splitmix64_finalize;
 use engine_core::ProgressSink as EngineProgressSink;
 use engine_core::SimulationSpec;
+use engine_core::contract_adapter::contract_to_simulation_spec;
+use engine_core::rng::splitmix64_finalize;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Floor a single requested N to the cluster atom (so the nested-prefix
 /// dataset is a valid balanced / complete-cluster design), returning the
@@ -178,6 +179,12 @@ pub(crate) fn factor_preflight_sample_size(spec: &SimulationSpec, grid: &[usize]
 /// (the grid length — 1 for a single-N power run), and `offset` is the fit
 /// count already completed by earlier scenarios in this call.
 ///
+/// Keeps `SimsCompleted` strictly increasing. Rayon workers take their count
+/// (`fetch_add`) and call `report` as two separate steps, so a worker holding
+/// a smaller count can reach the lock after one holding a larger count; that
+/// stale tick is dropped. The largest count always wins its comparison, so the
+/// final tick is never lost.
+///
 /// `Send + Sync`: the inner `Mutex<Option<&mut dyn ProgressSink>>` provides
 /// interior mutability; `Send + Sync` are inherited because
 /// `dyn ProgressSink: Send + Sync` (declared in `progress.rs`).
@@ -190,6 +197,9 @@ pub(crate) struct EngineSinkAdapter<'s, 'c> {
     /// Call-level denominator; equals `Started.total_sims`.
     call_total: u64,
     pub(crate) outer: std::sync::Mutex<Option<&'s mut (dyn ProgressSink + 's)>>,
+    /// Largest engine count forwarded so far. Read and written only while
+    /// holding `outer`'s lock, so the check-and-store is atomic with the send.
+    last_sent: AtomicU64,
     cancel: &'c CancellationToken,
 }
 
@@ -208,6 +218,7 @@ impl<'s, 'c> EngineSinkAdapter<'s, 'c> {
             fits_per_sim,
             call_total,
             outer: std::sync::Mutex::new(outer),
+            last_sent: AtomicU64::new(0),
             cancel,
         }
     }
@@ -224,6 +235,10 @@ impl<'s, 'c> EngineProgressSink for EngineSinkAdapter<'s, 'c> {
             return false;
         }
         if let Ok(mut guard) = self.outer.lock() {
+            if current <= self.last_sent.load(Ordering::Relaxed) {
+                return true;
+            }
+            self.last_sent.store(current, Ordering::Relaxed);
             if let Some(sink) = guard.as_mut() {
                 sink.on_event(ProgressEvent::SimsCompleted {
                     n: self.n,
@@ -450,6 +465,7 @@ mod tests {
             het_coeffs: HeteroskedasticityCoeffs::default(),
             report_overall: false,
             factor_min_level_count: 0,
+            curvature_hints: None,
         }
     }
 

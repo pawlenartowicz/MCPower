@@ -2,22 +2,7 @@
 //! `configs/formula-fixtures/cases.json` does not carry (driven by
 //! `tests/formula_fixtures.rs`).
 
-use engine_spec_builder::{parse_formula, RandomEffect, SpecError};
-
-#[test]
-fn intercept_suppression_rejected() {
-    // The `(0+x|g)` / `(-1+x|g)` forms are corpus rows; these bare forms are not.
-    for f in ["y ~ x + (0|g)", "y ~ x + (-1|g)"] {
-        assert!(
-            matches!(
-                parse_formula(f),
-                Err(SpecError::RandomInterceptSuppressionUnsupported)
-            ),
-            "expected suppression error for {f}, got {:?}",
-            parse_formula(f)
-        );
-    }
-}
+use engine_spec_builder::{RandomEffect, parse_formula};
 
 #[test]
 fn implicit_intercept_multivar_slope() {

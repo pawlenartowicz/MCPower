@@ -235,8 +235,8 @@ pub enum AppGroupingRelation {
 /// `predictor_name` names a predictor in `parsed_formula.predictors`; the
 /// assembler resolves it to a generation `ColumnId` by its position among the
 /// NON-FACTOR predictors (mirrors the Python/R ports). `slope_variance` and
-/// `slope_intercept_corr` pass straight into `SlopeTerm`; `corr_with` is always
-/// empty (slope↔slope correlations are not exposed in this pass).
+/// `slope_intercept_corr` pass straight into `SlopeTerm`; `corr_with` is all
+/// zeros (slope k gets k entries — slope↔slope correlations are not exposed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSlopeTerm {
     pub predictor_name: String,

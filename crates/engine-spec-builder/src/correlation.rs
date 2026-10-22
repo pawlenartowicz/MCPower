@@ -13,7 +13,7 @@ use crate::input::CorrelationPair;
 /// - [`SpecError::CorrelationUnknownVar`]: a pair names a variable not in `non_factor`.
 /// - [`SpecError::CorrelationOutOfRange`]: a correlation value outside [-1, 1] (or non-finite).
 /// - [`SpecError::CorrelationNotPsd`]: the assembled matrix is not positive semi-definite.
-pub fn build_correlation_matrix(
+pub(crate) fn build_correlation_matrix(
     non_factor: &[String],
     pairs: &[CorrelationPair],
 ) -> Result<Vec<f64>, SpecError> {

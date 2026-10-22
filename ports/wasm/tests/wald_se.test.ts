@@ -10,6 +10,8 @@ vi.mock('../vendor/engine-wasm/engine_wasm.js', () => ({
   power_plot_specs_json: vi.fn().mockReturnValue('{"blocks":[]}'),
   merge_sample_size_results: vi.fn(),
   sample_size_plot_specs_json: vi.fn(),
+  curvature_hints_power: vi.fn().mockReturnValue('[[]]'),
+  curvature_hints_sample_size: vi.fn().mockReturnValue('[[]]'),
   parse_formula: vi.fn(),
   get_effects_from_data: vi.fn(),
   effect_skeleton: vi.fn(),

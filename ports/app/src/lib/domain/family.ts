@@ -136,7 +136,7 @@ export interface SlopeConfig {
 /** Defaults for an extra grouping freshly declared in the formula, before the
  *  user touches its card. Shared by the cluster-cards reconcile and the engine
  *  adapter so the UI always shows the values a run would use. */
-export const EXTRA_GROUPING_DEFAULTS = { icc: 0.05, crossedN: 10, nestedN: 2, tauSquared: 0.5 } as const;
+export const EXTRA_GROUPING_DEFAULTS = { icc: 0.05, crossedN: 10, nestedN: SIMULATION.nested_n_per_parent, tauSquared: 0.5 } as const;
 
 /** Defaults for a random slope pre-checked from formula syntax (`(1+x|g)`)
  *  before the user sets its parameters. Shared like EXTRA_GROUPING_DEFAULTS. */
@@ -178,6 +178,12 @@ export function mixedOutcomeKind(cl: ClusterConfig | undefined): OutcomeKind {
   if (!cl) return 'linear';
   if (cl.outcomeKind) return cl.outcomeKind;
   return cl.binaryOutcome ? 'logit' : 'linear';
+}
+
+/** Default simulation count for a mixed model: a binary or Poisson outcome is a
+ *  GLMM (heavier fits), a Gaussian one a linear mixed model. */
+export function mixedDefaultSimulations(kind: OutcomeKind): number {
+  return kind === 'linear' ? SIMULATION.n_sims.mixed : SIMULATION.n_sims.glmm;
 }
 
 export interface AdvancedConfig {

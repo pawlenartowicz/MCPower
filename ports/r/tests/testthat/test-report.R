@@ -774,19 +774,6 @@ test_that("as.data.frame for find_sample_size gives test x scenario x required_n
   }
 })
 
-test_that("as.data.frame: target_test='all-contrasts' gives an empty but correctly-columned frame", {
-  # The engine computes no per-contrast required-N crossing for post-hoc
-  # targets, so target_indices is empty and the frame has zero rows — but it
-  # must still carry the full column set, not error on construction.
-  m <- .r_posthoc_only_model()
-  res <- m$find_sample_size(from_size = 40, to_size = 200, by = 40,
-                            target_test = "all-contrasts",
-                            verbose = FALSE, progress_callback = FALSE)
-  df <- as.data.frame(res)
-  expect_identical(names(df), c("test", "scenario", "required_n", "ci_lo", "ci_hi"))
-  expect_equal(nrow(df), 0L)
-})
-
 test_that("as.data.frame: NA conventions for at_or_below_min and not_reached", {
   # at_or_below_min: required_n is NA (no single integer to export)
   inner_atmin <- list(
@@ -1077,42 +1064,6 @@ test_that(".diagnostic_warnings is silent on benign τ̂=0 alone (no high-τ̂)"
   expect_length(warns[grepl("boundary", warns)], 0L)
 })
 
-# ── .diagnostic_warnings: GLM baseline drift → live (mirrors Python) ──────────
-
-.glm_inner <- function(realized) list(
-  convergence_rate           = list(1.0),
-  boundary_hit_rate_tau_zero = 0.0,
-  boundary_hit_rate_high_tau = 0.0,
-  estimator_extras           = list(estimator = "glm", baseline_prob_realized = realized)
-)
-
-test_that(".diagnostic_warnings trips on GLM baseline drift over threshold", {
-  warns <- mcpower:::.diagnostic_warnings(.glm_inner(0.50), baseline_prob_requested = 0.30)
-  expect_true(any(grepl("GLM baseline drift 0.200", warns)),
-              info = paste("warns:", paste(warns, collapse = " | ")))
-})
-
-test_that(".diagnostic_warnings is clean when GLM drift within threshold", {
-  warns <- mcpower:::.diagnostic_warnings(.glm_inner(0.32), baseline_prob_requested = 0.30)
-  expect_length(warns[grepl("drift", warns)], 0L)
-})
-
-test_that(".diagnostic_warnings is silent on drift when requested baseline is NULL", {
-  warns <- mcpower:::.diagnostic_warnings(.glm_inner(0.90), baseline_prob_requested = NULL)
-  expect_length(warns[grepl("drift", warns)], 0L)
-})
-
-test_that(".diagnostic_warnings is silent on drift for OLS", {
-  inner <- list(
-    convergence_rate           = list(1.0),
-    boundary_hit_rate_tau_zero = 0.0,
-    boundary_hit_rate_high_tau = 0.0,
-    estimator_extras           = list(estimator = "ols")
-  )
-  warns <- mcpower:::.diagnostic_warnings(inner, baseline_prob_requested = 0.30)
-  expect_length(warns[grepl("drift", warns)], 0L)
-})
-
 # ── .report_diagnostics: multi-scenario prefix + Laplace (mirrors Python) ─────
 
 .clean_scen <- function(...) {
@@ -1152,7 +1103,7 @@ test_that(".report_diagnostics surfaces the Laplace line for high τ̂² + small
   inner <- .clean_scen(estimator_extras = list(
     estimator = "glm", baseline_prob_realized = 0.30, tau_squared_hat_mean = 2.0))
   result <- list(scenarios = list(default = inner))
-  meta <- list(factors = list(), baseline_prob_requested = 0.30, min_cluster_size = 4L)
+  meta <- list(factors = list(), min_cluster_size = 4L)
   out <- mcpower:::.report_diagnostics(result, meta, mcpower:::.report_config())
   expect_match(out, "Laplace-approximation bias likely")
 })
@@ -1162,7 +1113,7 @@ test_that(".report_diagnostics has no Laplace line when clusters are large", {
   inner <- .clean_scen(estimator_extras = list(
     estimator = "glm", baseline_prob_realized = 0.30, tau_squared_hat_mean = 2.0))
   result <- list(scenarios = list(default = inner))
-  meta <- list(factors = list(), baseline_prob_requested = 0.30,
+  meta <- list(factors = list(),
                min_cluster_size = as.integer(recommended))
   out <- mcpower:::.report_diagnostics(result, meta, mcpower:::.report_config())
   expect_false(grepl("Laplace", out))

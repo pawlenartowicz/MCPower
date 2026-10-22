@@ -53,7 +53,8 @@ The defaults are chosen so the precision is good enough for almost every study:
 | Design | Default simulations | Why |
 |---|---|---|
 | OLS / logistic / factor | **1,600** | each fit is very cheap |
-| Mixed-effects (clustered) | **800** | each fit costs more |
+| Mixed-effects (clustered), continuous outcome | **800** | each fit costs more |
+| Mixed-effects (clustered), binary or count outcome | **400** | each fit costs more still |
 
 > [!tip]
 > Raise the simulation count when two designs report **nearly the same power** and

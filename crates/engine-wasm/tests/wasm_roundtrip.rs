@@ -9,9 +9,9 @@ use wasm_bindgen_test::*;
 const LINEAR_SPEC_JSON: &str = r#"{"family":"linear","parsed_formula":{"outcome":"y","predictors":["x1","x2"],"interaction_terms":[]},"var_types":[{"kind":"numeric","name":"x1"},{"kind":"numeric","name":"x2"}],"effects":[{"name":"x1","value":0.3},{"name":"x2","value":0.2}],"correlations":null,"alpha":0.05,"target_power":0.8,"n_sims":128,"seed":2137,"tests":{"kind":"all"},"correction":"none","scenarios":[],"csv":null,"report_overall":false,"contrasts":[]}"#;
 
 /// Minimal unclustered logit spec that produces NaN-bearing GLM extras when run
-/// on a single worker. `baseline_prob_realized` and `tau_squared_hat_mean` are
-/// NaN in the single-core result (both have zero-count denominators in
-/// `from_batch`); they must survive `serde_json` null encoding through the real
+/// on a single worker. `tau_squared_hat_mean` is NaN in the single-core result
+/// (no random effect, so a zero-count denominator in `from_batch`); it must
+/// survive `serde_json` null encoding through the real
 /// `engine_wasm::find_power` → `engine_wasm::merge_power_results` boundary.
 /// Mirrors `engine-app-spec/tests/wire_json.rs::nan_bearing_extras_survive_json_wire_and_merge`
 /// but exercises the actual wasm-bindgen export wrappers.
@@ -94,9 +94,9 @@ fn merge_pools_two_power_parts() {
 #[wasm_bindgen_test]
 fn nan_bearing_extras_survive_wasm_json_wire_and_merge() {
     // Single-core logit run: the worker calls find_power and sends JSON back
-    // to the main thread. baseline_prob_realized and tau_squared_hat_mean are
-    // NaN in a per-worker result (zero-count denominators in from_batch) →
-    // serde_json encodes them as JSON null.
+    // to the main thread. tau_squared_hat_mean is NaN in a per-worker result
+    // (zero-count denominator in from_batch) → serde_json encodes it as JSON
+    // null.
     let part = engine_wasm::find_power(LOGIT_SPEC_JSON, 80, 64, 11, None)
         .expect("find_power must succeed for a valid logit spec");
 

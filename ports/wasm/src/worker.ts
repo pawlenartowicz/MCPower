@@ -3,9 +3,19 @@
 // plots, and cancellation (worker.terminate()).
 import init, { find_power, find_sample_size } from '../vendor/engine-wasm/engine_wasm.js';
 
+// `hints`: the run's curvature hints from the main thread, an opaque JSON
+// string passed straight to the engine; absent = the engine runs its own pilot.
 type RunMsg =
-  | { kind: 'power'; spec: string; sampleSize: number; nSims: number; seed: string }
-  | { kind: 'sample_size'; spec: string; bounds: string; method: string; nSims: number; seed: string };
+  | { kind: 'power'; spec: string; sampleSize: number; nSims: number; seed: string; hints?: string }
+  | {
+      kind: 'sample_size';
+      spec: string;
+      bounds: string;
+      method: string;
+      nSims: number;
+      seed: string;
+      hints?: string;
+    };
 
 let ready: Promise<unknown> | null = null;
 function ensureInit() {
@@ -23,9 +33,11 @@ ctx.onmessage = async (e: MessageEvent<RunMsg>) => {
     await ensureInit();
     let part: string;
     if (msg.kind === 'power') {
-      part = find_power(msg.spec, msg.sampleSize, msg.nSims, BigInt(msg.seed), onProgress);
+      part = find_power(msg.spec, msg.sampleSize, msg.nSims, BigInt(msg.seed), onProgress, msg.hints);
     } else {
-      part = find_sample_size(msg.spec, msg.bounds, msg.method, msg.nSims, BigInt(msg.seed), onProgress);
+      part = find_sample_size(
+        msg.spec, msg.bounds, msg.method, msg.nSims, BigInt(msg.seed), onProgress, msg.hints,
+      );
     }
     ctx.postMessage({ kind: 'part', part });
   } catch (err) {

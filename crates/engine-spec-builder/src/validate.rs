@@ -9,7 +9,8 @@ use crate::input::{LinearSpec, VarKind};
 ///
 /// # Errors
 /// - [`SpecError::NonFiniteEffect`]: a non-finite effect size.
-/// - [`SpecError::FactorProportionNonPositive`]: a binary/factor proportion ≤ 0, > 1, or non-finite.
+/// - [`SpecError::BinaryProportionOutOfRange`]: a binary proportion outside `[0, 1]` or non-finite.
+/// - [`SpecError::FactorProportionNonPositive`]: a factor proportion ≤ 0 or non-finite.
 /// - [`SpecError::FactorLevelCount`]: a factor level count outside the configured bounds.
 /// - [`SpecError::FactorProportionLengthMismatch`]: proportions length ≠ level count.
 /// - [`SpecError::FactorProportionSum`]: factor proportions don't sum to 1.
@@ -39,8 +40,9 @@ pub fn validate_pre_projection(spec: &LinearSpec) -> Result<(), SpecError> {
             VarKind::Binary { proportion }
                 if !(0.0..=1.0).contains(proportion) || !proportion.is_finite() =>
             {
-                return Err(SpecError::FactorProportionNonPositive {
+                return Err(SpecError::BinaryProportionOutOfRange {
                     name: pred.name.clone(),
+                    value: *proportion,
                 });
             }
             VarKind::Binary { .. } => {}
@@ -213,19 +215,33 @@ mod tests {
         ));
     }
 
-    // A binary predictor proportion outside [0, 1] is rejected.
+    // A binary predictor proportion outside [0, 1] is rejected; 0 and 1 are allowed.
     #[test]
     fn binary_proportion_out_of_range_rejected() {
-        let mut s = base_spec();
-        s.predictors = vec![PredictorSpec {
-            name: "x1".into(),
-            pinned: false,
-            kind: VarKind::Binary { proportion: 1.5 },
-        }];
-        assert!(matches!(
-            validate_pre_projection(&s),
-            Err(SpecError::FactorProportionNonPositive { .. })
-        ));
+        for bad in [1.5, -0.1, f64::NAN] {
+            let mut s = base_spec();
+            s.predictors = vec![PredictorSpec {
+                name: "x1".into(),
+                pinned: false,
+                kind: VarKind::Binary { proportion: bad },
+            }];
+            match validate_pre_projection(&s) {
+                Err(SpecError::BinaryProportionOutOfRange { name, value }) => {
+                    assert_eq!(name, "x1");
+                    assert!(value.to_bits() == bad.to_bits());
+                }
+                other => panic!("proportion {bad}: got {other:?}"),
+            }
+        }
+        for ok in [0.0, 1.0] {
+            let mut s = base_spec();
+            s.predictors = vec![PredictorSpec {
+                name: "x1".into(),
+                pinned: false,
+                kind: VarKind::Binary { proportion: ok },
+            }];
+            assert!(validate_pre_projection(&s).is_ok(), "proportion {ok}");
+        }
     }
 
     // A factor with fewer than 2 or more than 20 levels is rejected.

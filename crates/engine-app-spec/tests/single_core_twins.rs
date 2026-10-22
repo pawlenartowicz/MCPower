@@ -3,13 +3,13 @@
 //! (`run_single_core_* ×N + merge` produces a valid pooled result).
 
 use engine_app_spec::{
-    run_find_power, run_single_core_find_power, run_single_core_find_sample_size, AdapterError,
-    AppSpec, EffectSize, LinearSpec, NullEmitter, ParsedFormula, TestSelection, VarType,
+    AdapterError, AppSpec, EffectSize, LinearSpec, NullEmitter, ParsedFormula, TestSelection,
+    VarType, run_find_power, run_single_core_find_power, run_single_core_find_sample_size,
 };
 use engine_contract::CorrectionMethod;
 use engine_orchestrator::{
-    merge_power_results, merge_sample_size_results, ByValue, CancellationToken, GridMode,
-    OrchestratorError, SampleSizeMethod, SampleSizeResult, ScenarioResult,
+    ByValue, CancellationToken, GridMode, OrchestratorError, SampleSizeMethod, SampleSizeResult,
+    ScenarioResult, merge_power_results, merge_sample_size_results,
 };
 
 fn sample_linear_spec() -> AppSpec {
@@ -61,8 +61,10 @@ fn sample_linear_spec() -> AppSpec {
 fn single_core_parts_merge_to_full_run() {
     let spec = sample_linear_spec();
     let cancel = CancellationToken::new();
-    let part_a = run_single_core_find_power(&spec, 80, 800, 11, &NullEmitter, &cancel).expect("a");
-    let part_b = run_single_core_find_power(&spec, 80, 800, 22, &NullEmitter, &cancel).expect("b");
+    let part_a =
+        run_single_core_find_power(&spec, 80, 800, 11, None, &NullEmitter, &cancel).expect("a");
+    let part_b =
+        run_single_core_find_power(&spec, 80, 800, 22, None, &NullEmitter, &cancel).expect("b");
     let counts_a = part_a.scenarios[0].1.success_counts_uncorrected.clone();
     let counts_b = part_b.scenarios[0].1.success_counts_uncorrected.clone();
     assert_eq!(
@@ -93,7 +95,7 @@ fn run_single_core_find_power_errors_when_pre_cancelled() {
     let spec = sample_linear_spec();
     let cancel = CancellationToken::new();
     cancel.cancel();
-    let res = run_single_core_find_power(&spec, 80, 800, 11, &NullEmitter, &cancel);
+    let res = run_single_core_find_power(&spec, 80, 800, 11, None, &NullEmitter, &cancel);
     assert!(
         matches!(
             res,
@@ -135,6 +137,7 @@ fn single_core_sample_size_parts_merge_via_merge_sample_size_results() {
         method_a,
         128,
         11,
+        None,
         &NullEmitter,
         &cancel,
     )
@@ -145,6 +148,7 @@ fn single_core_sample_size_parts_merge_via_merge_sample_size_results() {
         method_b,
         128,
         22,
+        None,
         &NullEmitter,
         &cancel,
     )
@@ -216,8 +220,8 @@ fn single_core_matches_native_find_power() {
     // Native multi-core baseline: reads n_sims and seed from spec (128, 2137).
     let native = run_find_power(&spec, 80, &NullEmitter, &cancel).expect("native ok");
     // Single-core path: same seed, same n_sims, different dispatch (no rayon fan-out).
-    let single =
-        run_single_core_find_power(&spec, 80, 128, 2137, &NullEmitter, &cancel).expect("single ok");
+    let single = run_single_core_find_power(&spec, 80, 128, 2137, None, &NullEmitter, &cancel)
+        .expect("single ok");
 
     assert_eq!(
         native.scenarios.len(),

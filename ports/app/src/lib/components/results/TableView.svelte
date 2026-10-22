@@ -15,6 +15,15 @@
   // table lives in JointDistTab; this stays per-target marginal only.
   const r = $derived(tab.kind === 'find-power' ? (tab.result as PowerResult) : null);
   const ssr = $derived(tab.kind === 'find-sample-size' ? (tab.result as SampleSizeResult) : null);
+  // Requested baseline event probability of a binary outcome (plain logit/probit
+  // or a binary mixed model); null for any other outcome.
+  const requestedBaseline = $derived.by((): number | null => {
+    const spec = tab.spec;
+    if (spec.family === 'logit') return spec.baseline_probability;
+    if (spec.family === 'mixed' && spec.outcome?.kind === 'binary') return spec.outcome.baseline_probability;
+    return null;
+  });
+  const pctOrNA = (v: number) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
   const useCorrected = $derived(tab.spec.correction !== 'none');
 
   // Determine estimator string for overall label lookup. For find-sample-size
@@ -210,7 +219,7 @@
     {#if r.estimator_extras && (r.estimator_extras as { estimator: string }).estimator === 'glm'}
       {@const fx = r.estimator_extras as Extract<EstimatorExtras, { estimator: 'glm' }>}
       <div class="text-xs text-muted-foreground">
-        baseline prob (realized) = {(fx.baseline_prob_realized * 100).toFixed(1)}%
+        {`event rate = ${pctOrNA(fx.baseline_prob_realized)}`}{requestedBaseline != null ? ` · baseline ${pctOrNA(requestedBaseline)}` : ''}
       </div>
     {/if}
     {#if r.estimator_extras && (r.estimator_extras as { estimator: string }).estimator === 'mle'}

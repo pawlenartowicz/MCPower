@@ -5,8 +5,8 @@
 
 use crate::aggregation::aggregate_batch;
 use crate::cancel::CancellationToken;
-use crate::find_power::{factor_preflight_sample_size, lower_contracts, EngineSinkAdapter};
-use crate::grid::{build_grid, derive_sample_size_outputs, SampleSizeDerivations};
+use crate::find_power::{EngineSinkAdapter, factor_preflight_sample_size, lower_contracts};
+use crate::grid::{SampleSizeDerivations, build_grid, derive_sample_size_outputs};
 use crate::progress::{ProgressEvent, ProgressSink};
 use crate::result::{
     OrchestratorError, PowerResult, SampleSizeMethod, SampleSizeResult, Scenario, ScenarioResult,
@@ -32,7 +32,7 @@ pub(crate) fn shared_primary_cluster(
                     return Err(OrchestratorError::MixedClusterAtoms {
                         a: prev.atom(),
                         b: cs.atom(),
-                    })
+                    });
                 }
                 Some(_) => {}
             }
@@ -82,6 +82,23 @@ pub(crate) fn resolve_cluster_grid_params(
     Ok((atom, hard_min, warnings))
 }
 
+/// The shared N grid of a sample-size search: `(grid, atom, warnings)`, with
+/// the cluster guards' and the grid builder's warnings. One home for the
+/// grid, so `find_sample_size`, `single_core_find_sample_size` and
+/// `curvature_hints_sample_size` fit at the same N values.
+pub(crate) fn sample_size_grid(
+    contracts: &[SimulationContract],
+    bounds: (usize, usize),
+    method: SampleSizeMethod,
+) -> Result<(Vec<usize>, usize, Vec<String>), OrchestratorError> {
+    let (from, to) = bounds;
+    let SampleSizeMethod::Grid { by, mode } = method;
+    let (atom, hard_min, mut warnings) = resolve_cluster_grid_params(contracts)?;
+    let (grid, build_warnings) = build_grid(from, to, by, mode, atom, hard_min)?;
+    warnings.extend(build_warnings);
+    Ok((grid, atom, warnings))
+}
+
 /// Multi-core sample-size search: builds the shared N grid (Grid is the only
 /// method), runs one `run_batch` per scenario across all grid points, and
 /// derives `first_achieved` / `first_joint_achieved` from the per-N results.
@@ -113,12 +130,7 @@ pub fn find_sample_size(
 ) -> Result<ScenarioResult<SampleSizeResult>, OrchestratorError> {
     let scenarios = lower_contracts(contracts, base_seed)?;
 
-    let (from, to) = bounds;
-
-    let SampleSizeMethod::Grid { by, mode } = method;
-    let (atom, hard_min, mut grid_warnings) = resolve_cluster_grid_params(contracts)?;
-    let (grid, build_warnings) = build_grid(from, to, by, mode, atom, hard_min)?;
-    grid_warnings.extend(build_warnings);
+    let (grid, atom, grid_warnings) = sample_size_grid(contracts, bounds, method)?;
 
     let total_scenarios = scenarios.len();
     let total_grid_points = grid.len();
@@ -169,6 +181,8 @@ pub fn find_sample_size(
                 fitted_joint: d.fitted_joint,
                 first_overall_achieved: d.first_overall_achieved,
                 fitted_overall: d.fitted_overall,
+                posthoc_first_achieved: d.posthoc_first_achieved,
+                posthoc_fitted: d.posthoc_fitted,
                 cluster_atom: atom,
                 unit_divisor,
                 target_power,

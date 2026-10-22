@@ -82,6 +82,7 @@ def test_check_failure_threshold_error_message_content():
             boundary_hit_rate_tau_zero=[0.20],
             boundary_hit_rate_high_tau=[0.05],
             threshold=0.10,
+            clustered=True,
         )
     msg = str(exc_info.value)
     assert "failure rate" in msg.lower()
@@ -89,6 +90,23 @@ def test_check_failure_threshold_error_message_content():
     assert "10.0%" in msg or "10%" in msg  # threshold
     assert "tau_zero" in msg
     assert "high_tau" in msg
+    assert "n_clusters" in msg
+
+
+def test_check_failure_threshold_unclustered_message_has_no_cluster_hints():
+    """A model without random effects gets no tau breakdown or n_clusters hint."""
+    with pytest.raises(RuntimeError) as exc_info:
+        _check_failure_threshold(
+            convergence_rate=[0.75],
+            boundary_hit_rate_tau_zero=[0.0],
+            boundary_hit_rate_high_tau=[0.0],
+            threshold=0.10,
+        )
+    msg = str(exc_info.value)
+    assert msg.startswith("Convergence failure rate 25.0%")
+    assert "LME" not in msg
+    assert "tau" not in msg
+    assert "n_clusters" not in msg
 
 
 # ---------------------------------------------------------------------------

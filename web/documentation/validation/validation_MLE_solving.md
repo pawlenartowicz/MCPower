@@ -26,9 +26,11 @@ matrix, outcome, and cluster ids, byte-for-byte), fit them two ways —
 — and compare the fitted fixed-effect coefficients, the test statistics,
 and the decision threshold. The statistic is the **Wald *z*** on the
 fixed effect (`fixef / sqrt(diag(vcov))`), *not* lmerTest’s
-Satterthwaite *t* — MCPower’s own test definition is the Wald z. Because
-both fit the identical bytes, sampling noise cancels: any difference is
-a solver discrepancy.
+Satterthwaite *t* — MCPower’s own test definition builds that statistic
+and refers it to a between-within *t* by default, and the R side derives
+that same between-within reference independently (see step 2 below).
+Because both fit the identical bytes, sampling noise cancels: any
+difference is a solver discrepancy.
 
 The chosen cases sit at ICC 0.1–0.2 with 20–30 clusters, well clear of
 the **τ̂ ≈ 0 boundary**. If a case ever collapsed to that boundary,
@@ -42,8 +44,18 @@ None of the cases below are expected to hit it.
     confirm its content hash matches the saved file — proof the bytes
     haven’t drifted.
 2.  **B (R) vs C (MCPower)** on those bytes: fixed-effect coefficients,
-    the Wald *z* statistics (β̂/se), and the critical value
-    `qnorm(1 − α/2)` ≈ 1.96.
+    the Wald *z* statistics (β̂/se), the critical value, and the
+    denominator degrees of freedom behind it. The reference distribution
+    is rebuilt in R from the case definition and the saved dataset alone
+    — `g` clusters counted off the saved cluster ids, `p_between` = the
+    design columns constant within cluster (the intercept plus anything
+    the case declared cluster-level), `df_between = g − p_between`,
+    `df_within = (N − p) − df_between` — so the R-side critical value is
+    `qt(1 − α/2, df)` at *R’s* df, never at the df MCPower reported.
+    MCPower’s own reported df is then checked against it for exact
+    equality, and a mismatch fails the row: without that check a
+    miscounted `p_between` would move the engine’s df and the R critical
+    value together and stay green.
 3.  **C vs A** (a readable sanity overlay): MCPower’s recovered
     coefficients next to the formula’s true values.
 
@@ -53,7 +65,8 @@ None of the cases below are expected to hit it.
 |----|----|----|
 | Coefficient (β) | 10^{-4} relative | REML profile optimisation — agrees with `lmer` inside this band |
 | Statistic (*z*) | 10^{-4} relative | derived from the same β and variance |
-| Critical value | 10^{-8} absolute | engine’s own normal/χ² quantile vs R’s `qnorm` ≈1.6e-9 |
+| Critical value | 10^{-8} absolute | engine’s own t/normal quantile vs R’s `qt` ≈1.6e-9 |
+| Denominator df | exact equality | integer-valued on both sides — an inequality is a `p_between` / cluster-count fault, not rounding |
 
 These are the B↔C gates from `tolerances.R`. MLE is a **REML profile
 optimisation** (Brent on the variance component) — the loosest of the
@@ -91,95 +104,95 @@ inside the iterative band on every quantity.*
 R formula `y ~ x1 + (1|grp)` · linear mixed model (random intercept) ·
 n=600, seed=2137. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | 0.078383 | NA | NA | 3.0e-08 | — | PASS |
-| x1 | 0.5 | 0.404979 | 10.34034 | 1.959964 | 8.2e-07 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | 0.078383 | NA | NA | — | 7.1e-11 | — | PASS |
+| x1 | 0.5 | 0.404979 | 10.34034 | 1.96407 | 579 | 2.0e-09 | 1.2e-13 | PASS |
 
 ## y = 0.3·x1 + per-grp random intercept (ICC 0.30) + noise
 
 R formula `y ~ x1 + (1|grp)` · linear mixed model (random intercept) ·
 n=600, seed=2138. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | 0.131583 | NA | NA | 3.6e-09 | — | PASS |
-| x1 | 0.3 | 0.347749 | 8.595397 | 1.959964 | 4.3e-07 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | 0.131583 | NA | NA | — | 3.5e-11 | — | PASS |
+| x1 | 0.3 | 0.347749 | 8.595397 | 1.96407 | 579 | 4.2e-09 | 1.2e-13 | PASS |
 
 ## y = 0.5·x1 + 0.3·x2 + per-grp random intercept (ICC 0.20) + noise
 
 R formula `y ~ x1 + x2 + (1|grp)` · linear mixed model (random
 intercept) · n=750, seed=2137. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | -0.007542 | NA | NA | 5.6e-07 | — | PASS |
-| x1 | 0.5 | 0.440708 | 12.927637 | 1.959964 | 7.6e-07 | 1.6e-09 | PASS |
-| x2 | 0.3 | 0.341816 | 9.183627 | 1.959964 | 9.0e-07 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | -0.007542 | NA | NA | — | 1.1e-09 | — | PASS |
+| x1 | 0.5 | 0.440708 | 12.927637 | 1.963251 | 723 | 1.5e-09 | 1.2e-13 | PASS |
+| x2 | 0.3 | 0.341816 | 9.183627 | 1.963251 | 723 | 1.8e-09 | 1.2e-13 | PASS |
 
 ## y = 0.3·x1 + 0.5·x2 + per-grp random intercept (ICC 0.30) + noise
 
 R formula `y ~ x1 + x2 + (1|grp)` · linear mixed model (random
 intercept) · n=750, seed=2138. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | 0.102675 | NA | NA | 1.9e-09 | — | PASS |
-| x1 | 0.3 | 0.357704 | 9.980624 | 1.959964 | 1.1e-07 | 1.6e-09 | PASS |
-| x2 | 0.5 | 0.497794 | 13.989819 | 1.959964 | 9.8e-08 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | 0.102675 | NA | NA | — | 1.5e-11 | — | PASS |
+| x1 | 0.3 | 0.357704 | 9.980624 | 1.963251 | 723 | 8.5e-10 | 1.2e-13 | PASS |
+| x2 | 0.5 | 0.497794 | 13.989819 | 1.963251 | 723 | 7.8e-10 | 1.2e-13 | PASS |
 
 ## y = 0.5·x1 + 0.3·x2 + 0.3·x1:x2 + per-grp random intercept (ICC 0.20) + noise
 
 R formula `y ~ x1*x2 + (1|grp)` · linear mixed model (random intercept)
 · n=750, seed=2137. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | -0.007002 | NA | NA | 3.6e-07 | — | PASS |
-| x1 | 0.5 | 0.447848 | 12.953272 | 1.959964 | 8.3e-07 | 1.6e-09 | PASS |
-| x2 | 0.3 | 0.341794 | 9.187226 | 1.959964 | 9.3e-07 | 1.6e-09 | PASS |
-| x1:x2 | 0.3 | 0.254123 | 6.738949 | 1.959964 | 5.7e-07 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | -0.007002 | NA | NA | — | 8.2e-10 | — | PASS |
+| x1 | 0.5 | 0.447848 | 12.953272 | 1.963255 | 722 | 1.9e-09 | 2.3e-13 | PASS |
+| x2 | 0.3 | 0.341794 | 9.187226 | 1.963255 | 722 | 2.2e-09 | 2.3e-13 | PASS |
+| x1:x2 | 0.3 | 0.254123 | 6.738949 | 1.963255 | 722 | 1.3e-09 | 2.3e-13 | PASS |
 
 ## y = 0.4·x1 + 0.3·x2 + 0.2·x1:x2 + per-grp random intercept (ICC 0.30) + noise
 
 R formula `y ~ x1*x2 + (1|grp)` · linear mixed model (random intercept)
 · n=900, seed=2138. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | 0.202794 | NA | NA | 7.4e-10 | — | PASS |
-| x1 | 0.4 | 0.428858 | 12.586038 | 1.959964 | 8.1e-08 | 1.6e-09 | PASS |
-| x2 | 0.3 | 0.289511 | 8.587036 | 1.959964 | 1.6e-07 | 1.6e-09 | PASS |
-| x1:x2 | 0.2 | 0.251104 | 7.673815 | 1.959964 | 1.7e-07 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | 0.202794 | NA | NA | — | 5.5e-12 | — | PASS |
+| x1 | 0.4 | 0.428858 | 12.586038 | 1.962704 | 867 | 6.0e-10 | 2.0e-13 | PASS |
+| x2 | 0.3 | 0.289511 | 8.587036 | 1.962704 | 867 | 1.2e-09 | 2.0e-13 | PASS |
+| x1:x2 | 0.2 | 0.251104 | 7.673815 | 1.962704 | 867 | 1.3e-09 | 2.0e-13 | PASS |
 
 ## y = 0.3·x1 + 0.3·g\[2\] + per-grp random intercept (ICC 0.20) + noise
 
 R formula `y ~ x1 + g + (1|grp)` · linear mixed model (random intercept)
 · n=750, seed=2137. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | -0.042469 | NA | NA | 6.6e-08 | — | PASS |
-| x1 | 0.3 | 0.241373 | 7.079191 | 1.959964 | 8.8e-07 | 1.6e-09 | PASS |
-| g\[2\] | 0.3 | 0.375982 | 5.275995 | 1.959964 | 6.6e-07 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | -0.042469 | NA | NA | — | 6.4e-11 | — | PASS |
+| x1 | 0.3 | 0.241373 | 7.079191 | 1.963251 | 723 | 8.7e-10 | 1.2e-13 | PASS |
+| g\[2\] | 0.3 | 0.375982 | 5.275995 | 1.963251 | 723 | 6.5e-10 | 1.2e-13 | PASS |
 
 ## y = 0.4·x1 + 0.5·g\[2\] + 0.8·g\[3\] + per-grp random intercept (ICC 0.30) + noise
 
 R formula `y ~ x1 + g + (1|grp)` · linear mixed model (random intercept)
 · n=900, seed=2138. File reproduces from seed: **yes**.
 
-| Term | True (formula) | β (R = MCPower) | t / z | crit | rel. diff (β, stat) | crit abs. diff | Verdict |
-|:---|---:|---:|---:|---:|:---|:---|:---|
-| intercept | 0.0 | 0.123802 | NA | NA | 6.8e-09 | — | PASS |
-| x1 | 0.4 | 0.435261 | 12.890829 | 1.959964 | 5.2e-08 | 1.6e-09 | PASS |
-| g\[2\] | 0.5 | 0.612951 | 2.210123 | 1.959964 | 3.2e-06 | 1.6e-09 | PASS |
-| g\[3\] | 0.8 | 1.000041 | 3.147536 | 1.959964 | 3.2e-06 | 1.6e-09 | PASS |
+| Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
+|:---|---:|---:|---:|---:|:---|:---|:---|:---|
+| intercept | 0.0 | 0.123802 | NA | NA | — | 9.0e-12 | — | PASS |
+| x1 | 0.4 | 0.435261 | 12.890829 | 1.962704 | 867 | 6.9e-11 | 2.0e-13 | PASS |
+| g\[2\] | 0.5 | 0.612951 | 2.210123 | 1.962704 | 867 | 4.3e-09 | 2.0e-13 | PASS |
+| g\[3\] | 0.8 | 1.000041 | 3.147536 | 1.962704 | 867 | 4.3e-09 | 2.0e-13 | PASS |
 
 | item | value |
 |:---|:---|
-| generated | 2026-06-26 |
+| generated | 2026-10-20 |
 | R | R version 4.5.3 (2026-03-11) |
-| mcpower | 1.0.3 |
+| mcpower | 1.4.0 |
 | MLE solving bands (beta/stat rel · crit abs) | 0.0001 rel / 0.0001 rel / 1e-08 abs |
 
 ## M2 — crossed & nested groupings (general lmm path)
@@ -233,6 +246,10 @@ Wald z on both sides — never lmerTest t.
 
 **lmm_slope_crossed**: PASS (24/25 lme4-clean draws)
 
+**lmm_slope_crossed_extra_slopes**: PASS (19/25 lme4-clean draws)
+
+**lmm_slope_nested_extra_slopes**: PASS (24/25 lme4-clean draws)
+
 **lmm_slope_a**: A↔B PASS (K=300)
 
 **lmm_slope_b**: A↔B PASS (K=300)
@@ -240,6 +257,10 @@ Wald z on both sides — never lmerTest t.
 **lmm_multislope**: A↔B PASS (K=300)
 
 **lmm_slope_crossed**: A↔B PASS (K=300)
+
+**lmm_slope_crossed_extra_slopes**: A↔B PASS (K=300)
+
+**lmm_slope_nested_extra_slopes**: A↔B PASS (K=300)
 
     ## Power Analysis — MLE  N=480  sims=800  α=0.05  target=80%
     ## formula: y ~ x1 + (1|grp)
@@ -256,10 +277,10 @@ Wald z on both sides — never lmerTest t.
     ## ───────────────────────────────────
     ## Test                 Power   Target
     ## ───────────────────────────────────
-    ## x1                   95.0%      80%
+    ## x1                   94.9%      80%
     ## ───────────────────────────────────
 
-    ## Slope τ²=0: singular_fit_rate = 0.626 (expect high)
+    ## Slope τ²=0: singular_fit_rate = 0.625 (expect high)
 
     ## Slope τ²=0.10: singular_fit_rate = 0.010 (expect low)
 
@@ -276,14 +297,16 @@ optimizers on the same bytes need not share the optimum at a boundary).
 > from `glmer`’s *default* summary on two known, deferred axes (full
 > rationale in the workspace doc
 > `docs/ideas-features/mixed-model-significance-reference.md`): **(z)**
-> MCPower’s Wald SE is the RX/PLS Schur
+> on this GLMM path MCPower’s Wald SE is the RX/PLS Schur
 > (`= glmer vcov(use.hessian = FALSE)`), ~3% anticonservative vs glmer’s
-> default `use.hessian = TRUE` — a deliberate, documented, deferred
-> choice (that doc’s §“Second axis”), *not* a regression; **(β̂/τ̂²/ρ̂)**
-> MCPower-BOBYQA vs glmer-Laplace agree on the same bytes only to ~2–3×
-> the LMM-inherited `GLMM_TOL` bands, plus glmer’s few-cluster
-> convergence noise. The cell logs the measured gaps and renders green,
-> tripping only a generous gross-regression backstop; the engine’s own
+> default `use.hessian = TRUE` (GLMM-only; the linear LMM path above
+> uses the standard GLS `(XᵀV̂⁻¹X)⁻¹`, lme4-equivalent, with no
+> Schur/Hessian fork) — a deliberate, documented, deferred choice (that
+> doc’s §“Second axis”), *not* a regression; **(β̂/τ̂²/ρ̂)** MCPower-BOBYQA
+> vs glmer-Laplace agree on the same bytes only to ~2–3× the
+> LMM-inherited `GLMM_TOL` bands, plus glmer’s few-cluster convergence
+> noise. The cell logs the measured gaps and renders green, tripping
+> only a generous gross-regression backstop; the engine’s own
 > brute-force-Laplace unit tests are the fine fit-regression guard.
 
 A↔B: `glmer` recovers the spec’s β and variance components from
@@ -303,7 +326,7 @@ Section 8.5 is the Laplace-bias cell: MCPower-GLMM (Laplace) vs
 `GLMM_TOL$laplace_bias_beta_abs`.
 
 **glmm_intercept**: XFAIL — 60 z (SE convention, 2.6% max) + 13 β̂/τ̂²/ρ̂
-(optimizer band: β̂ 1.7e-03, τ̂² 2.8e-03, ρ̂ 0.0e+00) (60/60 glmer-clean
+(optimizer band: β̂ 1.6e-03, τ̂² 2.8e-03, ρ̂ 0.0e+00) (60/60 glmer-clean
 draws)
 
 **glmm_slope**: XFAIL — 40 z (SE convention, 8.6% max) + 91 β̂/τ̂²/ρ̂
@@ -314,9 +337,17 @@ draws)
 (optimizer band: β̂ 2.6e-03, τ̂² 2.9e-03, ρ̂ 6.1e-03) (15/60 glmer-clean
 draws)
 
-**glmm_slope_crossed**: XFAIL — 37 z (SE convention, 9.5% max) + 127
-β̂/τ̂²/ρ̂ (optimizer band: β̂ 3.6e-03, τ̂² 6.6e-03, ρ̂ 2.6e-02) (37/60
+**glmm_slope_crossed**: XFAIL — 37 z (SE convention, 9.5% max) + 124
+β̂/τ̂²/ρ̂ (optimizer band: β̂ 3.6e-03, τ̂² 6.6e-03, ρ̂ 8.8e-03) (37/60
 glmer-clean draws)
+
+**glmm_slope_crossed_extra_slopes**: XFAIL — 14 z (SE convention, 9.4%
+max) + 47 β̂/τ̂²/ρ̂ (optimizer band: β̂ 2.6e-03, τ̂² 4.3e-03, ρ̂ 2.9e-03)
+(14/60 glmer-clean draws)
+
+**glmm_slope_nested_extra_slopes**: XFAIL — 14 z (SE convention, 4.6%
+max) + 33 β̂/τ̂²/ρ̂ (optimizer band: β̂ 1.3e-03, τ̂² 4.3e-03, ρ̂ 1.7e-03)
+(14/60 glmer-clean draws)
 
 ## 8.3b Wald-SE convention (Oracle-1)
 
@@ -338,16 +369,18 @@ residual is reported as a finding, not gated.
 
 | Cell | clean draws | rx vs vcov(F) mean | rx vs vcov(F) max | hess vs vcov(T) mean | hess vs vcov(T) max |
 |:---|---:|---:|---:|---:|---:|
-| glmm_intercept | 30 | 0.0000980 | 0.0001896 | 0.00540 | 0.00915 |
-| glmm_slope | 22 | 0.0004707 | 0.0010742 | 0.01220 | 0.02050 |
-| glmm_multislope | 11 | 0.0006205 | 0.0019027 | 0.01232 | 0.02584 |
-| glmm_slope_crossed | 17 | 0.0004877 | 0.0013428 | 0.01563 | 0.02685 |
-| few6_int | 29 | 0.0001968 | 0.0007165 | 0.04320 | 0.98032 |
-| few8_slope | 7 | 0.0010401 | 0.0063649 | 0.02123 | 0.12168 |
-| few10_crossed | 6 | 0.0006336 | 0.0018790 | 0.01464 | 0.04054 |
-| hiICC_int | 29 | 0.0004461 | 0.0013959 | 0.02746 | 0.05822 |
-| smallclust | 26 | 0.0000986 | 0.0008882 | 0.00283 | 0.02885 |
-| boundary | 24 | 0.0003738 | 0.0009031 | 0.01575 | 0.11231 |
+| glmm_intercept | 30 | 0.0000981 | 0.0001896 | 0.00540 | 0.00915 |
+| glmm_slope | 22 | 0.0004706 | 0.0010733 | 0.01220 | 0.02050 |
+| glmm_multislope | 11 | 0.0006206 | 0.0019035 | 0.01232 | 0.02584 |
+| glmm_slope_crossed | 17 | 0.0004877 | 0.0013432 | 0.01563 | 0.02685 |
+| glmm_slope_crossed_extra_slopes | 8 | 0.0004834 | 0.0011544 | 0.01100 | 0.01799 |
+| glmm_slope_nested_extra_slopes | 7 | 0.0003096 | 0.0008199 | 0.01082 | 0.01659 |
+| few6_int | 29 | 0.0001968 | 0.0007165 | 0.00942 | 0.04063 |
+| few8_slope | 7 | 0.0010406 | 0.0063645 | 0.01363 | 0.06846 |
+| few10_crossed | 6 | 0.0006337 | 0.0018793 | 0.01464 | 0.04054 |
+| hiICC_int | 29 | 0.0004461 | 0.0013960 | 0.02746 | 0.05822 |
+| smallclust | 26 | 0.0000986 | 0.0008883 | 0.00283 | 0.02885 |
+| boundary | 24 | 0.0003737 | 0.0009031 | 0.01114 | 0.03032 |
 
 Oracle-1 — Wald-SE convention gaps (relative). rx should match glmer
 vcov(use.hessian=FALSE) to ~4-5 sig figs; hessian within the FD band
@@ -361,6 +394,10 @@ vcov(use.hessian=FALSE) to ~4-5 sig figs; hessian within the FD band
 
 **glmm_slope_crossed**: A↔B PASS (K=200)
 
-    ## **τ²→0 collapse (ICC=0.05, 10×5)**: PASS — 14/25 draws pinned; worst |Δβ̂| 7.92e-08, |Δz| 3.39e-04 (25 draws, τ̂² mean 0.309)
+**glmm_slope_crossed_extra_slopes**: A↔B PASS (K=200)
+
+**glmm_slope_nested_extra_slopes**: A↔B PASS (K=200)
+
+    ## **τ²→0 collapse (ICC=0.05, 10×5)**: PASS — 14/25 draws pinned; worst |Δβ̂| 4.42e-08, |Δz| 3.39e-04 (25 draws, τ̂² mean 0.309)
 
     ## **Laplace-bias cell**: max |Δβ̂_x1| = 0.0136 (limit 0.0500), mean = 0.0067 — within limit

@@ -1,7 +1,7 @@
 mod common;
 
-use engine_orchestrator::debug::{debug_report, StageMask};
-use engine_orchestrator::{find_power, CancellationToken};
+use engine_orchestrator::debug::{StageMask, debug_report};
+use engine_orchestrator::{CancellationToken, find_power};
 
 #[test]
 fn invariant_3_stats_reproduce_power() {

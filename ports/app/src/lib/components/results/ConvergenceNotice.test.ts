@@ -86,15 +86,14 @@ describe('ConvergenceNotice', () => {
     expect(getByText(/High-τ̂ boundary hits 5\.0%/)).toBeTruthy();
   });
 
-  it('computes GLM baseline drift against the requested baseline from the spec', async () => {
+  it('does not flag a gap between the realized event rate and the requested baseline', () => {
     const logitSpec: AppSpec = { family: 'logit', ...LINEAR_BODY, baseline_probability: 0.3 };
     const result = makeResult({
       estimator_extras: { estimator: 'glm', baseline_prob_realized: 0.5 } as EstimatorExtras,
     });
-    const { getByText } = render(ConvergenceNotice, { props: { tab: makeTab(logitSpec, result) } });
-    await expandBadge(getByText);
-    // |0.5 − 0.3| = 0.2 → 20.0% > 5% threshold.
-    expect(getByText(/drifted by 20\.0%/)).toBeTruthy();
+    const { getByText, queryByText } = render(ConvergenceNotice, { props: { tab: makeTab(logitSpec, result) } });
+    expect(getByText(/all clear/)).toBeTruthy();
+    expect(queryByText(/drifted/)).toBeNull();
   });
 
   it('renders the Laplace-bias line for GLMM with large τ̂² and small clusters', async () => {

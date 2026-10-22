@@ -1,7 +1,8 @@
 # D2 — host-side type detection: detect_column_types against shared golden fixture.
 # Mirrors mcpower/ports/py/tests/test_upload_type_detection.py exactly.
 
-GOLDEN_PATH <- testthat::test_path("_golden", "upload_type_detection.json")
+# Shared across ports in mcpower/configs/; absent when the package is checked from a built tarball.
+GOLDEN_PATH <- testthat::test_path("..", "..", "..", "..", "configs", "upload_type_detection.json")
 
 # Build the test array from the fixture spec (mirror of Python's build_array_from_fixture).
 # seed=42 matches Python's np.random.default_rng(42) output order for the continuous column.
@@ -38,11 +39,8 @@ GOLDEN_PATH <- testthat::test_path("_golden", "upload_type_detection.json")
   list(matrix = mat, names = names_vec)
 }
 
-test_that("golden fixture exists", {
-  expect_true(file.exists(GOLDEN_PATH))
-})
-
 test_that("all columns match shared golden fixture", {
+  skip_if_not(file.exists(GOLDEN_PATH), "shared golden fixture not found (outside the repo checkout)")
   fx <- jsonlite::fromJSON(GOLDEN_PATH, simplifyVector = FALSE)
   built <- .build_array_from_fixture(fx)
   mat <- built$matrix
@@ -124,6 +122,11 @@ test_that("value_to_label renders integers without decimals", {
   expect_equal(mcpower:::.value_to_label(6.0), "6")
   expect_equal(mcpower:::.value_to_label(6.5), "6.5")
   expect_equal(mcpower:::.value_to_label("USA"), "USA")
+})
+
+test_that("value_to_label maps a character '4.0' to '4' and passes NA through", {
+  expect_equal(mcpower:::.value_to_label("4.0"), "4")
+  expect_true(is.na(mcpower:::.value_to_label(NA_real_)))
 })
 
 # Regression test for CRITICAL 3: numeric column containing a genuine NA must

@@ -157,47 +157,6 @@ def test_benign_tau_zero_alone_does_not_trip():
 
 
 # ---------------------------------------------------------------------------
-# GLM baseline drift → live gate against the requested baseline.
-# ---------------------------------------------------------------------------
-
-
-def _glm_inner(realized):
-    return {
-        **_CLEAN_BASE,
-        "estimator_extras": {"estimator": "glm", "baseline_prob_realized": realized},
-    }
-
-
-def test_glm_drift_trips_when_over_threshold():
-    """|realized − requested| over glm_baseline_drift_max trips with the 3-dp drift."""
-    warns = diagnostic_warnings(_glm_inner(0.50), baseline_prob_requested=0.30)
-    assert any("GLM baseline drift 0.200" in w for w in warns), f"Expected 'GLM baseline drift 0.200' in {warns}"
-
-
-def test_glm_drift_clean_within_threshold():
-    """Realized within glm_baseline_drift_max of requested → no drift warning."""
-    warns = diagnostic_warnings(_glm_inner(0.32), baseline_prob_requested=0.30)
-    assert not [w for w in warns if "drift" in w], f"Expected no drift warning within threshold; got {warns}"
-
-
-def test_glm_drift_silent_when_requested_none():
-    """requested is None (the dead-branch guard): no drift warning even with a
-    realized value far from any baseline."""
-    warns = diagnostic_warnings(_glm_inner(0.90), baseline_prob_requested=None)
-    assert not [w for w in warns if "drift" in w], f"Expected no drift warning when requested is None; got {warns}"
-
-
-def test_glm_drift_silent_for_ols():
-    """OLS carries no baseline_prob_realized → no drift warning even if a requested
-    value is threaded through."""
-    warns = diagnostic_warnings(
-        {**_CLEAN_BASE, "estimator_extras": {"estimator": "ols"}},
-        baseline_prob_requested=0.30,
-    )
-    assert not [w for w in warns if "drift" in w], f"Expected no drift warning for OLS; got {warns}"
-
-
-# ---------------------------------------------------------------------------
 # Multi-scenario diagnostics + Laplace-in-report (rendered via Report).
 # ---------------------------------------------------------------------------
 
@@ -248,7 +207,7 @@ def test_laplace_bias_surfaces_in_report():
         }
     )
     result = {"scenarios": {"default": inner}}
-    meta = {"factors": {}, "baseline_prob_requested": 0.30, "min_cluster_size": 4}
+    meta = {"factors": {}, "min_cluster_size": 4}
     rep = Report(result, meta, kind="find_power")
     out = rep._diagnostics(get_report_config())
     assert "Laplace-approximation bias likely" in out, f"Expected the Laplace line in:\n{out}"
@@ -268,7 +227,7 @@ def test_laplace_bias_silent_when_clusters_large():
         }
     )
     result = {"scenarios": {"default": inner}}
-    meta = {"factors": {}, "baseline_prob_requested": 0.30, "min_cluster_size": recommended}
+    meta = {"factors": {}, "min_cluster_size": recommended}
     rep = Report(result, meta, kind="find_power")
     out = rep._diagnostics(get_report_config())
     assert "Laplace" not in out, f"Expected no Laplace line for large clusters:\n{out}"

@@ -76,6 +76,17 @@ test_that("agq > 1 on an ineligible (unclustered) design warns and falls back to
   expect_true(!is.null(res$power_uncorrected))
 })
 
+test_that("agq > 1 with a non-GLM estimator warns and strips to Laplace", {
+  for (est in c("mle", "ols")) {
+    m <- MCPower$new("y ~ x1 + (1|g)", family = "logit", estimator = est)$
+      set_cluster("g", ICC = 0.2, n_clusters = 20L)
+    priv <- m$.__enclos_env__$private
+    expect_false(priv$agq_eligible())
+    res <- expect_warning(priv$resolve_estimation(NULL, 3L, NULL), "GLM estimator")
+    expect_equal(res$nagq, 1L)
+  }
+})
+
 test_that("agq=5 on an eligible clustered logit GLMM survives eligibility, reaches the contract as nagq, and changes the result vs Laplace", {
   # Eligible shape: single grouping factor, one intercept-only RE — mirrors
   # the AGQ-eligible fixture used elsewhere for this family/cluster combo.

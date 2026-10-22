@@ -1,6 +1,6 @@
 use engine_app_spec::{
-    run_find_power, run_find_sample_size, run_single_core_find_power, AdapterError, AppSpec,
-    EffectSize, LinearSpec, LogitSpec, NullEmitter, ParsedFormula, TestSelection, VarType,
+    AdapterError, AppSpec, EffectSize, LinearSpec, LogitSpec, NullEmitter, ParsedFormula,
+    TestSelection, VarType, run_find_power, run_find_sample_size, run_single_core_find_power,
 };
 use engine_contract::CorrectionMethod;
 use engine_orchestrator::{
@@ -122,7 +122,7 @@ fn run_single_core_find_power_smoke_logit() {
     let spec = sample_logit_spec_for_driver();
     let cancel = CancellationToken::new();
     let result =
-        run_single_core_find_power(&spec, 80, 128, 2137, &NullEmitter, &cancel).expect("ok");
+        run_single_core_find_power(&spec, 80, 128, 2137, None, &NullEmitter, &cancel).expect("ok");
     assert_eq!(result.scenarios.len(), 1);
     let (_label, power) = &result.scenarios[0];
     assert_eq!(

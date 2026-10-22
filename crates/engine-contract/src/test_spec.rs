@@ -45,22 +45,6 @@ pub enum CorrectionMethod {
     TukeyHsd,
 }
 
-impl CorrectionMethod {
-    /// Integer code consumed by `engine_core::SimulationSpec.correction_method`:
-    /// none=0, bonferroni=1, holm=2, bh=3, tukey_hsd=4. Byte-for-byte alignment
-    /// with the hosts' code maps (Python `_CORRECTION_CODE`) is load-bearing —
-    /// the `correction_codes_match_spec_builder_mapping` test pins it.
-    pub fn code(self) -> i32 {
-        match self {
-            Self::None => 0,
-            Self::Bonferroni => 1,
-            Self::Holm => 2,
-            Self::BenjaminiHochberg => 3,
-            Self::TukeyHsd => 4,
-        }
-    }
-}
-
 /// Pairwise post-hoc block for one factor: its generation column, the term
 /// positions of its dummies, and an optional separate α (`None` → test α).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -80,32 +64,12 @@ mod tests {
             targets: vec![
                 TestTarget::Marginal { term: 1 },
                 TestTarget::Joint { terms: vec![2, 3] },
+                TestTarget::Contrast {
+                    positive: 1,
+                    negative: 2,
+                },
             ],
             correction: CorrectionMethod::Bonferroni,
-            alpha: 0.05,
-        };
-        let bytes = rmp_serde::to_vec_named(&spec).unwrap();
-        let back: TestSpec = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(spec, back);
-    }
-
-    #[test]
-    fn correction_codes_match_spec_builder_mapping() {
-        assert_eq!(CorrectionMethod::None.code(), 0);
-        assert_eq!(CorrectionMethod::Bonferroni.code(), 1);
-        assert_eq!(CorrectionMethod::Holm.code(), 2);
-        assert_eq!(CorrectionMethod::BenjaminiHochberg.code(), 3);
-        assert_eq!(CorrectionMethod::TukeyHsd.code(), 4);
-    }
-
-    #[test]
-    fn contrast_roundtrip() {
-        let spec = TestSpec {
-            targets: vec![TestTarget::Contrast {
-                positive: 1,
-                negative: 2,
-            }],
-            correction: CorrectionMethod::None,
             alpha: 0.05,
         };
         let bytes = rmp_serde::to_vec_named(&spec).unwrap();

@@ -41,13 +41,15 @@ optimistic.
 For mixed models (LME and clustered GLMM), the `df_method` setting defaults to
 `"between_within"`: each fixed effect is tested against a *t* distribution
 with between-within denominator degrees of freedom (a cluster-level predictor
-gets the between-cluster df, others get the within-cluster df). Setting
-`df_method="asymptotic"` opts into the Wald z instead. The calibration of
-both against lmerTest Satterthwaite is on the
+gets the between-cluster df, others get the within-cluster df). With a
+crossed or nested extra grouping it uses Satterthwaite df for an LME and the
+Wald z for a GLMM. Setting `df_method="asymptotic"` opts into the Wald z
+instead. The calibration of both against lmerTest Satterthwaite is on the
 [[validation/validation_df_calibration|denominator-df calibration page]].
-Satterthwaite and Kenward-Roger degree-of-freedom corrections are not
-available. Where the z approximation runs optimistic, prefer more clusters
-over more rows per cluster when you can.
+Satterthwaite df are not available for single-grouping designs or for any
+GLMM, and Kenward-Roger corrections are not available. Where the z
+approximation runs optimistic, prefer more clusters over more rows per cluster
+when you can.
 
 ## Mixed-effects structure has depth limits
 

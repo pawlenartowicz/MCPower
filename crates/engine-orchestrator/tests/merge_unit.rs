@@ -2,9 +2,9 @@
 
 use engine_orchestrator::aggregation::wilson_ci;
 use engine_orchestrator::{
-    merge_power_results, merge_sample_size_results, ByValue, Ci, CrossingFit, EstimatorExtras,
-    GridMode, OrchestratorError, PosthocPower, PowerResult, SampleSizeMethod, SampleSizeResult,
-    ScenarioResult,
+    ByValue, Ci, CrossingFit, EstimatorExtras, GridMode, OrchestratorError, PosthocPower,
+    PowerResult, SampleSizeMethod, SampleSizeResult, ScenarioResult, merge_power_results,
+    merge_sample_size_results,
 };
 
 fn ols_pr(n_sims: u64, succ_unc: Vec<u64>, succ_cor: Vec<u64>, conv: u64) -> PowerResult {
@@ -161,6 +161,8 @@ fn ssr_grid(parts_per_n: Vec<PowerResult>) -> SampleSizeResult {
         fitted_joint: vec![],
         first_overall_achieved: None,
         fitted_overall: None,
+        posthoc_first_achieved: vec![],
+        posthoc_fitted: vec![],
         cluster_atom: 1,
         unit_divisor: 1,
         target_power: 0.8,
@@ -231,6 +233,24 @@ fn merge_sample_size_results_carries_unit_divisor_and_rejects_mismatch() {
     let err = merge_sample_size_results(&wrap_ssr(vec![part_a, part_c])).unwrap_err();
     assert!(
         matches!(&err, OrchestratorError::IncompatibleMerge(m) if m.contains("unit_divisor")),
+        "{err}"
+    );
+}
+
+/// The crossing fit takes `n_sims` from grid point 0 for every point, so a
+/// part whose own grid points disagree on `n_sims` must be rejected, not fitted.
+#[test]
+fn merge_sample_size_results_rejects_n_sims_differing_across_grid_points() {
+    let mk = |n: usize, n_sims: u64| {
+        let mut pr = ols_pr(n_sims, vec![50, 25], vec![50, 25], n_sims);
+        pr.n = n;
+        pr
+    };
+    let part_a = ssr_grid(vec![mk(100, 100), mk(200, 100)]);
+    let part_b = ssr_grid(vec![mk(100, 100), mk(200, 60)]);
+    let err = merge_sample_size_results(&wrap_ssr(vec![part_a, part_b])).unwrap_err();
+    assert!(
+        matches!(&err, OrchestratorError::IncompatibleMerge(m) if m.contains("n_sims")),
         "{err}"
     );
 }
@@ -647,7 +667,7 @@ fn mle_pr(n_sims: u64, singular_count: u64, singular_n: u64) -> PowerResult {
         convergence_rate: singular_n as f64 / n_sims as f64,
         boundary_hit: vec![0; n_sims as usize],
         estimator_extras: EstimatorExtras::Mle {
-            tau_estimate: 0.0,
+            tau_estimate: f64::NAN,
             boundary_hits: singular_count, // bh==1 only — see helper doc comment above
             joint_uncorrected_rate: 0.0,
             joint_corrected_rate: 0.0,
@@ -789,7 +809,7 @@ fn glm_pr(
         baseline_prob_realized: if baseline_n > 0 {
             baseline_sum / baseline_n as f64
         } else {
-            0.0
+            f64::NAN
         },
         baseline_prob_sum: baseline_sum,
         baseline_prob_n: baseline_n,
@@ -865,4 +885,69 @@ fn merge_rejects_asymmetric_empty_histogram() {
         merge_power_results(&wrap(vec![a, b])),
         Err(OrchestratorError::IncompatibleMerge(_))
     ));
+}
+
+/// A post-hoc block whose corrected counts are shorter than its uncorrected
+/// counts is rejected, whether it is the head or a later part — the pooling
+/// loop indexes both at the uncorrected length.
+#[test]
+fn merge_rejects_posthoc_corrected_shorter_than_uncorrected() {
+    let good = || pr_with_posthoc(4, vec![3, 0, 1], vec![2, 0, 0]);
+    let short = || pr_with_posthoc(4, vec![3, 0, 1], vec![2, 0]);
+    for parts in [vec![short(), good()], vec![good(), short()]] {
+        let r = merge_power_results(&wrap(parts));
+        assert!(
+            matches!(&r, Err(OrchestratorError::IncompatibleMerge(m))
+                if m.contains("corrected and uncorrected")),
+            "{r:?}"
+        );
+    }
+}
+
+/// Parts whose post-hoc blocks share a contrast count but not a level count
+/// are rejected rather than pooled under the head's `n_levels`.
+#[test]
+fn merge_rejects_mismatched_posthoc_n_levels() {
+    let a = pr_with_posthoc(4, vec![3, 0, 1], vec![2, 0, 0]);
+    let mut b = pr_with_posthoc(4, vec![2, 1, 1], vec![1, 1, 0]);
+    b.posthoc[0].n_levels = 4;
+    let r = merge_power_results(&wrap(vec![a, b]));
+    assert!(
+        matches!(&r, Err(OrchestratorError::IncompatibleMerge(m)) if m.contains("n_levels")),
+        "{r:?}"
+    );
+}
+
+/// A head whose separation counts are shorter than its exclusion counts is
+/// rejected, even merged alone — no later part can disagree with it.
+#[test]
+fn merge_rejects_head_separation_shorter_than_exclusion() {
+    let mut a = ols_pr(10, vec![8, 6], vec![7, 5], 10);
+    a.factor_exclusion_counts = vec![3, 0];
+    a.factor_separation_counts = vec![1];
+    let r = merge_power_results(&wrap(vec![a]));
+    assert!(
+        matches!(&r, Err(OrchestratorError::IncompatibleMerge(m))
+            if m.contains("factor_separation_counts")),
+        "{r:?}"
+    );
+}
+
+/// Every part agrees point by point, but grid point 1 carries one target where
+/// point 0 carries two. The sample-size derivations size every series from
+/// point 0, so this is rejected instead of indexing past point 1's counts.
+#[test]
+fn merge_sample_size_rejects_grid_point_target_count_unlike_point_0() {
+    let mk = || {
+        let p0 = ols_pr(100, vec![50, 25], vec![50, 25], 100);
+        let mut p1 = ols_pr(100, vec![80], vec![80], 100);
+        p1.n = 200;
+        p1.target_indices = vec![0];
+        ssr_grid(vec![p0, p1])
+    };
+    let r = merge_sample_size_results(&wrap_ssr(vec![mk(), mk()]));
+    assert!(
+        matches!(&r, Err(OrchestratorError::IncompatibleMerge(m)) if m.contains("grid point 1")),
+        "{r:?}"
+    );
 }

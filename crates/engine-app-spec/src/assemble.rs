@@ -3,8 +3,8 @@
 use engine_contract::SimulationContract;
 use engine_spec_builder::input::{CorrelationPair, UploadColumn, UploadColumnType, UploadInput};
 use engine_spec_builder::{
-    build_contract_with_skeleton, EffectAssignment, EffectSkeleton, HeteroskedasticityInput,
-    LinearSpec as BuilderLinearSpec, PredictorSpec, ResidualSpec, VarKind,
+    EffectAssignment, EffectSkeleton, HeteroskedasticityInput, LinearSpec as BuilderLinearSpec,
+    PredictorSpec, ResidualSpec, VarKind, build_contract_with_skeleton,
 };
 
 use engine_contract::CorrectionMethod;
@@ -104,11 +104,7 @@ pub fn effect_skeleton_json(spec: &AppSpec) -> Result<String, AdapterError> {
 /// before this is called, and by the Py/R hosts; guard the denominator anyway.
 pub(crate) fn icc_to_tau_squared(icc: f64) -> f64 {
     let denom = 1.0 - icc;
-    if denom > 0.0 {
-        icc / denom
-    } else {
-        0.0
-    }
+    if denom > 0.0 { icc / denom } else { 0.0 }
 }
 
 /// Latent-scale logistic ICC→τ²: `τ² = icc/(1 − icc) · π²/3`. The random
@@ -321,7 +317,8 @@ fn resolve_slopes(
         .collect();
     slopes
         .iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(k, s)| {
             let col_idx = non_factor_names
                 .iter()
                 .position(|p| *p == s.predictor_name)
@@ -330,7 +327,9 @@ fn resolve_slopes(
                 column: engine_contract::ColumnId(col_idx as u32),
                 variance: s.slope_variance,
                 corr_with_intercept: s.slope_intercept_corr,
-                corr_with: vec![],
+                // Slope↔slope correlations are not exposed; the contract needs
+                // one entry per earlier slope (slope k carries k zeros).
+                corr_with: vec![0.0; k],
             })
         })
         .collect()
@@ -1679,11 +1678,7 @@ mod tests {
     }
 
     // Intercept + 3 slopes = 4 REs per group exceeds the ≤3 cap — ineligible,
-    // even for an otherwise-qualifying single-grouping Binary GLMM. (A
-    // `resolve_slopes` limitation — its `corr_with` is always empty, so a
-    // built contract with 2+ primary slopes fails `check_slope_terms`'s
-    // corr_with-length invariant independently of AGQ — means this checks the
-    // eligibility rule directly rather than through a full `assemble_mixed`.)
+    // even for an otherwise-qualifying single-grouping Binary GLMM.
     #[test]
     fn mixed_agq_ineligible_with_too_many_slopes() {
         let mut spec = mixed_fixture();
@@ -1800,6 +1795,63 @@ mod tests {
             "extra-grouping slope variance forwarded: {}",
             cluster.extra_groupings[0].slopes[0].variance
         );
+    }
+
+    // A nested extra grouping keeps its `n_per_parent` and `tau_squared` on the
+    // contract's `GroupingSpec`, as a `NestedWithin` relation (not `Crossed`).
+    #[test]
+    fn assemble_mixed_forwards_nested_within_grouping() {
+        let mut spec = mixed_fixture();
+        spec.extra_groupings = vec![AppGroupingSpec {
+            tau_squared: 0.15,
+            cluster_name: None,
+            relation: AppGroupingRelation::NestedWithin { n_per_parent: 3 },
+            slopes: vec![],
+        }];
+        let (contracts, _, _) =
+            assemble_mixed(&spec).expect("a nested extra grouping must assemble and validate");
+        let cluster = contracts[0].generation.cluster.as_ref().unwrap();
+        assert_eq!(cluster.extra_groupings.len(), 1);
+        assert_eq!(cluster.extra_groupings[0].tau_squared, 0.15);
+        assert_eq!(
+            cluster.extra_groupings[0].relation,
+            engine_contract::GroupingRelation::NestedWithin { n_per_parent: 3 }
+        );
+    }
+
+    // Two slopes on the primary grouping and two on an extra grouping: slope k
+    // carries `corr_with` of length k, which the contract validates per slope.
+    #[test]
+    fn assemble_mixed_two_slopes_on_primary_and_extra_grouping() {
+        let slope = |name: &str| AppSlopeTerm {
+            predictor_name: name.into(),
+            slope_variance: 0.05,
+            slope_intercept_corr: 0.0,
+        };
+        let mut spec = mixed_fixture();
+        spec.slopes = vec![slope("x1"), slope("x2")];
+        spec.extra_groupings = vec![AppGroupingSpec {
+            tau_squared: 0.1,
+            cluster_name: None,
+            relation: AppGroupingRelation::Crossed { n_clusters: 8 },
+            slopes: vec![slope("x2"), slope("x1")],
+        }];
+        let (contracts, _, _) =
+            assemble_mixed(&spec).expect("two slopes per grouping must assemble and validate");
+        let cluster = contracts[0].generation.cluster.as_ref().unwrap();
+        let lens = |slopes: &[engine_contract::SlopeTerm]| -> Vec<usize> {
+            slopes.iter().map(|s| s.corr_with.len()).collect()
+        };
+        assert_eq!(lens(&cluster.slopes), vec![0, 1]);
+        assert_eq!(lens(&cluster.extra_groupings[0].slopes), vec![0, 1]);
+        for s in cluster
+            .slopes
+            .iter()
+            .chain(&cluster.extra_groupings[0].slopes)
+        {
+            assert!(s.corr_with.iter().all(|&c| c == 0.0));
+        }
+        contracts[0].validate().expect("contract validates");
     }
 
     // ICC validation mirrors the Py/R hosts: 0 is allowed (no clustering), the

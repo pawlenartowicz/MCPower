@@ -11,7 +11,8 @@
 
 mod common;
 
-use engine_core::introspect::{fit_provided_data, run_introspect, IntrospectMask};
+use engine_core::batch::{optim_diag, run_batch_st};
+use engine_core::introspect::{IntrospectMask, fit_provided_data, run_introspect};
 use engine_core::spec::{
     ClusterSizing, ClusterSpec, Distribution, EstimatorSpec, ScenarioPerturbations, SimulationSpec,
 };
@@ -73,6 +74,7 @@ fn truth_start_gate_converges_both_ways() {
 
     let cold = fit_provided_data(
         &cold_spec,
+        BASE_SEED,
         &d.design,
         d.nrow,
         d.ncol,
@@ -89,6 +91,7 @@ fn truth_start_gate_converges_both_ways() {
     let warm_spec = mixed_spec(true);
     let warm = fit_provided_data(
         &warm_spec,
+        BASE_SEED,
         &d.design,
         d.nrow,
         d.ncol,
@@ -110,5 +113,48 @@ fn truth_start_gate_converges_both_ways() {
     assert!(
         bits(&cold.betas) != bits(&warm.betas) || bits(&cold.se) != bits(&warm.se),
         "truth_start had no effect on the refit: cold and warm results are bit-identical"
+    );
+}
+
+/// The same case with a random slope on x1, which routes the hot loop through
+/// the general LMM fit (the `lme` Brent path never reads a start).
+fn slope_spec(truth_start: bool) -> SimulationSpec {
+    let mut spec = mixed_spec(truth_start);
+    spec.cluster.as_mut().unwrap().slopes = vec![engine_contract::SlopeTerm {
+        column: engine_contract::ColumnId(0),
+        variance: 0.10,
+        corr_with_intercept: 0.0,
+        corr_with: vec![],
+    }];
+    // x_full col 1 = x1 (col 0 = intercept).
+    spec.cluster_slope_design_cols = vec![1];
+    spec
+}
+
+/// BOBYQA objective evaluations and fit count a single-N, single-threaded
+/// `run_batch_st` spends. Process-wide counters, diffed around the run; this is
+/// the only `run_batch_st` call in this test binary, so no other test feeds them.
+fn evals_and_fits(spec: &SimulationSpec) -> (u64, u64) {
+    let before = optim_diag::snapshot();
+    run_batch_st(spec, &[400], 20, BASE_SEED, None).expect("run_batch_st");
+    let after = optim_diag::snapshot();
+    (after[0] - before[0], after[1] - before[1])
+}
+
+/// Hot-loop gate: at a single grid point (no carried θ̂) the fit starts from the
+/// DGP truth only when `scenario.truth_start` is set, so the two settings must
+/// cost a different number of objective evaluations over the same sims. Equal
+/// counts mean the start was dropped before the fit.
+#[test]
+fn truth_start_gate_reaches_the_hot_loop_fit() {
+    let (cold_evals, cold_fits) = evals_and_fits(&slope_spec(false));
+    let (warm_evals, warm_fits) = evals_and_fits(&slope_spec(true));
+    assert!(
+        cold_fits > 0 && warm_fits > 0,
+        "the slope LMM must be fitted"
+    );
+    assert_ne!(
+        cold_evals, warm_evals,
+        "truth_start changed nothing in the hot loop ({cold_evals} evals both ways)"
     );
 }

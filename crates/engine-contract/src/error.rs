@@ -2,8 +2,8 @@
 
 use thiserror::Error;
 
-/// Validation failures from `SimulationContract::validate` and the config /
-/// theme validators; the `#[error]` strings carry the detail.
+/// Validation failures from `SimulationContract::validate` and the config
+/// validator; the `#[error]` strings carry the detail.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ContractError {
     #[error("coefficients.len ({coeffs}) must equal design_generation.terms.len ({terms})")]
@@ -31,7 +31,9 @@ pub enum ContractError {
     #[error("factor column has invalid proportions: {0}")]
     InvalidFactorProportions(&'static str),
 
-    #[error("dummy level_index {level_index} out of range (column ColumnId({column}) has {n_levels} levels)")]
+    #[error(
+        "dummy level_index {level_index} out of range (column ColumnId({column}) has {n_levels} levels)"
+    )]
     DummyLevelOutOfRange {
         column: u32,
         level_index: u32,
@@ -82,10 +84,14 @@ pub enum ContractError {
     #[error("extra grouping RE width q_g = 1 + #slopes must be ≤ {max}; got q_g = {got}")]
     ExtraGroupingQTooLarge { got: u32, max: u32 },
 
-    #[error("SlopeTerm.column {id} is a factor or non-continuous column; random slopes require a continuous predictor")]
+    #[error(
+        "SlopeTerm.column {id} is a factor or non-continuous column; random slopes require a continuous predictor"
+    )]
     SlopeColumnNotContinuous { id: u32 },
 
-    #[error("SlopeTerm.column {id} has no Direct fixed-effect term; a random slope requires its variable as a fixed effect")]
+    #[error(
+        "SlopeTerm.column {id} has no Direct fixed-effect term; a random slope requires its variable as a fixed effect"
+    )]
     SlopeColumnNotInDesign { id: u32 },
 
     #[error("SlopeTerm.variance must be finite and >= 0; got {got}")]
@@ -94,22 +100,30 @@ pub enum ContractError {
     #[error("a slope correlation must be finite in [-1, 1]; got {got}")]
     SlopeCorrInvalid { got: f64 },
 
-    #[error("a random slope requires cluster.tau_squared > 0 (the intercept variance it correlates with); got {got}")]
+    #[error(
+        "a random slope requires cluster.tau_squared > 0 (the intercept variance it correlates with); got {got}"
+    )]
     SlopeInterceptVarianceMissing { got: f64 },
 
-    #[error("slope {slope} corr_with must list correlations with all earlier slopes; expected {expected}, got {got}")]
+    #[error(
+        "slope {slope} corr_with must list correlations with all earlier slopes; expected {expected}, got {got}"
+    )]
     SlopeCorrWithLenInvalid { slope: u32, expected: u32, got: u32 },
 
     #[error("the random-effects covariance D = diag(τ)·R·diag(τ) is not positive semidefinite")]
     SlopeCovarianceNotPSD,
 
-    #[error("GroupingRelation::Crossed requires ClusterSizing::FixedClusters (crossed factors with a fixed-size primary are not supported)")]
+    #[error(
+        "GroupingRelation::Crossed requires ClusterSizing::FixedClusters (crossed factors with a fixed-size primary are not supported)"
+    )]
     CrossedRequiresFixedClusters,
 
     #[error("at most one NestedWithin grouping is supported by this engine version")]
     MultipleNestedUnsupported,
 
-    #[error("NestedWithin requires cluster_size % n_per_parent == 0; got {cluster_size} % {n_per_parent}")]
+    #[error(
+        "NestedWithin requires cluster_size % n_per_parent == 0; got {cluster_size} % {n_per_parent}"
+    )]
     NestedSizeIndivisible {
         cluster_size: u32,
         n_per_parent: u32,
@@ -141,12 +155,6 @@ pub enum ContractError {
 
     #[error("invalid PosthocSpec: {0}")]
     InvalidPosthoc(&'static str),
-
-    #[error("invalid scenarios.json: {0}")]
-    InvalidScenariosConfig(String),
-
-    #[error("invalid plot theme: {0}")]
-    InvalidPlotTheme(String),
 
     #[error("invalid config.json: {0}")]
     InvalidConfig(String),

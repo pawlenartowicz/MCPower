@@ -234,6 +234,8 @@ test_that("tukey correction: corrected power <= uncorrected power per contrast",
   for (i in seq_along(ph$power_uncorrected)) {
     expect_lte(ph$power_corrected[[i]], ph$power_uncorrected[[i]] + 1e-9)
   }
+  # The correction must reach the engine: at least one contrast loses power.
+  expect_true(any(unlist(ph$power_corrected) < unlist(ph$power_uncorrected) - 1e-9))
 })
 
 test_that("pure all-contrasts (no overall): posthoc block present, main power empty", {
@@ -353,4 +355,40 @@ test_that("summary(posthoc result): joint section renders n_sims correctly", {
   # Joint distribution renders as a table now (minimal-table format, mirrors
   # Python): the "Exactly | At least" column headers sit adjacent in the header.
   expect_match(out, "Exactly\\s+At least")
+})
+
+# ---------------------------------------------------------------------------
+# find_sample_size: post-hoc contrasts carry a required N
+# ---------------------------------------------------------------------------
+
+test_that("find_sample_size all-contrasts: frame has one required-N row per contrast", {
+  m <- .simple_anova_model()
+  res <- m$find_sample_size(from_size = 40, to_size = 400, by = 40,
+                            target_test = "all-contrasts",
+                            verbose = FALSE, progress_callback = FALSE)
+  df <- as.data.frame(res)
+  expect_equal(names(df), c("test", "scenario", "required_n", "ci_lo", "ci_hi"))
+  expect_equal(df$test, c("2 vs 1", "3 vs 1", "3 vs 2"))
+
+  fits   <- res$posthoc_fitted[[1]]
+  firsts <- res$posthoc_first_achieved[[1]]
+  expect_equal(length(fits), 3L)
+  for (i in 1:3) {
+    f <- fits[[as.character(i - 1L)]]
+    expected <- if (identical(f$status, "fitted")) as.integer(f$n_achievable)
+                else if (identical(f$status, "non_monotone")) as.integer(firsts[[as.character(i - 1L)]])
+                else NA_integer_
+    expect_identical(df$required_n[[i]], expected)
+  }
+  # The 0.8 effect (3 vs 1) is reachable in this grid and needs no more N than
+  # the 0.5 effect (2 vs 1).
+  expect_false(is.na(df$required_n[df$test == "3 vs 1"]))
+  r21 <- df$required_n[df$test == "2 vs 1"]
+  expect_true(is.na(r21) || df$required_n[df$test == "3 vs 1"] <= r21)
+
+  out <- paste(capture.output(print(res)), collapse = "\n")
+  expect_match(out, "dose_group  (pairwise)", fixed = TRUE)
+  expect_match(out, "3 vs 1")
+  out_long <- paste(capture.output(print(summary(res))), collapse = "\n")
+  expect_match(out_long, "dose_group  (pairwise)", fixed = TRUE)
 })

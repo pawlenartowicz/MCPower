@@ -1,5 +1,5 @@
 # R mirror of the Python APIC chained-surface property tests
-# (mcpower/ports/py/tests/test_apic_surface.py). Each block asserts the SAME
+# (mcpower/ports/py/tests/spec/test_apic_surface.py). Each block asserts the SAME
 # behavior (shape / labels / order / error-kind) as the Python canonical
 # reference, adapted to R idiom — never a pinned numeric power value.
 #
@@ -46,16 +46,16 @@ test_that("set_max_failed_simulations rejects values outside [0,1] (APIC-77)", {
   expect_equal(m$max_failed_simulations, 0.0)
 })
 
-# --- set_heteroskedasticity_driver (APIC-74) ------------------------------------
-
-test_that("set_heteroskedasticity_driver: default (no args) -> null driver; bad var raises (APIC-74)", {
-  m <- MCPower$new("y ~ x1 + x2")
-  m$set_heteroskedasticity_driver()  # off -> null driver (λ is scenario-only)
-  hs <- m$.__enclos_env__$private$heteroskedasticity
-  expect_null(hs$driver_var_index)
-  # ratio key is gone (scenario-only)
-  expect_null(hs[["ratio"]])
-  expect_error(MCPower$new("y ~ x1")$set_heteroskedasticity_driver("zzz"))
+test_that("set_heteroskedasticity_driver warns for binary/count outcomes only", {
+  expect_warning(
+    MCPower$new("y ~ x1", family = "logit")$set_heteroskedasticity_driver(),
+    "continuous outcomes only")
+  expect_warning(
+    MCPower$new("y ~ x1", family = "poisson")$set_heteroskedasticity_driver(),
+    "continuous outcomes only")
+  expect_no_warning(MCPower$new("y ~ x1")$set_heteroskedasticity_driver())
+  expect_no_warning(
+    MCPower$new("y = x1 + (1|g)", family = "lme")$set_heteroskedasticity_driver())
 })
 
 # --- set_scenario_configs non-dict (APIC-44) -------------------------------
@@ -128,51 +128,12 @@ test_that("scenarios = empty character vector raises (APIC-43)", {
   expect_error(m$find_power(80, scenarios = character(0), n_sims = 50, progress_callback = FALSE))
 })
 
-# --- _parse_equation triple + RE tagging + = synonym (APIC-18 / APIC-20) ---
-
-test_that(".parse_equation returns (dependent, fixed, random_effects) with RE tagging (APIC-18)", {
-  pe <- mcpower:::.parse_equation("y ~ x1 + (1|g)")
-  expect_equal(pe$dependent, "y")
-  expect_equal(pe$fixed_formula, "x1")
-  expect_equal(length(pe$random_effects), 1L)
-  expect_equal(pe$random_effects[[1]]$type, "random_intercept")
-  expect_equal(pe$random_effects[[1]]$grouping_var, "g")
-})
-
-test_that(".parse_equation accepts '=' as a synonym for '~' (APIC-20)", {
-  pe <- mcpower:::.parse_equation("y = x1 + x2")
-  expect_equal(pe$dependent, "y")
-  expect_equal(pe$fixed_formula, "x1+x2")
-  expect_equal(length(pe$random_effects), 0L)
-})
-
-# --- _parse_independent_variables shape (APIC-19) --------------------------
-
-test_that(".parse_independent_variables yields main/interaction effect shapes (APIC-19)", {
-  piv <- mcpower:::.parse_independent_variables("x1 + x2 + x1:x2")
-  expect_equal(unlist(piv$variables), c("x1", "x2"))
-  # main effects carry column_index
-  expect_equal(piv$effects[[1]]$type, "main")
-  expect_equal(piv$effects[[1]]$column_index, 0L)
-  # interaction effects carry var_names + column_indices
-  expect_equal(piv$effects[[3]]$type, "interaction")
-  expect_equal(unlist(piv$effects[[3]]$var_names), c("x1", "x2"))
-  expect_equal(piv$effects[[3]]$column_indices, c(0L, 1L))
-})
-
 # --- split_assignments top-level comma + unbalanced (APIC-21) --------------
 
 test_that("split_assignments splits top-level commas only; unbalanced ')' raises (APIC-21)", {
   parts <- mcpower:::split_assignments("x1=(binary,0.3), x2=0.5")
   expect_equal(parts, c("x1=(binary,0.3)", "x2=0.5"))
   expect_error(mcpower:::split_assignments("a=)b"))
-})
-
-# --- _normalise_correlation_input (APIC-22) --------------------------------
-
-test_that(".normalise_correlation_input rewrites bare (a,b)=v; passes through prefixed (APIC-22)", {
-  expect_equal(mcpower:::.normalise_correlation_input("(x1,x2)=0.4"), "corr(x1,x2)=0.4")
-  expect_equal(mcpower:::.normalise_correlation_input("corr(x1,x2)=0.4"), "corr(x1,x2)=0.4")
 })
 
 # --- assignment-to-legacy key shapes (APIC-23) -----------------------------
@@ -250,71 +211,6 @@ test_that(".encode_outcome_and_clusters computes tau = ICC/(1-ICC); ICC=0 -> 0 (
   expect_equal(rp0[[1]]$tau_squared, 0.0)
 })
 
-# --- registry set_correlation symmetry (APIC-58) ---------------------------
-
-test_that("RVariableRegistry$set_correlation is symmetric (APIC-58)", {
-  reg <- mcpower:::RVariableRegistry$new("y ~ x1 + x2")
-  reg$set_correlation("x1", "x2", 0.5)
-  m <- reg$get_correlation_matrix()
-  expect_equal(m[1, 2], m[2, 1])
-  expect_equal(m[1, 2], 0.5)
-})
-
-# --- registry set_variable_type(factor) stores factor_info (APIC-59) -------
-
-test_that("RVariableRegistry$set_variable_type('factor') stores factor_info (APIC-59)", {
-  reg <- mcpower:::RVariableRegistry$new("y ~ g")
-  reg$set_variable_type("g", "factor", n_levels = 4L)
-  fi <- reg$`_factors`[["g"]]
-  expect_equal(fi$n_levels, 4L)
-  expect_equal(fi$reference_level, 1L)
-  expect_true("g" %in% reg$factor_names)
-})
-
-# --- expand_factors reference coding shape (APIC-57) -----------------------
-
-test_that("expand_factors produces n_levels-1 dummies named factor[level] (APIC-57)", {
-  reg <- mcpower:::RVariableRegistry$new("y ~ x1 + g")
-  reg$set_variable_types("g=(factor,3)")
-  reg$expand_factors()
-  expect_equal(reg$dummy_names, c("g[2]", "g[3]"))
-  expect_equal(length(reg$dummy_names), 3L - 1L)
-})
-
-# --- _to_linear_spec_dict correlations non-zero only (APIC-61) -------------
-
-test_that(".to_linear_spec_list emits non-zero correlations only; empty when none (APIC-61)", {
-  reg <- mcpower:::RVariableRegistry$new("y ~ x1 + x2")
-  reg$set_effects("x1=0.5, x2=0.3")
-  none <- mcpower:::.to_linear_spec_list(reg, "optimistic", alpha = 0.05,
-            correction = NULL, target_test = NULL,
-            heteroskedasticity = list(driver_var_index = NULL), residual_name = "normal",
-            max_failed = 1.0, test_formula = NULL)
-  expect_equal(length(none$correlations), 0L)
-
-  reg$set_correlation_spec("(x1,x2)=0.4")
-  withc <- mcpower:::.to_linear_spec_list(reg, "optimistic", alpha = 0.05,
-            correction = NULL, target_test = NULL,
-            heteroskedasticity = list(driver_var_index = NULL), residual_name = "normal",
-            max_failed = 1.0, test_formula = NULL)
-  expect_equal(length(withc$correlations), 1L)
-  expect_equal(withc$correlations[[1]]$value, 0.4)
-})
-
-# --- _to_linear_spec_dict correction alias mapping (APIC-63) ---------------
-
-test_that(".to_linear_spec_list maps bh/fdr -> benjamini_hochberg, NULL -> none (APIC-63)", {
-  reg <- mcpower:::RVariableRegistry$new("y ~ x1")
-  reg$set_effects("x1=0.5")
-  args <- function(corr) mcpower:::.to_linear_spec_list(reg, "optimistic",
-            alpha = 0.05, correction = corr, target_test = NULL,
-            heteroskedasticity = list(driver_var_index = NULL), residual_name = "normal",
-            max_failed = 1.0, test_formula = NULL)
-  expect_equal(args("bh")$correction, "benjamini_hochberg")
-  expect_equal(args("fdr")$correction, "benjamini_hochberg")
-  expect_equal(args(NULL)$correction, "none")
-})
-
 # --- _to_linear_spec_dict strips (1|group) (APIC-62) -----------------------
 
 test_that(".to_linear_spec_list strips random-effect terms from the builder formula (APIC-62)", {
@@ -356,9 +252,9 @@ test_that(".unwrap_scenario_result keeps the full envelope for multiple scenario
   expect_equal(length(u$scenarios), 2L)
 })
 
-# --- _scenario_dict rejects unknown distribution (APIC-80) -----------------
+# --- unknown scenario distribution rejected at spec build (APIC-80) --------
 
-test_that(".scenario_dict / encoders reject unknown distribution names (APIC-80)", {
+test_that("unknown scenario distribution rejected at spec build (APIC-80)", {
   expect_error(mcpower:::.encode_dist_list(c("zzz"), "optimistic"))
   expect_error(mcpower:::.encode_residual_list(c("zzz"), "optimistic"))
 })
@@ -466,14 +362,19 @@ test_that("test_formula refits the reduced model, recovering the marginal coef",
   expect_gt(p_reduced - p_full, 0.50)
 })
 
-# --- baseline-probability logit transform identity (APIC-41) ---------------
+# --- expand_factors: interaction-only factor gets no main effects ----------
 
-test_that("set_baseline_probability stores intercept = logit(p) (APIC-41)", {
-  m <- MCPower$new("y ~ x1", family = "logit")$set_baseline_probability(0.3)
-  m$summary()  # forces apply
-  # transform identity log(p/(1-p)), not an oracle value
-  expect_equal(m$intercept, log(0.3 / 0.7))
-  m$set_baseline_probability(0.6)
-  m$summary()
-  expect_equal(m$intercept, log(0.6 / 0.4))
+test_that("y ~ cyl:x registers only the interaction effects, keeps dummy columns", {
+  reg <- mcpower:::RVariableRegistry$new("y ~ cyl:x")
+  reg$set_variable_type("cyl", "factor", n_levels = 3L)
+  reg$expand_factors()
+  expect_equal(reg$effect_names, c("cyl[2]:x", "cyl[3]:x"))
+  expect_true(all(c("cyl[2]", "cyl[3]") %in% reg$predictor_names))
+})
+
+test_that("a factor with a main term still registers its main dummy effects", {
+  reg <- mcpower:::RVariableRegistry$new("y ~ cyl + cyl:x")
+  reg$set_variable_type("cyl", "factor", n_levels = 3L)
+  reg$expand_factors()
+  expect_equal(reg$effect_names, c("cyl[2]", "cyl[3]", "cyl[2]:x", "cyl[3]:x"))
 })

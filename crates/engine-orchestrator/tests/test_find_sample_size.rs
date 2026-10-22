@@ -2,9 +2,9 @@ mod common;
 use common::{minimal_ols_contract, minimal_ols_contract_labelled};
 
 use engine_orchestrator::{
-    find_sample_size, merge_sample_size_results, single_core_find_sample_size, ByValue,
-    CancellationToken, CrossingFit, GridMode, OrchestratorError, ProgressEvent, ProgressSink,
-    SampleSizeMethod, SampleSizeResult, ScenarioResult,
+    ByValue, CancellationToken, CrossingFit, GridMode, OrchestratorError, ProgressEvent,
+    ProgressSink, SampleSizeMethod, SampleSizeResult, ScenarioResult, find_sample_size,
+    merge_sample_size_results, single_core_find_sample_size,
 };
 
 /// Grid whose interior brackets the 0.8 crossing of `minimal_ols_contract`

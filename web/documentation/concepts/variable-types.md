@@ -100,7 +100,7 @@ The conceptual point is that **type, distribution shape, and residual shape are 
 
 **Heteroskedasticity** means the residual variance is not constant — the spread of the noise depends on a predictor instead of being the same everywhere. Linear models assume the opposite (constant variance), so this is an assumption violation worth stress-testing. The **driver** control names the continuous predictor whose value scales that variance; set it with `set_heteroskedasticity_driver(var)`, where `var` is a continuous predictor or the predicted value (the default).
 
-The driver only says *which* predictor governs the spread. *How much* the variance changes along it is the ratio λ, which comes from the active scenario, not the model — so heteroskedasticity is exercised through sensitivity analysis. The driver is restricted to continuous predictors and applies to linear models only.
+The driver only says *which* predictor governs the spread. *How much* the variance changes along it is the ratio λ, which comes from the active scenario, not the model — so heteroskedasticity is exercised through sensitivity analysis. The driver is restricted to continuous predictors and applies to continuous outcomes, including linear mixed models.
 
 ```python
 model.set_heteroskedasticity_driver("x1")

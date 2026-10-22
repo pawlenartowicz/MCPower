@@ -377,15 +377,9 @@ dependencies = [
 
 [[package]]
 name = "bobyqa"
-version = "0.1.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2785d76fcc832c5978731a1ab9566232bcc41941150d607e048b7c2f3667a53"
-
-[[package]]
-name = "bobyqa"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29652fc14c962e886cb95080521404983d791286b465baf11ee6decb2842b490"
+checksum = "36fb1944a8ed2c528a3bf333bdf9189ad5517ff9bd457b29777ae0a834b283a0"
 
 [[package]]
 name = "borsh"
@@ -658,6 +652,16 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "commonstats"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c1779773f7b9a8102504c8f81f59fee44dedd28491c6013c9f4811940bb7c6d"
+dependencies = [
+ "libm",
+ "rand_philox",
 ]
 
 [[package]]
@@ -1156,7 +1160,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine-app-spec"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1170,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "engine-contract"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "engine-contract",
  "glmm",
@@ -1183,10 +1187,9 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "approx",
- "bobyqa 0.1.1",
  "dhat",
  "engine-contract",
  "faer",
@@ -1195,7 +1198,6 @@ dependencies = [
  "pulp",
  "rand_philox",
  "rayon",
- "rmp-serde",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1204,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "engine-orchestrator"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "approx",
  "engine-contract",
@@ -1213,7 +1215,6 @@ dependencies = [
  "faer",
  "indexmap 2.14.0",
  "insta",
- "rayon",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -1222,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "engine-py"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1236,7 +1237,7 @@ dependencies = [
 
 [[package]]
 name = "engine-r"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1250,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "engine-spec-builder"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1263,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "engine-wasm"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "engine-app-spec",
  "engine-core",
@@ -2063,11 +2064,12 @@ dependencies = [
 
 [[package]]
 name = "glmm"
-version = "0.3.2"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcad75fd2d6297d20d111712f7e9f0e5265385dc6c36a168e6aa6f8dc8704954"
+checksum = "8b32700b74ae75cf95c80baa089afb86b6efcce57330821811a4b3482556125d"
 dependencies = [
- "bobyqa 0.3.0",
+ "bobyqa",
+ "commonstats",
  "faer",
  "pulp",
 ]
@@ -2783,7 +2785,7 @@ dependencies = [
 
 [[package]]
 name = "mcpower-app"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "engine-app-spec",
  "engine-orchestrator",

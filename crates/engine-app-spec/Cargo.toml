@@ -19,7 +19,9 @@ engine-core         = { path = "../engine-core" }
 engine-orchestrator = { path = "../engine-orchestrator" }
 engine-spec-builder = { path = "../engine-spec-builder" }
 serde               = { version = "1", features = ["derive"] }
-serde_json          = "1"
+# float_roundtrip: parse every f64 exactly. The WASM host passes curvature
+# hints between workers as JSON, and a one-ULP misparse would change the fit.
+serde_json          = { version = "1", features = ["float_roundtrip"] }
 thiserror           = "2"
 
 [dev-dependencies]

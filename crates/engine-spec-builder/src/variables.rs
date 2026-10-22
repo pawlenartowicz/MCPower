@@ -487,7 +487,7 @@ mod tests {
         // main effects carry empty component lists
         assert!(t.interaction_components[0].is_empty()); // x1
         assert!(t.interaction_components[1].is_empty()); // group[B]
-                                                         // x1:group[B] → [("x1", None), ("group", Some("B"))]
+        // x1:group[B] → [("x1", None), ("group", Some("B"))]
         assert_eq!(
             t.interaction_components[3],
             vec![

@@ -492,14 +492,29 @@ as.data.frame.mcpower_sample_size_result <- function(x, ...) {
   # ≤ / ≥ sentinel rows with no single exportable integer).
   # ci_lo/ci_hi: floor/ceiling-rounded when status == fitted and bound present;
   # NA_integer_ otherwise (mirrors Python SampleSizeResult.to_dataframe()).
-  # No posthoc block here: the engine computes no per-contrast required-N
-  # crossing for "all-contrasts" targets, so a pure post-hoc query yields the
-  # empty-but-correctly-columned frame below (mirrors results.py).
+  # Post-hoc pairwise contrasts get one row each with the same convention.
   empty <- data.frame(test = character(0), scenario = character(0),
                        required_n = integer(0), ci_lo = integer(0), ci_hi = integer(0),
                        stringsAsFactors = FALSE)
   meta <- attr(x, "mcpower_meta")
   recs <- list()
+  add_row <- function(label, nm, f, v) {
+    if (!is.null(f) && identical(f$status, "fitted")) {
+      req   <- as.integer(f$n_achievable)
+      ci_lo <- if (!is.null(f$ci_lo)) as.integer(floor(f$ci_lo))   else NA_integer_
+      ci_hi <- if (!is.null(f$ci_hi)) as.integer(ceiling(f$ci_hi)) else NA_integer_
+    } else if (is.null(f) || identical(f$status, "non_monotone")) {
+      # Missing fit or non_monotone: use first_achieved grid value
+      req <- if (!is.null(v) && !is.na(v)) as.integer(v) else NA_integer_
+      ci_lo <- NA_integer_; ci_hi <- NA_integer_
+    } else {
+      # at_or_below_min / not_reached: no meaningful integer to export
+      req <- NA_integer_; ci_lo <- NA_integer_; ci_hi <- NA_integer_
+    }
+    data.frame(test = label, scenario = nm,
+               required_n = req, ci_lo = ci_lo, ci_hi = ci_hi,
+               stringsAsFactors = FALSE)
+  }
   for (nm in names(.scenarios(x))) {
     inner      <- .scenarios(x)[[nm]]
     fitted_map <- inner$fitted
@@ -507,23 +522,14 @@ as.data.frame.mcpower_sample_size_result <- function(x, ...) {
       if (r$kind == "factor_header") next
       key <- as.character(r$pos - 1L)   # 0-based engine key
       f   <- if (!is.null(fitted_map)) fitted_map[[key]] else NULL
-      if (!is.null(f) && identical(f$status, "fitted")) {
-        req   <- as.integer(f$n_achievable)
-        ci_lo <- if (!is.null(f$ci_lo)) as.integer(floor(f$ci_lo))   else NA_integer_
-        ci_hi <- if (!is.null(f$ci_hi)) as.integer(ceiling(f$ci_hi)) else NA_integer_
-      } else if (is.null(f) || identical(f$status, "non_monotone")) {
-        # Missing fit or non_monotone: use first_achieved grid value
-        v   <- inner$first_achieved[[key]]
-        req <- if (!is.null(v) && !is.na(v)) as.integer(v) else NA_integer_
-        ci_lo <- NA_integer_; ci_hi <- NA_integer_
-      } else {
-        # at_or_below_min / not_reached: no meaningful integer to export
-        req <- NA_integer_; ci_lo <- NA_integer_; ci_hi <- NA_integer_
-      }
-      recs[[length(recs) + 1L]] <- data.frame(
-        test = r$label, scenario = nm,
-        required_n = req, ci_lo = ci_lo, ci_hi = ci_hi,
-        stringsAsFactors = FALSE)
+      recs[[length(recs) + 1L]] <- add_row(r$label, nm, f, inner$first_achieved[[key]])
+    }
+    ph_first <- inner$posthoc_first_achieved %||% list()
+    for (r in .posthoc_descriptors(meta)) {
+      if (identical(r$kind, "posthoc_header") || r$block > length(ph_first)) next
+      key <- as.character(r$contrast - 1L)
+      recs[[length(recs) + 1L]] <- add_row(r$label, nm, inner$posthoc_fitted[[r$block]][[key]],
+                                           ph_first[[r$block]][[key]])
     }
   }
   if (length(recs) == 0L) return(empty)

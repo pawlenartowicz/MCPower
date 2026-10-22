@@ -50,7 +50,7 @@ const csvSpec: AppSpec = {
 
 const method: SampleSizeMethod = { Grid: { by: { Fixed: 10 }, mode: 'Linear' } };
 
-const okResponse = { run_id: 'r1', result: { scenarios: [] }, plots: { blocks: [] }, warnings: [] };
+const okResponse = { run_id: 'r1', result: { scenarios: [] }, plots: { blocks: [] } };
 
 beforeEach(() => {
   vi.clearAllMocks();

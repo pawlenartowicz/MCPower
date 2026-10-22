@@ -8,12 +8,12 @@
 //! as R's `matrix()` default), so the flat `Vec<f64>` + nrow + ncol can be
 //! passed directly to `matrix(data, nrow, ncol)` in R with zero transpose.
 
-use engine_orchestrator::debug::{
-    debug_load_data as orch_load_data, DebugCrit, DebugData, DebugDispatch, DebugReport,
-    DebugStats, DispatchRoute, Estimator, LoadDataResult, LoadDataTarget, Matrix, OutcomeKind,
-    ResolvedInput, StageMask, TargetCrit, TargetStats,
-};
 use engine_orchestrator::ScenarioResult;
+use engine_orchestrator::debug::{
+    DebugCrit, DebugData, DebugDispatch, DebugReport, DebugStats, DispatchRoute, Estimator,
+    LoadDataResult, LoadDataTarget, Matrix, OutcomeKind, ResolvedInput, StageMask, TargetCrit,
+    TargetStats, debug_load_data as orch_load_data,
+};
 use extendr_api::error::Result;
 use extendr_api::prelude::*;
 
@@ -280,7 +280,7 @@ pub fn debug_load_data(
         other => {
             return Err(Error::Other(format!(
                 "unknown wald_se override {other:?}; expected \"\", \"default\", \"rx\", or \"hessian\""
-            )))
+            )));
         }
     };
     // Validation-only df-method override, same rationale/reach as `wald_se`.
@@ -291,7 +291,7 @@ pub fn debug_load_data(
         other => {
             return Err(Error::Other(format!(
                 "unknown df_method override {other:?}; expected \"\", \"default\", \"asymptotic\", or \"between_within\""
-            )))
+            )));
         }
     };
     let idx = scenario_index as usize;

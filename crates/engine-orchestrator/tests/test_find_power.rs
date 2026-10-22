@@ -6,7 +6,7 @@ use common::{
 };
 
 use engine_orchestrator::{
-    find_power, single_core_find_power, CancellationToken, NoOpSink, ProgressEvent, ProgressSink,
+    CancellationToken, NoOpSink, ProgressEvent, ProgressSink, find_power, single_core_find_power,
 };
 
 #[derive(Default)]
@@ -165,9 +165,8 @@ fn sims_completed_carries_actual_n() {
 /// `SimsCompleted` is cumulative across the whole call: every tick's `total`
 /// equals `Started.total_sims` (= n_sims × n_scenarios), the second scenario's
 /// ticks land above the first scenario's range (the per-scenario offset is
-/// applied), and the final boundary tick reaches the call total. Monotonicity
-/// is NOT asserted on the multi-core path — rayon workers may race tick
-/// emission by a step.
+/// applied), and the final boundary tick reaches the call total. Ordering is
+/// pinned by `multi_core_sims_completed_is_strictly_increasing`.
 #[test]
 fn sims_completed_is_cumulative_across_scenarios() {
     #[derive(Default)]
@@ -256,6 +255,43 @@ fn single_core_sims_completed_is_cumulative_and_monotone() {
         sink.ticks
     );
     assert_eq!(sink.ticks.last().map(|&(c, _)| c), Some(200));
+}
+
+/// The multi-core entry delivers `SimsCompleted` strictly increasing, like the
+/// single-core twin. At `n_sims <= 50` the engine reports after every sim, so
+/// rayon workers contend for the sink on every tick; 40 calls × 4 scenarios
+/// give thousands of chances for a stale tick to slip through.
+#[test]
+fn multi_core_sims_completed_is_strictly_increasing() {
+    #[derive(Default)]
+    struct Ticks(Vec<u64>);
+    impl ProgressSink for Ticks {
+        fn on_event(&mut self, e: ProgressEvent) {
+            if let ProgressEvent::SimsCompleted { completed, .. } = e {
+                self.0.push(completed);
+            }
+        }
+    }
+
+    let contracts: Vec<_> = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(minimal_ols_contract_labelled)
+        .collect();
+    let cancel = CancellationToken::new();
+    for seed in 0..40 {
+        let mut sink = Ticks::default();
+        find_power(&contracts, 30, 50, seed, Some(&mut sink), &cancel).expect("ok");
+        assert!(
+            sink.0.windows(2).all(|w| w[0] < w[1]),
+            "seed {seed}: SimsCompleted must be strictly increasing: {:?}",
+            sink.0
+        );
+        assert_eq!(
+            sink.0.last(),
+            Some(&200),
+            "seed {seed}: final tick reaches the total"
+        );
+    }
 }
 
 #[test]
@@ -382,4 +418,37 @@ fn single_core_find_power_cancellation_short_circuits() {
         r,
         Err(engine_orchestrator::OrchestratorError::Cancelled { .. })
     ));
+}
+
+/// A one-term `Joint` on a one-predictor OLS model is the overall F test, and
+/// F(1, n − 2) = t² on the same fit, so every sim decides the overall test
+/// and the marginal the same way: the two powers are equal exactly.
+#[test]
+fn one_term_joint_overall_matches_marginal_power_exactly() {
+    use engine_contract::TestTarget;
+    let mut c = minimal_ols_contract();
+    c.test.targets = vec![
+        TestTarget::Marginal { term: 1 },
+        TestTarget::Joint { terms: vec![1] },
+    ];
+    let cancel = CancellationToken::new();
+    for (n, seed) in [(20, 1), (40, 2), (80, 3)] {
+        let r = find_power(std::slice::from_ref(&c), n, 1600, seed, None, &cancel).expect("ok");
+        let pr = &r.scenarios[0].1;
+        let marginal = pr.power_uncorrected[0];
+        // Power strictly inside (0, 1), so equal decisions are not trivially equal.
+        assert!(
+            marginal > 0.0 && marginal < 1.0,
+            "n = {n}: power {marginal}"
+        );
+        assert_eq!(
+            pr.overall_significant_rate,
+            Some(marginal),
+            "n = {n}: overall F must reject exactly when the marginal t does"
+        );
+        assert_eq!(
+            pr.overall_significant_count,
+            pr.success_counts_uncorrected[0]
+        );
+    }
 }

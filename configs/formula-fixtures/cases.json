@@ -621,6 +621,124 @@
       }
     },
     {
+      "id": "023_implicit_multivar_slope",
+      "formula": "y ~ x + z + (x+z|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x",
+          "z"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "slope",
+            "vars": [
+              "x",
+              "z"
+            ]
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          },
+          {
+            "kind": "main",
+            "name": "z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "024_redundant_one_in_implicit_slope",
+      "formula": "y ~ x + (x+1|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "slope",
+            "vars": [
+              "x"
+            ]
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "025_redundant_intercept_token",
+      "formula": "y ~ x + (1+1|g)",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x"
+        ],
+        "random_effects": [
+          {
+            "group": "g",
+            "kind": "intercept",
+            "parent": null
+          }
+        ],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "026_dup_main_equals_separator",
+      "formula": "y = x1 + x2 + x1",
+      "expected": {
+        "dependent": "y",
+        "predictors": [
+          "x1",
+          "x2"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          },
+          {
+            "kind": "main",
+            "name": "x2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "027_empty_lhs_tilde",
+      "formula": "~ x1",
+      "expected": {
+        "dependent": "explained_variable",
+        "predictors": [
+          "x1"
+        ],
+        "random_effects": [],
+        "terms": [
+          {
+            "kind": "main",
+            "name": "x1"
+          }
+        ]
+      }
+    },
+    {
       "id": "err_bad_identifier",
       "formula": "y ~ 1x",
       "error": "formula syntax error"
@@ -649,6 +767,31 @@
       "id": "err_intercept_suppression_minus_one",
       "formula": "y ~ x + (-1+x|g)",
       "error": "intercept suppression"
+    },
+    {
+      "id": "err_empty_rhs",
+      "formula": "y =",
+      "error": "formula is empty"
+    },
+    {
+      "id": "err_intercept_suppression_bare_zero",
+      "formula": "y ~ x + (0|g)",
+      "error": "intercept suppression"
+    },
+    {
+      "id": "err_intercept_suppression_bare_minus_one",
+      "formula": "y ~ x + (-1|g)",
+      "error": "intercept suppression"
+    },
+    {
+      "id": "err_bad_identifier_later_term",
+      "formula": "y = x1 + 2bad",
+      "error": "formula syntax error"
+    },
+    {
+      "id": "err_empty_slope_var_list",
+      "formula": "y ~ x + (1++|g)",
+      "error": "empty slope term"
     }
   ]
 }

@@ -1,4 +1,4 @@
-use engine_contract::{validate_config, ByStep, ContractError};
+use engine_contract::{ByStep, ContractError, validate_config};
 use std::path::Path;
 
 fn workspace_config() -> Vec<u8> {
@@ -14,9 +14,11 @@ fn workspace_config_json_parses() {
     assert_eq!(cfg.simulation.target_power, 0.8);
     assert_eq!(cfg.simulation.n_sims.ols, 1600);
     assert_eq!(cfg.simulation.n_sims.mixed, 800);
+    assert_eq!(cfg.simulation.n_sims.glmm, 400);
     assert_eq!(cfg.simulation.n_sims.anova, 1000);
     assert_eq!(cfg.simulation.max_failed_fraction, 0.1);
     assert_eq!(cfg.simulation.cluster_auto_count, 12);
+    assert_eq!(cfg.simulation.nested_n_per_parent, 2);
     assert_eq!(cfg.benchmarks.continuous, [0.1, 0.25, 0.4]);
     assert_eq!(cfg.benchmarks.binary_factor, [0.2, 0.5, 0.8]);
     assert_eq!(cfg.benchmarks.odds, [0.405, 0.916, 1.386]);
@@ -28,7 +30,9 @@ fn workspace_config_json_parses() {
     assert_eq!(cfg.limits.min_clusters, 5);
     assert_eq!(cfg.limits.reliable_rows_per_cluster, 5);
     assert_eq!(cfg.limits.recommended_rows_per_cluster, 10);
+    assert_eq!(cfg.report.format.power_decimals_short, 1);
     assert_eq!(cfg.report.format.power_decimals_long, 1);
+    assert_eq!(cfg.report.thresholds.convergence_min, 0.95);
     assert_eq!(
         cfg.report.overall_label_by_estimator.get("ols").unwrap(),
         "Overall F"

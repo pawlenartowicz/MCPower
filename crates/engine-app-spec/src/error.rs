@@ -84,7 +84,9 @@ pub enum AdapterError {
     /// Declared var_type class conflicts with the column's auto-detected class.
     /// Authoritative guard for both the App and WASM — prevents a meaningless
     /// ColumnId-keyed kernel error from reaching the user.
-    #[error("Column '{name}' was detected as {detected} from your uploaded data; it can't be modeled as {declared}. Uploaded columns take their type from the data.")]
+    #[error(
+        "Column '{name}' was detected as {detected} from your uploaded data; it can't be modeled as {declared}. Uploaded columns take their type from the data."
+    )]
     UploadClassConflict {
         name: String,
         detected: String,

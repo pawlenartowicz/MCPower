@@ -88,7 +88,7 @@ expression: "parse(&power_at_n_spec(&multi_scenario(), &opts))"
         "y": {
           "field": "target",
           "scale": {
-            "paddingInner": 0.18181818181818185,
+            "paddingInner": 0.18181818181818182,
             "paddingOuter": 0
           },
           "sort": null,

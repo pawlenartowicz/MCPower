@@ -196,16 +196,6 @@
   resolved
 }
 
-# upload_data_utils.py value_to_label: integer-valued numeric → string without
-# decimal ("6" not "6.0"); otherwise as.character.
-.value_to_label <- function(v) {
-  if (is.numeric(v) && !is.na(v) && v == as.integer(v)) {
-    as.character(as.integer(v))
-  } else {
-    as.character(v)
-  }
-}
-
 # RVariableRegistry — mirror of variables.py VariableRegistry
 # ---------------------------------------------------------------------------
 
@@ -342,7 +332,7 @@ RVariableRegistry <- R6::R6Class(
     # variables.py get_predictor
     get_predictor = function(name) private$predictors[[name]],
 
-    # variables.py get_effect
+    # effect lookup by name
     get_effect = function(name) private$effects[[name]],
 
     # variables.py set_variable_type
@@ -419,9 +409,12 @@ RVariableRegistry <- R6::R6Class(
         if (!has_factor) new_effects[[name]] <- eff
       }
 
-      # Create dummies + main effects per factor.
+      # Create dummies per factor; main effects only for a factor that has a
+      # main term in the formula (one seen only inside interactions keeps its
+      # dummy predictor columns for the interaction but gets no main effects).
       for (factor_name in names(self$`_factors`)) {
         factor_info <- self$`_factors`[[factor_name]]
+        has_main_term <- identical(original_effects[[factor_name]]$effect_type, "main")
         n_levels <- factor_info$n_levels
         level_labels <- factor_info$level_labels
         reference_level <- if (!is.null(factor_info$reference_level)) factor_info$reference_level else 1L
@@ -443,13 +436,15 @@ RVariableRegistry <- R6::R6Class(
           )
           new_predictors[[dummy_name]] <- dummy_pred
 
-          dummy_eff <- private$.effect(
-            name = dummy_name, effect_type = "main", var_names = list(dummy_name)
-          )
-          dummy_eff$column_index <- col_idx
-          dummy_eff$factor_source <- factor_name
-          dummy_eff$factor_level <- level
-          new_effects[[dummy_name]] <- dummy_eff
+          if (has_main_term) {
+            dummy_eff <- private$.effect(
+              name = dummy_name, effect_type = "main", var_names = list(dummy_name)
+            )
+            dummy_eff$column_index <- col_idx
+            dummy_eff$factor_source <- factor_name
+            dummy_eff$factor_level <- level
+            new_effects[[dummy_name]] <- dummy_eff
+          }
 
           private$factor_dummies[[dummy_name]] <- list(
             factor_name = factor_name, level = level
@@ -512,7 +507,7 @@ RVariableRegistry <- R6::R6Class(
       invisible(NULL)
     },
 
-    # variables.py get_effect_sizes — in effect order.
+    # Effect sizes as a numeric vector, in effect order.
     get_effect_sizes = function() {
       vapply(private$effects, function(e) e$effect_size, numeric(1), USE.NAMES = FALSE)
     },
@@ -686,7 +681,7 @@ RVariableRegistry <- R6::R6Class(
 
 
 # ---------------------------------------------------------------------------
-# model.py mirror — _scenario_dict (nested inner fn, model.py)
+# spec/spec_builder.py mirror: build_scenario_dict
 # ---------------------------------------------------------------------------
 
 # Mirror of model.py _encode_dist_list. Code table from `.dist_codes()` (zzz.R).
@@ -726,7 +721,7 @@ RVariableRegistry <- R6::R6Class(
   out
 }
 
-# Mirror of model.py _scenario_dict. `scenario_configs` defaults to
+# Mirror of spec/spec_builder.py build_scenario_dict. `scenario_configs` defaults to
 # `.scenario_defaults()`; callers may pass merged per-model configs.
 # Integer code lists are wrapped in I() so length-1 lists still serialize as
 # JSON arrays under auto_unbox. The three RE knobs (random_effect_dist/df,
@@ -781,7 +776,7 @@ RVariableRegistry <- R6::R6Class(
 
 
 # ---------------------------------------------------------------------------
-# model.py mirror — _resolve_tests (model.py)
+# spec/test_selector.py mirror: resolve_tests
 # ---------------------------------------------------------------------------
 # Parses a target_test DSL string into list(targets, contrast_pairs,
 # report_overall). Mirrors the Python tokenizer/keyword-expansion/validation.
@@ -1216,7 +1211,8 @@ RVariableRegistry <- R6::R6Class(
 # values matching `_engine.build_contract_from_spec`'s signature; clusters_json
 # is a JSON string serialized with jsonlite to match Python's json.dumps.
 .encode_outcome_and_clusters <- function(family, link, estimator, intercept,
-                                         pending_clusters) {
+                                         pending_clusters,
+                                         nested_vars = character(0)) {
   # outcome_kind from family: logit/probit -> binary, poisson -> count, else
   # continuous. link is "canonical" | "probit" (probit sets the non-canonical
   # binary link). Mirrors Python model.py _encode_outcome_and_clusters.
@@ -1289,9 +1285,12 @@ RVariableRegistry <- R6::R6Class(
           gtau_raw <- if (gdenom > 0) gicc / gdenom else 0.0
           gtau     <- gtau_raw * tau_factor
         }
-        # Relation: NestedWithin when n_per_parent supplied, Crossed otherwise.
-        if (!is.null(gcfg$n_per_parent)) {
-          relation <- list(NestedWithin = list(n_per_parent = as.integer(gcfg$n_per_parent)))
+        # Relation: NestedWithin for a parsed nested child (or when n_per_parent
+        # is supplied; the config default fills a missing count), Crossed
+        # otherwise.
+        if (!is.null(gcfg$n_per_parent) || gv %in% nested_vars) {
+          npp <- gcfg$n_per_parent %||% .sim_defaults()$nested_n_per_parent
+          relation <- list(NestedWithin = list(n_per_parent = as.integer(npp)))
         } else {
           gn <- gcfg$n_clusters
           if (is.null(gn)) stop(sprintf(

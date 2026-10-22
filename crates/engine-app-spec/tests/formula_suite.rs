@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use engine_app_spec::{parse_formula, FormulaParse, RandomEffectJson, TermJson};
+use engine_app_spec::{FormulaParse, RandomEffectJson, TermJson, parse_formula};
 use serde::Deserialize;
 
 #[derive(Deserialize)]

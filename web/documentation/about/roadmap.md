@@ -67,7 +67,9 @@ Real candidates, but with an open question that has to clear before they ship:
   degrees-of-freedom correction (`df_method="between_within"`) already
   shipped and is the default; on linear mixed models it matched lmerTest
   Satterthwaite in the [[validation/validation_df_calibration|calibration]],
-  on logit GLMMs with 5–10 clusters it still over-rejects.
+  on logit GLMMs with 5–10 clusters it still over-rejects. Linear mixed
+  models with a crossed or nested extra grouping already use Satterthwaite df
+  under `"between_within"`; single-grouping designs and GLMMs do not.
 
 ## Deliberately out of scope
 

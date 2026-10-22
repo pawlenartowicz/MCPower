@@ -19,9 +19,8 @@
     "alpha": 0.05,
     "correction": "none",
     "targets": ["overall"],
-    "heterogeneity": 0.0,
     "heteroskedasticity": {},
-    "residual": { "distribution": "normal", "df": 0.0 },
+    "residual": { "distribution": "normal" },
     "max_failed_fraction": 0.1,
     "scenarios": []
   },

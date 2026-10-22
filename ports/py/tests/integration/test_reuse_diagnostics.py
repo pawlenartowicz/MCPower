@@ -6,7 +6,7 @@ def test_reuse_fraction_closed_form():
 
     assert abs(_reuse_fraction(1000, 1000) - 26.0) < 1.0
     assert abs(_reuse_fraction(1000, 2000) - 59.0) < 1.0
-    assert _reuse_fraction(1000, 999) >= 0.0
+    assert abs(_reuse_fraction(1000, 999) - 26.39) < 0.005
 
 
 def test_reuse_fraction_edge_cases():

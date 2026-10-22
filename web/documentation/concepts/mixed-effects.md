@@ -250,8 +250,9 @@ mixed model (LME or clustered GLMM): `"between_within"` (default) tests
 against a *t* with between-within denominator degrees of freedom — a
 predictor declared cluster-level (via `set_cluster`'s cluster-level-variables
 argument) gets the between-cluster df, others get the within-cluster df;
-`"asymptotic"` tests against a Wald z. It falls back to Wald z with a crossed
-or nested extra grouping, and has no effect on OLS or unclustered GLM. See
+`"asymptotic"` tests against a Wald z. With a crossed or nested extra
+grouping, `"between_within"` uses Satterthwaite degrees of freedom for an LME
+and the Wald z for a GLMM. It has no effect on OLS or unclustered GLM. See
 [[concepts/simulation-settings#denominator-degrees-of-freedom|Denominator
 degrees of freedom]] for the full explanation.
 

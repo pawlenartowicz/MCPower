@@ -27,8 +27,8 @@ mod spec_builder_bridge;
 
 use crate::errors::engine_err_to_py;
 use crate::orchestrator_bridge::{
-    decode_contracts, power_result_to_pydict, sample_size_result_to_pydict,
-    OrchestratorProgressSink,
+    OrchestratorProgressSink, decode_contracts, power_result_to_pydict,
+    sample_size_result_to_pydict,
 };
 
 /// Configure the rayon thread pool. Must be called *before* any engine
