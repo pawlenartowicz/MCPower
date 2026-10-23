@@ -59,12 +59,13 @@ pub(crate) fn snap_single_n(
 }
 
 /// Pre-run advisory warnings for factor levels too sparse at `n`. Exact under
-/// fixed allocation (the deterministic walk run via
-/// engine_core::fixed_allocation_counts). Fixed-allocation designs only —
-/// under sampled allocation level counts are stochastic, so preflight is
-/// skipped and the post-run per-factor counters carry the signal. Factors are
-/// identified by 1-based spec index — the engine is label-free;
-/// named diagnostics come from the per-factor counters rendered port-side.
+/// fixed allocation: engine_core::fixed_allocation_counts replays the
+/// generator's deterministic walk, so every simulation realizes these counts.
+/// Sampled factors have stochastic level counts and get no preflight
+/// (fixed_allocation_counts reports None for them); the post-run per-factor
+/// counters carry the signal. Factors are identified by 1-based spec index —
+/// the engine is label-free; named diagnostics come from the per-factor
+/// counters rendered port-side.
 pub(crate) fn factor_preflight_warnings(spec: &SimulationSpec, n: usize) -> Vec<String> {
     let k_min = spec.factor_min_level_count;
     if k_min == 0 {
@@ -76,26 +77,12 @@ pub(crate) fn factor_preflight_warnings(spec: &SimulationSpec, n: usize) -> Vec<
     if !spec.upload_data.is_empty() {
         return Vec::new();
     }
-    let scenario_sampled = spec.scenario.sampled_factor_proportions;
     let mut out = Vec::new();
-    let mut off = 0usize;
-    for (f, &nl) in spec.factor_n_levels.iter().enumerate() {
-        let l = nl.max(0) as usize;
-        // Sampled factors have stochastic level counts; the deterministic
-        // fixed-allocation preflight does not describe them — skip (mirrors the
-        // per-factor resolution in data_gen.rs). None inherits the scenario default.
-        let sampled = spec
-            .factor_sampled
-            .get(f)
-            .copied()
-            .flatten()
-            .unwrap_or(scenario_sampled);
-        if sampled {
-            off += l;
-            continue;
-        }
-        let probs = &spec.factor_proportions[off..off + l];
-        let counts = engine_core::fixed_allocation_counts(probs, n);
+    for (f, counts) in engine_core::fixed_allocation_counts(spec, n)
+        .iter()
+        .enumerate()
+    {
+        let Some(counts) = counts else { continue };
         if let Some((lvl, &c)) = counts.iter().enumerate().min_by_key(|&(_, c)| *c) {
             if c < k_min {
                 out.push(format!(
@@ -111,7 +98,6 @@ pub(crate) fn factor_preflight_warnings(spec: &SimulationSpec, n: usize) -> Vec<
                 ));
             }
         }
-        off += l;
     }
     out
 }
@@ -131,43 +117,37 @@ pub(crate) fn factor_preflight_sample_size(spec: &SimulationSpec, grid: &[usize]
     if !spec.upload_data.is_empty() {
         return Vec::new(); // uploaded-data designs: see factor_preflight_warnings
     }
-    let scenario_sampled = spec.scenario.sampled_factor_proportions;
-    let mut out = Vec::new();
-    let mut off = 0usize;
-    for (f, &nl) in spec.factor_n_levels.iter().enumerate() {
-        let l = nl.max(0) as usize;
-        // Sampled factors have stochastic level counts; the deterministic
-        // fixed-allocation preflight does not describe them — skip (mirrors the
-        // per-factor resolution in data_gen.rs). None inherits the scenario default.
-        let sampled = spec
-            .factor_sampled
-            .get(f)
-            .copied()
-            .flatten()
-            .unwrap_or(scenario_sampled);
-        if sampled {
-            off += l;
-            continue;
-        }
-        let probs = &spec.factor_proportions[off..off + l];
-        let counts = engine_core::fixed_allocation_counts(probs, lo);
-        if counts.iter().any(|&c| c < k_min) {
-            match engine_core::min_inclusion_n(probs, k_min, hi) {
-                Some(n_inc) => out.push(format!(
-                    "factor {}: levels reach the {}-observation minimum only at N >= {}; \
-                     grid points below that exclude the factor and report power 0 for its effects",
-                    f + 1, k_min, n_inc
-                )),
-                None => out.push(format!(
-                    "factor {}: a level stays under the {}-observation minimum across the whole \
-                     [{}, {}] range; the factor is excluded everywhere and its effects report power 0",
-                    f + 1, k_min, lo, hi
-                )),
-            }
-        }
-        off += l;
+    let at_lo = engine_core::fixed_allocation_counts(spec, lo);
+    let sparse: Vec<usize> = at_lo
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.as_ref().is_some_and(|c| c.iter().any(|&x| x < k_min)))
+        .map(|(f, _)| f)
+        .collect();
+    if sparse.is_empty() {
+        return Vec::new();
     }
-    out
+    let inclusion = engine_core::min_inclusion_n(spec, k_min, hi);
+    sparse
+        .into_iter()
+        .map(|f| match inclusion[f] {
+            Some(n_inc) => format!(
+                "factor {}: levels reach the {}-observation minimum only at N >= {}; \
+                 grid points below that exclude the factor and report power 0 for its effects",
+                f + 1,
+                k_min,
+                n_inc
+            ),
+            None => format!(
+                "factor {}: a level stays under the {}-observation minimum across the whole \
+                 [{}, {}] range; the factor is excluded everywhere and its effects report power 0",
+                f + 1,
+                k_min,
+                lo,
+                hi
+            ),
+        })
+        .collect()
 }
 
 /// Adapter wrapping the orchestrator's outer sink + cancellation token into

@@ -64,10 +64,32 @@ pub struct SimWorkspace {
     /// f32 scratch column for the batched t/χ² residual accumulator draws
     /// (`max_n`). Stage-2 residual pass only.
     pub resid_g: Vec<f32>,
-    /// Fixed-allocation running counts, one slot per factor level
-    /// (`factor_proportions` layout). Reset per sim by `generate_sim_data`;
-    /// sized lazily there so the constructor signature stays unchanged.
+    /// Fixed-allocation walk counts, one slot per crossed cell: the
+    /// row-level cells, then the cluster-level cells. Scratch for building
+    /// the cached sequences below; sized lazily.
     pub factor_alloc_counts: Vec<u32>,
+    /// Crossed-cell weights in the `factor_alloc_counts` layout (product of
+    /// the cell's level proportions). Filled per sim by `generate_sim_data`.
+    pub factor_cell_weights: Vec<f64>,
+    /// Level counts of the row-level fixed factors, a 0 separator, then those
+    /// of the cluster-level fixed factors (`fixed_cell_weights`). Filled per
+    /// sim with the weights.
+    pub factor_cell_radices: Vec<u32>,
+    /// Cached row-level cell of every row (`fixed_cell_sequences`). The
+    /// fixed-allocation walk is identical in every sim of one design, so
+    /// `generate_sim_data` builds it once and rebuilds only when the cache
+    /// key (the three `factor_seq_*` fields) changes.
+    pub factor_row_seq: Vec<u32>,
+    /// Cached cluster-level cell of every cluster step, clusters in
+    /// representative-row order; same cache key as `factor_row_seq`.
+    pub factor_cluster_seq: Vec<u32>,
+    /// Cache key: the cell weights the sequences were built from.
+    pub factor_seq_weights: Vec<f64>,
+    /// Cache key: the radices the sequences were built from (they also fix
+    /// the row/cluster cell split).
+    pub factor_seq_radices: Vec<u32>,
+    /// Cache key: the max_n the sequences were built for.
+    pub factor_seq_n: usize,
     /// Running per-level counts for the current row prefix, factor_proportions
     /// layout. Reset per sim in run_one_sim; grown incrementally with the grid.
     pub factor_prefix_counts: Vec<u32>,
@@ -333,6 +355,13 @@ impl SimWorkspace {
             gen_tail_idx: Vec::with_capacity(max_n),
             resid_g: vec![0.0f32; max_n],
             factor_alloc_counts: Vec::new(),
+            factor_cell_weights: Vec::new(),
+            factor_row_seq: Vec::new(),
+            factor_cluster_seq: Vec::new(),
+            factor_cell_radices: Vec::new(),
+            factor_seq_weights: Vec::new(),
+            factor_seq_radices: Vec::new(),
+            factor_seq_n: usize::MAX,
             factor_prefix_counts: Vec::new(),
             factor_excluded_flags: Vec::new(),
             reduced_crit_cache: Vec::new(),

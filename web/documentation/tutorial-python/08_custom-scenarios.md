@@ -140,7 +140,7 @@ The available knobs are:
 | `residual_change_prob` | Probability that the residual distribution is swapped to a non-normal shape |
 | `residual_dists` | Pool of replacement residual shapes: `high_kurtosis` (Student t, df from `residual_df`), `right_skewed`, `left_skewed`, `normal`, `uniform` |
 | `residual_df` | Degrees of freedom for the replacement residual shapes (minimum 3) |
-| `sampled_factor_proportions` | Factor group sizes: exact requested proportions when `False` (the default), random per-observation assignment when `True` |
+| `sampled_factor_proportions` | Factor group sizes: fixed at the requested proportions (within one or two observations, the same in every simulation) when `False` (the default), random per-observation assignment when `True` |
 
 Knob names are validated up front: an unknown or misspelled key raises a
 `ValueError` listing the valid keys, and arming the residual swap with a

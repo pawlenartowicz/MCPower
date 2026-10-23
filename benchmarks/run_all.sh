@@ -49,8 +49,8 @@ run() {  # run <output> <cmd...>: skip only when <output> exists AT THE CURRENT 
 
 run results/py.json    "$PY" harness.py --case all --scale "$SCALE" --out results/py.json
 run results/py_1t.json "$PY" harness.py --case all --methods mcpower_find_power --threads 1 --scale "$SCALE" --out results/py_1t.json
-run results/r.json     Rscript harness.R --case all --scale "$SCALE" --out results/r.json
-run results/r_1t.json  Rscript harness.R --case all --methods mcpower_find_power --threads 1 --scale "$SCALE" --out results/r_1t.json
+run results/r.json     Rscript ../validation/agreement/harness.R --case all --scale "$SCALE" --out "$PWD/results/r.json"
+run results/r_1t.json  Rscript ../validation/agreement/harness.R --case all --methods mcpower_find_power --threads 1 --scale "$SCALE" --out "$PWD/results/r_1t.json"
 # Julia competitor tier (loops only — no engine, so no _1t twin). combine.py
 # auto-detects results/jl.json; the scale cache works via meta.n_sims_scale.
 run results/jl.json    julia --project=. -t auto harness.jl --case all --scale "$SCALE" --out results/jl.json
@@ -62,4 +62,4 @@ run results/jl.json    julia --project=. -t auto harness.jl --case all --scale "
 # Power-agreement cross-check (MCPower vs dedicated tools vs DIY loops) — printed
 # right after the timing results so a benchmark run reports both speed and the
 # statistical sanity check. Reads results/r.json (the only run carrying tools).
-"$PY" power_agreement.py
+"$PY" ../validation/agreement/power_agreement.py --in results/r.json

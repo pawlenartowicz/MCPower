@@ -1,0 +1,9 @@
+"model_class","check","n_cells","max_abs_diff"
+"OLS","coefficients_and_statistics",15,2.39808173319034e-14
+"OLS","critical_value",15,1.16795462190566e-13
+"GLM","coefficients_and_statistics",16,0.000383397838811916
+"GLM","critical_value",16,1.58014135109852e-09
+"LMM","coefficients_and_statistics",19,7.86512636832271e-05
+"LMM","critical_value",8,2.26263452418607e-13
+"GLMM","coefficients_and_statistics",6,0.120086768396465
+"GLMM","critical_value",0,NA

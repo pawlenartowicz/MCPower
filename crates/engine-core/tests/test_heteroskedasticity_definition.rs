@@ -254,3 +254,159 @@ fn row_stable_under_het() {
         assert_eq!(ws_big.y_full[i], ws_small.y_full[i], "y diverges at {i}");
     }
 }
+
+/// Generates one sim of `n` rows and checks the analytic driver moments in
+/// `spec.het_coeffs` against the sample moments of what the generator wrote:
+/// `lp_clean = Σⱼ βⱼ·xᵢⱼ` over every `x_full` column (interactions included)
+/// for `lp_pop_mean`/`lp_pop_std`, and each column for `col_mean`/`col_std`.
+/// Tolerance is 5 Monte-Carlo SEs: SE(mean) = s/√n and
+/// SE(sd) = s·√((m₄/s⁴ − 1)/(4n)), both from the sample, plus a 1e-9 floor
+/// for the constant intercept column.
+fn assert_driver_moments_match_generated(spec: &SimulationSpec, n: usize, label: &str) {
+    let n_nf = spec.n_non_factor as usize;
+    let p = 1 + n_nf + spec.n_factor_dummies as usize + spec.interactions.len();
+    let mut ws = SimWorkspace::new(n, p, n_nf, spec.factor_n_levels.len(), None);
+    generate_sim_data(spec, 0, 2137, &mut ws).unwrap();
+
+    let check = |values: &[f64], mean: f64, sd: f64, what: &str| {
+        let nf = values.len() as f64;
+        let m = values.iter().sum::<f64>() / nf;
+        let m2 = values.iter().map(|v| (v - m).powi(2)).sum::<f64>() / nf;
+        let m4 = values.iter().map(|v| (v - m).powi(4)).sum::<f64>() / nf;
+        let s = m2.sqrt();
+        let se_mean = s / nf.sqrt();
+        let se_sd = if m2 > 0.0 {
+            s * ((m4 / (m2 * m2) - 1.0).max(0.0) / (4.0 * nf)).sqrt()
+        } else {
+            0.0
+        };
+        assert!(
+            (m - mean).abs() <= 5.0 * se_mean + 1e-9,
+            "{label} {what}: analytic mean {mean}, sample mean {m} (SE {se_mean})"
+        );
+        assert!(
+            (s - sd).abs() <= 5.0 * se_sd + 1e-9,
+            "{label} {what}: analytic sd {sd}, sample sd {s} (SE {se_sd})"
+        );
+    };
+
+    let lp: Vec<f64> = (0..n)
+        .map(|i| {
+            (0..p)
+                .map(|j| ws.x_full[(i, j)] as f64 * spec.effect_sizes[j])
+                .sum()
+        })
+        .collect();
+    check(
+        &lp,
+        spec.het_coeffs.lp_pop_mean,
+        spec.het_coeffs.lp_pop_std,
+        "lp",
+    );
+    assert_eq!(spec.het_coeffs.col_mean.len(), p, "{label}: col_mean width");
+    assert_eq!(spec.het_coeffs.col_std.len(), p, "{label}: col_std width");
+    for j in 0..p {
+        let col: Vec<f64> = (0..n).map(|i| ws.x_full[(i, j)] as f64).collect();
+        check(
+            &col,
+            spec.het_coeffs.col_mean[j],
+            spec.het_coeffs.col_std[j],
+            &format!("column {j}"),
+        );
+    }
+}
+
+#[test]
+fn driver_moments_cover_correlated_gaussian_interactions() {
+    // x1, x2, x3 standard normal with r12 = 0.5, r13 = 0.3, r23 = −0.2 and the
+    // terms x1:x2, x2:x3, x1:x2:x3. E[x1·x2] = r12 ≠ 0 moves lp_pop_mean, and
+    // the 3-way column covaries with x1 (E[x1²x2x3] = r23 + 2·r12·r13).
+    let mut s = SimulationSpec {
+        n_non_factor: 3,
+        correlation: vec![1.0, 0.5, 0.3, 0.5, 1.0, -0.2, 0.3, -0.2, 1.0],
+        var_types: vec![Distribution::Normal; 3],
+        var_params: vec![0.0; 3],
+        interactions: vec![vec![1, 2], vec![2, 3], vec![1, 2, 3]],
+        effect_sizes: vec![0.1, 0.25, 0.25, -0.2, 0.22, 0.15, 0.1],
+        target_indices: vec![1, 2, 3, 4, 5, 6],
+        scenario: ScenarioPerturbations {
+            heteroskedasticity_ratio: 2.0,
+            ..ScenarioPerturbations::optimistic()
+        },
+        ..common::base_spec()
+    };
+    s.het_coeffs = s.compute_het_coeffs();
+    assert_driver_moments_match_generated(&s, 400_000, "correlated gaussian");
+}
+
+#[test]
+fn driver_moments_cover_binary_by_continuous_interactions() {
+    // `y ~ treatment + stress * sleep` plus treatment:stress, with treatment
+    // binary (p = 0.3) and every column uncorrelated.
+    let mut s = SimulationSpec {
+        n_non_factor: 3,
+        correlation: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        var_types: vec![
+            Distribution::Binary,
+            Distribution::Normal,
+            Distribution::Normal,
+        ],
+        var_params: vec![0.3, 0.0, 0.0],
+        interactions: vec![vec![2, 3], vec![1, 2]],
+        effect_sizes: vec![0.0, 0.5, 0.25, 0.25, 0.22, 0.3],
+        target_indices: vec![1, 2, 3, 4, 5],
+        scenario: ScenarioPerturbations {
+            heteroskedasticity_ratio: 2.0,
+            ..ScenarioPerturbations::optimistic()
+        },
+        ..common::base_spec()
+    };
+    s.het_coeffs = s.compute_het_coeffs();
+    assert_driver_moments_match_generated(&s, 400_000, "binary x continuous");
+}
+
+#[test]
+fn driver_moments_cover_factor_by_continuous_interactions() {
+    // One standard-normal x1 and a 3-level factor (0.5/0.3/0.2) with both
+    // dummies interacted with x1: [1, x1, d1, d2, d1:x1, d2:x1]. The two
+    // dummies of one factor are never 1 together, so Cov(d1, d2) = −p₁p₂.
+    let mut s = SimulationSpec {
+        n_non_factor: 1,
+        n_factor_dummies: 2,
+        factor_n_levels: vec![3],
+        factor_proportions: vec![0.5, 0.3, 0.2],
+        interactions: vec![vec![2, 1], vec![3, 1]],
+        effect_sizes: vec![0.0, 0.25, 0.5, 0.8, 0.3, -0.4],
+        target_indices: vec![1, 2, 3, 4, 5],
+        scenario: ScenarioPerturbations {
+            heteroskedasticity_ratio: 2.0,
+            ..ScenarioPerturbations::optimistic()
+        },
+        ..common::base_spec()
+    };
+    s.het_coeffs = s.compute_het_coeffs();
+    assert_driver_moments_match_generated(&s, 400_000, "factor x continuous");
+}
+
+#[test]
+fn driver_moments_cover_uploaded_binary_interaction() {
+    // NORTA-mode uploaded binary (p = 0.4) is the same 0/1 threshold marginal
+    // as `Binary`, so its moments are mean p, SD sqrt(p(1 − p)), not 0/1.
+    // Columns: [1, u, x, u:x], uncorrelated.
+    let mut s = SimulationSpec {
+        n_non_factor: 2,
+        correlation: vec![1.0, 0.0, 0.0, 1.0],
+        var_types: vec![Distribution::UploadedBinary, Distribution::Normal],
+        var_params: vec![0.4, 0.0],
+        interactions: vec![vec![1, 2]],
+        effect_sizes: vec![0.0, 0.5, 0.25, 0.3],
+        target_indices: vec![1, 2, 3],
+        scenario: ScenarioPerturbations {
+            heteroskedasticity_ratio: 2.0,
+            ..ScenarioPerturbations::optimistic()
+        },
+        ..common::base_spec()
+    };
+    s.het_coeffs = s.compute_het_coeffs();
+    assert_driver_moments_match_generated(&s, 400_000, "uploaded binary x continuous");
+}

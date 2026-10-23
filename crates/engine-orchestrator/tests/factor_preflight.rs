@@ -141,6 +141,7 @@ fn preflight_sample_size_names_min_inclusion_n() {
     // [0.9, 0.1] grid [20, 200]: level 1 is sparse at low N.
     // min_inclusion_n should return the first N where both levels clear 5 obs.
     let c = factor_contract([0.9, 0.1]);
+    let spec = engine_core::contract_adapter::contract_to_simulation_spec(&c).unwrap();
     let cancel = CancellationToken::new();
     let res = find_sample_size(
         &[c],
@@ -160,7 +161,7 @@ fn preflight_sample_size_names_min_inclusion_n() {
     let (_, ss) = &res.scenarios[0];
     // The warning must name the exact value min_inclusion_n computes for these
     // proportions within the grid ceiling — not just any "N >= " phrasing.
-    let n_inc = engine_core::min_inclusion_n(&[0.9, 0.1], 5, 200).unwrap();
+    let n_inc = engine_core::min_inclusion_n(&spec, 5, 200)[0].unwrap();
     let needle = format!("N >= {n_inc}");
     assert!(
         ss.grid_warnings.iter().any(|w| w.contains(&needle)),

@@ -700,13 +700,16 @@ check_extras_golden <- function(case) {
     if (xfail) abs(abs(a) - abs(b)) <= MLMM_TOL$xfail_backstop$z_abs
     else abs(abs(a) - abs(b)) <= MLMM_TOL$stat_abs_floor ||
          abs(abs(a) - abs(b)) <= SOLVING_TOL$estimate_rel_iter * max(abs(a), abs(b))
+  beta_diff <- stat_diff <- numeric(0)   # absolute golden-vs-MCPower gaps, read by l3_maxima.R
   for (j in seq_along(fit$betas)) {
     a <- golden$beta[j]; b <- fit$betas[j]
+    beta_diff <- c(beta_diff, abs(a - b))
     if (!beta_ok(a, b)) fails <- c(fails, sprintf("beta[%d] %.8f vs %.8f", j, a, b))
   }
   for (t in fit$targets) {
     # z comparison: golden$z is signed (R lmer "t value" / glmer "z value"); align signs.
     a <- golden$z[t$target_index + 1L]; b <- t$statistic * sign(t$beta)
+    stat_diff <- c(stat_diff, abs(abs(a) - abs(b)))
     if (!stat_ok(a, b)) fails <- c(fails, sprintf("z[%d] %.6f vs %.6f", t$target_index + 1L, a, b))
   }
   # Variance components: logit (GLMM) is documented XFAIL — use the backstop vc_abs (0.1);
@@ -731,7 +734,8 @@ check_extras_golden <- function(case) {
     if (!(abs(a - b) <= SOLVING_TOL$vc_abs || abs(a - b) <= SOLVING_TOL$vc_rel * max(abs(a), abs(b))))
       fails <- c(fails, sprintf("sigma2 %.8f vs %.8f", a, b))
   }
-  list(label = case$label, ok = length(fails) == 0, fails = fails)
+  list(label = case$label, ok = length(fails) == 0, fails = fails,
+       beta_diff = beta_diff, stat_diff = stat_diff)
 }
 
 # ==============================================================================

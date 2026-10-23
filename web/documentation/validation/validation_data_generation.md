@@ -70,10 +70,11 @@ square root of the number of draws). For OLS and mixed-effects models,
 the ~103 per-coefficient z-scores are pooled across all cases and the
 **false-discovery rate** is controlled via Benjamini-Hochberg at q =
 0.001 (a fixed per-coefficient z-threshold below ~4 would abort nearly
-every clean render on sampling noise alone). For logistic regression we
-use an **absolute band** instead (\|mean − true\| ≤ 0.02), because
-logistic MLE’s finite-sample bias swamps the z-score at this K — see
-below.
+every clean render on sampling noise alone). For the maximum-likelihood
+families (logistic, probit, Poisson) we use an **absolute band** instead
+— logistic/probit within 0.02, Poisson within 0.005 — because their
+finite-sample bias is systematic and swamps the z-score at this K (see
+below).
 
 **3. File reproduces.** The dataset saved to disk for each formula is
 regenerated from its random seed, and its content fingerprint (a SHA-256
@@ -93,7 +94,8 @@ saved file would be meaningless.
 | intra-cluster correlation (ICC), conditional | the value you set | within 0.01 |
 | observed (marginal) ICC vs predicted | τ²/(τ²+σ²+Var(Xβ)) | within 0.01 |
 | **coefficient recovery (OLS/LME)** | the true coefficient | pooled BH-FDR ≤ **0.001** across all cases |
-| **coefficient recovery (logit)** | the true coefficient | absolute difference within **0.02** |
+| **coefficient recovery (logit / probit)** | the true coefficient | absolute difference within **0.02** |
+| **coefficient recovery (Poisson)** | the true coefficient | absolute difference within **0.005** |
 
 The data-check tolerances are tight because they apply to the *average
 over all draws*, not to a single dataset — averaging thousands of draws
@@ -148,6 +150,14 @@ follows.
 | `y ~ x1 + g` | `x1=0.8, g[2]=0.5, g[3]=0.8` | 1000 | all OK | all OK | yes |
 | `y ~ x1*x2` | `x1=0.5, x2=0.3, x1:x2=0.3` | 1000 | all OK | all OK | yes |
 | `y ~ x1*x2` | `x1=0.8, x2=0.5, x1:x2=0.4` | 1000 | all OK | all OK | yes |
+| `y ~ x1` | `x1=0.5` | 600 | all OK | all OK | yes |
+| `y ~ x1` | `x1=0.8` | 600 | all OK | all OK | yes |
+| `y ~ x1 + x2` | `x1=0.5, x2=0.3` | 800 | all OK | all OK | yes |
+| `y ~ x1 + g` | `x1=0.5, g[2]=0.4, g[3]=0.8` | 1000 | all OK | all OK | yes |
+| `y ~ x1` | `x1=0.5` | 600 | all OK | all OK | yes |
+| `y ~ x1` | `x1=0.3` | 600 | all OK | all OK | yes |
+| `y ~ x1 + x2` | `x1=0.4, x2=0.2` | 800 | all OK | all OK | yes |
+| `y ~ x1 + g` | `x1=0.4, g[2]=0.3, g[3]=0.5` | 1000 | all OK | all OK | yes |
 | `y ~ x1 + (1&#124;grp)` | `x1=0.5` | 600 | all OK | all OK | yes |
 | `y ~ x1 + (1&#124;grp)` | `x1=0.3` | 600 | all OK | all OK | yes |
 | `y ~ x1 + x2 + (1&#124;grp)` | `x1=0.5, x2=0.3` | 750 | all OK | all OK | yes |
@@ -157,7 +167,7 @@ follows.
 | `y ~ x1 + g + (1&#124;grp)` | `x1=0.30, g[2]=0.30` | 750 | all OK | all OK | yes |
 | `y ~ x1 + g + (1&#124;grp)` | `x1=0.40, g[2]=0.50, g[3]=0.80` | 900 | all OK | all OK | yes |
 
-> **All 31 formulas pass all three checks.** The generated data matches
+> **All 39 formulas pass all three checks.** The generated data matches
 > the requested statistics, an independent R model recovers every true
 > coefficient, and every saved dataset reproduces from its seed.
 
@@ -767,10 +777,10 @@ generated dataset; the average estimate should land on the true value:
 
 | Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
 |:---|---:|---:|---:|---:|:---|
-| intercept | 0.0 | 0.0000 | 0.0619 | 0.0222 | OK |
-| g1\[2\] | 0.5 | 0.5025 | 0.0888 | 1.1111 | OK |
-| g2\[2\] | 0.4 | 0.3992 | 0.0992 | -0.3184 | OK |
-| g1\[2\]:g2\[2\] | 0.3 | 0.3030 | 0.1451 | 0.8201 | OK |
+| intercept | 0.0 | 0.0015 | 0.0636 | 0.9304 | OK |
+| g1\[2\] | 0.5 | 0.4997 | 0.0922 | -0.1193 | OK |
+| g2\[2\] | 0.4 | 0.3956 | 0.1026 | -1.7150 | OK |
+| g1\[2\]:g2\[2\] | 0.3 | 0.3098 | 0.1484 | 2.6493 | OK |
 
 Every coefficient is centred on its true value — the formula holds in
 the generated data.
@@ -800,17 +810,17 @@ draws, vs. what was requested:
 
 | What we check  | Requested | Average over draws | Allowed difference | Result |
 |:---------------|----------:|-------------------:|:-------------------|:-------|
-| noise variance |         1 |             1.0007 | within 1%          | OK     |
+| noise variance |         1 |             1.0008 | within 1%          | OK     |
 
 **Coefficient recovery** — an independent R model fitted to each
 generated dataset; the average estimate should land on the true value:
 
 | Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
 |:---|---:|---:|---:|---:|:---|
-| intercept | 0.0 | -0.0005 | 0.0701 | -0.2752 | OK |
-| g1\[2\] | 0.2 | 0.2026 | 0.0968 | 1.0546 | OK |
-| g2\[2\] | 0.8 | 0.8004 | 0.0988 | 0.1608 | OK |
-| g1\[2\]:g2\[2\] | 0.5 | 0.5028 | 0.1490 | 0.7572 | OK |
+| intercept | 0.0 | 0.0006 | 0.0662 | 0.3615 | OK |
+| g1\[2\] | 0.2 | 0.2036 | 0.0939 | 1.5282 | OK |
+| g2\[2\] | 0.8 | 0.7980 | 0.0965 | -0.8119 | OK |
+| g1\[2\]:g2\[2\] | 0.5 | 0.5001 | 0.1400 | 0.0331 | OK |
 
 Every coefficient is centred on its true value — the formula holds in
 the generated data.
@@ -1169,6 +1179,284 @@ the generated data.
 alt="Recovered coefficients for y ~ x1*x2 over 1600 datasets." />
 <figcaption aria-hidden="true">Recovered coefficients for y ~ x1*x2 over
 1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.5·x1 + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check        | Requested | Average over draws | Allowed difference | Result |
+|:---------------------|----------:|-------------------:|:-------------------|:-------|
+| average of x1        |         0 |             0.0002 | within 0.01        | OK     |
+| std. deviation of x1 |         1 |             0.9998 | within 0.01        | OK     |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | -0.5244 | -0.5294 | 0.0576 | -3.5023 | OK |
+| x1 | 0.5000 | 0.5062 | 0.0621 | 3.9734 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data.
+
+<figure>
+<img src="figures/probit_simple_a.png"
+alt="Recovered coefficients for y ~ x1 over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 over
+1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.8·x1 + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check        | Requested | Average over draws | Allowed difference | Result |
+|:---------------------|----------:|-------------------:|:-------------------|:-------|
+| average of x1        |         0 |             0.0002 | within 0.01        | OK     |
+| std. deviation of x1 |         1 |             0.9998 | within 0.01        | OK     |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | 0.0 | -0.0027 | 0.0556 | -1.9271 | OK |
+| x1 | 0.8 | 0.8087 | 0.0703 | 4.9671 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data.
+
+<figure>
+<img src="figures/probit_simple_b.png"
+alt="Recovered coefficients for y ~ x1 over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 over
+1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.5·x1 + 0.3·x2 + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check | Requested | Average over draws | Allowed difference | Result |
+|:---|---:|---:|:---|:---|
+| average of x1 | 0.0 | 0.0014 | within 0.01 | OK |
+| std. deviation of x1 | 1.0 | 1.0000 | within 0.01 | OK |
+| average of x2 | 0.0 | 0.0010 | within 0.01 | OK |
+| std. deviation of x2 | 1.0 | 0.9995 | within 0.01 | OK |
+| correlation of x1 and x2 | 0.2 | 0.2001 | within 0.01 | OK |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | -0.5244 | -0.5283 | 0.0510 | -3.0241 | OK |
+| x1 | 0.5000 | 0.5049 | 0.0558 | 3.5390 | OK |
+| x2 | 0.3000 | 0.3028 | 0.0512 | 2.1916 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data. Because `x1` and `x2` are correlated (0.20), their
+estimates vary more from draw to draw; that wider spread is the expected
+effect of collinearity, not a problem.
+
+<figure>
+<img src="figures/probit_two_a.png"
+alt="Recovered coefficients for y ~ x1 + x2 over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 + x2
+over 1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.5·x1 + 0.4·g\[2\] + 0.8·g\[3\] + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check         | Requested | Average over draws | Allowed difference | Result |
+|:----------------------|----------:|-------------------:|:-------------------|:-------|
+| average of x1         |       0.0 |             0.0014 | within 0.01        | OK     |
+| std. deviation of x1  |       1.0 |             0.9996 | within 0.01        | OK     |
+| proportion in level 0 |       0.5 |             0.5000 | within 0.01        | OK     |
+| proportion in level 1 |       0.3 |             0.3000 | within 0.01        | OK     |
+| proportion in level 2 |       0.2 |             0.2000 | within 0.01        | OK     |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | -0.5244 | -0.5267 | 0.0631 | -1.4895 | OK |
+| x1 | 0.5000 | 0.5032 | 0.0472 | 2.7144 | OK |
+| g\[2\] | 0.4000 | 0.3982 | 0.0986 | -0.7358 | OK |
+| g\[3\] | 0.8000 | 0.8019 | 0.1159 | 0.6422 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data.
+
+<figure>
+<img src="figures/probit_factor_a.png"
+alt="Recovered coefficients for y ~ x1 + g over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 + g
+over 1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.5·x1 + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check        | Requested | Average over draws | Allowed difference | Result |
+|:---------------------|----------:|-------------------:|:-------------------|:-------|
+| average of x1        |         0 |             0.0002 | within 0.01        | OK     |
+| std. deviation of x1 |         1 |             0.9998 | within 0.01        | OK     |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | 0.6931 | 0.6945 | 0.0297 | 1.7533 | OK |
+| x1 | 0.5000 | 0.4988 | 0.0269 | -1.7890 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data.
+
+<figure>
+<img src="figures/poisson_simple_a.png"
+alt="Recovered coefficients for y ~ x1 over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 over
+1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.3·x1 + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check        | Requested | Average over draws | Allowed difference | Result |
+|:---------------------|----------:|-------------------:|:-------------------|:-------|
+| average of x1        |         0 |             0.0002 | within 0.01        | OK     |
+| std. deviation of x1 |         1 |             0.9998 | within 0.01        | OK     |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | 1.6094 | 1.6103 | 0.0183 | 1.9055 | OK |
+| x1 | 0.3000 | 0.2992 | 0.0176 | -1.8565 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data.
+
+<figure>
+<img src="figures/poisson_simple_b.png"
+alt="Recovered coefficients for y ~ x1 over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 over
+1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.4·x1 + 0.2·x2 + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check | Requested | Average over draws | Allowed difference | Result |
+|:---|---:|---:|:---|:---|
+| average of x1 | 0.0 | 0.0014 | within 0.01 | OK |
+| std. deviation of x1 | 1.0 | 1.0000 | within 0.01 | OK |
+| average of x2 | 0.0 | 0.0010 | within 0.01 | OK |
+| std. deviation of x2 | 1.0 | 0.9995 | within 0.01 | OK |
+| correlation of x1 and x2 | 0.2 | 0.2001 | within 0.01 | OK |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | 0.6931 | 0.6934 | 0.0261 | 0.4613 | OK |
+| x1 | 0.4000 | 0.3994 | 0.0242 | -0.9726 | OK |
+| x2 | 0.2000 | 0.2002 | 0.0241 | 0.4051 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data. Because `x1` and `x2` are correlated (0.20), their
+estimates vary more from draw to draw; that wider spread is the expected
+effect of collinearity, not a problem.
+
+<figure>
+<img src="figures/poisson_two_a.png"
+alt="Recovered coefficients for y ~ x1 + x2 over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 + x2
+over 1600 datasets.</figcaption>
+</figure>
+
+*Each panel: the spread of one recovered coefficient across 1600
+generated datasets. Red line = the true value, blue dashed = the average
+estimate. File reproduces from seed: **yes**.*
+
+## y = 0.4·x1 + 0.3·g\[2\] + 0.5·g\[3\] + noise
+
+**Data checks** — statistics of the generated data, averaged over all
+draws, vs. what was requested:
+
+| What we check         | Requested | Average over draws | Allowed difference | Result |
+|:----------------------|----------:|-------------------:|:-------------------|:-------|
+| average of x1         |       0.0 |             0.0014 | within 0.01        | OK     |
+| std. deviation of x1  |       1.0 |             0.9996 | within 0.01        | OK     |
+| proportion in level 0 |       0.5 |             0.5000 | within 0.01        | OK     |
+| proportion in level 1 |       0.3 |             0.3000 | within 0.01        | OK     |
+| proportion in level 2 |       0.2 |             0.2000 | within 0.01        | OK     |
+
+**Coefficient recovery** — an independent R model fitted to each
+generated dataset; the average estimate should land on the true value:
+
+| Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
+|:---|---:|---:|---:|---:|:---|
+| intercept | 0.6931 | 0.6930 | 0.0318 | -0.1396 | OK |
+| x1 | 0.4000 | 0.3998 | 0.0199 | -0.4061 | OK |
+| g\[2\] | 0.3000 | 0.3006 | 0.0452 | 0.5372 | OK |
+| g\[3\] | 0.5000 | 0.5003 | 0.0486 | 0.2536 | OK |
+
+Every coefficient is centred on its true value — the formula holds in
+the generated data.
+
+<figure>
+<img src="figures/poisson_factor_a.png"
+alt="Recovered coefficients for y ~ x1 + g over 1600 datasets." />
+<figcaption aria-hidden="true">Recovered coefficients for y ~ x1 + g
+over 1600 datasets.</figcaption>
 </figure>
 
 *Each panel: the spread of one recovered coefficient across 1600
@@ -1643,14 +1931,14 @@ estimate. File reproduces from seed: **yes**.*
 
 | item | value |
 |:---|:---|
-| Report generated | 21 June 2026 |
+| Report generated | 23 October 2026 |
 | R version | R version 4.5.3 (2026-03-11) |
-| mcpower | 1.0.0 |
-| lme4 | 1.1.38 |
+| mcpower | 1.4.1 |
+| lme4 | 2.0.6 |
 | Draws per formula (ordinary / logistic) | 1,600 |
 | Draws per formula (mixed) | 800 |
-| Recovery threshold | OLS/LME: pooled BH-FDR ≤ 0.001 (Benjamini-Hochberg); logit: \|mean−true\| ≤ 0.02 (absolute) |
-| Formulas validated | 31 |
+| Recovery threshold | OLS/LME: pooled BH-FDR ≤ 0.001 (Benjamini-Hochberg); logit/probit: \|mean−true\| ≤ 0.02; Poisson: \|mean−true\| ≤ 0.005 (absolute) |
+| Formulas validated | 39 |
 
 The datasets are generated by `mcpower/validation/data_generation.r`
 from the formula catalogue in `mcpower/validation/formulas.R`; this

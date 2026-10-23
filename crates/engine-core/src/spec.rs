@@ -70,8 +70,9 @@ pub struct CritValues {
 /// scaler. Populated by `run_batch` from the full spec. `lp_pop_mean`/`lp_pop_std`
 /// are the linear-predictor moments (used when `driver == None`); `col_mean`/
 /// `col_std` are per-column moments in full-design layout
-/// (`[intercept, continuous.., factor_dummies..]`) used when `driver == Some(idx)`.
-/// Analytic (population) moments only — row-stable by construction.
+/// (`[intercept, continuous.., factor_dummies.., interactions..]`) used when
+/// `driver == Some(idx)`. Analytic (population) moments only — row-stable by
+/// construction. See `SimulationSpec::compute_het_coeffs` for the model.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct HeteroskedasticityCoeffs {
     /// Population mean of `lp = Σ βⱼ E[Xⱼ]`.
@@ -432,50 +433,66 @@ pub struct SimulationSpec {
 // ---------------------------------------------------------------------------
 
 impl SimulationSpec {
-    /// Precompute population mean and std of the linear predictor under the
-    /// spec's marginal assumptions. Used by the heteroskedasticity scaler
-    /// (Option H2: residual variance scales with standardised linear predictor magnitude).
+    /// Precompute the population moments of the heteroskedasticity driver: the
+    /// linear predictor `lp = Σⱼ βⱼ·xⱼ` over every `x_full` column (intercept,
+    /// continuous, factor dummies, interactions) and each column on its own.
+    /// Deterministic (no RNG), computed once per batch from the base spec.
     ///
-    /// Assumes: continuous non-factor columns are unit-variance zero-mean (true
-    /// for DIST_NORMAL / skewed / t3 / uniform / DIST_HIGH_KURTOSIS by data_gen
-    /// construction). DIST_BINARY columns use E = param, Var = param(1-param).
-    /// Factor dummies use proportion[d+1] as mean.
+    /// Column model, matching what `generate_sim_data` writes: continuous
+    /// columns are mean 0, variance 1, except `Binary`/`UploadedBinary` (0/1,
+    /// mean = param); factor dummies are 0/1 with mean = level proportion, and
+    /// two dummies of one factor are never 1 together; an interaction column is
+    /// the raw product of its components. Factors are independent of each other
+    /// and of the continuous block. Every mean and covariance reduces to a
+    /// product moment `E[∏ xₐ]`, which factorizes over those independent
+    /// blocks. Within the continuous block it is Isserlis' theorem over
+    /// `correlation` (`E[x_a x_b] = r_ab`, odd products 0,
+    /// `E[x_a x_b x_c x_d] = r_ab r_cd + r_ac r_bd + r_ad r_bc`), after
+    /// writing each binary as `μ + σ·g` with `g` a standard normal carrying the
+    /// binary's correlation entries (powers of a 0/1 column collapse first).
     ///
-    /// Caveat: binary columns in a correlated block have correlation matrix
-    /// entries in standardised space, not in raw-marginal space; the cross-
-    /// covariance approximation is exact only for the all-Gaussian case.
+    /// Exact: all-`Normal` continuous columns with any correlation; columns of
+    /// any synthetic marginal that are uncorrelated with the other components of a
+    /// product (only E[x] and E[x²] enter then); factor dummies.
+    /// Approximate: a binary or non-`Normal` column correlated with another
+    /// component (the latent correlation is used as if it held on the observed
+    /// scale); `UploadedData` columns in NORTA mode (the interpolated empirical
+    /// quantile does not keep variance exactly 1); jointly resampled upload
+    /// columns (bootstrap mode); cluster-level columns broadcast within
+    /// clusters (the broadcast breaks their row-wise correlation with
+    /// within-cluster columns); and the per-sim scenario
+    /// perturbations, which move the realized moments away from the base spec.
     pub fn compute_het_coeffs(&self) -> HeteroskedasticityCoeffs {
         let n_nf = self.n_non_factor as usize;
         let n_fd = self.n_factor_dummies as usize;
-        let p = 1 + n_nf + n_fd;
+        let n_main = 1 + n_nf + n_fd;
+        let p = n_main + self.interactions.len();
 
-        // Per-column means and variances of the *transformed* X.
-        // Layout: index 0 = intercept (mean 1, var 0), 1..=n_nf = continuous,
-        // then factor dummies.
-        let mut mu = vec![0.0_f64; p];
-        let mut sd = vec![0.0_f64; p];
-        mu[0] = 1.0; // intercept
-        sd[0] = 0.0;
-
+        // Main-column marginals. `factor_of[c]` is the factor owning dummy
+        // column c (usize::MAX for the intercept and continuous columns).
+        let mut mu = vec![0.0_f64; n_main];
+        let mut sd = vec![0.0_f64; n_main];
+        let mut binary = vec![false; n_main];
+        let mut factor_of = vec![usize::MAX; n_main];
+        mu[0] = 1.0;
         for j in 0..n_nf {
             let vt = self
                 .var_types
                 .get(j)
                 .copied()
                 .unwrap_or(Distribution::Normal);
-            if matches!(vt, Distribution::Binary) {
+            if matches!(vt, Distribution::Binary | Distribution::UploadedBinary) {
                 let pp = self.var_params.get(j).copied().unwrap_or(0.5);
                 mu[1 + j] = pp;
                 sd[1 + j] = (pp * (1.0 - pp)).max(0.0).sqrt();
+                binary[1 + j] = true;
             } else {
-                mu[1 + j] = 0.0;
                 sd[1 + j] = 1.0;
             }
         }
-
         let mut col = 1 + n_nf;
         let mut prop_off = 0usize;
-        for &nl in &self.factor_n_levels {
+        for (f, &nl) in self.factor_n_levels.iter().enumerate() {
             let n_levels = nl.max(0) as usize;
             for d in 0..n_levels.saturating_sub(1) {
                 let pp = self
@@ -485,45 +502,167 @@ impl SimulationSpec {
                     .unwrap_or(0.0);
                 mu[col + d] = pp;
                 sd[col + d] = (pp * (1.0 - pp)).max(0.0).sqrt();
+                factor_of[col + d] = f;
             }
             col += n_levels.saturating_sub(1);
             prop_off += n_levels;
         }
 
-        // lp_pop_mean = Σⱼ βⱼ·μⱼ
-        let mut lp_mean = 0.0;
-        for (j, &mu_j) in mu.iter().enumerate().take(p) {
-            let b = self.effect_sizes.get(j).copied().unwrap_or(0.0);
-            lp_mean += b * mu_j;
-        }
+        // Each x_full column as the multiset of main columns it multiplies.
+        let mut atoms: Vec<Vec<usize>> = Vec::with_capacity(p);
+        atoms.push(Vec::new());
+        atoms.extend((1..n_main).map(|c| vec![c]));
+        atoms.extend(
+            self.interactions
+                .iter()
+                .map(|comps| comps.iter().map(|&c| c as usize).collect()),
+        );
 
-        // lp_pop_var = β' Σ β.
-        let mut lp_var = 0.0;
-        for (j, &sd_j) in sd.iter().enumerate().take(p) {
-            let bj = self.effect_sizes.get(j).copied().unwrap_or(0.0);
-            lp_var += bj * bj * sd_j * sd_j;
+        let corr = |a: usize, b: usize| -> f64 {
+            if a == b {
+                1.0
+            } else {
+                self.correlation[(b - 1) * n_nf + (a - 1)]
+            }
+        };
+        // E[∏ x_c] over a multiset of main columns.
+        let product_moment = |cols: &mut Vec<usize>| -> f64 {
+            cols.sort_unstable();
+            let mut value = 1.0;
+            // Factor dummies: one factor contributes p_d if it shows a single
+            // distinct dummy d (any power), 0 if it shows two.
+            let mut gauss: Vec<usize> = Vec::new();
+            let mut bins: Vec<usize> = Vec::new();
+            let mut last_dummy: Option<usize> = None;
+            for &c in cols.iter() {
+                if c == 0 {
+                    continue;
+                }
+                if factor_of[c] != usize::MAX {
+                    // Sorted, and one factor's dummies are adjacent columns, so
+                    // only the previous dummy can share c's factor.
+                    if let Some(o) = last_dummy {
+                        if o == c {
+                            continue;
+                        }
+                        if factor_of[o] == factor_of[c] {
+                            return 0.0;
+                        }
+                    }
+                    last_dummy = Some(c);
+                    value *= mu[c];
+                } else if binary[c] {
+                    if bins.last() != Some(&c) {
+                        bins.push(c);
+                    }
+                } else {
+                    gauss.push(c);
+                }
+            }
+            // Binaries as μ + σ·g: sum over the subsets S of binaries that
+            // enter as σ·g, the rest as μ.
+            let mut cont = 0.0;
+            for mask in 0u64..(1u64 << bins.len()) {
+                let mut coef = 1.0;
+                let mut members = gauss.clone();
+                for (k, &b) in bins.iter().enumerate() {
+                    if mask & (1 << k) != 0 {
+                        coef *= sd[b];
+                        members.push(b);
+                    } else {
+                        coef *= mu[b];
+                    }
+                }
+                if coef != 0.0 {
+                    cont += coef * isserlis(&members, &corr);
+                }
+            }
+            value * cont
+        };
+
+        let col_mean: Vec<f64> = atoms
+            .iter()
+            .map(|a| product_moment(&mut a.clone()))
+            .collect();
+        let cov = |a: usize, b: usize| -> f64 {
+            let mut joint = atoms[a].clone();
+            joint.extend_from_slice(&atoms[b]);
+            product_moment(&mut joint) - col_mean[a] * col_mean[b]
+        };
+        // Main columns keep their closed-form marginal SD; interaction columns
+        // take theirs from the product moments.
+        let col_std: Vec<f64> = (0..p)
+            .map(|c| {
+                if c < n_main {
+                    sd[c]
+                } else {
+                    cov(c, c).max(0.0).sqrt()
+                }
+            })
+            .collect();
+
+        let beta = |c: usize| self.effect_sizes.get(c).copied().unwrap_or(0.0);
+        let mut lp_mean = 0.0;
+        for (c, &mean_c) in col_mean.iter().enumerate() {
+            lp_mean += beta(c) * mean_c;
         }
-        // Add 2 · βⱼ·βₖ·Cov(Xⱼ, Xₖ) for the continuous block.
-        // self.correlation is flat column-major n_nf×n_nf with diag=1.
-        for j in 0..n_nf {
-            for k in (j + 1)..n_nf {
-                let bj = self.effect_sizes.get(1 + j).copied().unwrap_or(0.0);
-                let bk = self.effect_sizes.get(1 + k).copied().unwrap_or(0.0);
-                let r = self.correlation[k * n_nf + j];
-                lp_var += 2.0 * bj * bk * r * sd[1 + j] * sd[1 + k];
+        // lp_pop_var = β' Σ β over the full design: diagonal first, then
+        // 2·βₐ·β_b·Cov(Xₐ, X_b) for a < b. This is the main-effects-only
+        // summation order, so a design without interactions keeps bit-identical
+        // coefficients (cross terms that are exactly 0 add nothing).
+        let mut lp_var = 0.0;
+        for (a, &sd_a) in col_std.iter().enumerate() {
+            let ba = beta(a);
+            lp_var += ba * ba * sd_a * sd_a;
+        }
+        for a in 0..p {
+            let ba = beta(a);
+            if ba == 0.0 {
+                continue;
+            }
+            for b in (a + 1)..p {
+                let bb = beta(b);
+                if bb != 0.0 {
+                    lp_var += 2.0 * ba * bb * cov(a, b);
+                }
             }
         }
-        let lp_std = lp_var.max(0.0).sqrt();
 
         HeteroskedasticityCoeffs {
             lp_pop_mean: lp_mean,
-            lp_pop_std: lp_std,
-            // Promote the per-column moments (full-design layout) so the
-            // generator can standardize a chosen driver column directly.
-            col_mean: mu,
-            col_std: sd,
+            lp_pop_std: lp_var.max(0.0).sqrt(),
+            col_mean,
+            col_std,
         }
     }
+}
+
+/// Isserlis' theorem: `E[∏ g_c]` for zero-mean unit-variance jointly Gaussian
+/// `g` with pairwise correlation `corr` — the sum over perfect pairings of the
+/// product of the paired correlations (0 for an odd count). Repeats allowed.
+fn isserlis(cols: &[usize], corr: &dyn Fn(usize, usize) -> f64) -> f64 {
+    if cols.is_empty() {
+        return 1.0;
+    }
+    if cols.len() % 2 == 1 {
+        return 0.0;
+    }
+    let first = cols[0];
+    let mut total = 0.0;
+    for i in 1..cols.len() {
+        let r = corr(first, cols[i]);
+        if r == 0.0 {
+            continue;
+        }
+        let rest: Vec<usize> = cols[1..]
+            .iter()
+            .enumerate()
+            .filter(|&(k, _)| k + 1 != i)
+            .map(|(_, &c)| c)
+            .collect();
+        total += r * isserlis(&rest, corr);
+    }
+    total
 }
 
 // ---------------------------------------------------------------------------

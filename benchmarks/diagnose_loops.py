@@ -17,12 +17,15 @@ Usage (from mcpower/benchmarks/, venv active):
     python diagnose_loops.py --scale 0.1     # 10% of that budget (faster, noisier)
     python diagnose_loops.py --sims 100      # fixed sims/point (overrides --scale)
 
-Reads which cases to probe from benchmark_cases.json (family == "lme").
+Reads which cases to probe from validation/agreement/cases.json (family == "lme").
 """
 import argparse
+import pathlib
 
 from cases import load_cases
 import loops_py
+
+CASES_JSON = pathlib.Path(__file__).parent.parent / "validation" / "agreement" / "cases.json"
 
 SEED = 2137
 
@@ -46,7 +49,7 @@ def main():
                     help="fixed sims/point, overriding --scale")
     args = ap.parse_args()
 
-    cases = [c for c in load_cases("benchmark_cases.json") if c.family == "lme"]
+    cases = [c for c in load_cases(CASES_JSON) if c.family == "lme"]
     tiers = (("best", loops_py._lme_best_chunk), ("naive", loops_py.lme_naive))
 
     worst = {}  # case.id -> (min usable%, at n, tier)

@@ -11,7 +11,7 @@ import json, math, pathlib, statistics, sys
 from cases import load_cases
 
 BENCH_DIR = pathlib.Path(__file__).parent
-CASES_PATH = BENCH_DIR / "benchmark_cases.json"
+CASES_PATH = BENCH_DIR.parent / "validation" / "agreement" / "cases.json"
 # Hardcoded canonical paths — combine.py takes no arguments. py.json is the only
 # required input; the rest are optional (skipped when absent).
 RESULTS_DIR = BENCH_DIR / "results"

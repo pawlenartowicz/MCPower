@@ -27,9 +27,9 @@ using GLM, MixedModels, StatsModels, Distributions
 # flattering MCPower. Mirrors harness.py pinning OMP/MKL/OPENBLAS=1.
 BLAS.set_num_threads(1)
 
-const CASES_PATH = joinpath(@__DIR__, "benchmark_cases.json")
+const CASES_PATH = joinpath(@__DIR__, "..", "validation", "agreement", "cases.json")
 const RECORDED_METHODS = ["loop_naive", "loop_best"]
-# n_sims key per recorded method (the loop tiers' counts in benchmark_cases.json).
+# n_sims key per recorded method (the loop tiers' counts in validation/agreement/cases.json).
 const _TIER = Dict("loop_best" => "best", "loop_naive" => "naive")
 const _KIND = Dict("loop_best" => "best", "loop_naive" => "naive")
 # Timing hygiene mirrors py: median of 3 reps for loop_best, 1 rep for loop_naive
@@ -147,6 +147,11 @@ function main(argv)
         for method in methods
             method in RECORDED_METHODS ||
                 (println(stderr, "WARNING: unknown method $(repr(method)), skipping"); continue)
+            if case.family == "lme" && case.cluster !== nothing &&
+               (!isempty(get(case.cluster, "cluster_level", [])) || !isempty(get(case.cluster, "random_slopes", [])))
+                println("\n=== $(case.id) $method (lme): skipped — no Julia loop for random slopes / cluster-level predictors ===")
+                continue
+            end
             kind = _KIND[method]
             n_sims = scaled_sims(case.n_sims[_TIER[method]], scale)
             reps = _REPS[method]

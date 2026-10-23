@@ -1,10 +1,14 @@
 #!/usr/bin/env Rscript
 # On-request smoke for the dedicated-tool adapters: cell-means goldens + one
 # case per tool at nsim = 4, asserting finite power in [0, 1].
-# Run from mcpower/benchmarks:  Rscript smoke_tools.R
-source("harness.R")   # load_cases, seed_for, sources loops_r.R + tools_r.R; no run (guarded)
+# Run from any directory:  Rscript smoke_tools.R
+HERE <- local({
+  fa <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+  if (length(fa)) dirname(normalizePath(sub("^--file=", "", fa[1]))) else getwd()
+})
+source(file.path(HERE, "harness.R"))   # load_cases, seed_for, sources loops_r.R + tools_r.R; no run (guarded)
 
-cases <- load_cases("benchmark_cases.json")
+cases <- load_cases(file.path(HERE, "cases.json"))
 by_id <- function(id) Filter(function(c) c$id == id, cases)[[1]]
 
 # --- cell-means goldens (2x2, one-way 4) ---

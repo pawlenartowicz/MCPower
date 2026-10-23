@@ -255,7 +255,8 @@ function _split_counts(n_sims::Int, n_workers::Int)
 end
 
 # Run a *_best chunk across Base.Threads, pooling raw counts then dividing by
-# usable. Per-chunk RNG Xoshiro(seed + (i-1)*100003) — fixed seed stride mirrors
+# n_sims (a failed fit counts as not significant and stays in the denominator;
+# `usable` is the scored-fit count). Per-chunk RNG Xoshiro(seed + (i-1)*100003) — fixed seed stride mirrors
 # the py/R best pools (statistically equivalent, not bit-equal across worker
 # counts). BLAS is pinned to 1 thread in harness.jl so per-thread BLAS does not
 # oversubscribe and flatter MCPower.
@@ -268,8 +269,7 @@ function _parallel(chunk, n_sims::Int, seed::Int; max_workers::Int=typemax(Int))
     t_rej = sum(p[1] for p in parts)
     f_rej = sum(p[2] for p in parts)
     usable = sum(p[3] for p in parts)
-    denom = max(usable, 1)
-    return (t_rej ./ denom, f_rej / denom, usable)
+    return (t_rej ./ n_sims, f_rej / n_sims, usable)
 end
 
 # MixedModels formula `.y ~ V1+…+VP + (re | .g)`, built once via @formula (like
@@ -353,8 +353,7 @@ function ols_naive(case::Case, n, n_sims, seed)
         b = coef(m)[idx]; V = vcov(m)[idx, idx]          # joint Wald F via library covariance
         dot(b, V \ b) / length(TARGETS) > fcrit && (f_rej += 1)
     end
-    denom = max(usable, 1)
-    return (t_rej ./ denom, f_rej / denom, usable)
+    return (t_rej ./ n_sims, f_rej / n_sims, usable)
 end
 
 # ---------------------------------------------------------------------------
@@ -467,22 +466,29 @@ function glm_naive(case::Case, n, n_sims, seed)
         end
         wstat > chi2crit && (f_rej += 1)
     end
-    denom = max(conv, 1)
-    return (t_rej ./ denom, f_rej / denom, conv)
+    return (t_rej ./ n_sims, f_rej / n_sims, conv)
 end
 
 # ---------------------------------------------------------------------------
 # LME — mirror loops_py lme_best / lme_naive. Both tiers use the SAME
 # MixedModels fit (same seed -> same data -> same fit); best earns its speed
-# from precomputed criticals + manual Wald + threads, not a fit shortcut.
+# from precomputed criticals + manual Wald t / F + threads, not a fit shortcut.
+# Tests: Student-t per coefficient and F joint on the between-within df
+# n - (P+1) - (n_clusters-1), or the single-level reference (t at n - (P+1), F) when
+# _single_level_fit; LMM fits use REML.
 # ---------------------------------------------------------------------------
 
 function _lme_best_chunk(spec::DesignSpec, n::Int, n_clusters::Int, tau::Float64,
                          fml, n_sims::Int, seed::Int)
     rng = Xoshiro(seed)
     BETA = spec.beta; TARGETS = spec.targets; P = length(BETA)
-    zcrit = quantile(Normal(), 1 - ALPHA / 2)
-    chi2crit = quantile(Chisq(length(TARGETS)), 1 - ALPHA)
+    # Between-within denominator df (no cluster-level predictors in any case).
+    df_bw = n - (P + 1) - (n_clusters - 1)
+    tcrit = quantile(TDist(df_bw), 1 - ALPHA / 2)
+    fcrit = quantile(FDist(length(TARGETS), df_bw), 1 - ALPHA)
+    df_one = n - (P + 1)                                # single-level reference
+    tcrit1 = quantile(TDist(df_one), 1 - ALPHA / 2)
+    fcrit1 = quantile(FDist(length(TARGETS), df_one), 1 - ALPHA)
     t_rej = zeros(Int, P); f_rej = 0; conv = 0
     cluster_ids = _assign_clusters(n, n_clusters)
     gfac = string.(cluster_ids)
@@ -493,10 +499,12 @@ function _lme_best_chunk(spec::DesignSpec, n::Int, n_clusters::Int, tau::Float64
         y = X * BETA .+ b[cluster_ids .+ 1] .+ randn(rng, n)
         m = _try_fit_lmm(fml, _mm_table(P, X, y, gfac))
         m === nothing && continue
-        conv += 1
         cf = coef(m); V = vcov(m); se = sqrt.(diag(V))
-        zstat = cf[2:end] ./ se[2:end]
-        t_rej .+= Int.(abs.(zstat) .> zcrit)
+        all(isfinite, cf) && all(isfinite, se) || continue
+        conv += 1
+        tstat = cf[2:end] ./ se[2:end]
+        one = _single_level_fit(m)
+        t_rej .+= Int.(abs.(tstat) .> (one ? tcrit1 : tcrit))
         bt = cf[idx]; Vt = V[idx, idx]
         local wstat
         try
@@ -505,14 +513,21 @@ function _lme_best_chunk(spec::DesignSpec, n::Int, n_clusters::Int, tau::Float64
             _linalg_skip(e) && continue
             rethrow()
         end
-        wstat > chi2crit && (f_rej += 1)
+        wstat / length(TARGETS) > (one ? fcrit1 : fcrit) && (f_rej += 1)
     end
     return (t_rej, f_rej, conv)
 end
 
+# True when every diagonal entry of the relative Cholesky factor theta is <= 1e-4
+# (diagonal entries have lowerbd(m) == 0; off-diagonal entries are ignored). Such a fit
+# is scored against the single-level reference.
+# Mirrors crates/engine-core/src/critvals.rs BetweenWithinDf::collapsed and glmm's
+# PIN_THETA (1e-4) — change together.
+_single_level_fit(m) = all(t <= 1e-4 for (t, lb) in zip(m.θ, lowerbd(m)) if lb == 0)
+
 function _try_fit_lmm(fml, tbl)
     try
-        return MixedModels.fit(MixedModel, fml, tbl; progress=false)
+        return MixedModels.fit(MixedModel, fml, tbl; REML=true, progress=false)
     catch e
         e isa InterruptException && rethrow()
         return nothing
@@ -536,6 +551,8 @@ function lme_naive(case::Case, n, n_sims, seed)
     spec = _design(case); BETA = spec.beta; TARGETS = spec.targets; P = length(BETA)
     nc, tau = _lme_tau_clusters(case)
     fml = _re_formula(P, Int[])
+    tcrit = quantile(TDist(n - (P + 1) - (nc - 1)), 1 - ALPHA / 2)   # between-within df
+    tcrit1 = quantile(TDist(n - (P + 1)), 1 - ALPHA / 2)             # single-level reference
     t_rej = zeros(Int, P); conv = 0
     cluster_ids = _assign_clusters(n, nc)
     gfac = string.(cluster_ids)
@@ -545,20 +562,21 @@ function lme_naive(case::Case, n, n_sims, seed)
         y = X * BETA .+ b[cluster_ids .+ 1] .+ randn(rng, n)
         m = _try_fit_lmm(fml, _mm_table(P, X, y, gfac))
         m === nothing && continue
+        tstat = (coef(m) ./ stderror(m))[2:(P + 1)]     # library coef/SE, fixed effects
+        all(isfinite, tstat) || continue
         conv += 1
-        pv = coeftable(m).cols[4][2:(P + 1)]            # library Wald-z p-values, fixed effects
-        t_rej .+= Int.(pv .< ALPHA)
+        t_rej .+= Int.(abs.(tstat) .> (_single_level_fit(m) ? tcrit1 : tcrit))
     end
     # No joint test (mirror loops_py lme_naive: value never recorded).
-    denom = max(conv, 1)
-    return (t_rej ./ denom, 0.0, conv)
+    return (t_rej ./ n_sims, 0.0, conv)
 end
 
 # ---------------------------------------------------------------------------
 # GLMM (clustered logistic) — mirror loops_r.R glmm_best_chunk / glmm_naive.
 # Random intercept on the LATENT logit scale (residual var pi^2/3), so
 # TAU = sqrt(ICC/(1-ICC) * pi^2/3); one independent latent-scale slope RE per
-# slope_cols entry. MixedModels Laplace fit + Wald z. The family loops_py lacks.
+# slope_cols entry. MixedModels Laplace fit; Wald t / F on the between-within df, or z / chi-square when _single_level_fit.
+# The family loops_py lacks.
 # ---------------------------------------------------------------------------
 
 # GLMM Laplace fits are allocation-heavy, so the *_best thread pool oversubscribes
@@ -601,8 +619,12 @@ function _glmm_best_chunk(spec::DesignSpec, n::Int, n_clusters::Int, tau::Float6
                           intercept::Float64, slope_sd::Float64, fml, n_sims::Int, seed::Int)
     rng = Xoshiro(seed)
     BETA = spec.beta; TARGETS = spec.targets; P = length(BETA); SLOPE = spec.slope_cols
-    zcrit = quantile(Normal(), 1 - ALPHA / 2)
-    chi2crit = quantile(Chisq(length(TARGETS)), 1 - ALPHA)
+    # Between-within denominator df (random slopes do not change it).
+    df_bw = n - (P + 1) - (n_clusters - 1)
+    tcrit = quantile(TDist(df_bw), 1 - ALPHA / 2)
+    fcrit = quantile(FDist(length(TARGETS), df_bw), 1 - ALPHA)
+    zcrit = quantile(Normal(), 1 - ALPHA / 2)           # single-level reference
+    chicrit = quantile(Chisq(length(TARGETS)), 1 - ALPHA)
     t_rej = zeros(Int, P); f_rej = 0; conv = 0
     cluster_ids = _assign_clusters(n, n_clusters)
     gfac = string.(cluster_ids)
@@ -612,10 +634,12 @@ function _glmm_best_chunk(spec::DesignSpec, n::Int, n_clusters::Int, tau::Float6
         y = _glmm_draw_y(rng, X, BETA, intercept, cluster_ids, n_clusters, tau, SLOPE, slope_sd)
         m = _try_fit_glmm(fml, _mm_table(P, X, y, gfac))
         m === nothing && continue
-        conv += 1
         cf = coef(m); V = vcov(m); se = sqrt.(diag(V))
-        zstat = cf[2:end] ./ se[2:end]
-        t_rej .+= Int.(abs.(zstat) .> zcrit)
+        all(isfinite, cf) && all(isfinite, se) || continue
+        conv += 1
+        tstat = cf[2:end] ./ se[2:end]
+        one = _single_level_fit(m)
+        t_rej .+= Int.(abs.(tstat) .> (one ? zcrit : tcrit))
         bt = cf[idx]; Vt = V[idx, idx]
         local wstat
         try
@@ -624,7 +648,7 @@ function _glmm_best_chunk(spec::DesignSpec, n::Int, n_clusters::Int, tau::Float6
             _linalg_skip(e) && continue
             rethrow()
         end
-        wstat > chi2crit && (f_rej += 1)
+        (one ? wstat > chicrit : wstat / length(TARGETS) > fcrit) && (f_rej += 1)
     end
     return (t_rej, f_rej, conv)
 end
@@ -652,6 +676,8 @@ function glmm_naive(case::Case, n, n_sims, seed)
     tau = _glmm_tau(case); intercept = _logit(case.baseline_p)
     slope_sd = _glmm_slope_sd(case, spec)
     fml = _re_formula(P, spec.slope_cols)
+    tcrit = quantile(TDist(n - (P + 1) - (nc - 1)), 1 - ALPHA / 2)   # between-within df
+    zcrit = quantile(Normal(), 1 - ALPHA / 2)                        # single-level reference
     t_rej = zeros(Int, P); conv = 0
     cluster_ids = _assign_clusters(n, nc)
     gfac = string.(cluster_ids)
@@ -660,12 +686,12 @@ function glmm_naive(case::Case, n, n_sims, seed)
         y = _glmm_draw_y(rng, X, BETA, intercept, cluster_ids, nc, tau, spec.slope_cols, slope_sd)
         m = _try_fit_glmm(fml, _mm_table(P, X, y, gfac))
         m === nothing && continue
+        tstat = (coef(m) ./ stderror(m))[2:(P + 1)]     # library coef/SE, fixed effects
+        all(isfinite, tstat) || continue
         conv += 1
-        pv = coeftable(m).cols[4][2:(P + 1)]            # library Wald-z p-values
-        t_rej .+= Int.(pv .< ALPHA)
+        t_rej .+= Int.(abs.(tstat) .> (_single_level_fit(m) ? zcrit : tcrit))
     end
-    denom = max(conv, 1)
-    return (t_rej ./ denom, 0.0, conv)
+    return (t_rej ./ n_sims, 0.0, conv)
 end
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Dedicated-tool adapters (R only): simr, Superpower, simglm -- each used as its
-# docs show, returning the tool's power estimate(s) for the sanity column.
+# docs show, returning the tool's power estimate(s) as an agreement comparator.
 # Contract: tool_<name>(case, n, nsim, seed) -> list(power = numeric vector).
 # The harness times the call; adapters use lazy :: so package load cost lands
 # in the harness's micro warm-up, not the timed run.
@@ -30,7 +30,18 @@ TOOLS <- list(
 #
 # nsim and progress are simrOptions, passed through powerSim's ... argument
 # (see body(simr::powerSim): opts <- simrOptions(...)).
+#
+# Decision rule: MCPower tests a mixed fixed effect against a t at the
+# between-within df (mixed_df() in loops_r.R, for the tested target); simr's "z"
+# test only stores two-sided normal p-values. |z| > qt(1 - a/2, df) is the same event as
+# p < 2 * pnorm(-qt(1 - a/2, df)), so summary() scores the stored p-values at
+# that equivalent alpha. Failed fits keep an NA p-value and count as not
+# significant over all nsim, as in MCPower.
 # ---------------------------------------------------------------------------
+
+simr_alpha <- function(n, spec, k) {
+  2 * stats::pnorm(-stats::qt(1 - 0.05 / 2, mixed_df(n, spec, k)[spec$targets[1]]))
+}
 
 tool_simr <- function(case, n, nsim, seed) {
   if (identical(case$family, "glmm"))
@@ -42,46 +53,66 @@ tool_simr <- function(case, n, nsim, seed) {
   ICC        <- case$cluster$ICC
   TAU        <- sqrt(ICC / (1.0 - ICC))
 
-  # Build pilot data from the DGP (matches loop kernel data generation)
+  SLOPE_COLS <- spec$slope_cols
+  SLOPE_SD   <- if (length(SLOPE_COLS)) sqrt(case$cluster$slope_variance) else numeric(0)
+
+  # Build pilot data from the DGP (matches loop kernel data generation).
+  # cluster_level factors get one level per cluster, repeated over its rows.
+  cluster_ids <- factor(rep(seq_len(N_CLUSTERS), length.out = n))
   d <- as.data.frame(matrix(rnorm(n * spec$n_cont), n, spec$n_cont))
   if (spec$n_cont > 0L) names(d) <- spec$cont_names
   for (fi in seq_along(spec$fac_names)) {
     L <- length(spec$proportions[[fi]])
-    d[[spec$fac_names[fi]]] <- factor(rep(seq_len(L), length.out = n))
+    if (fi %in% spec$cluster_level_facs) {
+      lvl <- sample(seq_len(L), N_CLUSTERS, replace = TRUE, prob = spec$proportions[[fi]])[as.integer(cluster_ids)]
+    } else {
+      lvl <- sample(seq_len(L), n, replace = TRUE, prob = spec$proportions[[fi]])
+    }
+    d[[spec$fac_names[fi]]] <- factor(lvl, levels = seq_len(L), labels = simglm_levels(L))
   }
-  cluster_ids <- factor(rep(seq_len(N_CLUSTERS), length.out = n))
   d[[case$cluster$var]] <- cluster_ids
 
-  # Generate response: eta from design matrix + random intercepts + noise
-  rhs_fixed <- sub("\\s*\\+\\s*\\([^)]*\\|[^)]*\\).*", "",
-                   sub("^[^~]*~\\s*", "", case$formula))
+  # Fixed part in loop_design column order, so spec$beta lines up with the
+  # fit's coefficients whatever order the case formula writes its terms in.
+  rhs_fixed <- paste(c(spec$cont_names, spec$fac_names, spec$pair_terms), collapse = " + ")
   fml_fixed <- stats::as.formula(paste("~", rhs_fixed))
   X_full <- stats::model.matrix(fml_fixed, data = d)[, -1L, drop = FALSE]
   b_cluster <- rnorm(N_CLUSTERS) * TAU
   y_vals <- as.numeric(X_full %*% spec$beta) +
-            b_cluster[as.integer(cluster_ids)] + rnorm(n)
-  d[[".y_simr"]] <- y_vals
+            b_cluster[as.integer(cluster_ids)]
+  for (sc in SLOPE_COLS)
+    y_vals <- y_vals + (rnorm(N_CLUSTERS) * SLOPE_SD)[as.integer(cluster_ids)] * X_full[, sc]
+  d[[".y_simr"]] <- y_vals + rnorm(n)
 
-  # Fit lmer replacing the original LHS with .y_simr
-  fml_fit <- stats::as.formula(
-    paste(".y_simr ~", sub("^[^~]*~", "", case$formula))
-  )
+  # Fit lmer on the loop-order fixed part plus the case's random-effects term
+  re_term <- regmatches(case$formula, regexpr("\\([^)]*\\|[^)]*\\)", case$formula))
+  fml_fit <- stats::as.formula(paste(".y_simr ~", rhs_fixed, "+", re_term))
   fit <- suppressWarnings(
     lme4::lmer(fml_fit, data = d, REML = TRUE,
                control = lme4::lmerControl(calc.derivs = FALSE))
   )
 
   # Pin the generating parameters: powerSim must simulate at the true values,
-  # not at this single draw's estimates (intercept 0, sigma 1, theta = TAU/1).
+  # not at this single draw's estimates (intercept 0, sigma 1; theta is the
+  # lower Cholesky of the RE covariance over sigma, diagonal for uncorrelated REs).
+  k <- 1L + length(SLOPE_COLS)
+  L <- diag(c(TAU, rep(SLOPE_SD, length(SLOPE_COLS))), k, k)
   fit@beta  <- c(0, spec$beta)
-  fit@theta <- TAU
+  fit@theta <- L[lower.tri(L, diag = TRUE)]
   fit@devcomp$cmp[["sigmaML"]]   <- 1.0
   fit@devcomp$cmp[["sigmaREML"]] <- 1.0
   attr(fit, "simrTag") <- TRUE
 
-  ps <- simr::powerSim(fit, test = simr::fixed(case$targets[1], "z"),
+  # An interaction coefficient is named with its variables in model.matrix
+  # order, which can differ from the target token's order.
+  want <- sort(strsplit(simglm_term_of(case$targets[1], spec), ":")[[1]])
+  hit  <- names(lme4::fixef(fit))[vapply(strsplit(names(lme4::fixef(fit)), ":"),
+                                         function(p) identical(sort(p), want), logical(1))]
+  if (length(hit) != 1L) stop(sprintf("simr: target '%s' not a unique fixed effect", case$targets[1]))
+
+  ps <- simr::powerSim(fit, test = simr::fixed(hit, "z"),
                        nsim = nsim, progress = FALSE)
-  s <- summary(ps)
+  s <- summary(ps, alpha = simr_alpha(n, spec, N_CLUSTERS))
   list(power = as.numeric(s$mean))
 }
 
@@ -108,7 +139,9 @@ tool_simr_glmm <- function(case, n, nsim, seed) {
   if (spec$n_cont > 0L) names(d) <- spec$cont_names
   for (fi in seq_along(spec$fac_names)) {
     L <- length(spec$proportions[[fi]])
-    d[[spec$fac_names[fi]]] <- factor(rep(seq_len(L), length.out = n))
+    d[[spec$fac_names[fi]]] <- factor(
+      sample(seq_len(L), n, replace = TRUE, prob = spec$proportions[[fi]]),
+      levels = seq_len(L))
   }
   cluster_ids <- factor(rep(seq_len(N_CLUSTERS), length.out = n))
   d[[case$cluster$var]] <- cluster_ids
@@ -141,7 +174,7 @@ tool_simr_glmm <- function(case, n, nsim, seed) {
 
   ps <- simr::powerSim(fit, test = simr::fixed(case$targets[1], "z"),
                        nsim = nsim, progress = FALSE)
-  s <- summary(ps)
+  s <- summary(ps, alpha = simr_alpha(n, spec, N_CLUSTERS))
   list(power = as.numeric(s$mean))
 }
 
@@ -149,6 +182,11 @@ tool_simr_glmm <- function(case, n, nsim, seed) {
 # Superpower -- the 3 between-subject ANOVA cases. Dummy betas -> cell means
 # (sd = 1, n per cell = n/cells). Cell order is row-major over factor levels
 # (a1_b1, a1_b2, ..., a2_b1, ...), matching ANOVA_design's labeling.
+#
+# Decision rule: a target dummy f[k] is MCPower's treatment-coded coefficient,
+# i.e. level k vs level 1 with every other factor at its first level, t-tested
+# at the pooled residual df N - cells. That is Superpower's unadjusted pairwise
+# emmeans contrast between those two cells, not its omnibus F.
 # ---------------------------------------------------------------------------
 
 superpower_mu <- function(spec) {
@@ -175,6 +213,20 @@ superpower_design_string <- function(spec) {
   paste0(vapply(spec$proportions, length, integer(1)), "b", collapse = "*")
 }
 
+# emm_results label of the contrast "reference cell - target cell" for a
+# main-effect dummy token f[k] (or a bare 2-level factor). Superpower names the
+# factors a, b, ... and their levels a1, a2, ...
+superpower_contrast <- function(tok, spec) {
+  fac <- sub("\\[.*", "", trimws(tok))
+  i   <- match(fac, spec$fac_names)
+  k   <- if (grepl("\\[", tok)) as.integer(sub(".*\\[([0-9]+)\\].*", "\\1", tok)) else 2L
+  if (is.na(i)) stop(sprintf("superpower: target '%s' is not a main-effect dummy", tok))
+  cell <- function(lvl_i) paste(vapply(seq_along(spec$fac_names), function(j)
+    sprintf("%s_%s%d", letters[j], letters[j], if (j == i) lvl_i else 1L),
+    character(1)), collapse = " ")
+  paste(cell(1L), "-", cell(k))
+}
+
 tool_superpower <- function(case, n, nsim, seed) {
   set.seed(seed)
   spec <- loop_design(case)
@@ -185,8 +237,15 @@ tool_superpower <- function(case, n, nsim, seed) {
                                   n = n %/% cells, mu = superpower_mu(spec),
                                   sd = 1, plot = FALSE)
   res <- Superpower::ANOVA_power(des, alpha_level = 0.05, nsims = nsim,
-                                 verbose = FALSE)
-  list(power = as.numeric(res$main_results$power) / 100)   # Superpower reports percent
+                                 verbose = FALSE, emm = TRUE,
+                                 contrast_type = "pairwise", emm_p_adjust = "none")
+  emm <- res$emm_results
+  labels <- vapply(case$targets, superpower_contrast, character(1), spec = spec)
+  hit <- match(labels, trimws(as.character(emm$contrast)))
+  if (anyNA(hit))
+    stop(sprintf("superpower: contrast(s) not in emm_results: %s",
+                 paste(labels[is.na(hit)], collapse = ", ")))
+  list(power = as.numeric(emm$power[hit]) / 100)   # Superpower reports percent
 }
 
 # ---------------------------------------------------------------------------
@@ -206,7 +265,8 @@ tool_superpower <- function(case, n, nsim, seed) {
 #     joined with ':'). Factor levels carry case proportions via prob=.
 # Column order matches loop_design's [cont mains | factor dummies |
 # interactions] convention, so reg_weights = c(intercept, spec$beta) directly.
-# alpha 0.05, two-tailed z-test (dist='qnorm').
+# alpha 0.05, two-tailed: OLS t at the residual df n - (P + 1) (simglm's own
+# qt default would use n - 1), logit Wald z (dist='qnorm') -- MCPower's rules.
 # ---------------------------------------------------------------------------
 
 # Factor level labels: 'lev1', 'lev2', ... so target 'f[k]' -> term 'flev<k>'
@@ -275,7 +335,9 @@ tool_simglm <- function(case, n, nsim, seed) {
     sample_size  = n,
     reg_weights  = weights,
     replications = nsim,
-    power        = list(dist = "qnorm", alpha = 0.05),
+    power        = if (logit) list(dist = "qnorm", alpha = 0.05)
+                   else list(dist = "qt", alpha = 0.05,
+                             opts = list(df = n - length(spec$beta) - 1L)),
     extract_coefficients = TRUE
   )
   if (logit) {

@@ -228,10 +228,12 @@ skew = 0 gate is the tripwire: a fired swap would force skew = √(8/6) ≈
 ## Factor-proportion sampling
 
 `sampled_factor_proportions = FALSE` (the optimistic default) assigns
-factor levels by a deterministic largest-remainder walk — counts are a
-pure function of (n, p), identical across draws, each within 1 of
-n·p. `TRUE` draws levels per row: counts are Binomial(n, p) with
-variance n·p(1−p).
+factor levels by a deterministic largest-remainder walk — counts depend
+only on n and the proportions and are identical across draws. With one
+factor (the case here) each level count is within 1 of n·p; with
+several fixed factors the walk runs over their crossed cells, keeping
+each cell count within about 1 of its target. `TRUE` draws levels per
+row: counts are Binomial(n, p) with variance n·p(1−p).
 
 |  | Case | Gate | Measured | Law | z | Verdict |
 |:---|:---|:---|---:|---:|---:|:---|

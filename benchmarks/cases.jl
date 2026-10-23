@@ -1,4 +1,4 @@
-# Load benchmark_cases.json and resolve each case against its family defaults.
+# Load validation/agreement/cases.json and resolve each case against its family defaults.
 # Mirrors cases.py — change together. Julia keeps the column convention 0-based
 # (see loops_jl.jl) but case fields are plain data, identical to the Python Case.
 module BenchCases

@@ -1,4 +1,4 @@
-"""Load benchmark_cases.json and resolve each case against its family defaults."""
+"""Load validation/agreement/cases.json and resolve each case against its family defaults."""
 from __future__ import annotations
 import json
 from dataclasses import dataclass, field

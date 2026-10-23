@@ -30,7 +30,7 @@
 //!
 //! Specs are FROZEN Rust constructors: a baseline comparison is only valid if
 //! the spec is bit-identical across runs, so nothing here reads
-//! `benchmark_cases.json` or `configs/scenarios.json` at runtime. The scenario
+//! `validation/agreement/cases.json` or `configs/scenarios.json` at runtime. The scenario
 //! presets below are a hand-frozen copy of the config values as of 2026-06-04;
 //! a deliberate preset retune must be re-frozen here as a visible diff.
 //!

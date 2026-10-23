@@ -292,26 +292,35 @@ pub fn generate_sim_data(
         ws.x_full[(i, 0)] = 1.0f32;
     }
 
-    // Per-factor proportion sampling: a Some override wins; None (or an absent
-    // entry, e.g. empty factor_sampled) inherits the scenario default. Resolved
-    // per factor below; precomputed here only to decide the alloc-counts reset.
-    let scenario_sampled = spec.scenario.sampled_factor_proportions;
-    let any_exact = (0..n_factors).any(|f| {
-        !spec
-            .factor_sampled
-            .get(f)
-            .copied()
-            .flatten()
-            .unwrap_or(scenario_sampled)
-    });
-    // Fixed-allocation walk state — running per-level counts for every factor
-    // (factor_proportions layout). Reset each sim whenever at least one factor
-    // uses the deterministic walk; the resize is a no-op after the first sim.
-    if any_exact && !spec.factor_proportions.is_empty() {
-        ws.factor_alloc_counts.clear();
-        ws.factor_alloc_counts
-            .resize(spec.factor_proportions.len(), 0);
+    // Fixed allocation consumes no RNG and its proportions are fixed by the
+    // spec, so every sim gets the same cell sequences: the walks (O(cells)
+    // per step) run once per workspace and later sims only read them. The
+    // cache key is everything the sequences depend on — the cell weights,
+    // the radices (which also fix the row/cluster cell split) and max_n — so
+    // a workspace reused for another design rebuilds it.
+    let split = fixed_cell_weights(
+        spec,
+        &mut ws.factor_cell_weights,
+        &mut ws.factor_cell_radices,
+    );
+    if ws.factor_seq_n != max_n
+        || ws.factor_seq_weights != ws.factor_cell_weights
+        || ws.factor_seq_radices != ws.factor_cell_radices
+    {
+        fixed_cell_sequences(
+            &ws.factor_cell_weights,
+            &ws.factor_cell_radices,
+            split,
+            max_n,
+            &mut ws.factor_alloc_counts,
+            &mut ws.factor_row_seq,
+            &mut ws.factor_cluster_seq,
+        );
+        ws.factor_seq_weights.clone_from(&ws.factor_cell_weights);
+        ws.factor_seq_radices.clone_from(&ws.factor_cell_radices);
+        ws.factor_seq_n = max_n;
     }
+    let mut cl_step = 0usize;
 
     // (a) Continuous block — planar, class-addressed (CLASS_XNORM, column =
     // predictor j). Replaces the former per-row z draws: values come from the
@@ -510,7 +519,24 @@ pub fn generate_sim_data(
     // sequential rng stream below serves only categorical draws, the
     // bootstrap row pick, and cluster-RE draws (drawn before this loop).
     for i in 0..max_n {
-        // (b) Factor block — categorical draws per factor, reference-coded.
+        // (b) Factor block — one level per factor, reference-coded.
+        //
+        // Fixed factors read their level off the cached crossed-cell walks
+        // (fixed_cell_weights): the row's row-level cell, and for
+        // cluster-level factors the next cluster cell on each representative
+        // row (the broadcast below copies it to the rest of the cluster; at
+        // other rows the level here is a placeholder). walk_fixed_allocation
+        // mirrors this decoding for the preflight — change together.
+        let mut row_rem = ws.factor_row_seq.get(i).map_or(0, |&c| c as usize);
+        let mut cl_rem = 0usize;
+        if !ws.factor_cluster_seq.is_empty() {
+            if let Some(cluster) = &spec.cluster {
+                if cluster_rep_row(&cluster.sizing, i) == i {
+                    cl_rem = ws.factor_cluster_seq[cl_step] as usize;
+                    cl_step += 1;
+                }
+            }
+        }
         let mut col_offset = 1 + n_non_factor;
         let mut prop_offset = 0usize;
         for f in 0..n_factors {
@@ -519,25 +545,22 @@ pub fn generate_sim_data(
                 continue;
             }
             let probs = &spec.factor_proportions[prop_offset..prop_offset + n_levels];
-            // Inherit the scenario default unless this factor overrides it.
-            let sampled = spec
-                .factor_sampled
-                .get(f)
-                .copied()
-                .flatten()
-                .unwrap_or(scenario_sampled);
-            let lvl = if !sampled {
-                // Deterministic allocation — consumes no RNG. The shared per-sim
-                // stream therefore sits at a different position than in sampled
-                // mode from here on; in mixed-mode designs the per-factor choice
-                // determines RNG consumption (intentional, per-sim deterministic).
-                fixed_level_next(
-                    probs,
-                    &mut ws.factor_alloc_counts[prop_offset..prop_offset + n_levels],
-                )
-            } else {
-                // Simple randomization — one categorical draw per factor per row.
-                rng.next_categorical(probs)
+            let lvl = match factor_alloc(spec, f, col_offset) {
+                // Simple randomization — one categorical draw per factor per
+                // row; fixed factors consume none, so in mixed-mode designs the
+                // per-factor choice sets the shared stream's consumption.
+                FactorAlloc::Sampled => rng.next_categorical(probs),
+                FactorAlloc::Row => {
+                    let l = row_rem % n_levels;
+                    row_rem /= n_levels;
+                    l
+                }
+                FactorAlloc::Cluster => {
+                    let l = cl_rem % n_levels;
+                    cl_rem /= n_levels;
+                    l
+                }
+                FactorAlloc::Overwritten => 0,
             };
             // Zero the dummies in this factor first.
             for d in 0..(n_levels.saturating_sub(1)) {
@@ -608,23 +631,15 @@ pub fn generate_sim_data(
         // row's value is already final (rep < i in both layouts, rows ascend)
         // and resident in x_full, so no per-cluster cache buffer is needed. The
         // per-row draw above already ran for these columns (value discarded on
-        // non-rep rows), so the RNG call count is unchanged ⇒ empty
-        // between_var_indices is byte-identical to today.
+        // non-rep rows), so the RNG call count does not depend on
+        // between_var_indices.
         //
-        // The (cluster → rep-row) mapping below MUST define the same clusters as
-        // ws.cluster_ids (which keys the u_c add in the assembly loop) — both
-        // derive from cluster.sizing; keep them in lockstep.
+        // cluster_rep_row MUST define the same clusters as ws.cluster_ids
+        // (which keys the u_c add in the assembly loop) — both derive from
+        // cluster.sizing; keep them in lockstep.
         if !spec.between_var_indices.is_empty() {
             if let Some(cluster) = &spec.cluster {
-                let rep = match &cluster.sizing {
-                    ClusterSizing::FixedClusters { n_clusters } => {
-                        i % ((*n_clusters).max(1) as usize)
-                    }
-                    ClusterSizing::FixedSize { cluster_size } => {
-                        let cs = (*cluster_size).max(1) as usize;
-                        i - (i % cs)
-                    }
-                };
+                let rep = cluster_rep_row(&cluster.sizing, i);
                 if i != rep {
                     for &col_u in &spec.between_var_indices {
                         ws.x_full[(i, col_u as usize)] = ws.x_full[(rep, col_u as usize)];
@@ -922,65 +937,414 @@ pub fn generate_sim_data(
     Ok(())
 }
 
-/// Deterministic factor-level assignment for `fixed_allocation` scenarios: an
-/// incremental largest-remainder walk (weighted round-robin) over the row
-/// index. `counts` holds this factor's per-level totals for the rows already
-/// assigned this sim; the next row gets the level with the largest running
-/// deficit `p_g·(rows+1) − counts[g]`, ties broken by lowest level index.
+/// One step of the deterministic largest-remainder walk (weighted
+/// round-robin) behind fixed allocation. `weights` are the walked
+/// categories' proportions (a factor's levels, or crossed cells — see
+/// `fixed_cell_weights`), already passed through `normalise_weights`;
+/// `counts` holds the per-category totals of the steps taken so far. The
+/// next step takes the category with the largest running deficit
+/// `w_g·(steps+1) − counts[g]`. Among categories with exactly that deficit
+/// it takes the largest `tie_score(steps+1, g)`, and remaining ties go to
+/// the lowest index; `tie_score` runs only on exact ties (crossed cells use
+/// it to keep factor marginals balanced, see `walk_cells`; a single factor
+/// passes a constant). A step is O(categories), so for crossed cells the
+/// walk runs once per workspace (see the cached sequences in
+/// `generate_sim_data`), not per sim.
 ///
 /// Properties (tests below):
-/// - consumes no RNG — the assignment is a pure function of (row index, probs);
-/// - row-stable: row i's level depends only on rows 0..i, so `X_full[:N]`
-///   stays a nested prefix across the sample-size grid;
-/// - at every prefix N: Σ counts == N; each count stays within 1 of N·p_g
-///   for two-level factors (the exact Hamilton split) and within ~1 in
-///   general — transient deviations slightly above 1 are possible only for
-///   many-level, highly skewed proportion vectors;
+/// - consumes no RNG — the assignment is a pure function of (step, weights);
+/// - step-stable: step i depends only on steps 0..i, so `X_full[:N]` stays
+///   a nested prefix across the sample-size grid;
+/// - at every prefix N: Σ counts == N; no count exceeds N·w_g by 1 or more
+///   (the chosen category always has a positive deficit, since deficits sum
+///   to 1); the shortfall below N·w_g stays under 1 for two categories (the
+///   exact Hamilton split) and can pass 1 slightly for many, skewed
+///   categories (largest seen 1.28, over 64 crossed cells);
 /// - equal proportions reduce to round-robin `i % k`, matching the cluster
 ///   round-robin precedent.
-fn fixed_level_next(probs: &[f64], counts: &mut [u32]) -> usize {
-    debug_assert!(!probs.is_empty(), "fixed_level_next: empty probs");
-    let total: f64 = probs.iter().sum();
-    debug_assert!(total > 0.0, "fixed_level_next: proportions sum to zero");
+fn fixed_level_next(
+    weights: &[f64],
+    counts: &mut [u32],
+    tie_score: impl Fn(f64, usize) -> f64,
+) -> usize {
+    debug_assert!(!weights.is_empty(), "fixed_level_next: empty weights");
+    debug_assert_eq!(weights.len(), counts.len());
     let assigned: u32 = counts.iter().sum();
     let t = (assigned + 1) as f64;
     let mut best = 0usize;
     let mut best_deficit = f64::NEG_INFINITY;
-    for (g, &p) in probs.iter().enumerate() {
-        // Strict > keeps the lowest index on ties.
-        let deficit = (p / total) * t - counts[g] as f64;
+    let mut best_score: Option<f64> = None;
+    for (g, &w) in weights.iter().enumerate() {
+        let deficit = w * t - counts[g] as f64;
         if deficit > best_deficit {
             best_deficit = deficit;
             best = g;
+            best_score = None;
+        } else if deficit == best_deficit {
+            // Strict > keeps the lowest index on remaining ties.
+            let incumbent = *best_score.get_or_insert_with(|| tie_score(t, best));
+            let score = tie_score(t, g);
+            if score > incumbent {
+                best = g;
+                best_score = Some(score);
+            }
         }
     }
     counts[best] += 1;
     best
 }
 
-/// Deterministic level counts the fixed-allocation walk produces for the
-/// first `n` rows — the same largest-remainder walk the row loop runs.
-/// Used by the orchestrator's pre-run sparse-factor validator.
-pub fn fixed_allocation_counts(probs: &[f64], n: usize) -> Vec<u32> {
-    let mut counts = vec![0u32; probs.len()];
-    for _ in 0..n {
-        let _ = fixed_level_next(probs, &mut counts);
+/// Scale `weights` to sum to 1 (each `w / Σw`, summed in index order).
+fn normalise_weights(weights: &mut [f64]) {
+    let total: f64 = weights.iter().sum();
+    debug_assert!(total > 0.0, "normalise_weights: weights sum to zero");
+    for w in weights.iter_mut() {
+        *w /= total;
     }
-    counts
 }
 
-/// Smallest N ≤ n_max at which every level's fixed-allocation count
-/// reaches `k_min`, or None if not reached within n_max. Single forward
-/// walk — O(n_max · k).
-pub fn min_inclusion_n(probs: &[f64], k_min: u32, n_max: usize) -> Option<usize> {
-    let mut counts = vec![0u32; probs.len()];
-    for n in 1..=n_max {
-        let _ = fixed_level_next(probs, &mut counts);
-        if counts.iter().all(|&c| c >= k_min) {
-            return Some(n);
+/// How the row loop assigns a factor's level.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FactorAlloc {
+    /// One categorical draw per row on the shared per-sim stream.
+    Sampled,
+    /// Fixed allocation, crossed with the other row-level fixed factors.
+    Row,
+    /// Fixed allocation over clusters: crossed with the other cluster-level
+    /// fixed factors and stepped once per cluster, on its representative row.
+    /// The broadcast copies that row's level to the rest of the cluster.
+    Cluster,
+    /// Frame-sourced under strict bootstrap: the bootstrap arm overwrites the
+    /// level on every row, so it takes no part in any walk.
+    Overwritten,
+}
+
+/// Resolve factor `f` (spec order; its first dummy is `x_full` column
+/// `first_dummy`). A `factor_sampled` override wins over the scenario default.
+fn factor_alloc(spec: &SimulationSpec, f: usize, first_dummy: usize) -> FactorAlloc {
+    let sampled = spec
+        .factor_sampled
+        .get(f)
+        .copied()
+        .flatten()
+        .unwrap_or(spec.scenario.sampled_factor_proportions);
+    if sampled {
+        FactorAlloc::Sampled
+    } else if !spec.bootstrap_frame_map.is_empty()
+        && spec.bootstrap_frame_map[spec.n_non_factor as usize + f].is_some()
+    {
+        FactorAlloc::Overwritten
+    } else if spec.cluster.is_some()
+        && spec.factor_n_levels[f] > 1
+        && spec.between_var_indices.contains(&(first_dummy as u32))
+    {
+        FactorAlloc::Cluster
+    } else {
+        FactorAlloc::Row
+    }
+}
+
+/// Fill `weights` with the crossed-cell weights of the row-level fixed
+/// factors followed by those of the cluster-level fixed factors, and
+/// `radices` with the level counts of the row-level factors, a 0 separator,
+/// then those of the cluster-level factors (mixed-radix order). Returns the
+/// two cell counts (0 for a group with no factor). A cell's weight is the
+/// product of its levels' raw proportions, normalised within its group.
+///
+/// Fixed allocation walks these cells, one step per row (per cluster for the
+/// cluster-level group), and reads each factor's level off the chosen cell.
+/// Walking each factor on its own would give two factors with equal
+/// proportions the same sequence, i.e. identical columns, and others
+/// deterministically aligned ones. The cell walk keeps every cell count near
+/// N·p_cell at every prefix, so the fixed factors are crossed, and orthogonal
+/// at every N where all cell targets are integers. Like any walk it consumes
+/// no RNG and step i depends only on steps 0..i (prefix-stable in max_n).
+///
+/// Cell index is mixed-radix over the group's factors in spec order, first
+/// factor least significant (`cell_levels` decodes it); exact deficit ties
+/// between cells are broken by marginal balance (`walk_cells`). A group with
+/// one factor has exactly that factor's proportions as weights (1.0·p is
+/// exact), so a single fixed factor walks its own levels.
+fn fixed_cell_weights(
+    spec: &SimulationSpec,
+    weights: &mut Vec<f64>,
+    radices: &mut Vec<u32>,
+) -> (usize, usize) {
+    weights.clear();
+    radices.clear();
+    let mut cells = [0usize; 2];
+    for (g, kind) in [FactorAlloc::Row, FactorAlloc::Cluster]
+        .into_iter()
+        .enumerate()
+    {
+        let mut n_cells = 0usize;
+        let mut col = 1 + spec.n_non_factor as usize;
+        for (f, &nl) in spec.factor_n_levels.iter().enumerate() {
+            let k = nl.max(0) as usize;
+            if k > 0 && factor_alloc(spec, f, col) == kind {
+                n_cells = n_cells.max(1) * k;
+                radices.push(k as u32);
+            }
+            col += k.saturating_sub(1);
+        }
+        if kind == FactorAlloc::Row {
+            radices.push(0);
+        }
+        for cell in 0..n_cells {
+            let mut w = 1.0f64;
+            let mut rem = cell;
+            let (mut col, mut off) = (1 + spec.n_non_factor as usize, 0usize);
+            for (f, &nl) in spec.factor_n_levels.iter().enumerate() {
+                let k = nl.max(0) as usize;
+                if k > 0 && factor_alloc(spec, f, col) == kind {
+                    w *= spec.factor_proportions[off + rem % k];
+                    rem /= k;
+                }
+                col += k.saturating_sub(1);
+                off += k;
+            }
+            weights.push(w);
+        }
+        let start = weights.len() - n_cells;
+        if n_cells > 0 {
+            normalise_weights(&mut weights[start..]);
+        }
+        cells[g] = n_cells;
+    }
+    (cells[0], cells[1])
+}
+
+/// Representative (first) row of row `i`'s cluster. The cluster-level
+/// broadcast and the cluster-level allocation walk both key on it, and it
+/// must group rows the same way `ws.cluster_ids` does (both derive from the
+/// sizing) — change together.
+fn cluster_rep_row(sizing: &ClusterSizing, i: usize) -> usize {
+    match sizing {
+        ClusterSizing::FixedClusters { n_clusters } => i % ((*n_clusters).max(1) as usize),
+        ClusterSizing::FixedSize { cluster_size } => {
+            let cs = (*cluster_size).max(1) as usize;
+            i - (i % cs)
         }
     }
-    None
+}
+
+/// Run the fixed-allocation walks for n steps. `row_seq[i]` is row i's
+/// row-level cell; `cl_seq[c]` is the cluster-level cell of the c-th cluster,
+/// clusters taken in representative-row order. n steps cover every cluster
+/// of an n-row design under either sizing, so the sequences depend only on
+/// the weights, the radices and n. A group with no cells gets an empty
+/// sequence. `weights`, `radices` and `(row_cells, cl_cells)` come from
+/// `fixed_cell_weights`; `counts` is scratch.
+fn fixed_cell_sequences(
+    weights: &[f64],
+    radices: &[u32],
+    (row_cells, cl_cells): (usize, usize),
+    n: usize,
+    counts: &mut Vec<u32>,
+    row_seq: &mut Vec<u32>,
+    cl_seq: &mut Vec<u32>,
+) {
+    counts.clear();
+    counts.resize(row_cells + cl_cells, 0);
+    row_seq.clear();
+    cl_seq.clear();
+    let sep = radices
+        .iter()
+        .position(|&k| k == 0)
+        .unwrap_or(radices.len());
+    let (row_counts, cl_counts) = counts.split_at_mut(row_cells);
+    if row_cells > 0 {
+        walk_cells(
+            &weights[..row_cells],
+            &radices[..sep],
+            n,
+            row_counts,
+            row_seq,
+        );
+    }
+    if cl_cells > 0 {
+        walk_cells(
+            &weights[row_cells..],
+            &radices[sep + 1..],
+            n,
+            cl_counts,
+            cl_seq,
+        );
+    }
+}
+
+/// n steps of the walk over one group's crossed cells (`radices`: the
+/// group's level counts, first factor least significant), appended to `seq`.
+///
+/// Exact deficit ties among cells are common (equal proportions give equal
+/// cell weights). Breaking them by lowest index alone always takes the cell
+/// with the lowest later-factor levels first, so a later factor's marginal
+/// counts drift far from N·p (4×4×4 equal: the third factor sits at level 0
+/// for rows 1–16). Ties therefore go to the cell whose levels are furthest
+/// behind their marginal targets, Σ_f (t·p_f[l_f] − m_f[l_f]), with
+/// marginal proportions p_f summed from the cell weights and m_f the
+/// marginal counts so far. A single factor's score equals its cell deficit,
+/// so the constant score it gets instead changes nothing.
+fn walk_cells(weights: &[f64], radices: &[u32], n: usize, counts: &mut [u32], seq: &mut Vec<u32>) {
+    let crossed = radices.len() > 1;
+    let n_marg: usize = radices.iter().map(|&k| k as usize).sum();
+    let mut marg_p = vec![0.0f64; if crossed { n_marg } else { 0 }];
+    let mut marg_c = vec![0u32; marg_p.len()];
+    if crossed {
+        for (cell, &w) in weights.iter().enumerate() {
+            for i in cell_levels(cell, radices) {
+                marg_p[i] += w;
+            }
+        }
+    }
+    for _ in 0..n {
+        let cell = fixed_level_next(weights, counts, |t, g| {
+            if !crossed {
+                return 0.0;
+            }
+            cell_levels(g, radices)
+                .map(|i| marg_p[i] * t - marg_c[i] as f64)
+                .sum()
+        });
+        for i in cell_levels(cell, radices).filter(|_| crossed) {
+            marg_c[i] += 1;
+        }
+        seq.push(cell as u32);
+    }
+}
+
+/// Flat marginal index of each factor's level in `cell`: factor f's levels
+/// occupy a block of `radices[f]` slots after the earlier factors' blocks.
+fn cell_levels(cell: usize, radices: &[u32]) -> impl Iterator<Item = usize> + '_ {
+    radices.iter().scan((cell, 0usize), |(rem, off), &k| {
+        let k = k as usize;
+        let i = *off + *rem % k;
+        *rem /= k;
+        *off += k;
+        Some(i)
+    })
+}
+
+/// Replay `generate_sim_data`'s fixed allocation over the first `n_max`
+/// rows, calling `each_row(n, counts)` for the empty prefix (n = 0) and after
+/// each row n (1-based), with per-factor level counts in spec order: `Some`
+/// for row- and cluster-level fixed factors (cluster-level counted after the
+/// broadcast, i.e. every row carries its cluster's level), `None` for sampled
+/// and bootstrap-overwritten factors. Stops early when `each_row` returns
+/// false.
+fn walk_fixed_allocation(
+    spec: &SimulationSpec,
+    n_max: usize,
+    mut each_row: impl FnMut(usize, &[Option<Vec<u32>>]) -> bool,
+) {
+    let (mut weights, mut radices) = (Vec::new(), Vec::new());
+    let split = fixed_cell_weights(spec, &mut weights, &mut radices);
+    let (mut scratch, mut row_seq, mut cl_seq) = (Vec::new(), Vec::new(), Vec::new());
+    fixed_cell_sequences(
+        &weights,
+        &radices,
+        split,
+        n_max,
+        &mut scratch,
+        &mut row_seq,
+        &mut cl_seq,
+    );
+    let mut kinds = Vec::new();
+    let mut col = 1 + spec.n_non_factor as usize;
+    for (f, &nl) in spec.factor_n_levels.iter().enumerate() {
+        kinds.push(factor_alloc(spec, f, col));
+        col += (nl.max(0) as usize).saturating_sub(1);
+    }
+    let mut counts: Vec<Option<Vec<u32>>> = spec
+        .factor_n_levels
+        .iter()
+        .zip(&kinds)
+        .map(|(&nl, kind)| {
+            matches!(kind, FactorAlloc::Row | FactorAlloc::Cluster)
+                .then(|| vec![0u32; nl.max(0) as usize])
+        })
+        .collect();
+    // Cluster step (index into cl_seq) of each representative row, read back
+    // on the cluster's later rows (the broadcast).
+    let mut rep_step = vec![0usize; if cl_seq.is_empty() { 0 } else { n_max }];
+    let mut cl_step = 0usize;
+    if !each_row(0, &counts) {
+        return;
+    }
+    for i in 0..n_max {
+        let mut row_rem = row_seq.get(i).map_or(0, |&c| c as usize);
+        let mut cl_rem = 0usize;
+        if let (false, Some(cluster)) = (cl_seq.is_empty(), &spec.cluster) {
+            let rep = cluster_rep_row(&cluster.sizing, i);
+            if rep == i {
+                rep_step[i] = cl_step;
+                cl_step += 1;
+            }
+            cl_rem = cl_seq[rep_step[rep]] as usize;
+        }
+        for (f, &nl) in spec.factor_n_levels.iter().enumerate() {
+            let k = nl.max(0) as usize;
+            if k == 0 {
+                continue;
+            }
+            let rem = match kinds[f] {
+                FactorAlloc::Row => &mut row_rem,
+                FactorAlloc::Cluster => &mut cl_rem,
+                FactorAlloc::Sampled | FactorAlloc::Overwritten => continue,
+            };
+            if let Some(c) = counts[f].as_mut() {
+                c[*rem % k] += 1;
+            }
+            *rem /= k;
+        }
+        if !each_row(i + 1, &counts) {
+            return;
+        }
+    }
+}
+
+/// Per-factor level counts that fixed allocation gives the first `n` rows of
+/// `generate_sim_data`, in spec factor order; `None` for factors whose levels
+/// are not fixed-allocated (sampled, or overwritten by the strict-bootstrap
+/// arm). Deterministic: every sim realizes these counts. Used by the
+/// orchestrator's pre-run sparse-factor validator.
+pub fn fixed_allocation_counts(spec: &SimulationSpec, n: usize) -> Vec<Option<Vec<u32>>> {
+    let mut out = Vec::new();
+    walk_fixed_allocation(spec, n, |row, c| {
+        if row < n {
+            return true;
+        }
+        out = c.to_vec();
+        false
+    });
+    out
+}
+
+/// Per factor (spec order), the smallest N ≤ n_max at which every level's
+/// fixed-allocation count reaches `k_min`; `None` if not reached within
+/// n_max or if the factor is not fixed-allocated. One forward walk —
+/// O(n_max · (crossed cells + levels)).
+pub fn min_inclusion_n(spec: &SimulationSpec, k_min: u32, n_max: usize) -> Vec<Option<usize>> {
+    let mut out = vec![None; spec.factor_n_levels.len()];
+    walk_fixed_allocation(spec, n_max, |row, counts| {
+        if row == 0 {
+            return true;
+        }
+        let mut pending = false;
+        for (f, c) in counts.iter().enumerate() {
+            if let Some(c) = c {
+                if out[f].is_none() {
+                    if c.iter().all(|&x| x >= k_min) {
+                        out[f] = Some(row);
+                    } else {
+                        pending = true;
+                    }
+                }
+            }
+        }
+        pending
+    });
+    out
 }
 
 /// Populate the workspace design slots for `sim_id`: either the optimistic
@@ -1359,9 +1723,10 @@ mod tests {
         // R1: at every prefix N, Σ counts == N and each count is within 1 of
         // N·p_g; at N = 100 a 70/30 request is exactly [70, 30].
         let probs = [0.7, 0.3];
+        let w = norm(&probs);
         let mut counts = [0u32; 2];
         for n in 1..=100usize {
-            fixed_level_next(&probs, &mut counts);
+            fixed_level_next(&w, &mut counts, |_, _| 0.0);
             let total: u32 = counts.iter().sum();
             assert_eq!(total as usize, n, "counts must sum to N at every prefix");
             for (g, &c) in counts.iter().enumerate() {
@@ -1380,10 +1745,10 @@ mod tests {
         // Ties break to the lowest level index, so equal proportions are
         // exactly round-robin i % k — the same tie-break rule used by
         // ClusterSizing::cluster_of_row.
-        let probs = [1.0 / 3.0; 3];
+        let w = norm(&[1.0 / 3.0; 3]);
         let mut counts = [0u32; 3];
         for i in 0..30usize {
-            let lvl = fixed_level_next(&probs, &mut counts);
+            let lvl = fixed_level_next(&w, &mut counts, |_, _| 0.0);
             assert_eq!(lvl, i % 3, "row {i}");
         }
     }
@@ -1392,19 +1757,120 @@ mod tests {
     fn fixed_walk_normalises_weights_and_permits_empty_cells() {
         // Unnormalised proportions use normalised weights; a level with
         // N·p_g < 0.5 receives zero rows at small N (correct apportionment).
-        let probs = [7.0, 3.0]; // sums to 10, behaves as 0.7/0.3
+        let w = norm(&[7.0, 3.0]); // sums to 10, behaves as 0.7/0.3
         let mut counts = [0u32; 2];
         for _ in 0..100 {
-            fixed_level_next(&probs, &mut counts);
+            fixed_level_next(&w, &mut counts, |_, _| 0.0);
         }
         assert_eq!(counts, [70, 30]);
 
-        let probs = [0.9, 0.1];
+        let w = norm(&[0.9, 0.1]);
         let mut counts = [0u32; 2];
         for _ in 0..4 {
-            fixed_level_next(&probs, &mut counts);
+            fixed_level_next(&w, &mut counts, |_, _| 0.0);
         }
         assert_eq!(counts, [4, 0], "minority level is empty until N·p_g grows");
+    }
+
+    fn norm(weights: &[f64]) -> Vec<f64> {
+        let mut w = weights.to_vec();
+        normalise_weights(&mut w);
+        w
+    }
+
+    /// Reference-coded level of a 2-level factor whose single dummy is `col`.
+    fn level_2(ws: &SimWorkspace, i: usize, col: usize) -> usize {
+        (ws.x_full[(i, col)] == 1.0) as usize
+    }
+
+    #[test]
+    fn fixed_factors_are_crossed_with_exact_cell_counts() {
+        // Two fixed factors with the same proportions must not share one
+        // column: the walk runs over their crossed cells, so every cell
+        // (a, b) tracks N·p_a·p_b at every prefix and is exact at N = 100,
+        // where every cell target is an integer.
+        for p in [[0.5, 0.5], [0.3, 0.7]] {
+            let spec = ols_spec_2x(2, vec![2, 2], vec![p[0], p[1], p[0], p[1]]);
+            let n = 100;
+            let mut ws = SimWorkspace::new(n, 5, 2, 2, None);
+            generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
+            let mut cells = [[0u32; 2]; 2];
+            for i in 0..n {
+                cells[level_2(&ws, i, 3)][level_2(&ws, i, 4)] += 1;
+                for a in 0..2 {
+                    for b in 0..2 {
+                        let target = (i + 1) as f64 * p[a] * p[b];
+                        let dev = cells[a][b] as f64 - target;
+                        assert!(
+                            dev < 1.0 && dev > -1.0,
+                            "p={p:?} prefix {}: cell ({a},{b}) = {} vs {target}",
+                            i + 1,
+                            cells[a][b]
+                        );
+                    }
+                }
+            }
+            for a in 0..2 {
+                for b in 0..2 {
+                    assert_eq!(
+                        cells[a][b] as f64,
+                        (n as f64 * p[a] * p[b]).round(),
+                        "p={p:?}: cell ({a},{b}) at N={n}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn crossed_factor_marginals_stay_within_one() {
+        // Exact deficit ties among crossed cells go to the cell whose levels
+        // are furthest behind their marginal targets, so no factor's level
+        // counts drift: every marginal stays within 1 of N·p at every prefix.
+        for levels in [vec![2, 2], vec![10, 2], vec![4, 4, 4]] {
+            let props: Vec<f64> = levels
+                .iter()
+                .flat_map(|&k| std::iter::repeat_n(1.0 / k as f64, k as usize))
+                .collect();
+            let n_dummies: i32 = levels.iter().map(|k| k - 1).sum();
+            let spec = ols_spec_2x(n_dummies as u32, levels.clone(), props);
+            let n = 300;
+            let n_pred = 3 + n_dummies as usize;
+            let mut ws = SimWorkspace::new(n, n_pred, 2, levels.len(), None);
+            generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
+            for m in 1..=n {
+                for (f, c) in realized_level_counts(&spec, &ws, m).iter().enumerate() {
+                    let target = m as f64 / levels[f] as f64;
+                    for (l, &x) in c.iter().enumerate() {
+                        assert!(
+                            (x as f64 - target).abs() <= 1.0,
+                            "{levels:?}: factor {f} level {l} = {x} vs {target} at N={m}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_crossed_factors_prefix_stable_across_max_n() {
+        // Rows 1..n of a two-factor fixed design do not depend on max_n.
+        let spec = ols_spec_2x(2, vec![2, 2], vec![0.3, 0.7, 0.3, 0.7]);
+        let n = 100;
+        let mut ws_n = SimWorkspace::new(n, 5, 2, 2, None);
+        let mut ws_2n = SimWorkspace::new(2 * n, 5, 2, 2, None);
+        generate_sim_data(&spec, 3, 42, &mut ws_n).unwrap();
+        generate_sim_data(&spec, 3, 42, &mut ws_2n).unwrap();
+        for i in 0..n {
+            for j in 0..5 {
+                assert_eq!(
+                    ws_n.x_full[(i, j)].to_bits(),
+                    ws_2n.x_full[(i, j)].to_bits(),
+                    "x_full[{i},{j}] differs across max_n"
+                );
+            }
+            assert_eq!(ws_n.y_full[i].to_bits(), ws_2n.y_full[i].to_bits());
+        }
     }
 
     /// The preflight helper `fixed_allocation_counts` must report exactly the
@@ -1423,10 +1889,11 @@ mod tests {
             let lvl = (1..4).find(|&k| ws.x_full[(i, 2 + k)] == 1.0).unwrap_or(0);
             realized[lvl] += 1;
         }
-        let c = fixed_allocation_counts(&props, n);
-        assert_eq!(c, vec![28, 4, 4, 4]);
+        let c = fixed_allocation_counts(&spec, n);
+        assert_eq!(c, vec![Some(vec![28, 4, 4, 4])]);
         assert_eq!(
-            realized, c,
+            Some(realized),
+            c[0],
             "preflight counts must equal the generated design"
         );
     }
@@ -1434,12 +1901,167 @@ mod tests {
     #[test]
     fn min_inclusion_n_finds_threshold_crossing() {
         // p_min = 0.1, k_min = 5 → ceil-ish 50 region; exact via the walk.
-        let n = min_inclusion_n(&[0.9, 0.1], 5, 200).unwrap();
-        let c = fixed_allocation_counts(&[0.9, 0.1], n);
+        let spec = ols_spec_2x(1, vec![2], vec![0.9, 0.1]);
+        let n = min_inclusion_n(&spec, 5, 200)[0].unwrap();
+        let c = fixed_allocation_counts(&spec, n)[0].clone().unwrap();
         assert!(c.iter().all(|&x| x >= 5));
-        let c_prev = fixed_allocation_counts(&[0.9, 0.1], n - 1);
+        let c_prev = fixed_allocation_counts(&spec, n - 1)[0].clone().unwrap();
         assert!(c_prev.iter().any(|&x| x < 5));
-        assert_eq!(min_inclusion_n(&[0.99, 0.01], 5, 100), None);
+        let rare = ols_spec_2x(1, vec![2], vec![0.99, 0.01]);
+        assert_eq!(min_inclusion_n(&rare, 5, 100), vec![None]);
+    }
+
+    /// Per-factor level counts realized by `generate_sim_data` over rows 0..n,
+    /// spec factor order (reference coding: level 0 = all dummies zero).
+    fn realized_level_counts(spec: &SimulationSpec, ws: &SimWorkspace, n: usize) -> Vec<Vec<u32>> {
+        let mut out = Vec::new();
+        let mut col = 1 + spec.n_non_factor as usize;
+        for &nl in &spec.factor_n_levels {
+            let k = nl as usize;
+            let mut c = vec![0u32; k];
+            for i in 0..n {
+                let lvl = (1..k)
+                    .find(|&l| ws.x_full[(i, col + l - 1)] == 1.0)
+                    .unwrap_or(0);
+                c[lvl] += 1;
+            }
+            out.push(c);
+            col += k - 1;
+        }
+        out
+    }
+
+    #[test]
+    fn fixed_allocation_counts_match_generator_for_crossed_and_mixed_factors() {
+        // Two row-level fixed factors (crossed) and one sampled factor: the
+        // preflight reports exactly the generated marginal counts of the fixed
+        // factors at every N, and None for the sampled one.
+        let mut spec = ols_spec_2x(4, vec![3, 2, 2], vec![0.2, 0.3, 0.5, 0.3, 0.7, 0.5, 0.5]);
+        spec.factor_sampled = vec![None, None, Some(true)];
+        let max_n = 60;
+        let mut ws = SimWorkspace::new(max_n, 1 + 2 + 4, 2, 4, None);
+        generate_sim_data(&spec, 7, 42, &mut ws).unwrap();
+        for n in [0, 1, 7, 33, 60] {
+            let realized = realized_level_counts(&spec, &ws, n);
+            let pre = fixed_allocation_counts(&spec, n);
+            assert_eq!(pre[0].as_ref(), Some(&realized[0]), "factor 0 at N={n}");
+            assert_eq!(pre[1].as_ref(), Some(&realized[1]), "factor 1 at N={n}");
+            assert_eq!(pre[2], None, "sampled factor has no preflight counts");
+        }
+    }
+
+    #[test]
+    fn single_fixed_factor_follows_the_per_factor_walk() {
+        // One fixed factor walks its own levels: the generated sequence is the
+        // plain fixed_level_next sequence over its proportions, also when a
+        // sampled factor sits beside it.
+        let props = [0.2, 0.3, 0.5];
+        let w = norm(&props);
+        let mut walk_counts = [0u32; 3];
+        let walk: Vec<usize> = (0..50)
+            .map(|_| fixed_level_next(&w, &mut walk_counts, |_, _| 0.0))
+            .collect();
+        let alone = ols_spec_2x(2, vec![3], props.to_vec());
+        let mut with_sampled = ols_spec_2x(3, vec![3, 2], vec![0.2, 0.3, 0.5, 0.4, 0.6]);
+        with_sampled.factor_sampled = vec![None, Some(true)];
+        for spec in [alone, with_sampled] {
+            let n_pred = 1 + 2 + spec.n_factor_dummies as usize;
+            let mut ws = SimWorkspace::new(50, n_pred, 2, spec.n_factor_dummies as usize, None);
+            generate_sim_data(&spec, 1, 42, &mut ws).unwrap();
+            for (i, &lvl) in walk.iter().enumerate() {
+                let got = (1..3).find(|&l| ws.x_full[(i, 2 + l)] == 1.0).unwrap_or(0);
+                assert_eq!(got, lvl, "row {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_walk_bound_over_crossed_cells() {
+        // The walk over crossed cells: at every prefix no cell exceeds
+        // N·p_cell by 1 or more, and the shortfall stays under 1.5 over a
+        // sweep of skewed and balanced proportion sets (see fixed_level_next).
+        let mut rng = SimRng::new(2137, 0);
+        let mut worst_short = 0.0f64;
+        for shape in [&[2usize, 2][..], &[3, 4], &[2, 3, 5], &[4, 4, 4]] {
+            for rep in 0..20 {
+                let mut cells = vec![1.0f64];
+                for &k in shape {
+                    // Exponents 1, 3, 5, 7 skew the level weights more on later reps.
+                    let skew = 1 + (rep % 4) as i32 * 2;
+                    let w: Vec<f64> = (0..k)
+                        .map(|_| (rng.next_uniform() as f64).powi(skew) + 1e-3)
+                        .collect();
+                    let t: f64 = w.iter().sum();
+                    cells = w
+                        .iter()
+                        .flat_map(|&p| cells.iter().map(move |&c| c * p / t))
+                        .collect();
+                }
+                let cells = norm(&cells);
+                let mut counts = vec![0u32; cells.len()];
+                for n in 1..=600usize {
+                    fixed_level_next(&cells, &mut counts, |_, _| 0.0);
+                    for (g, &c) in counts.iter().enumerate() {
+                        let dev = c as f64 - n as f64 * cells[g];
+                        assert!(dev < 1.0, "over-count {dev} at N={n}, shape {shape:?}");
+                        worst_short = worst_short.max(-dev);
+                    }
+                }
+            }
+        }
+        assert!(worst_short < 1.5, "shortfall {worst_short}");
+    }
+
+    #[test]
+    fn cluster_level_fixed_factor_walks_over_clusters() {
+        // A cluster-level fixed factor steps once per cluster on its
+        // representative row, under both sizings: cluster levels follow the
+        // per-factor walk in cluster order, rows of a cluster share it, and
+        // the preflight counts equal the generated rows after the broadcast.
+        use crate::spec::{ClusterSizing, ClusterSpec};
+        let w = norm(&[0.5, 0.5]);
+        let mut walk_counts = [0u32; 2];
+        let walk: Vec<usize> = (0..10)
+            .map(|_| fixed_level_next(&w, &mut walk_counts, |_, _| 0.0))
+            .collect();
+        for sizing in [
+            ClusterSizing::FixedClusters { n_clusters: 10 },
+            ClusterSizing::FixedSize { cluster_size: 2 },
+        ] {
+            // Factor 0 (cluster-level, dummy col 3) and factor 1 (row-level,
+            // dummy col 4), both 50/50.
+            let mut spec = ols_spec_2x(2, vec![2, 2], vec![0.5, 0.5, 0.5, 0.5]);
+            spec.estimator = EstimatorSpec::Mle;
+            spec.cluster = Some(ClusterSpec {
+                sizing: sizing.clone(),
+                tau_squared: 0.2,
+                slopes: vec![],
+                extra_groupings: vec![],
+            });
+            spec.between_var_indices = vec![3];
+            let n = 20;
+            let mut ws = SimWorkspace::new(
+                n,
+                5,
+                2,
+                2,
+                Some(&engine_contract::ClusterSpec::intercept_only(
+                    sizing.clone(),
+                    0.25,
+                )),
+            );
+            generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
+            for i in 0..n {
+                let c = ws.cluster_ids[i] as usize;
+                assert_eq!(level_2(&ws, i, 3), walk[c], "{sizing:?} row {i}");
+            }
+            for m in [0, 5, 13, 20] {
+                let realized = realized_level_counts(&spec, &ws, m);
+                let pre = fixed_allocation_counts(&spec, m);
+                assert_eq!(pre[0].as_ref(), Some(&realized[0]), "{sizing:?} N={m}");
+                assert_eq!(pre[1].as_ref(), Some(&realized[1]), "{sizing:?} N={m}");
+            }
+        }
     }
 
     fn factor_spec_70_30() -> SimulationSpec {

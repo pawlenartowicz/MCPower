@@ -405,6 +405,15 @@ failure, and we say so wherever it appears.
 RES  <- stats::setNames(lapply(CASES, simulate_case), names(CASES))
 HASH <- stats::setNames(lapply(CASES, hash_check),    names(CASES))
 RECOVERY_OFF <- recovery_decision(RES)
+# Machine-readable copy of every coefficient-recovery table on this page (same
+# beta_rows() values and verdicts, intercept rows included).
+recovery_csv <- do.call(rbind, lapply(RES, function(s) {
+  br <- beta_rows(s)
+  data.frame(case = s$case$label, family = s$case$family, term = br$Term,
+             specified = br[["True value"]], mean_recovered = br[["Recovered (average)"]],
+             z = br[["Std. errors from true"]], verdict = br$Result)
+}))
+utils::write.csv(recovery_csv, file.path("data", "data_generation_recovery.csv"), row.names = FALSE)
 ```
 
 # Results at a glance

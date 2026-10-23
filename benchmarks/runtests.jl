@@ -4,11 +4,11 @@ using OrderedCollections: OrderedDict
 include("cases.jl"); using .BenchCases
 
 const HERE = @__DIR__
-const CASES = load_cases(joinpath(HERE, "benchmark_cases.json"))
+const CASES = load_cases(joinpath(HERE, "..", "validation", "agreement", "cases.json"))
 byid = Dict(c.id => c for c in CASES)
 
 @testset "load_cases" begin
-    @test length(CASES) == 15
+    @test length(CASES) == 16
     ols = byid["ols_simple"]
     @test ols.family == "ols"
     @test ols.n_grid == collect(20:10:140)

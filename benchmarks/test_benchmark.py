@@ -2,12 +2,13 @@ import json, pathlib
 from cases import load_cases, Case
 
 ROOT = pathlib.Path(__file__).parent
+CASES_JSON = ROOT.parent / "validation" / "agreement" / "cases.json"
 
 
 def test_load_cases_merges_family_defaults():
-    cases = load_cases(ROOT / "benchmark_cases.json")
+    cases = load_cases(CASES_JSON)
     by_id = {c.id: c for c in cases}
-    assert len(cases) == 15
+    assert len(cases) == 16
     ols = by_id["ols_simple"]
     assert ols.family == "ols"
     assert ols.n_grid == list(range(20, 141, 10))          # per-case grid (capped near 80% crossing)
@@ -22,9 +23,9 @@ def test_load_cases_merges_family_defaults():
 
 
 def test_load_cases_new_fields():
-    cases = load_cases(ROOT / "benchmark_cases.json")
+    cases = load_cases(CASES_JSON)
     by_id = {c.id: c for c in cases}
-    assert by_id["anova_2x2"].n_grid == list(range(40, 541, 50))       # reaches the interaction's 80% crossing
+    assert by_id["anova_2x2"].n_grid == list(range(40, 521, 40))       # divisible by the 4 cells
     assert by_id["anova_2x2"].n_sims["tool"] == 1000                   # per-case key-level override
     assert by_id["anova_2x2"].n_sims["mcpower"] == 10000               # family default preserved
     assert by_id["ols_large_n"].n_grid == list(range(300, 2101, 200))
@@ -53,7 +54,7 @@ def test_load_cases_new_fields():
 def test_build_model_runs_every_case_at_nsim4():
     from harness import build_model
     failures = []
-    for c in load_cases(ROOT / "benchmark_cases.json"):
+    for c in load_cases(CASES_JSON):
         try:
             m = build_model(c)
             r = m.find_power(sample_size=c.n_grid[-1], n_sims=4, seed=2137,
@@ -68,7 +69,7 @@ def test_build_model_runs_every_case_at_nsim4():
 def test_loop_best_returns_finite_power():
     import numpy as np
     from loops_py import LOOPS
-    cases = {c.id: c for c in load_cases(ROOT / "benchmark_cases.json")}
+    cases = {c.id: c for c in load_cases(CASES_JSON)}
     for cid in ("ols_multi", "glm_multi", "lme_multi"):
         c = cases[cid]
         n = c.n_grid[len(c.n_grid)//2]
@@ -78,7 +79,7 @@ def test_loop_best_returns_finite_power():
 
 
 def _case_by_id(cid):
-    return {c.id: c for c in load_cases(ROOT / "benchmark_cases.json")}[cid]
+    return {c.id: c for c in load_cases(CASES_JSON)}[cid]
 
 
 def test_loop_design_factor_factor_product():

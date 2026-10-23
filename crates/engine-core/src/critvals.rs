@@ -780,8 +780,8 @@ pub(crate) fn q_tukey_ppf(p: f64, k: f64, df: f64) -> f64 {
 /// Inputs for the between-within denominator degrees of freedom (SAS
 /// `DDFM=BETWITHIN`), resolved once per table build by [`BetweenWithinDf::resolve`].
 ///
-/// Passing `None` to the builder selects the asymptotic (Wald-z) reference,
-/// which is both today's default and the fallback for designs where the
+/// Passing `None` to the builder selects the asymptotic (Wald-z) reference:
+/// the `df_method = asymptotic` opt-in, and the fallback for designs where the
 /// between/within partition is not defined.
 #[derive(Debug, Clone)]
 pub struct BetweenWithinDf {

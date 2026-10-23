@@ -28,17 +28,17 @@ DIAG = None
 
 
 def _diag_fit(make_fit):
-    """Run one per-sim statsmodels fit under the loops' skip rules; return
-    (fit, usable). A fit is unusable if it raises or reports non-convergence —
-    identical to the inline try/except the loops used before. When DIAG is set
-    (diagnostic runs only), also capture and tally the warnings each fit raises
-    and its outcome."""
+    """Run one per-sim statsmodels fit; return (fit, usable). A fit is unusable
+    only if it raises — a fit that returns estimates is scored even when
+    statsmodels flags non-convergence. When DIAG is set (diagnostic runs only),
+    also capture and tally the warnings each fit raises and its convergence
+    flag."""
     if DIAG is None:
         try:
             fit = make_fit()
         except Exception:
             return None, False
-        return fit, getattr(fit, "converged", True)
+        return fit, True
     DIAG["total"] = DIAG.get("total", 0) + 1
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
@@ -51,10 +51,18 @@ def _diag_fit(make_fit):
     for w in captured:
         key = f"warn:{w.category.__name__}"
         DIAG[key] = DIAG.get(key, 0) + 1
-    usable = getattr(fit, "converged", True)
-    outcome = "usable" if usable else "not_converged"
+    outcome = "usable" if getattr(fit, "converged", True) else "not_converged"
     DIAG[outcome] = DIAG.get(outcome, 0) + 1
-    return fit, usable
+    return fit, True
+
+
+def _single_level_fit(fit):
+    """True when the random-intercept SD relative to the residual SD (theta) is
+    <= 1e-4, so the fit is scored against the single-level reference.
+    Mirrors crates/engine-core/src/critvals.rs BetweenWithinDf::collapsed and
+    glmm's PIN_THETA (1e-4) — change together."""
+    tau2 = float(np.asarray(fit.cov_re)[0, 0])
+    return np.sqrt(max(tau2, 0.0) / fit.scale) <= 1e-4
 
 
 def _rhs(formula: str) -> str:
@@ -216,6 +224,8 @@ def _split_counts(n_sims: int, n_workers: int) -> list[int]:
 
 def _parallel(chunk_fn, case, n, n_sims, seed):
     """Run a *_best_chunk across a process pool; pool raw counts, then estimate.
+    Power = rejections / n_sims: a failed fit counts as not significant and stays
+    in the denominator; `usable` is the count of fits that were scored.
 
     cpu_count() pool workers × multi-threaded BLAS would oversubscribe the machine
     and inflate the loop baseline, flattering MCPower; BLAS is pinned in harness.py.
@@ -228,8 +238,7 @@ def _parallel(chunk_fn, case, n, n_sims, seed):
     t_rej = sum(p[0] for p in parts)
     f_rej = sum(p[1] for p in parts)
     usable = sum(p[2] for p in parts)
-    denom = max(usable, 1)
-    return t_rej / denom, f_rej / denom, usable
+    return t_rej / n_sims, f_rej / n_sims, usable
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +302,7 @@ def ols_naive(case, n, n_sims, seed):
         usable += 1
         t_rejections += (pvals < ALPHA).astype(np.int64)
         if f_reject: f_rejections += 1
-    denom = max(usable, 1)
-    return t_rejections / denom, f_rejections / denom
+    return t_rejections / n_sims, f_rejections / n_sims
 
 
 # ---------------------------------------------------------------------------
@@ -410,8 +418,7 @@ def glm_naive(case, n, n_sims, seed):
                 f_rejections += 1
         except Exception:
             pass
-    denom = max(converged, 1)
-    return t_rejections / denom, f_rejections / denom, converged
+    return t_rejections / n_sims, f_rejections / n_sims, converged
 
 
 # ---------------------------------------------------------------------------
@@ -432,8 +439,14 @@ def _lme_best_chunk(case, n, n_sims, seed):
     N_CLUSTERS = case.cluster["n_clusters"]
     ICC = case.cluster["ICC"]
     TAU = float(np.sqrt(ICC / (1.0 - ICC)))
-    z_crit = stats.norm.ppf(1.0 - ALPHA / 2.0)
-    chi2_crit = stats.chi2.ppf(1.0 - ALPHA, TARGETS.size)
+    # Between-within denominator df (no cluster-level predictors in any case).
+    df_bw = n - (P + 1) - (N_CLUSTERS - 1)
+    t_crit = stats.t.ppf(1.0 - ALPHA / 2.0, df_bw)
+    f_crit = stats.f.ppf(1.0 - ALPHA, TARGETS.size, df_bw)
+    # Single-level reference (a fit with zero random-intercept variance).
+    df_one = n - (P + 1)
+    t_crit_one = stats.t.ppf(1.0 - ALPHA / 2.0, df_one)
+    f_crit_one = stats.f.ppf(1.0 - ALPHA, TARGETS.size, df_one)
     t_rejections = np.zeros(P, dtype=np.int64)
     f_rejections = 0
     converged = 0
@@ -461,19 +474,21 @@ def _lme_best_chunk(case, n, n_sims, seed):
         # sample-size-normalized, so |grad| grows with n and trips the check on
         # fits whose fixed effects are fine (0% raise; rate non-monotonic in n,
         # 100% usable at n=400/500 — a degenerate design would fail
-        # systematically). Those draws drop from the power denominator below;
-        # the fit still ran, so timing is unaffected and the dropped-draw
-        # selection bias touches only the sanity-signal power. Left as-is
-        # deliberately; quantified by diagnose_loops.py.
+        # systematically). Such fits are still scored (the estimates are fine);
+        # only a fit that raises or yields a non-finite SE is a failure, counted
+        # as not significant. Quantified by diagnose_loops.py.
         fit, usable = _diag_fit(lambda: sm.MixedLM(y, Xd, groups=cluster_ids).fit(disp=False))
         if not usable:
             continue
-        converged += 1
         coef = np.asarray(fit.fe_params)
         cov = np.asarray(fit.cov_params())[: P + 1, : P + 1]
         se = np.sqrt(np.diag(cov))
-        z_stat = coef[1:] / se[1:]
-        t_rejections += (np.abs(z_stat) > z_crit).astype(np.int64)
+        if not (np.all(np.isfinite(coef)) and np.all(np.isfinite(se))):
+            continue
+        converged += 1
+        one = _single_level_fit(fit)
+        t_stat = coef[1:] / se[1:]
+        t_rejections += (np.abs(t_stat) > (t_crit_one if one else t_crit)).astype(np.int64)
         idx = TARGETS + 1
         b = coef[idx]
         V = cov[np.ix_(idx, idx)]
@@ -481,7 +496,7 @@ def _lme_best_chunk(case, n, n_sims, seed):
             w_stat = float(b @ np.linalg.solve(V, b))
         except np.linalg.LinAlgError:
             continue
-        if w_stat > chi2_crit:
+        if w_stat / TARGETS.size > (f_crit_one if one else f_crit):
             f_rejections += 1
     # Return raw counts for parallel aggregation
     return t_rejections, f_rejections, converged
@@ -497,6 +512,9 @@ def lme_naive(case, n, n_sims, seed):
     N_CLUSTERS = case.cluster["n_clusters"]
     ICC = case.cluster["ICC"]
     TAU = float(np.sqrt(ICC / (1.0 - ICC)))
+    df_bw = n - (P + 1) - (N_CLUSTERS - 1)
+    t_crit = stats.t.ppf(1.0 - ALPHA / 2.0, df_bw)
+    t_crit_one = stats.t.ppf(1.0 - ALPHA / 2.0, n - (P + 1))   # single-level reference
     t_rejections = np.zeros(P, dtype=np.int64)
     converged = 0
     cluster_ids = _assign_clusters(n, N_CLUSTERS)
@@ -507,17 +525,18 @@ def lme_naive(case, n, n_sims, seed):
         y = X @ BETA + b_cluster[cluster_ids] + eps
         Xd = sm.add_constant(X)
         # Same MixedLM fit as lme_best; see its comment for the benign ~5-20%
-        # non-convergence (statsmodels gradient-norm artifact) left as-is.
+        # non-convergence flag (statsmodels gradient-norm artifact), still scored.
         fit, usable = _diag_fit(lambda: sm.MixedLM(y, Xd, groups=cluster_ids).fit(disp=False))
         if not usable:
             continue
+        t_stat = np.asarray(fit.tvalues)[1 : P + 1]  # library coef/SE; drop intercept, keep fixed effects
+        if not np.all(np.isfinite(t_stat)):
+            continue
         converged += 1
-        pvals = np.asarray(fit.pvalues)[1 : P + 1]  # drop intercept, keep fixed effects
-        t_rejections += (pvals < ALPHA).astype(np.int64)
+        t_rejections += (np.abs(t_stat) > (t_crit_one if _single_level_fit(fit) else t_crit)).astype(np.int64)
     # No joint test here — the R naive kernel doesn't compute one, the value is
     # never recorded, and timing dead work would inflate the Python baseline.
-    denom = max(converged, 1)
-    return t_rejections / denom, 0.0, converged
+    return t_rejections / n_sims, 0.0, converged
 
 
 # ---------------------------------------------------------------------------

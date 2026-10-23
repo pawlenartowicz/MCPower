@@ -1,14 +1,20 @@
 #!/usr/bin/env Rscript
 # Parameterized R benchmark harness — mirrors harness.py.
-# Run from mcpower/benchmarks with:  Rscript harness.R --case ols_simple --out results/r_smoke.json
+# Run from any directory:  Rscript harness.R --case ols_simple --out results/r_smoke.json
+# cases.json, loops_r.R and tools_r.R resolve relative to this file; --out defaults to results/r.json beside it.
+
+HERE <- local({
+  fa <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+  if (length(fa)) dirname(normalizePath(sub("^--file=", "", fa[1]))) else getwd()
+})
 
 # ---- arg parsing (do this first, before loading mcpower) ----
 parse_args <- function(argv) {
-  out <- list(case = "all", methods = NULL, out = "results/r.json", threads = "auto")
+  out <- list(case = "all", methods = NULL, out = file.path(HERE, "results", "r.json"), threads = "auto", budget = "timing")
   i <- 1
   while (i <= length(argv)) {
     key <- argv[i]
-    if (!key %in% c("--case", "--methods", "--out", "--threads", "--scale"))
+    if (!key %in% c("--case", "--methods", "--out", "--threads", "--scale", "--budget"))
       stop(sprintf("unknown arg: %s", key))
     if (i + 1 > length(argv)) stop(sprintf("missing value for %s", key))
     val <- argv[i + 1]
@@ -16,6 +22,10 @@ parse_args <- function(argv) {
     else if (key == "--methods") out$methods <- strsplit(val, ",")[[1]]
     else if (key == "--out")     out$out <- val
     else if (key == "--scale")   out$scale <- val
+    else if (key == "--budget") {
+      if (!val %in% c("timing", "agreement")) stop(sprintf("--budget must be timing or agreement, got %s", val))
+      out$budget <- val
+    }
     else                         out$threads <- val
     i <- i + 2
   }
@@ -37,13 +47,17 @@ if (ARGS$threads == "1" && Sys.getenv("RAYON_NUM_THREADS") != "1") {
 Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1")
 
 suppressMessages({ library(mcpower); library(jsonlite) })
-source("loops_r.R")
-source("tools_r.R")
+source(file.path(HERE, "loops_r.R"))
+source(file.path(HERE, "tools_r.R"))
 
 RECORDED_METHODS <- c("mcpower_find_power", "mcpower_find_sample_size",
                       "tool", "loop_naive", "loop_best")
 REPS <- list(mcpower_find_power = 3L, mcpower_find_sample_size = 3L,
              loop_best = 3L, loop_naive = 1L)
+
+# --budget agreement: per-grid-point sim counts from cases.json defaults$agreement
+# (replacing the per-case timing counts), one rep per point, no warmup.
+AGREEMENT <- identical(ARGS$budget, "agreement")
 
 # Scaling for every tier's sim count (mcpower / loops / tools). 1.0 = the real
 # (publishable) run; set e.g. 0.1 for a 1/10-sims quick preview. Recorded rows
@@ -59,7 +73,7 @@ seed_for <- function(n) 2137L + as.integer(n)
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 # ---- load_cases: mirror cases.py (merge family defaults) ----
-load_cases <- function(path) {
+load_cases <- function(path, agreement = FALSE) {
   doc <- jsonlite::fromJSON(path, simplifyVector = FALSE)
   defaults <- doc$defaults
   lapply(doc$cases, function(c) {
@@ -67,6 +81,11 @@ load_cases <- function(path) {
     n <- c$n %||% d$n                       # per-case grid override
     n_sims <- d$n_sims                      # key-level merge with per-case overrides
     for (k in names(c$n_sims)) n_sims[[k]] <- c$n_sims[[k]]
+    if (agreement) {                        # the budget block overrides per-case counts too
+      ag <- defaults$agreement
+      n_sims$mcpower <- ag$mcpower; n_sims$best <- ag$best
+      n_sims$tool <- if (identical(c$tool, "simr")) ag$simr else ag$tool
+    }
     list(
       id = c$id, family = c$family, formula = c$formula, effects = c$effects,
       targets = unlist(c$targets),
@@ -105,9 +124,11 @@ build_model <- function(case) {
       sl <- lapply(seq_along(cl$random_slopes), function(i)
         list(predictor = cl$random_slopes[[i]], variance = cl$slope_variance,
              corr_with_intercept = sic, corr_with = rep(0, i - 1L)))
-      m$set_cluster(cl$var, ICC = cl$ICC, n_clusters = cl$n_clusters, random_slopes = sl)
+      m$set_cluster(cl$var, ICC = cl$ICC, n_clusters = cl$n_clusters, random_slopes = sl,
+                    cluster_level_vars = unlist(cl$cluster_level))
     } else {
-      m$set_cluster(cl$var, ICC = cl$ICC, n_clusters = cl$n_clusters)
+      m$set_cluster(cl$var, ICC = cl$ICC, n_clusters = cl$n_clusters,
+                    cluster_level_vars = unlist(cl$cluster_level))
     }
   }
   if (!is.null(case$max_failed_frac)) m$set_max_failed_simulations(case$max_failed_frac)
@@ -121,6 +142,7 @@ build_model <- function(case) {
 }
 
 time_call <- function(fn, warmup, reps) {
+  if (AGREEMENT) { warmup <- FALSE; reps <- 1L }
   if (warmup) fn()
   times <- numeric(reps); result <- NULL
   for (i in seq_len(reps)) {
@@ -129,14 +151,21 @@ time_call <- function(fn, warmup, reps) {
   list(time = median(times), result = result)
 }
 
+# The loops return power for every design column; label the target columns so
+# record() can pick them by name.
 run_loop <- function(case, kind, n, n_sims, seed) {
-  as.numeric(LOOPS[[case$family]][[kind]](case, n, n_sims, seed)$power)
+  p <- as.numeric(LOOPS[[case$family]][[kind]](case, n, n_sims, seed)$power)
+  names(p) <- rep("", length(p))
+  names(p)[loop_design(case)$targets] <- case$targets
+  p
 }
 
 run_mcpower_find_power <- function(case, n, n_sims, seed) {
   m <- build_model(case)
   r <- m$find_power(sample_size = n, n_sims = n_sims, seed = seed, progress_callback = FALSE, verbose = FALSE)
-  as.numeric(r$power_uncorrected[[1]])
+  p <- as.numeric(r$power_uncorrected[[1]])
+  names(p) <- attr(r, "mcpower_meta")$effect_names[unlist(r$target_indices)]   # engine coefficient order
+  p
 }
 
 run_mcpower_find_sample_size <- function(case, n_sims, seed) {
@@ -155,9 +184,20 @@ run_mcpower_find_sample_size <- function(case, n_sims, seed) {
        power = curve)
 }
 
+# Every record's power[i] belongs to targets[i], where `targets` is the case's
+# targets list. A named power vector is reordered by term name into that order
+# and must cover every target. An unnamed vector is taken as already in that
+# order; the simr adapter passes a single unnamed value for targets[1], so its
+# power has length 1 while `targets` stays the full list.
 record <- function(case, method, n, n_sims, elapsed, power) {
+  if (!is.null(names(power))) {
+    miss <- setdiff(case$targets, names(power))
+    if (length(miss)) stop(sprintf("%s/%s: no power for target(s) %s", case$id, method, paste(miss, collapse = ", ")))
+    power <- power[case$targets]
+  }
   list(case_id = case$id, family = case$family, lang = "r", method = method,
        n = n, n_sims = n_sims, time_s = elapsed, per_sim_s = elapsed / n_sims,
+       targets = I(as.character(case$targets)),
        power = I(as.numeric(power)))   # I() keeps it a JSON array even when length 1
 }
 
@@ -185,7 +225,7 @@ build_meta <- function(threads_mode) {
 }
 
 main <- function(args) {
-  all_cases <- load_cases("benchmark_cases.json")   # relative to cwd (run from benchmarks/)
+  all_cases <- load_cases(file.path(HERE, "cases.json"), agreement = AGREEMENT)
   cases <- if (args$case == "all") all_cases else Filter(function(c) c$id == args$case, all_cases)
   if (length(cases) == 0) stop(sprintf("Case '%s' not found", args$case))
   methods <- if (is.null(args$methods)) RECORDED_METHODS else args$methods
@@ -249,7 +289,7 @@ main <- function(args) {
             # tryCatch backstop: a tool crash at one n (e.g. simglm drawing a
             # level-free factor sample at small n) drops that point, not the run.
             res <- tryCatch({
-              invisible(fn(case, n, warmup_nsim, seed_for(n)))  # micro warm-up
+              if (!AGREEMENT) invisible(fn(case, n, warmup_nsim, seed_for(n)))  # micro warm-up
               t0 <- proc.time()[["elapsed"]]
               out <- fn(case, n, n_sims, seed_for(n))
               list(el = proc.time()[["elapsed"]] - t0, power = out$power)

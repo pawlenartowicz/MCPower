@@ -40,9 +40,11 @@ def build_model(case: Case):
             m.set_cluster(cl["var"], ICC=cl["ICC"], n_clusters=cl["n_clusters"],
                           random_slopes=cl["random_slopes"],
                           slope_variance=cl.get("slope_variance", 0.0),
-                          slope_intercept_corr=cl.get("slope_intercept_corr", 0.0))
+                          slope_intercept_corr=cl.get("slope_intercept_corr", 0.0),
+                          cluster_level_vars=cl.get("cluster_level"))
         else:
-            m.set_cluster(cl["var"], ICC=cl["ICC"], n_clusters=cl["n_clusters"])
+            m.set_cluster(cl["var"], ICC=cl["ICC"], n_clusters=cl["n_clusters"],
+                          cluster_level_vars=cl.get("cluster_level"))
     if case.max_failed_frac is not None:
         m.set_max_failed_simulations(case.max_failed_frac)
     # Honest-compare override (benchmark-only): the loops and dedicated tools
@@ -54,7 +56,7 @@ def build_model(case: Case):
     return m
 
 
-CASES_PATH = pathlib.Path(__file__).parent / "benchmark_cases.json"
+CASES_PATH = pathlib.Path(__file__).parent.parent / "validation" / "agreement" / "cases.json"
 RECORDED_METHODS = ["mcpower_find_power", "mcpower_find_sample_size",
                     "tool", "loop_naive", "loop_best"]
 
@@ -234,12 +236,16 @@ def main(argv):
 
             elif method in ("loop_best", "loop_naive"):
                 # No Python GLMM loop baseline: statsmodels has no frequentist
-                # Laplace GLMM matching glmer's Wald-z rule, so a fair Python
+                # Laplace GLMM to match glmer's fit, so a fair Python
                 # comparator does not exist. The R harness runs the glmer loop;
                 # combine.py renders the missing py rows as dashes. (The Python
                 # `tool` tier is skipped for the same no-equivalent reason.)
                 if case.family == "glmm":
                     print(f"\n=== {case.id} {method} (glmm): skipped — no Python GLMM loop baseline ===")
+                    continue
+                if case.family == "lme" and case.cluster and (
+                        case.cluster.get("cluster_level") or case.cluster.get("random_slopes")):
+                    print(f"\n=== {case.id} {method} (lme): skipped — no Python loop for random slopes / cluster-level predictors ===")
                     continue
                 kind = "best" if method == "loop_best" else "naive"
                 tier = kind
