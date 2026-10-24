@@ -1987,7 +1987,7 @@ mod tests {
                 let mut cells = vec![1.0f64];
                 for &k in shape {
                     // Exponents 1, 3, 5, 7 skew the level weights more on later reps.
-                    let skew = 1 + (rep % 4) as i32 * 2;
+                    let skew = 1 + (rep % 4) * 2;
                     let w: Vec<f64> = (0..k)
                         .map(|_| (rng.next_uniform() as f64).powi(skew) + 1e-3)
                         .collect();
