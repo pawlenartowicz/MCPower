@@ -38,8 +38,8 @@ for (case in EXTRA_CASES) {
 }
 # G2/get_effects: deterministic analytic oracle (no golden, no lme4). For each
 # GE_CASES case, MCPower's K-draw mean recovered effect must match the analytic
-# expected_recovery value (beta/sqrt(beta'Sigma beta + 1) for OLS; beta directly
-# for GLM/MLE) within GETEFFECTS_TOL$mean_abs. Reuses recover_once and
+# expected_recovery value (the specified beta, for every estimator) within
+# GETEFFECTS_TOL$mean_abs. Reuses recover_once and
 # expected_recovery from common.R, GE_CASES from formulas.R.
 local({
   GE_N     <- 4000L

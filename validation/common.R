@@ -988,26 +988,11 @@ recover_once <- function(cc, seed) {
   as.numeric(parse_effects(m2$get_effects_from_data("y", verbose = FALSE))[cont])
 }
 
-# Convention-predicted recovery per estimator. OLS z-scores the outcome, so it
-# recovers the standardized coefficient beta / sqrt(Var(X beta) + 1), where
-# Var(X beta) = beta' Sigma beta (reduces to sum(beta^2) when predictors are
-# independent). With correlation the cross terms inflate Var(X beta), producing
-# stronger shrinkage. GLM (logit) and MLE (mixed) fit the native outcome and
-# recover beta directly.
+# Convention-predicted recovery per estimator: the specified beta itself. GLM
+# (logit) reads the native log-odds coefficient; OLS and MLE (mixed) divide by
+# the fitted residual SD, which the engine generates at 1.
 expected_recovery <- function(cc) {
-  cont      <- continuous_names(cc)
-  beta_cont <- parse_effects(cc$effects)[cont]
-  if (cc$family != "ols") return(beta_cont)
-  k <- length(beta_cont)
-  Sigma <- diag(k)
-  if (!is.null(cc$correlations)) {
-    pc <- parse_correlation(cc)            # list(cols, rho, vars); rho is a scalar
-    a  <- match(pc$vars[1], cont)
-    b  <- match(pc$vars[2], cont)
-    if (!is.na(a) && !is.na(b)) { Sigma[a, b] <- pc$rho; Sigma[b, a] <- pc$rho }
-  }
-  var_xb <- as.numeric(t(beta_cont) %*% Sigma %*% beta_cont)
-  beta_cont / sqrt(var_xb + 1)
+  parse_effects(cc$effects)[continuous_names(cc)]
 }
 
 # ==============================================================================

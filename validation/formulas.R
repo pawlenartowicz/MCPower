@@ -556,8 +556,8 @@ names(CASES) <- vapply(CASES, function(c) c$label, character(1))
 
 # Continuous-main-effect cases for the get_effects round-trip gate (L3 G2,
 # validation_get_effects.rmd + regression.R). Factors and interactions are out of
-# scope for the settled convention. Correlated case (ols_corr_a) exercises the
-# beta'Sigma beta oracle branch in expected_recovery.
+# scope for the settled convention. Correlated case (ols_corr_a) checks that
+# correlated predictors still recover the specified betas.
 GE_CASES <- list(CASES$ols_simple_a, CASES$ols_two_a, CASES$ols_corr_a,
                  CASES$glm_simple_a, CASES$glm_two_b,
                  CASES$lme_simple_a, CASES$lme_two_a)

@@ -57,16 +57,15 @@ dataset — and check the recovery lands where the convention says it should.
 The estimator is dispatched off the model family, and the recovery scale differs
 by estimator:
 
-- **OLS (continuous outcome)** z-scores the outcome, so it recovers the
-  *standardized regression coefficient* — `s / sqrt(Σs² + 1)` for independent
-  continuous predictors with the engine's default N(0, 1) residual. The shrinkage
-  is the residual variance the standardization divides through; it is small for
-  the small/medium effects benchmarked here and is the same approximation the
-  shipped OLS recovery has always carried.
-- **GLM (logistic)** and **MLE (mixed)** fit the **native** outcome (raw 0/1 for
-  logit, the raw response for mixed), so they recover the coefficient **directly**:
-  expected recovery is `s` itself. MLE recovery is fixed-effects-only and reads the
-  grouping column from the uploaded data.
+- **OLS (continuous outcome)** fits the raw response and divides the
+  coefficients by the fitted residual SD. The engine generates with residual
+  SD 1, so expected recovery is `s` itself, with or without correlated
+  predictors.
+- **GLM (logistic)** fits the **native** 0/1 outcome, so it recovers the
+  coefficient **directly**: expected recovery is `s` itself.
+- **MLE (mixed)** fits the raw response and divides the coefficients by the
+  fitted residual SD, so expected recovery is again `s`. MLE recovery is
+  fixed-effects-only and reads the grouping column from the uploaded data.
 
 Scope: **continuous main effects only** — the settled convention. Factor-dummy and
 interaction scaling under non-continuous outcomes is a separate, still-open item
@@ -118,7 +117,7 @@ knitr::kable(summ)
 ```{r overall, results='asis'}
 all_ok <- all(vapply(RESULTS, function(r) all(r$table$Verdict == "PASS"), logical(1)))
 cat(if (all_ok)
-  "> **All estimators round-trip:** every specified continuous main effect is recovered to within the gate of the convention-predicted value — OLS at the shrunk standardized scale, GLM and MLE at the native coefficient.\n"
+  "> **All estimators round-trip:** every specified continuous main effect is recovered to within the gate of the convention-predicted value — OLS and MLE in residual-SD units, GLM at the native coefficient.\n"
   else "> **Some cases need review** — see the per-case sections below.\n")
 ```
 
