@@ -129,6 +129,8 @@ model$set_cluster("site", ICC = 0.20, n_clusters = 30,
                   cluster_level_vars = c("treatment"))
 ```
 
+A cluster-level predictor must be synthesized. A predictor that comes from [[concepts/upload-data|uploaded data]] is resampled from the upload row by row, so it cannot also be drawn once per cluster; MCPower rejects that combination, and the app disables its cluster-level checkbox.
+
 **D3/D4 design-effect distinction.** A within-cluster predictor (measured on each individual) has its SE reduced by within-cluster replication; a cluster-level predictor has no such benefit — only the number of distinct clusters matters. At fixed total N, halving the number of clusters roughly doubles the SE of the cluster-level predictor while barely changing the SE of the within-cluster predictor. Run the same model at your planned `n_clusters` and at half that count to see how sensitive your power estimate is to the number of clusters (not just their size).
 
 > [!warning] Cluster-level predictors and ICC

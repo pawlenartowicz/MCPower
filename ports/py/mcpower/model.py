@@ -398,7 +398,7 @@ class MCPower:
                 random-effect term in the formula).
             ICC: Intraclass correlation coefficient (0 <= ICC < 1). 0 is
                 allowed (degenerate / no clustering); non-zero values must
-                lie in [0.1, 0.9] for numerical stability. This is the
+                lie in [0.05, 0.95] for numerical stability. This is the
                 *conditional* (residual) ICC ``tau^2 / (tau^2 + sigma^2)`` --
                 the within-cluster correlation after the predictors are
                 accounted for; the random intercept is sized as
@@ -976,9 +976,11 @@ class MCPower:
           * every modeled main-effect predictor must be present as an upload
             column (a multivariable fit can't estimate an absent predictor).
 
-        The fitted estimator follows the model family: OLS (linear) z-scores the
-        outcome to recover the standardized β; GLM (logit) and MLE (mixed) fit
-        the native outcome (raw 0/1 / raw response). Clustered recovery (linear
+        The fitted estimator follows the model family, and every fit runs on the
+        native outcome: OLS (linear) and MLE (linear mixed) divide the
+        coefficients by the fitted residual SD, the scale :meth:`set_effects`
+        reads back (the simulation fixes the residual SD at 1); GLM (logit) reads
+        the log-odds coefficients as-is. Clustered recovery (linear
         mixed or logistic GLMM) is fixed-effects-only — the uploaded data must
         carry the grouping column.
 
@@ -1054,14 +1056,16 @@ class MCPower:
             _json.dumps(payload)
         )
 
-        # Outcome scaling depends on the estimator: OLS z-scores it (recovers the
-        # standardized β) via the shared engine helper; GLM (logit) and MLE
-        # (mixed) fit it on its native scale (raw 0/1 / raw response).
-        y_raw = [float(v) for v in raw_columns[y]]
-        if self.estimator == "ols":
-            outcome = _engine.standardize_continuous(y_raw)
-        else:
-            outcome = y_raw
+        # Every estimator fits the outcome on its native scale (raw 0/1 /
+        # response); the Gaussian betas are rescaled after the fit. The Gaussian
+        # response is mean-centred: that moves only the unreported intercept and
+        # keeps the fit's running-sum σ̂² from cancelling against a large mean.
+        # Mirrors driver.rs.
+        gaussian = self.estimator in ("ols", "mle")
+        outcome = [float(v) for v in raw_columns[y]]
+        if gaussian:
+            y_mean = math.fsum(outcome) / len(outcome)
+            outcome = [v - y_mean for v in outcome]
 
         outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
@@ -1120,9 +1124,27 @@ class MCPower:
                 "design columns were built; canonical column order mismatch"
             )
 
+        # A Gaussian fit (OLS or linear mixed) runs on the raw response, so its
+        # betas are in outcome units. Divide by the fitted residual SD: the
+        # generator fixes σ = 1, so this is the scale set_effects reads back.
+        # Mirrors driver.rs.
+        scale = 1.0
+        if gaussian:
+            # An exact fit leaves σ̂² at round-off level (possibly negative):
+            # judge it against the outcome's own spread.
+            import statistics
+
+            sigma_sq = float(fit["sigma_sq_hat"])
+            scale = math.sqrt(sigma_sq) if sigma_sq > 0.0 else 0.0
+            if not scale > 1e-6 * statistics.pstdev(outcome):
+                raise ValueError(
+                    "the model fits the outcome exactly (residual SD ~ 0), so "
+                    "effects in residual-SD units are undefined"
+                )
+
         # Map betas → semantic names, drop the intercept (index 0), format.
         parts = [
-            f"{name}={round(float(beta), 4)}"
+            f"{name}={round(float(beta) / scale, 4)}"
             for name, beta in zip(semantic_names[1:], betas[1:])
         ]
         effects_str = ", ".join(parts)
@@ -1145,7 +1167,12 @@ class MCPower:
             # against (raw τ², not ICC-derived) — no meaningful ICC to report;
             # mirrors driver.rs's cluster_icc, which returns None for it.
             vc = fit["variance_components"]
-            if self._pending_clusters and self.family != "poisson" and not vc:
+            if self._pending_clusters and self.estimator == "ols":
+                print(
+                    "Estimated ICC: unavailable (the model is fitted by OLS, "
+                    "which has no random intercept)."
+                )
+            elif self._pending_clusters and self.family != "poisson" and not vc:
                 print(
                     "Estimated ICC: unavailable (the random-intercept fit did "
                     "not converge to a variance estimate)."

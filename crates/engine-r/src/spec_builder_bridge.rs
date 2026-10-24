@@ -116,13 +116,6 @@ pub fn build_recovery_design(spec_json: &str) -> Result<List> {
     ))
 }
 
-/// Z-score a slice with population SD (ddof=0) via the shared engine helper —
-/// the single source the host uses to scale the outcome for OLS recovery.
-#[extendr]
-pub fn standardize_continuous(values: Vec<f64>) -> Vec<f64> {
-    engine_spec_builder::standardize_continuous(&values)
-}
-
 /// Split a comma-separated assignment string at top-level commas (parens
 /// suppress splitting), trimming each segment and dropping empties. The shared
 /// splitter the host correlation/effect normalisers bind to. Errors on
@@ -309,6 +302,5 @@ extendr_module! {
     fn residual_codes;
     fn re_dist_codes;
     fn build_recovery_design;
-    fn standardize_continuous;
     fn split_assignments;
 }

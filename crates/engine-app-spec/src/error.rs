@@ -73,6 +73,11 @@ pub enum AdapterError {
     GetEffectsBetaColumnMismatch { betas: usize, cols: usize },
 
     #[error(
+        "get_effects_from_data: the model fits the outcome exactly (residual SD ~ 0), so effects in residual-SD units are undefined"
+    )]
+    GetEffectsNoResidual,
+
+    #[error(
         "get_effects_from_data: column {name:?} has {got} values but expected {expected} (n_rows)"
     )]
     GetEffectsColumnLength {

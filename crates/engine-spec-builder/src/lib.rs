@@ -38,5 +38,5 @@ pub use project_contract::{
     dist_codes_json, re_dist_codes_json, residual_codes_json,
 };
 pub use skeleton::{EffectDescriptor, EffectSkeleton};
-pub use upload::{RecoveryDesign, build_recovery_design, standardize_continuous};
+pub use upload::{RecoveryDesign, build_recovery_design};
 pub use variables::{PredictorTable, build_predictor_table};

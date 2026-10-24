@@ -9,6 +9,8 @@
   import { NumberInput } from '$lib/components/ui/number-input';
   import { familyStore } from '$lib/stores/family.svelte';
   import { parsedFormulaStore } from '$lib/stores/parsed-formula.svelte';
+  import { uploadStore } from '$lib/stores/upload.svelte';
+  import { uploadedColumnByName } from '$lib/domain/upload-detect';
   import { configPaneDialogStyle } from './dialog-position.svelte';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
 
@@ -17,6 +19,10 @@
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
   const predictors = $derived(parsedFormulaStore.getStable(cfg.formula).result?.predictors ?? []);
   const slopes = $derived(cfg.cluster?.slopes ?? []);
+  // A predictor bound to an uploaded column is resampled from the upload, so it
+  // cannot be drawn once per cluster; the engine rejects it. Its box stays
+  // enabled while checked so a stale selection can still be cleared.
+  const uploadedNames = $derived(new Set(uploadedColumnByName(uploadStore.csvData).keys()));
 
   function isClusterLevel(name: string): boolean {
     return (cfg.cluster?.clusterLevelVars ?? []).includes(name);
@@ -51,10 +57,16 @@
       {:else}
         <div class="flex flex-wrap gap-x-4 gap-y-1.5">
           {#each predictors as name (name)}
-            <label class="flex items-center gap-1.5 text-xs">
+            {@const uploaded = uploadedNames.has(name)}
+            <label
+              class="flex items-center gap-1.5 text-xs"
+              class:text-muted-foreground={uploaded}
+              title={uploaded ? 'Comes from the uploaded data, so it cannot be cluster-level' : undefined}
+            >
               <input
                 type="checkbox"
                 checked={isClusterLevel(name)}
+                disabled={uploaded && !isClusterLevel(name)}
                 data-testid={`cluster-level-${name}`}
                 onchange={() => toggleClusterLevel(name)}
               />

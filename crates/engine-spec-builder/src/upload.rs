@@ -18,9 +18,7 @@ use crate::variables::PredictorTable;
 /// Z-score a slice with population SD (ddof=0).
 ///
 /// Returns an empty `Vec` for empty input and all-zeros when SD == 0.
-/// Single-sourced here so every host (Python, R, Tauri, WASM) uses identical
-/// numeric transformations — including `driver.rs`'s outcome z-scoring path.
-pub fn standardize_continuous(values: &[f64]) -> Vec<f64> {
+fn standardize_continuous(values: &[f64]) -> Vec<f64> {
     let n = values.len();
     if n == 0 {
         return Vec::new();

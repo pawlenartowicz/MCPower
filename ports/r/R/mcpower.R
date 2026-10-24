@@ -639,8 +639,9 @@ MCPower <- R6::R6Class(
     },
 
     # model.py get_effects_from_data — estimate standardized effects from
-    # uploaded data. Estimator follows the family: OLS (linear) z-scores the
-    # outcome; GLM (logit) and MLE (mixed) fit the native outcome (clustered
+    # uploaded data. Estimator follows the family; every fit runs on the native
+    # outcome. OLS (linear) and MLE (linear mixed) divide by the fitted residual
+    # SD; GLM (logit) reads the log-odds coefficients as-is (clustered
     # recovery is fixed-effects-only and needs the grouping column uploaded).
     # Returns a set_effects-style string "x=0.13, y=0.41"; does NOT auto-apply
     # the effects. For a clustered model the verbose note also reports the
@@ -711,15 +712,14 @@ MCPower <- R6::R6Class(
       semantic_names <- rd$semantic_names
       ncol_design    <- rd$ncol
 
-      # Outcome scaling depends on the estimator: OLS z-scores it (recovers the
-      # standardized beta) via the shared engine helper; GLM (logit) and MLE
-      # (mixed) fit it on its native scale (raw 0/1 for logit, raw response).
-      y_raw <- as.numeric(unlist(raw_columns[[y]]))
-      outcome <- if (identical(self$estimator, "ols")) {
-        standardize_continuous(y_raw)
-      } else {
-        y_raw
-      }
+      # Every estimator fits the outcome on its native scale (raw 0/1 /
+      # response); the Gaussian betas are rescaled after the fit. The Gaussian
+      # response is mean-centred: that moves only the unreported intercept and
+      # keeps the fit's running-sum sigma^2 from cancelling against a large
+      # mean. Mirrors driver.rs.
+      gaussian <- self$estimator %in% c("ols", "mle")
+      outcome <- as.numeric(unlist(raw_columns[[y]]))
+      if (gaussian) outcome <- outcome - mean(outcome)
 
       # Clustered recovery (linear mixed `mle` OR logistic GLMM `glm`) is
       # fixed-effects-only: thread the uploaded grouping column as contiguous
@@ -771,9 +771,24 @@ MCPower <- R6::R6Class(
           length(betas), length(semantic_names)), call. = FALSE)
       }
 
+      # A Gaussian fit (OLS or linear mixed) runs on the raw response, so its
+      # betas are in outcome units. Divide by the fitted residual SD: the
+      # generator fixes sigma = 1, so this is the scale set_effects reads back.
+      # Mirrors driver.rs.
+      scale <- 1
+      if (gaussian) {
+        # An exact fit leaves sigma^2 at round-off level (possibly negative):
+        # judge it against the outcome's own spread.
+        scale <- sqrt(max(as.numeric(fit$sigma_sq_hat), 0))
+        if (!isTRUE(scale > 1e-6 * sqrt(mean(outcome^2)))) {
+          stop("the model fits the outcome exactly (residual SD ~ 0), so effects ",
+               "in residual-SD units are undefined", call. = FALSE)
+        }
+      }
+
       # Drop intercept (index 1), format remaining betas.
       parts <- mapply(function(nm, beta) {
-        sprintf("%s=%s", nm, round(as.numeric(beta), 4))
+        sprintf("%s=%s", nm, round(as.numeric(beta) / scale, 4))
       }, semantic_names[-1], betas[-1])
       effects_str <- paste(parts, collapse = ", ")
 
@@ -794,7 +809,10 @@ MCPower <- R6::R6Class(
         # (raw tau^2, not ICC-derived) — no meaningful ICC to report; mirrors
         # driver.rs's cluster_icc, which returns None for it.
         vc <- fit$variance_components
-        if (length(private$pending_clusters) > 0L && !identical(self$family, "poisson") &&
+        if (length(private$pending_clusters) > 0L && identical(self$estimator, "ols")) {
+          message("Estimated ICC: unavailable (the model is fitted by OLS, ",
+                  "which has no random intercept).")
+        } else if (length(private$pending_clusters) > 0L && !identical(self$family, "poisson") &&
             length(vc) == 0L) {
           message("Estimated ICC: unavailable (the random-intercept fit did ",
                   "not converge to a variance estimate).")

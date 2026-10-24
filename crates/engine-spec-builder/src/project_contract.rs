@@ -86,6 +86,18 @@ pub fn build_linear_contract_with_skeleton(
             table.non_factor_names.len(),
             upload,
         )?;
+        // An upload-bound column is resampled from the frame, so it cannot be
+        // reclassified as drawn once per cluster.
+        for &ColumnId(c) in &generation.cluster_level_columns {
+            if !matches!(
+                generation.columns[c as usize],
+                ColumnSpec::Synthetic { .. } | ColumnSpec::FactorSynthetic { .. }
+            ) {
+                return Err(SpecError::ClusterLevelUploaded {
+                    name: predictor_names[c as usize].clone(),
+                });
+            }
+        }
         // Partial mode: measure empirical Spearman rank correlations (converted to
         // the latent-Gaussian scale), then overlay explicit pairs.
         // Strict mode flows through as a bootstrap frame (apply_upload sets

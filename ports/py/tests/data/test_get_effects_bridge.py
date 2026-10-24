@@ -64,7 +64,7 @@ def _build_contracts() -> bytes:
 
 def test_fit_uploaded_data_lme_debug_fields_ols():
     """OLS path: variance_components and re_corr are empty lists; sigma_sq_hat
-    is NaN (the Mle path is the only one that populates these fields)."""
+    is the residual variance RSS / (n − p), 0 for the exact y = 2x."""
     contracts_bytes = _build_contracts()
     out = _engine.fit_uploaded_data(
         contracts_bytes, 0, _SEED, _DESIGN, _NROW, _NCOL, _OUTCOME, None
@@ -73,8 +73,7 @@ def test_fit_uploaded_data_lme_debug_fields_ols():
     assert out["variance_components"] == []
     assert isinstance(out["re_corr"], list)
     assert out["re_corr"] == []
-    # OLS does not surface σ̂²; the engine signals this with NaN.
-    assert math.isnan(out["sigma_sq_hat"])
+    assert out["sigma_sq_hat"] == pytest.approx(0.0, abs=1e-12)
 
 
 def test_fit_uploaded_data_beta_recovery():

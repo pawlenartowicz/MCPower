@@ -361,7 +361,7 @@ pub fn fit_provided_data(
                 statistic,
                 fit.converged,
                 vec![],
-                f64::NAN,
+                fit.sigma_sq, // σ̂² = RSS / (n − p); NaN on a rank-deficient fit
                 vec![],
                 0,
                 None,

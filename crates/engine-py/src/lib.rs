@@ -211,10 +211,6 @@ fn _engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         spec_builder_bridge::build_recovery_design,
         m
     )?)?;
-    m.add_function(wrap_pyfunction!(
-        spec_builder_bridge::standardize_continuous,
-        m
-    )?)?;
     m.add_function(wrap_pyfunction!(spec_builder_bridge::split_assignments, m)?)?;
     m.add_function(wrap_pyfunction!(plot_bridge::power_plot_set_json, m)?)?;
     m.add_function(wrap_pyfunction!(plot_bridge::sample_size_plot_set_json, m)?)?;

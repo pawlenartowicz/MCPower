@@ -22,13 +22,22 @@ import pytest
 from mcpower import MCPower
 
 
+def _residual_sd_slopes(columns, y):
+    """OLS slopes of ``y`` on ``columns`` in residual-SD units: raw slope × the
+    column's population SD ÷ σ̂, with σ̂² = RSS / (n − p)."""
+    X = np.column_stack([np.ones(len(y)), *columns])
+    beta, rss, *_ = np.linalg.lstsq(X, y, rcond=None)
+    sigma = math.sqrt(rss[0] / (len(y) - X.shape[1]))
+    return [b * c.std() / sigma for b, c in zip(beta[1:], columns)]
+
+
 def test_get_effects_from_data_returns_parseable_string_no_autoapply():
-    """A deterministic ``y = 2*x1`` yields a standardized slope of 1.0 (the
-    correlation), the string parses back through ``set_effects``, and the call
-    does NOT mutate the model's effect state."""
+    """``y = 2*x1 + ε`` yields the slope in residual-SD units, the string parses
+    back through ``set_effects``, and the call does NOT mutate the model's
+    effect state."""
     rng = np.random.default_rng(1)
     x1 = rng.normal(size=200)
-    y = 2.0 * x1  # deterministic ⇒ standardized slope = corr = 1.0
+    y = 2.0 * x1 + rng.normal(size=200)
 
     m = MCPower("y = x1")
     m.upload_data({"x1": x1.tolist(), "y": y.tolist()}, verbose=False)
@@ -41,7 +50,7 @@ def test_get_effects_from_data_returns_parseable_string_no_autoapply():
 
     assert "x1=" in s
     val = float(s.split("x1=")[1].split(",")[0])
-    assert abs(val - 1.0) < 1e-3
+    assert val == pytest.approx(_residual_sd_slopes([x1], y)[0], abs=1e-3)
 
     # Not auto-applied: effect state must be untouched.
     assert m._effects_set is False
@@ -53,17 +62,14 @@ def test_get_effects_from_data_returns_parseable_string_no_autoapply():
 
 
 def test_get_effects_from_data_recovers_two_continuous_slopes():
-    """With independent predictors and a deterministic linear y, both
-    standardized slopes are recovered. Confirms canonical column ordering maps
-    betas → names correctly when there is more than one predictor."""
+    """Both slopes of a two-predictor fit are recovered. Confirms canonical
+    column ordering maps betas → names correctly when there is more than one
+    predictor."""
     rng = np.random.default_rng(7)
     n = 400
     x1 = rng.normal(size=n)
     x2 = rng.normal(size=n)
-    # Standardize to known population scale so coefficients are interpretable.
-    x1s = (x1 - x1.mean()) / x1.std()
-    x2s = (x2 - x2.mean()) / x2.std()
-    y = 0.6 * x1s + 0.3 * x2s  # deterministic, no noise
+    y = 0.6 * x1 + 0.3 * x2 + rng.normal(scale=0.5, size=n)
 
     m = MCPower("y = x1 + x2")
     m.upload_data({"x1": x1.tolist(), "x2": x2.tolist(), "y": y.tolist()}, verbose=False)
@@ -73,13 +79,43 @@ def test_get_effects_from_data_recovers_two_continuous_slopes():
         (k.strip(), float(v))
         for k, v in (tok.split("=") for tok in s.split(","))
     )
-    # y is standardized to unit variance, so slopes shrink proportionally but
-    # their RATIO is preserved (0.6 : 0.3 == 2:1). Recover the standardized
-    # slopes directly: with orthogonal-ish predictors they're close to the
-    # correlation of y with each x, scaled by y's sd.
-    sd_y = y.std()
-    assert parsed["x1"] == pytest.approx(0.6 / sd_y, abs=1e-2)
-    assert parsed["x2"] == pytest.approx(0.3 / sd_y, abs=1e-2)
+    exp_x1, exp_x2 = _residual_sd_slopes([x1, x2], y)
+    assert parsed["x1"] == pytest.approx(exp_x1, abs=1e-3)
+    assert parsed["x2"] == pytest.approx(exp_x2, abs=1e-3)
+
+
+def test_get_effects_from_data_ols_round_trips_into_set_effects():
+    """Data generated the way the simulation does (residual SD 1) recovers the
+    effects that generated it, so the string can be fed back to set_effects.
+    Dividing by the total outcome SD would give 0.5/√1.5 ≈ 0.41 here."""
+    rng = np.random.default_rng(5)
+    n = 200_000
+    x = rng.normal(size=n)
+    m_ = rng.normal(size=n)
+    y = 0.5 * x + 0.5 * m_ + rng.normal(size=n)
+
+    m = MCPower("y = x + m")
+    m.upload_data({"x": x.tolist(), "m": m_.tolist(), "y": y.tolist()}, verbose=False)
+    s = m.get_effects_from_data("y", verbose=False)
+
+    parsed = dict(
+        (k.strip(), float(v))
+        for k, v in (tok.split("=") for tok in s.split(","))
+    )
+    assert parsed["x"] == pytest.approx(0.5, abs=0.01)
+    assert parsed["m"] == pytest.approx(0.5, abs=0.01)
+
+
+def test_get_effects_from_data_exact_fit_errors():
+    """A noiseless outcome has residual SD 0, so effects in residual-SD units
+    are undefined; raise instead of returning inf."""
+    rng = np.random.default_rng(1)
+    x1 = rng.normal(size=200)
+
+    m = MCPower("y = x1")
+    m.upload_data({"x1": x1.tolist(), "y": (2.0 * x1).tolist()}, verbose=False)
+    with pytest.raises(ValueError, match="residual SD"):
+        m.get_effects_from_data("y", verbose=False)
 
 
 def test_get_effects_from_data_missing_predictor_errors():
@@ -137,15 +173,17 @@ def test_get_effects_from_data_recovers_glm_log_odds():
 
 def test_get_effects_from_data_recovers_mle_fixed_effect():
     """Mixed: clustered data ``y = β·x + u_cluster + ε``. The fixed effect is
-    recovered on the z-scored-x scale (``β·sd(x)``), fitting on the native
-    outcome and threading the uploaded grouping column as cluster IDs."""
+    recovered on the z-scored-x scale and in residual-SD units
+    (``β·sd(x)/σ``), fitting on the native outcome and threading the uploaded
+    grouping column as cluster IDs."""
     rng = np.random.default_rng(11)
     n, n_clusters = 200, 8
     csize = n // n_clusters
     x = rng.normal(size=n)
     group = np.repeat(np.arange(n_clusters), csize).astype(float)
     u = (group - (n_clusters - 1) / 2.0) * 0.4  # per-cluster intercept
-    eps = rng.normal(scale=0.1, size=n)
+    sigma = 0.1
+    eps = rng.normal(scale=sigma, size=n)
     beta_true = 1.5
     y = beta_true * x + u + eps
 
@@ -159,8 +197,8 @@ def test_get_effects_from_data_recovers_mle_fixed_effect():
 
     assert "x=" in s
     val = float(s.split("x=")[1].split(",")[0])
-    expected = beta_true * x.std()  # recovered on the z-scored-x scale
-    assert abs(val - expected) < 0.15
+    expected = beta_true * x.std() / sigma
+    assert abs(val / expected - 1.0) < 0.1
 
 
 def _icc_from_note(captured: str) -> float:

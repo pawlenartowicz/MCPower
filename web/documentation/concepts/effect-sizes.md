@@ -10,18 +10,18 @@ Overestimate your effects and you run an underpowered study; underestimate them 
 
 ## Standardized betas
 
-In MCPower an effect size is a **standardized regression coefficient** (a beta). A beta of 0.30 means a one–standard-deviation increase in the predictor is associated with a 0.30 SD change in the outcome. Standardizing this way makes effects comparable across predictors measured on different scales.
+In MCPower an effect size is a **standardized regression coefficient** (a beta). A beta of 0.30 means a one–standard-deviation increase in the predictor is associated with a 0.30 change in the outcome, measured in **residual SDs**: the outcome's spread left over once the predictors are accounted for, which MCPower fixes at 1. When the predictors explain little of the outcome, a residual SD is close to the outcome's total SD, so reading the beta as "0.30 SD of the outcome" is a fair approximation for small effects. Standardizing this way makes effects comparable across predictors measured on different scales.
 
 For binary and factor predictors the interpretation shifts slightly:
 
-- A **binary** effect of 0.50 is the change in the outcome (in SD) when switching from the reference group (0) to the treatment group (1).
+- A **binary** effect of 0.50 is the change in the outcome (in residual SDs) when switching from the reference group (0) to the treatment group (1).
 - A **factor** predictor contributes one effect per non-reference level — each is the difference between that level and the reference. See [[concepts/variable-types|variable types]].
 
 Predictors you don't assign an effect to are treated as having no effect (beta = 0).
 
 ## Continuous vs binary outcomes
 
-What an effect size means depends on your outcome. A **continuous** outcome (a measured quantity — a score, a price, a reaction time) is fit with linear regression, and the effect is a standardized beta: the SD change in the outcome per 1-SD change in the predictor, as described in [Standardized betas](#standardized-betas) above. A **binary** outcome (yes/no, success/failure) is fit with logistic regression, where the effect is a beta on the **log-odds** scale and you also set a **baseline probability**.
+What an effect size means depends on your outcome. A **continuous** outcome (a measured quantity — a score, a price, a reaction time) is fit with linear regression, and the effect is a standardized beta: the change in the outcome, in residual SDs, per 1-SD change in the predictor, as described in [Standardized betas](#standardized-betas) above. A **binary** outcome (yes/no, success/failure) is fit with logistic regression, where the effect is a beta on the **log-odds** scale and you also set a **baseline probability**.
 
 These two cases use different effect-size benchmarks — see [Cohen's benchmarks](#cohens-benchmarks). For how logit betas relate to odds ratios, see [Logistic regression](#logistic-regression); for what the baseline anchors, see [Baseline probability](#baseline-probability).
 

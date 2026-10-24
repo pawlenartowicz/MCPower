@@ -125,15 +125,24 @@ fn f1_assemble_without_csv_leaves_uploaded_frame_none() {
 
 // ─── F2 tests ───────────────────────────────────────────────────────────────
 
-/// F2: get_effects_from_data on an OLS AppSpec with known data recovers the
-/// known standardized slope within tolerance ±0.1.
+/// Residual pattern +1, −1, −1, +1 repeated: sums to zero and is orthogonal to
+/// `i` and to `i % 2` over every block of 4 rows, so adding it to an exact
+/// linear outcome leaves the OLS slopes unchanged and sets RSS = n.
+fn orthogonal_noise(i: usize) -> f64 {
+    [1.0, -1.0, -1.0, 1.0][i % 4]
+}
+
+/// Population SD of 0, 1, …, n−1.
+fn sd_of_index(n: usize) -> f64 {
+    (((n * n - 1) as f64) / 12.0).sqrt()
+}
+
+/// F2: get_effects_from_data on an OLS AppSpec recovers the slope in
+/// residual-SD units, the scale the generator (residual SD 1) reads back.
 ///
-/// Construction: x = 0..N-1 (continuous), y = 2*x_std + noise_free, so the
-/// standardized OLS β_x ≈ 1.0 (the regression of z-scored y on z-scored x
-/// returns slope ≈ Corr(x,y) ≈ 1 when y = 2*x exactly).
-///
-/// With exact y = 2*x (no noise) the empirical R² → 1, so β ≈ 1.0 after
-/// standardization.  We gate loosely at ±0.1.
+/// Construction: x = 0..N-1 (continuous), y = 2·x + e with e orthogonal to
+/// [1, x] (`orthogonal_noise`), so the raw slope is exactly 2 and
+/// σ̂² = RSS / (n − 2) = n / (n − 2). The recovered effect is 2·sd(x)/σ̂.
 #[test]
 fn f2_get_effects_recovers_known_slope() {
     use engine_app_spec::driver::get_effects_from_data;
@@ -141,8 +150,9 @@ fn f2_get_effects_recovers_known_slope() {
     let n = 40usize;
     // x values: 0..39
     let x_vals: Vec<f64> = (0..n).map(|i| i as f64).collect();
-    // y = 2*x exactly → after z-scoring both, slope = 1.0
-    let y_vals: Vec<f64> = x_vals.iter().map(|&x| 2.0 * x).collect();
+    let y_vals: Vec<f64> = (0..n)
+        .map(|i| 2.0 * i as f64 + orthogonal_noise(i))
+        .collect();
 
     let spec = linear_spec_with_csv(x_vals, y_vals);
     let recovered = get_effects_from_data(&spec).expect("get_effects_from_data succeeds");
@@ -152,11 +162,12 @@ fn f2_get_effects_recovers_known_slope() {
     assert_eq!(effects.len(), 1, "one effect returned (intercept dropped)");
     assert_eq!(effects[0].name, "x");
     let beta_x = effects[0].value;
-    // y = 2*x exactly (noiseless) → standardized β is exactly 1.0; tighten to
-    // machine precision so standardization regressions are caught immediately.
+    let expected = 2.0 * sd_of_index(n) / (n as f64 / (n - 2) as f64).sqrt();
+    // σ̂² comes from running sums (y'y − β̂'X'y), which lose ~1e-9 relative
+    // here, where RSS is small next to y'y.
     assert!(
-        (beta_x - 1.0).abs() < 1e-9,
-        "expected β_x == 1.0 (noiseless), got {beta_x}"
+        (beta_x / expected - 1.0).abs() < 1e-6,
+        "expected β_x = 2·sd(x)/σ̂ = {expected}, got {beta_x}"
     );
     // OLS/Gaussian linear arm: no cluster (→ no ICC) and the intercept is a raw
     // mean offset, not a probability (→ no baseline).
@@ -167,10 +178,27 @@ fn f2_get_effects_recovers_known_slope() {
     );
 }
 
+/// F2: a noiseless outcome has residual SD 0, so residual-SD units are
+/// undefined; the driver errors instead of returning inf or NaN.
+#[test]
+fn f2_get_effects_exact_fit_errors() {
+    use engine_app_spec::AdapterError;
+    use engine_app_spec::driver::get_effects_from_data;
+
+    let x_vals: Vec<f64> = (0..40).map(|i| i as f64).collect();
+    let y_vals: Vec<f64> = x_vals.iter().map(|&x| 2.0 * x).collect();
+    let err = get_effects_from_data(&linear_spec_with_csv(x_vals, y_vals))
+        .expect_err("an exact fit has no residual scale");
+    assert!(
+        matches!(err, AdapterError::GetEffectsNoResidual),
+        "got {err:?}"
+    );
+}
+
 /// F2: get_effects_from_data on a continuous + binary predictor spec.
-/// x_cont is 0..39, x_bin alternates 0/1.  After standardization:
-/// – x_cont z-scored → slope with y ≈ known
-/// – x_bin centred  → slope with y ≈ 0 (y depends only on x_cont)
+/// x_cont is 0..39, x_bin alternates 0/1, y = 3·x_cont + e with e orthogonal to
+/// [1, x_cont, x_bin]. So x_cont recovers 3·sd(x_cont)/σ̂ with
+/// σ̂² = n / (n − 3), and x_bin (centred) recovers 0.
 #[test]
 fn f2_get_effects_with_binary_predictor() {
     use engine_app_spec::driver::get_effects_from_data;
@@ -179,7 +207,9 @@ fn f2_get_effects_with_binary_predictor() {
     let x_cont: Vec<f64> = (0..n).map(|i| i as f64).collect();
     let x_bin: Vec<f64> = (0..n).map(|i| if i % 2 == 0 { 0.0 } else { 1.0 }).collect();
     // y depends ONLY on x_cont; x_bin should have β ≈ 0
-    let y_vals: Vec<f64> = x_cont.iter().map(|&x| 3.0 * x).collect();
+    let y_vals: Vec<f64> = (0..n)
+        .map(|i| 3.0 * i as f64 + orthogonal_noise(i))
+        .collect();
 
     let spec = AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
@@ -258,15 +288,16 @@ fn f2_get_effects_with_binary_predictor() {
     );
     let x_cont_effect = effects.iter().find(|e| e.name == "x_cont").expect("x_cont");
     let x_bin_effect = effects.iter().find(|e| e.name == "x_bin").expect("x_bin");
-    // y = 3·x_cont exactly, so the fit is exact: z-scored y on z-scored x_cont
-    // has slope 1, and x_bin carries nothing once x_cont is in the model.
+    let expected = 3.0 * sd_of_index(n) / (n as f64 / (n - 3) as f64).sqrt();
+    // Running-sum σ̂², as in `f2_get_effects_recovers_known_slope`.
     assert!(
-        (x_cont_effect.value - 1.0).abs() < 1e-9,
-        "x_cont standardized slope must be 1, got {}",
+        (x_cont_effect.value / expected - 1.0).abs() < 1e-6,
+        "x_cont slope must be 3·sd/σ̂ = {expected}, got {}",
         x_cont_effect.value
     );
+    // The raw outcome spans ~120, so solver round-off reaches ~1e-7 here.
     assert!(
-        x_bin_effect.value.abs() < 1e-9,
+        x_bin_effect.value.abs() < 1e-6,
         "x_bin slope must be 0, got {}",
         x_bin_effect.value
     );
@@ -372,8 +403,9 @@ fn f2_get_effects_glm_recovers_log_odds() {
 /// slope from clustered data, fitting on the native outcome scale and threading
 /// the uploaded grouping column as cluster IDs. Construction: 8 balanced
 /// clusters of 25 rows; `x` cycles {-2,-1,0,1,2} (population sd = √2, balanced
-/// within each cluster), `y = 1·x + u_cluster + small ε`. The fixed effect is
-/// recovered on the z-scored-x scale, so β_x ≈ 1·sd(x) = √2.
+/// within each cluster), `y = 1·x + u_cluster + small ε` with sd(ε) = 0.1. The
+/// fixed effect is recovered on the z-scored-x scale and in residual-SD units,
+/// so β_x ≈ 1·sd(x)/sd(ε) = √2/0.1.
 #[test]
 fn f2_get_effects_mle_recovers_fixed_effect() {
     use engine_app_spec::driver::get_effects_from_data;
@@ -467,10 +499,10 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
     );
     assert_eq!(effects[0].name, "x");
     let beta_x = effects[0].value;
-    let expected = 2.0_f64.sqrt(); // 1·sd(x), sd(x) = √2
+    let expected = 2.0_f64.sqrt() / 0.1; // sd(x) = √2; ε = 0.05·{-3..3}, sd 0.1
     assert!(
-        (beta_x - expected).abs() < 0.1,
-        "expected fixed-effect β_x ≈ √2 = {expected}, got {beta_x}"
+        (beta_x / expected - 1.0).abs() < 0.1,
+        "expected fixed-effect β_x ≈ √2/0.1 = {expected}, got {beta_x}"
     );
     // Gaussian LME arm: estimated ICC = τ̂²/(τ̂²+σ̂²) from the converged fit. The
     // construction injects a real cluster effect (u_cluster spread ±~1 with tiny
@@ -494,10 +526,10 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
 ///
 /// Construction: 3-level factor `g` (labels ["ctrl", "treatA", "treatB"]).
 /// Level codes: 0 = ctrl (reference, excluded from dummies), 1 = treatA, 2 = treatB.
-/// y = 1.5 * g[treatA] + 0 * g[treatB] + noise_free.
+/// y = 3 · g[treatA] + e, with e = ±1 alternating (zero sum within each level).
 ///
-/// After z-scoring y and building 0/1 dummies, OLS should recover β_treatA > 0
-/// and β_treatB ≈ 0 (within tolerance), and no effect for "ctrl" (reference).
+/// OLS should recover β_treatA > 0 and β_treatB = 0, and no effect for "ctrl"
+/// (reference).
 #[test]
 fn f2_get_effects_with_factor_predictor() {
     use engine_app_spec::driver::get_effects_from_data;
@@ -511,10 +543,15 @@ fn f2_get_effects_with_factor_predictor() {
         "treatB".to_string(),
     ];
 
-    // y = 3.0 for treatA rows, 0.0 otherwise (large effect, no noise).
+    // y = 3.0 for treatA rows, 0.0 otherwise, plus ±1 noise that averages to 0
+    // within every level.
     let y_vals: Vec<f64> = g_codes
         .iter()
-        .map(|&c| if c == 1.0 { 3.0 } else { 0.0 })
+        .enumerate()
+        .map(|(i, &c)| {
+            let level = if c == 1.0 { 3.0 } else { 0.0 };
+            level + if i % 2 == 0 { 1.0 } else { -1.0 }
+        })
         .collect();
 
     let spec = AppSpec::Linear(LinearSpec {
@@ -611,7 +648,7 @@ fn f2_get_effects_with_factor_predictor() {
         "g[treatA] should have a large positive effect, got {}",
         treat_a.value
     );
-    // treatB shares ctrl's mean exactly (noiseless), so its dummy slope is 0.
+    // treatB shares ctrl's mean exactly, so its dummy slope is 0.
     assert!(
         treat_b.value.abs() < 1e-9,
         "g[treatB] should be near zero, got {}",

@@ -1,8 +1,3 @@
----
-title: "MCPower — Validating get_effects_from_data"
-description: "Validation of MCPower get_effects_from_data: round-trip recovery of standardized effect sizes for OLS, GLM logistic, and MLE mixed-effects models."
-right_sidebar: body
----
 # MCPower validation — get_effects_from_data round-trip
 
 # What this report validates
@@ -17,16 +12,14 @@ lands where the convention says it should.
 The estimator is dispatched off the model family, and the recovery scale
 differs by estimator:
 
-- **OLS (continuous outcome)** z-scores the outcome, so it recovers the
-  *standardized regression coefficient* — `s / sqrt(Σs² + 1)` for
-  independent continuous predictors with the engine’s default N(0, 1)
-  residual. The shrinkage is the residual variance the standardization
-  divides through; it is small for the small/medium effects benchmarked
-  here and is the same approximation the shipped OLS recovery has always
-  carried.
-- **GLM (logistic)** and **MLE (mixed)** fit the **native** outcome (raw
-  0/1 for logit, the raw response for mixed), so they recover the
-  coefficient **directly**: expected recovery is `s` itself. MLE
+- **OLS (continuous outcome)** fits the raw response and divides the
+  coefficients by the fitted residual SD. The engine generates with
+  residual SD 1, so expected recovery is `s` itself, with or without
+  correlated predictors.
+- **GLM (logistic)** fits the **native** 0/1 outcome, so it recovers the
+  coefficient **directly**: expected recovery is `s` itself.
+- **MLE (mixed)** fits the raw response and divides the coefficients by
+  the fitted residual SD, so expected recovery is again `s`. MLE
   recovery is fixed-effects-only and reads the grouping column from the
   uploaded data.
 
@@ -71,8 +64,7 @@ scale would move the mean by 0.1–0.5 — far outside this band.
 
 > **All estimators round-trip:** every specified continuous main effect
 > is recovered to within the gate of the convention-predicted value —
-> OLS at the shrunk standardized scale, GLM and MLE at the native
-> coefficient.
+> OLS and MLE in residual-SD units, GLM at the native coefficient.
 
 png 2 ![Mean recovered effect vs the convention-predicted value for
 every term, coloured by estimator.](figures/get_effects_roundtrip.png)
@@ -87,7 +79,7 @@ R formula `y ~ x1` · n=4000 · K=20 draws (seeds 2137–2156).
 
 | Term | Specified (s) | Expected | Mean recovered | \|err\| | Verdict |
 |:-----|--------------:|---------:|---------------:|--------:|:--------|
-| x1   |          0.25 |  0.24254 |        0.24393 |  0.0014 | PASS    |
+| x1   |          0.25 |     0.25 |        0.25163 | 0.00163 | PASS    |
 
 ## ols_two_a · OLS (continuous)
 
@@ -95,8 +87,8 @@ R formula `y ~ x1 + x2` · n=4000 · K=20 draws (seeds 2137–2156).
 
 | Term | Specified (s) | Expected | Mean recovered | \|err\| | Verdict |
 |:-----|--------------:|---------:|---------------:|--------:|:--------|
-| x1   |          0.25 |  0.24140 |        0.24286 | 0.00145 | PASS    |
-| x2   |          0.10 |  0.09656 |        0.09490 | 0.00166 | PASS    |
+| x1   |          0.25 |     0.25 |        0.25160 | 0.00160 | PASS    |
+| x2   |          0.10 |     0.10 |        0.09832 | 0.00168 | PASS    |
 
 ## ols_corr_a · OLS (continuous)
 
@@ -104,8 +96,8 @@ R formula `y ~ x1 + x2` · n=4000 · K=20 draws (seeds 2137–2156).
 
 | Term | Specified (s) | Expected | Mean recovered | \|err\| | Verdict |
 |:-----|--------------:|---------:|---------------:|--------:|:--------|
-| x1   |          0.25 |  0.23864 |        0.24102 | 0.00238 | PASS    |
-| x2   |          0.10 |  0.09545 |        0.09343 | 0.00202 | PASS    |
+| x1   |          0.25 |     0.25 |        0.25264 | 0.00263 | PASS    |
+| x2   |          0.10 |     0.10 |        0.09792 | 0.00208 | PASS    |
 
 ## glm_simple_a · GLM (logistic)
 
@@ -130,7 +122,7 @@ R formula `y ~ x1 + (1|grp)` · n=3990 · K=20 draws (seeds 2137–2156).
 
 | Term | Specified (s) | Expected | Mean recovered | \|err\| | Verdict |
 |:-----|--------------:|---------:|---------------:|--------:|:--------|
-| x1   |           0.5 |      0.5 |        0.50154 | 0.00154 | PASS    |
+| x1   |           0.5 |      0.5 |        0.50098 | 0.00099 | PASS    |
 
 ## lme_two_a · MLE (mixed)
 
@@ -139,14 +131,14 @@ R formula `y ~ x1 + x2 + (1|grp)` · n=3990 · K=20 draws (seeds
 
 | Term | Specified (s) | Expected | Mean recovered | \|err\| | Verdict |
 |:-----|--------------:|---------:|---------------:|--------:|:--------|
-| x1   |           0.5 |      0.5 |        0.50152 | 0.00152 | PASS    |
-| x2   |           0.3 |      0.3 |        0.29892 | 0.00107 | PASS    |
+| x1   |           0.5 |      0.5 |        0.50091 | 0.00091 | PASS    |
+| x2   |           0.3 |      0.3 |        0.29860 | 0.00140 | PASS    |
 
 | item                       | value                        |
 |:---------------------------|:-----------------------------|
-| generated                  | 2026-06-21                   |
+| generated                  | 2026-10-24                   |
 | R                          | R version 4.5.3 (2026-03-11) |
-| mcpower                    | 1.0.0                        |
+| mcpower                    | 1.4.1                        |
 | round-trip gate (mean abs) | 0.02 abs                     |
 | n / K / seed0              | 4000 / 20 / 2137             |
 

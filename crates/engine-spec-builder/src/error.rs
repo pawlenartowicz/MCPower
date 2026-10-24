@@ -11,6 +11,10 @@ pub enum SpecError {
     #[error("unknown predictor in formula: '{name}'")]
     UnknownPredictor { name: String },
     #[error(
+        "cluster-level variable '{name}' is bound to uploaded data; the engine resamples it from the upload and cannot draw it once per cluster. Use a synthesized predictor instead"
+    )]
+    ClusterLevelUploaded { name: String },
+    #[error(
         "test_formula references '{name}', which is not in the model formula; add '{name}' to the model formula and give it an effect (use 0 if it should not influence the generated data)"
     )]
     TestFormulaPredictorMissing { name: String },

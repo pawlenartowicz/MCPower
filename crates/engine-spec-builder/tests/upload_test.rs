@@ -52,6 +52,47 @@ fn make_two_predictor_spec_with_upload(upload: UploadInput) -> LinearSpec {
     }
 }
 
+/// A predictor bound to an uploaded column cannot also be cluster-level: the
+/// engine resamples it from the frame. A synthesized cluster-level predictor
+/// next to the upload still builds.
+#[test]
+fn uploaded_predictor_cannot_be_cluster_level() {
+    use engine_contract::{EstimatorSpec, OutcomeKind};
+
+    let upload = || UploadInput {
+        mode: UploadMode::Partial,
+        n_rows: 5,
+        columns: vec![UploadColumn {
+            name: "x1".into(),
+            col_type: UploadColumnType::Continuous,
+            values: vec![1.0, 2.0, 3.0, 4.0, 5.0],
+            labels: vec![],
+        }],
+    };
+    let build = |spec: &LinearSpec| {
+        engine_spec_builder::build_contract(
+            spec,
+            OutcomeKind::Continuous,
+            None,
+            Some(EstimatorSpec::Ols),
+            0.0,
+            vec![],
+        )
+    };
+
+    let mut spec = make_two_predictor_spec_with_upload(upload());
+    spec.cluster_level_vars = vec!["x1".into()];
+    let err = build(&spec).unwrap_err();
+    assert!(
+        matches!(err, SpecError::ClusterLevelUploaded { ref name } if name == "x1"),
+        "got {err:?}"
+    );
+
+    let mut spec = make_two_predictor_spec_with_upload(upload());
+    spec.cluster_level_vars = vec!["x2".into()];
+    build(&spec).expect("a synthesized cluster-level predictor builds");
+}
+
 #[test]
 fn matched_predictor_becomes_resampled_unmatched_stays_synthetic() {
     use engine_contract::{ColumnSpec, EstimatorSpec, OutcomeKind, SyntheticKind};

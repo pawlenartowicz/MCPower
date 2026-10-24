@@ -12,7 +12,6 @@ use engine_orchestrator::{
     curvature_hints_sample_size, find_power, find_sample_size, resolve_unit_divisor,
     single_core_find_power, single_core_find_sample_size,
 };
-use engine_spec_builder::upload::standardize_continuous;
 
 use crate::{
     AppSpec,
@@ -319,9 +318,10 @@ pub struct EffectsFromData {
 /// The canonical column order mirrors Python and R:
 /// `[Intercept, non-factors (z-scored or centred), factor dummies (0/1),
 ///   interactions (elementwise products)]`.
-/// Outcome scaling is estimator-specific: OLS z-scores the outcome (population
-/// SD, ddof=0), recovering the standardized β; GLM and MLE fit it on its native
-/// scale — recovery is the inverse of the generation convention. MLE recovery is
+/// Every estimator fits the outcome on its native scale, so recovery is the
+/// inverse of the generation convention: the Gaussian arms (OLS, linear mixed)
+/// divide the betas by the fitted residual SD, because the generator fixes the
+/// residual SD at 1; GLM betas are read as-is. MLE recovery is
 /// fixed-effects-only and threads the uploaded grouping column (named by the
 /// `(1|group)` term) as cluster IDs. Betas are mapped to semantic names and the
 /// intercept is dropped from the returned `effects`.
@@ -330,25 +330,33 @@ pub struct EffectsFromData {
 /// [`EffectsFromData`]): the estimated cluster ICC (mixed arm, converged fit
 /// only) and the binary-outcome baseline probability (the inverse-logit of the
 /// fitted intercept).
+/// Residual SD below this fraction of the outcome SD counts as an exact fit in
+/// [`get_effects_from_data`]: residual-SD units are then undefined.
+const EXACT_FIT_RTOL: f64 = 1e-6;
+
+fn population_sd(values: &[f64]) -> f64 {
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    (values.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n).sqrt()
+}
+
 pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterError> {
     use engine_spec_builder::variables::build_predictor_table;
 
-    // Extract the fields common to every estimator spec plus the outcome-scaling
-    // mode and (for MLE) the grouping-column name. OLS z-scores the outcome; GLM
-    // and MLE fit it on its native scale. MLE additionally threads the uploaded
-    // grouping column as cluster_ids (handled below).
-    let (parsed_formula, var_types, csv_opt, base_seed, native_outcome, cluster_name) = match spec {
-        AppSpec::Linear(l) => (&l.parsed_formula, &l.var_types, &l.csv, l.seed, false, None),
-        AppSpec::Logit(l) => (&l.parsed_formula, &l.var_types, &l.csv, l.seed, true, None),
+    // Extract the fields common to every estimator spec plus (for MLE) the
+    // grouping-column name. MLE additionally threads the uploaded grouping column
+    // as cluster_ids (handled below).
+    let (parsed_formula, var_types, csv_opt, base_seed, cluster_name) = match spec {
+        AppSpec::Linear(l) => (&l.parsed_formula, &l.var_types, &l.csv, l.seed, None),
+        AppSpec::Logit(l) => (&l.parsed_formula, &l.var_types, &l.csv, l.seed, None),
         AppSpec::Mixed(m) => (
             &m.parsed_formula,
             &m.var_types,
             &m.csv,
             m.seed,
-            true,
             Some(m.cluster_name.as_str()),
         ),
-        AppSpec::Poisson(p) => (&p.parsed_formula, &p.var_types, &p.csv, p.seed, true, None),
+        AppSpec::Poisson(p) => (&p.parsed_formula, &p.var_types, &p.csv, p.seed, None),
     };
 
     let csv = csv_opt.as_ref().ok_or(AdapterError::GetEffectsNoCsv)?;
@@ -492,14 +500,24 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
         ncol,
     } = engine_spec_builder::build_recovery_design(&table, &csv.columns, nrow)?;
 
-    // Outcome scaling depends on the estimator: z-score for OLS (recovers the
-    // standardized β); native scale for GLM/MLE (the inverse of generation — the
-    // logit fitter expects raw 0/1, the mixed fitter the raw response). Length
-    // already guarded above.
-    let outcome: Vec<f64> = if native_outcome {
-        y_col.values.clone()
+    // The outcome is fitted on its native scale (raw 0/1 for the logit fitter,
+    // the response for the Gaussian ones, whose betas are rescaled after the
+    // fit). The Gaussian response is mean-centred: that moves only the intercept,
+    // which these arms do not report, and keeps the fit's running-sum σ̂² from
+    // cancelling against a large mean. Length already guarded above.
+    let gaussian = matches!(
+        spec,
+        AppSpec::Linear(_)
+            | AppSpec::Mixed(MixedSpec {
+                outcome: MixedOutcome::Gaussian,
+                ..
+            })
+    );
+    let outcome: Vec<f64> = if gaussian {
+        let mean = y_col.values.iter().sum::<f64>() / y_col.values.len() as f64;
+        y_col.values.iter().map(|&v| v - mean).collect()
     } else {
-        standardize_continuous(&y_col.values)
+        y_col.values.clone()
     };
 
     // MLE (mixed) recovery is fixed-effects-only: the uploaded data must carry
@@ -617,12 +635,27 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
         });
     }
 
+    // A Gaussian fit (OLS or linear mixed) runs on the raw response, so its
+    // betas are in outcome units. Divide by the fitted residual SD: the generator
+    // fixes σ = 1, so this is the scale the effect inputs read back. Mirrors the
+    // Python/R `get_effects_from_data`.
+    let scale = if gaussian {
+        // An exact fit leaves σ̂² at round-off level (possibly negative):
+        // judge it against the outcome's own spread.
+        let sigma = result.sigma_sq_hat.sqrt();
+        if sigma.is_nan() || sigma <= EXACT_FIT_RTOL * population_sd(&outcome) {
+            return Err(AdapterError::GetEffectsNoResidual);
+        }
+        sigma
+    } else {
+        1.0
+    };
     let effects: Vec<EffectSize> = result.betas[1..]
         .iter()
         .zip(semantic_names[1..].iter())
         .map(|(&beta, name)| EffectSize {
             name: name.clone(),
-            value: beta,
+            value: beta / scale,
         })
         .collect();
 

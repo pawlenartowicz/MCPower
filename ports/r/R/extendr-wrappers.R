@@ -93,10 +93,6 @@ re_dist_codes <- function() .Call(wrap__re_dist_codes)
 #' `design_flat` to `debug_load_data`. Single-sources the design assembly.
 build_recovery_design <- function(spec_json) .Call(wrap__build_recovery_design, spec_json)
 
-#' Z-score a slice with population SD (ddof=0) via the shared engine helper —
-#' the single source the host uses to scale the outcome for OLS recovery.
-standardize_continuous <- function(values) .Call(wrap__standardize_continuous, values)
-
 #' Split a comma-separated assignment string at top-level commas (parens
 #' suppress splitting), trimming each segment and dropping empties. The shared
 #' splitter the host correlation/effect normalisers bind to. Errors on

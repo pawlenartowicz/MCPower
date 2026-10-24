@@ -161,13 +161,42 @@ test_that("get_effects_from_data round-trips uploaded data and returns set_effec
   expect_true(is.character(eff_str) && nzchar(eff_str))
   # The string should be parseable by set_effects.
   expect_no_error(MCPower$new("y ~ x1 + x2")$set_effects(eff_str))
-  # Recovered effects should be in the right ballpark (large sample).
-  # Parse "x1=0.4141, x2=0.2..." by extracting value after each '='.
+  # Recovered effects are the OLS slopes in residual-SD units: raw slope times
+  # the predictor's population SD, divided by the residual SD sqrt(RSS/(n-p)).
   pairs <- strsplit(eff_str, ",\\s*")[[1]]
   parsed_vals <- as.numeric(sub("^[^=]+=", "", pairs))
   expect_equal(length(parsed_vals), 2L)
-  expect_equal(parsed_vals[1], 0.4, tolerance = 0.15)
-  expect_equal(parsed_vals[2], 0.2, tolerance = 0.15)
+  fit <- stats::lm(y ~ x1 + x2, data = pilot)
+  pop_sd <- function(v) sqrt(mean((v - mean(v))^2))
+  expected <- stats::coef(fit)[-1] * c(pop_sd(x1), pop_sd(x2)) / stats::sigma(fit)
+  expect_equal(parsed_vals, unname(expected), tolerance = 1e-3)
+})
+
+test_that("get_effects_from_data OLS recovery round-trips into set_effects", {
+  # Data generated the way the simulation does (residual SD 1) recovers the
+  # effects that generated it. Dividing by the total outcome SD would give
+  # 0.5 / sqrt(1.5) = 0.41 here.
+  set.seed(5)
+  n <- 200000L
+  x <- rnorm(n); m_ <- rnorm(n)
+  y <- 0.5 * x + 0.5 * m_ + rnorm(n)
+
+  m <- MCPower$new("y ~ x + m")
+  m$upload_data(data.frame(y = y, x = x, m = m_), mode = "partial", verbose = FALSE)
+  eff_str <- m$get_effects_from_data("y", verbose = FALSE)
+  pairs <- strsplit(eff_str, ",\\s*")[[1]]
+  vals <- stats::setNames(as.numeric(sub("^[^=]+=", "", pairs)), sub("=.*$", "", pairs))
+  expect_lt(abs(vals[["x"]] - 0.5), 0.01)
+  expect_lt(abs(vals[["m"]] - 0.5), 0.01)
+})
+
+test_that("get_effects_from_data errors on an exact OLS fit", {
+  # A noiseless outcome has residual SD 0: residual-SD units are undefined.
+  set.seed(1)
+  x1 <- rnorm(200)
+  m <- MCPower$new("y ~ x1")
+  m$upload_data(data.frame(y = 2 * x1, x1 = x1), mode = "partial", verbose = FALSE)
+  expect_error(m$get_effects_from_data("y", verbose = FALSE), "residual SD")
 })
 
 test_that("get_effects_from_data recovers a GLM log-odds coefficient", {
@@ -186,14 +215,15 @@ test_that("get_effects_from_data recovers a GLM log-odds coefficient", {
 
 test_that("get_effects_from_data recovers an MLE fixed effect", {
   # Clustered data y = beta*x + u_cluster + eps. The fixed effect is recovered
-  # on the z-scored-x scale (beta * sd(x)), fitting on the native outcome and
-  # threading the uploaded grouping column as cluster IDs.
+  # on the z-scored-x scale and in residual-SD units (beta * sd(x) / sigma),
+  # fitting on the native outcome and threading the grouping column as cluster IDs.
   set.seed(11)
   n <- 200L; n_clusters <- 8L; csize <- n %/% n_clusters
   x <- rnorm(n)
   group <- rep(seq_len(n_clusters) - 1L, each = csize)  # 0..7
   u <- (group - (n_clusters - 1) / 2) * 0.4             # per-cluster intercept
-  eps <- rnorm(n, sd = 0.1)
+  sigma <- 0.1
+  eps <- rnorm(n, sd = sigma)
   beta_true <- 1.5
   y <- beta_true * x + u + eps
 
@@ -202,8 +232,8 @@ test_that("get_effects_from_data recovers an MLE fixed effect", {
   m$upload_data(data.frame(y = y, x = x, group = group), mode = "partial", verbose = FALSE)
   eff_str <- m$get_effects_from_data("y", verbose = FALSE)
   val <- as.numeric(sub("^x=", "", eff_str))
-  expected <- beta_true * sqrt(mean((x - mean(x))^2))  # population sd(x)
-  expect_equal(val, expected, tolerance = 0.15)
+  expected <- beta_true * sqrt(mean((x - mean(x))^2)) / sigma  # population sd(x)
+  expect_equal(val, expected, tolerance = 0.1)
 })
 
 .icc_from_msgs <- function(msgs) {
