@@ -384,15 +384,15 @@ pub fn fit_provided_data(
                 &spec.extra_slope_cols,
             );
             // One `fit_on` workspace at this single N (introspect fits one dataset,
-            // not a grid). build_mixed_workspaces builds the sized spec, per-point
-            // ids, and the frozen opts (target_indices/wald_se/nagq) exactly as the
+            // not a grid). build_mixed_workspaces builds the workspace on this N's
+            // ids, with the frozen opts (SE targets/wald_se/nagq), exactly as the
             // production find_power path does.
             // Sized at the FITTED width: `p_fit` already equals
             // `fit_columns.len()` under a `test_formula`, so
             // build_mixed_workspaces' own reduction guard is inert and the
             // β-dimension matches the reduced x injected above. The RE design Z
             // stays full — only fixed columns shrink.
-            let (mut mixed, ids, opts) = crate::mixed_workspace::build_mixed_workspaces(
+            let (mut mixed, _ids, opts) = crate::mixed_workspace::build_mixed_workspaces(
                 spec,
                 &[nrow as u32],
                 p_fit,
@@ -401,7 +401,7 @@ pub fn fit_provided_data(
             )
             .expect("Glm+cluster ⇒ build_mixed_workspaces is Some");
             // The batch opts carry the FULL-design target set; a reduced fit
-            // needs its own (target_indices is not frozen by `fit_on`).
+            // needs its own (`fit_on` freezes only the number of SE columns).
             let opts_red;
             let opts = if reduces {
                 opts_red = crate::mixed_workspace::fit_options(spec, fit_targets.clone());
@@ -427,22 +427,20 @@ pub fn fit_provided_data(
             } else {
                 Vec::new()
             };
-            let start = glmm::StartValues {
-                beta: fit_beta.clone(),
-                theta: start_theta,
-                dispersion: None,
-            };
-            let view = glmm::loop_advanced::fit_on_hinted(
-                &mut mixed[0],
+            let start = glmm::StartValues::new(fit_beta.clone(), start_theta);
+            let data = glmm::Data::new(
                 &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
-                &ids[0],
-                Some(&start),
-                hint,
-                opts,
+                nrow,
+                p_fit,
             );
-            let converged = view.converged();
-            let pinned = view.diagnostics().pinned_components;
+            let view =
+                glmm::loop_advanced::fit_on_hinted(&mut mixed[0], &data, Some(&start), hint, opts);
+            // As the hot loop: a fit without SEs (`se_unavailable`, every t²
+            // NaN) is not converged.
+            let diag = view.diagnostics();
+            let converged = diag.converged && !diag.se_unavailable;
+            let pinned = diag.pinned_components;
             let betas = view.betas()[..p_fit].to_vec();
             // var_diag / t_sq are PREDICTOR-indexed for the mixed arms.
             let se = fit_targets
@@ -454,15 +452,7 @@ pub fn fit_provided_data(
                 .map(|&t| view.t_sq()[t as usize].sqrt())
                 .collect();
             // `into_fit` consumes the view; read the accessors above first.
-            let fit = view.into_fit(
-                &ws.x_rowmajor[..nrow * p_fit],
-                &ws.y_full_f64[..nrow],
-                &ids[0],
-                nrow,
-                p_fit,
-                &model,
-                opts,
-            );
+            let fit = view.into_fit(&data, &model, opts);
             let (variance_components, re_corr) = unpack_varcorr(&fit);
             (
                 betas,
@@ -516,11 +506,13 @@ pub fn fit_provided_data(
                 .map(|t| fit.var_diag[t].sqrt())
                 .collect();
             let statistic = (0..n_test_targets).map(|t| fit.t_sq[t].sqrt()).collect();
+            // As the hot loop: a fit without SEs (`se_unavailable`, every t²
+            // NaN) is not converged.
             (
                 betas,
                 se,
                 statistic,
-                fit.converged,
+                fit.converged && !fit.se_unavailable,
                 vec![],
                 f64::NAN,
                 vec![],
@@ -562,20 +554,14 @@ pub fn fit_provided_data(
             // rebuilds the model from `spec` (slopes intact) and sizes the LMM
             // β-dimension at the full width, so it cannot express the stripped
             // reduced model. Same construction as batch.rs's cold reduced fit.
-            let (mut mixed, ids, opts) = if reduces {
+            let (mut mixed, opts) = if reduces {
                 let opts = crate::mixed_workspace::fit_options(spec, fit_targets.clone());
-                let raw = glmm::GroupIds {
-                    primary: ws.cluster_ids[..nrow].to_vec(),
-                    extra: ws
-                        .extra_grouping_ids
-                        .iter()
-                        .map(|v| v[..nrow].to_vec())
-                        .collect(),
-                };
-                let (sized, sized_ids, perm) =
-                    glmm::loop_advanced::spec_sized_from_ids_pub(&model, &raw);
-                let w = glmm::loop_advanced::build_workspace(&sized, perm, nrow, p_fit, &opts);
-                (vec![w], vec![sized_ids.into_owned()], opts)
+                let mut raw = glmm::GroupIds::new(ws.cluster_ids[..nrow].to_vec());
+                for v in &ws.extra_grouping_ids {
+                    raw = raw.extra(v[..nrow].to_vec());
+                }
+                let w = glmm::loop_advanced::build_workspace(&model, &raw, nrow, p_fit, &opts);
+                (vec![w], opts)
             } else {
                 crate::mixed_workspace::build_mixed_workspaces(
                     spec,
@@ -584,6 +570,7 @@ pub fn fit_provided_data(
                     &ws.cluster_ids,
                     &ws.extra_grouping_ids,
                 )
+                .map(|(mixed, _ids, opts)| (mixed, opts))
                 .expect("Mle ⇒ build_mixed_workspaces is Some")
             };
             // `fit_on` takes row-major x[i·p + j]; x_full_f64 is column-major faer.
@@ -601,19 +588,22 @@ pub fn fit_provided_data(
             // The stripped reduced model has one intercept scalar τ per grouping,
             // so its θ warm start must drop the slopes too (`include_slopes`).
             let theta = crate::mixed_workspace::truth_theta(cluster, !reduces);
-            let start = spec.scenario.truth_start.then(|| glmm::StartValues {
-                beta: fit_beta.clone(),
-                theta,
-                dispersion: None,
-            });
+            let start = spec
+                .scenario
+                .truth_start
+                .then(|| glmm::StartValues::new(fit_beta.clone(), theta));
             // Only a fit from the truth start reads the hint (batch.rs's Mle
             // arm). A reduced fit never has one: no pilot runs under a
             // `test_formula`.
-            let view = glmm::loop_advanced::fit_on_hinted(
-                &mut mixed[0],
+            let data = glmm::Data::new(
                 &ws.x_rowmajor[..nrow * p_fit],
                 &ws.y_full_f64[..nrow],
-                &ids[0],
+                nrow,
+                p_fit,
+            );
+            let view = glmm::loop_advanced::fit_on_hinted(
+                &mut mixed[0],
+                &data,
                 start.as_ref(),
                 start.as_ref().and(hint),
                 &opts,
@@ -634,15 +624,7 @@ pub fn fit_provided_data(
             // `into_fit` consumes the view; read the accessors above first. It also
             // covers the sparse route (Prebuilt holds a full Fit — varcorr/dispersion
             // read fine; only joint_t_sq/theta degrade, which introspect never reads).
-            let fit = view.into_fit(
-                &ws.x_rowmajor[..nrow * p_fit],
-                &ws.y_full_f64[..nrow],
-                &ids[0],
-                nrow,
-                p_fit,
-                &model,
-                &opts,
-            );
+            let fit = view.into_fit(&data, &model, &opts);
             let (variance_components, re_corr) = unpack_varcorr(&fit);
             // The targets' Satterthwaite df on the workspace `into_fit` released,
             // under the hot loop's rule (batch.rs Mle arm — change together):
@@ -794,8 +776,6 @@ fn entry_width(spec: &SimulationSpec) -> (u32, u32, Vec<u32>) {
 /// denominator df exactly as the hot path's `build_crit_tables` does (same
 /// entry width and `p_between` input, same `BetweenWithinDf::resolve` gate) so
 /// a debug run and a real `find_power` run see the same per-target reference.
-/// Tukey `k` is not threaded here — no debug caller reports a Tukey-adjusted
-/// threshold, matching this module's pre-existing behaviour.
 fn build_crit_table_for_debug(
     spec: &SimulationSpec,
     sample_sizes: &[u32],
@@ -829,6 +809,8 @@ fn build_crit_table_for_fit(
     build_debug_table(spec, &[sample_size], p, bw.as_ref())
 }
 
+/// A debug table covers a single N, so its Tukey thresholds are solved
+/// exactly rather than read off a run's curve; the two agree to 1e-10.
 fn build_debug_table(
     spec: &SimulationSpec,
     sample_sizes: &[u32],
@@ -842,7 +824,10 @@ fn build_debug_table(
         n_targets(spec) as u32,
         spec.correction_method,
         spec.estimator,
-        &crate::batch::tukey_k_per_target(spec),
+        Some(crate::critvals::TukeyTargets {
+            k_per_target: &crate::batch::tukey_k_per_target(spec),
+            thresholds: &crate::critvals::TukeyThresholds::default(),
+        }),
         bw,
     )
 }
@@ -1208,7 +1193,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5, 0.3, 0.2],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1556,7 +1540,7 @@ mod tests {
     /// A Gaussian LMM with a crossed or nested extra grouping, under the
     /// between-within reference, reports each target's Satterthwaite df and
     /// the cutoff `t_ppf(1 − α/2, df)²` at it. The df must equal glmm's stable
-    /// path (`fit_cold`, `Fit::coef_df`) on the same data — which glmm gates
+    /// path (`glmm::fit`, `Fit::coef_df`) on the same data, which glmm gates
     /// against lmerTest — so this pins that the provided-data fit runs the pass
     /// on the right workspace and reads the target entries. The crossed design
     /// with an extra-grouping random slope takes glmm's sparse route.
@@ -1618,16 +1602,13 @@ mod tests {
                 &spec.cluster_slope_design_cols,
                 &spec.extra_slope_cols,
             );
-            let ids = glmm::GroupIds {
-                primary: cids.clone(),
-                extra: ws
-                    .extra_grouping_ids
-                    .iter()
-                    .map(|v| v[..n].to_vec())
-                    .collect(),
-            };
+            let mut ids = glmm::GroupIds::new(cids.clone());
+            for v in &ws.extra_grouping_ids {
+                ids = ids.extra(v[..n].to_vec());
+            }
             let opts = crate::mixed_workspace::fit_options(&spec, spec.target_indices.clone());
-            let stable = glmm::fit_cold(&x_rowmajor, &outcome, n, p, &model, &ids, &opts);
+            let data = glmm::Data::new(&x_rowmajor, &outcome, n, p).ids(&ids);
+            let stable = glmm::fit(&data, &model, &opts).expect("valid stable-path input");
             let expected: Vec<f64> = spec
                 .target_indices
                 .iter()

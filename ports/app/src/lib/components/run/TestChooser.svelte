@@ -91,7 +91,12 @@
   // ANOVA auto-populates every pairwise contrast from the factor levels, so the
   // manual picker is redundant there (and lets users create duplicates); only
   // regression, which has no auto-contrasts, exposes "+ Add contrast".
-  const showAddContrast = $derived(!isAnova && factorVars.length > 0);
+  // The engine tests contrasts on OLS only: ANOVA, or regression with a linear
+  // outcome. Mixed is always LMM/GLMM. The adapter drops hidden chips too.
+  const contrastsAllowed = $derived(
+    isAnova || (familyStore.active === 'regression' && familyStore.activeOutcome === 'linear'),
+  );
+  const showAddContrast = $derived(!isAnova && contrastsAllowed && factorVars.length > 0);
 
   // Section gate. ANOVA's box now holds the covariate-tests expander + the
   // contrasts it drives, so it must show whenever there are factors (even with
@@ -159,7 +164,7 @@
   </div>
 
   <!-- Custom contrast chips -->
-  {#if cfg.contrasts.length > 0}
+  {#if contrastsAllowed && cfg.contrasts.length > 0}
     <div class="flex flex-wrap gap-1 pb-1">
       {#each cfg.contrasts as c, idx (idx)}
         <span class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-mono ${c.enabled !== false ? 'bg-accent' : 'bg-muted opacity-60'}`}>

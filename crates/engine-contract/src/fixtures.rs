@@ -46,7 +46,6 @@ pub fn example1_simple_ols() -> SimulationContract {
             coefficients: vec![0.0, 0.5, 0.3],
             residual: ResidualSpec {
                 distribution: ResidualDist::Normal,
-                pinned: false,
             },
             heteroskedasticity_driver: None,
             link: None,

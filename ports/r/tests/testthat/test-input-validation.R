@@ -188,3 +188,59 @@ test_that("set_alpha: alpha=0.05 (default) is accepted without warning", {
   m <- MCPower$new("y ~ x1")
   expect_silent(m$set_alpha(0.05))
 })
+
+# ── set_cluster / runtime grouping coverage (validators.py
+#    _validate_cluster_config + model.py _validate_lme_runtime) ─────────────
+
+test_that("set_cluster: a bare nested child name is not a formula grouping", {
+  # (1|school/class) parses to "school" and "school:class"; "class" alone would
+  # otherwise be simulated as a crossed grouping.
+  m <- MCPower$new("y ~ x + (1|school/class)", family = "lme")
+  m$set_cluster("school", ICC = 0.2, n_clusters = 20L)
+  expect_error(
+    m$set_cluster("class", ICC = 0.1, n_clusters = 60L),
+    "Grouping variable 'class' not found in formula random effects. Expected one of: school, school:class",
+    fixed = TRUE)
+})
+
+test_that("set_cluster: needs n_clusters or cluster_size unless nested", {
+  m <- MCPower$new("y ~ x1 + (1|g)", family = "lme")
+  expect_error(m$set_cluster("g", ICC = 0.2),
+               "Must specify either n_clusters or cluster_size", fixed = TRUE)
+  expect_error(m$set_cluster("g", ICC = 0.2, n_clusters = 10L, n_per_parent = 1L),
+               "n_per_parent must be an integer >= 2, got 1", fixed = TRUE)
+})
+
+test_that("set_cluster: a formula without random effects has no grouping to cluster", {
+  # Otherwise an OLS model would silently run a clustered DGP.
+  m <- MCPower$new("y ~ x")
+  expect_error(m$set_cluster("school", ICC = 0.2, n_clusters = 20L),
+               "Grouping variable 'school' not found in formula random effects.", fixed = TRUE)
+})
+
+test_that("find_*: family='lme' without set_cluster names the missing grouping", {
+  m <- MCPower$new("y ~ x1 + (1|school)", family = "lme")$set_effects("x1=0.3")
+  msg <- "family='lme' requires set_cluster(...) for each random effect grouping variable; missing: ['school']"
+  expect_error(m$find_power(400, n_sims = 10L, verbose = FALSE, progress_callback = FALSE),
+               msg, fixed = TRUE)
+  expect_error(m$find_sample_size(from_size = 200, to_size = 400, by = 100, n_sims = 10L,
+                                  verbose = FALSE, progress_callback = FALSE),
+               msg, fixed = TRUE)
+})
+
+test_that("find_power: every formula grouping needs its own set_cluster", {
+  m <- MCPower$new("y ~ x + (1|school/class)", family = "lme")$set_effects("x=0.3")
+  m$set_cluster("school", ICC = 0.2, n_clusters = 20L)
+  expect_error(m$find_power(1200, n_sims = 10L, verbose = FALSE, progress_callback = FALSE),
+               "random effect '(1|school:class)' has no set_cluster call", fixed = TRUE)
+})
+
+# ── set_simulations (validators.py _validate_simulations) ─────────────────
+
+test_that("set_simulations: below 1 rejects, fractional values round", {
+  m <- MCPower$new("y ~ x1")
+  expect_error(m$set_simulations(0), "Number of simulations must be >= 1, got 0", fixed = TRUE)
+  expect_error(m$set_simulations(-5), "Number of simulations must be >= 1, got -5", fixed = TRUE)
+  m$set_simulations(200.6)
+  expect_identical(m$n_simulations, 201L)
+})

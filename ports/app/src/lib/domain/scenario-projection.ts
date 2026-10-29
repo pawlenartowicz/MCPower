@@ -1,8 +1,8 @@
 // Projects an editable `ScenarioConfig` (the GUI's app copy of the three named
 // sets) to the wire `ScenarioWire` (= `engine_spec_builder::input::ScenarioInput`).
-// This is the TS port of Python's `build_scenario_dict` (spec/spec_builder.py): the same fields,
-// the same name → integer-code encoding for the two distribution lists, and the
-// same rejection of residual distributions the scenario wire cannot carry.
+// This is the TS port of Python's `build_scenario_dict` (spec/spec_builder.py): the same fields
+// and the same name → integer-code encoding for the one distribution list,
+// `new_distributions`.
 // The `lme` sub-object is flattened onto the wire: its fields are hoisted
 // directly onto `ScenarioWire`.
 import type { ScenarioConfig } from '$lib/configs/scenarios';
@@ -23,21 +23,10 @@ export const DIST_CODE: Readonly<Record<string, number>> = {
   uploaded_data: 99,
 };
 
-// Residual-distribution name → integer code. Canonical five shapes, matching
-// RESIDUAL_CODES in project_contract.rs. The v1 aliases (heavy_tailed/skewed/t)
-// are dropped in line with the spec-builder pre-1.0 break.
-export const RESIDUAL_CODE: Readonly<Record<string, number>> = {
-  normal: 0,
-  right_skewed: 2,
-  left_skewed: 3,
-  high_kurtosis: 4,
-  uniform: 5,
-};
-
-// Random-effect distribution name → integer code. Reuses the RESIDUAL_CODE
-// integer space (normal=0, heavy_tailed=1); mirrors Python's RE-dist encoding
-// and the engine's `residual_dist_from_code`. The UI only exposes normal /
-// heavy_tailed for random effects.
+// Random-effect distribution name → integer code (normal=0, heavy_tailed=1);
+// mirrors Python's RE-dist encoding and the engine's `RE_DIST_CODES` /
+// `re_dist_from_code`. The UI only exposes normal / heavy_tailed for random
+// effects.
 export const RE_DIST_CODE: Readonly<Record<string, number>> = {
   normal: 0,
   heavy_tailed: 1,
@@ -53,19 +42,10 @@ function encodeDist(name: string): number {
   return code;
 }
 
-function encodeResidual(name: string): number {
-  const code = RESIDUAL_CODE[name];
-  if (code === undefined) {
-    throw new Error(
-      `unknown residual distribution '${name}'; valid: ${Object.keys(RESIDUAL_CODE).sort().join(', ')}`,
-    );
-  }
-  return code;
-}
-
 /**
  * Project one `ScenarioConfig` to the wire `ScenarioWire`, mirroring Python's
- * `build_scenario_dict`. Throws on a residual distribution the wire cannot carry. The
+ * `build_scenario_dict`. The wire is built field by field, so keys a stored
+ * copy still carries from an older version never reach it. The
  * `lme` sub-object is flattened: its three fields are hoisted onto the wire
  * (random_effect_dist name-encoded via RE_DIST_CODE; df and icc_noise_sd raw),
  * mirroring the Python port. The `lme` sub-object itself is not on the wire.
@@ -78,9 +58,6 @@ export function projectScenario(cfg: ScenarioConfig): ScenarioWire {
     correlation_noise_sd: cfg.correlation_noise_sd,
     distribution_change_prob: cfg.distribution_change_prob,
     new_distributions: cfg.new_distributions.map(encodeDist),
-    residual_change_prob: cfg.residual_change_prob,
-    residual_dists: cfg.residual_dists.map(encodeResidual),
-    residual_df: cfg.residual_df,
     // Persisted scenario snapshots from before the knob lack the field;
     // default to the exact-allocation engine default.
     sampled_factor_proportions: cfg.sampled_factor_proportions ?? false,

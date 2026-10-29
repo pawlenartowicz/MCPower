@@ -368,6 +368,8 @@ fn f2_get_effects_glm_recovers_log_odds() {
                 },
             ],
         }),
+        report_overall: false,
+        contrasts: vec![],
         baseline_probability: 0.5,
         link: Default::default(),
         test_formula: None,
@@ -521,19 +523,11 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
     );
 }
 
-/// F2: get_effects_from_data with a factor predictor recovers known dummy
-/// effects and emits no EffectSize for the reference level.
-///
-/// Construction: 3-level factor `g` (labels ["ctrl", "treatA", "treatB"]).
+/// 3-level factor `g` (labels ["ctrl", "treatA", "treatB"]) and outcome `y`.
 /// Level codes: 0 = ctrl (reference, excluded from dummies), 1 = treatA, 2 = treatB.
 /// y = 3 · g[treatA] + e, with e = ±1 alternating (zero sum within each level).
-///
-/// OLS should recover β_treatA > 0 and β_treatB = 0, and no effect for "ctrl"
-/// (reference).
-#[test]
-fn f2_get_effects_with_factor_predictor() {
-    use engine_app_spec::driver::get_effects_from_data;
-
+/// `var_types` declares (or leaves undeclared) `g`.
+fn factor_upload_spec(var_types: Vec<VarType>) -> AppSpec {
     // 30 rows: 10 ctrl (code 0), 10 treatA (code 1), 10 treatB (code 2).
     let n = 30usize;
     let g_codes: Vec<f64> = (0..n).map(|i| (i / 10) as f64).collect(); // 0,0,...,1,1,...,2,2,...
@@ -554,20 +548,13 @@ fn f2_get_effects_with_factor_predictor() {
         })
         .collect();
 
-    let spec = AppSpec::Linear(LinearSpec {
+    AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
             outcome: "y".into(),
             predictors: vec!["g".into()],
             interaction_terms: vec![],
         },
-        var_types: vec![VarType::Factor {
-            name: "g".into(),
-            factor_n_levels: 3,
-            factor_proportions: vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
-            factor_reference: 0,
-            factor_labels: vec![],
-            sampled_proportions: None,
-        }],
+        var_types,
         effects: vec![
             EffectSize {
                 name: "g[2]".into(),
@@ -583,8 +570,7 @@ fn f2_get_effects_with_factor_predictor() {
         target_power: 0.8,
         n_sims: 32,
         seed: 42,
-        // Use numeric level names for TestSelection — assemble_spec builds factor
-        // levels as "1".."k"; the driver uses real label names for beta mapping.
+        // Without user labels the power run names the levels "1".."k".
         tests: TestSelection::Effects {
             names: vec!["g[2]".into(), "g[3]".into()],
         },
@@ -598,7 +584,7 @@ fn f2_get_effects_with_factor_predictor() {
                     name: "g".into(),
                     col_type: UploadColumnType::Factor,
                     values: g_codes,
-                    labels: labels.clone(),
+                    labels,
                 },
                 UploadColumn {
                     name: "y".into(),
@@ -612,48 +598,77 @@ fn f2_get_effects_with_factor_predictor() {
         contrasts: vec![],
         test_formula: None,
         outcome_options: None,
-    });
+    })
+}
 
-    let recovered = get_effects_from_data(&spec).expect("get_effects_from_data succeeds");
+/// The recovered effects of `factor_upload_spec`: named as the power run names
+/// them (`g[2]` = treatA, `g[3]` = treatB), no reference-level effect, and
+/// β_treatA > 0, β_treatB = 0.
+fn assert_factor_effects(recovered: &engine_app_spec::driver::EffectsFromData) {
     let effects = &recovered.effects;
-    assert_eq!(recovered.cluster_icc, None, "linear arm reports no ICC");
-    assert_eq!(
-        recovered.baseline_probability, None,
-        "linear arm reports no baseline"
-    );
-
-    // Expect exactly 2 effects: g[treatA] and g[treatB]. Reference (ctrl) must be absent.
     assert_eq!(
         effects.len(),
         2,
         "two dummies returned (reference excluded)"
     );
     assert!(
-        !effects.iter().any(|e| e.name == "g[ctrl]"),
-        "reference level g[ctrl] must not appear in returned effects"
+        !effects.iter().any(|e| e.name == "g[1]"),
+        "reference level g[1] must not appear in returned effects"
     );
-
     let treat_a = effects
         .iter()
-        .find(|e| e.name == "g[treatA]")
-        .expect("g[treatA] effect present");
+        .find(|e| e.name == "g[2]")
+        .expect("g[2] effect present");
     let treat_b = effects
         .iter()
-        .find(|e| e.name == "g[treatB]")
-        .expect("g[treatB] effect present");
-
+        .find(|e| e.name == "g[3]")
+        .expect("g[3] effect present");
     // treatA drives y; β_treatA should be substantially positive.
     assert!(
         treat_a.value > 0.5,
-        "g[treatA] should have a large positive effect, got {}",
+        "g[2] should have a large positive effect, got {}",
         treat_a.value
     );
     // treatB shares ctrl's mean exactly, so its dummy slope is 0.
     assert!(
         treat_b.value.abs() < 1e-9,
-        "g[treatB] should be near zero, got {}",
+        "g[3] should be near zero, got {}",
         treat_b.value
     );
+}
+
+/// F2: get_effects_from_data with a declared, unlabelled factor predictor
+/// recovers known dummy effects under the power run's level names.
+#[test]
+fn f2_get_effects_with_factor_predictor() {
+    use engine_app_spec::driver::get_effects_from_data;
+
+    let spec = factor_upload_spec(vec![VarType::Factor {
+        name: "g".into(),
+        factor_n_levels: 3,
+        factor_proportions: vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+        factor_reference: 0,
+        factor_labels: vec![],
+        sampled_proportions: None,
+    }]);
+    let recovered = get_effects_from_data(&spec).expect("get_effects_from_data succeeds");
+    assert_eq!(recovered.cluster_icc, None, "linear arm reports no ICC");
+    assert_eq!(
+        recovered.baseline_probability, None,
+        "linear arm reports no baseline"
+    );
+    assert_factor_effects(&recovered);
+}
+
+/// An undeclared predictor matching an uploaded factor column is a factor in
+/// effect recovery, as it is in the power run (data wins).
+#[test]
+fn f2_get_effects_undeclared_uploaded_factor_is_a_factor() {
+    use engine_app_spec::driver::get_effects_from_data;
+
+    let recovered =
+        get_effects_from_data(&factor_upload_spec(vec![])).expect("get_effects_from_data succeeds");
+    assert_factor_effects(&recovered);
 }
 
 // ─── B1 tests: baseline probability must be recovered through the outcome's
@@ -734,6 +749,8 @@ fn f2_get_effects_glm_logit_recovers_asymmetric_baseline() {
                 },
             ],
         }),
+        report_overall: false,
+        contrasts: vec![],
         baseline_probability: 0.5,
         link: BinaryLink::Logit,
         test_formula: None,
@@ -815,6 +832,8 @@ fn f2_get_effects_glm_probit_recovers_asymmetric_baseline() {
                 },
             ],
         }),
+        report_overall: false,
+        contrasts: vec![],
         baseline_probability: 0.5,
         link: BinaryLink::Probit,
         test_formula: None,

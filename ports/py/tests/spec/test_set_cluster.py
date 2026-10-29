@@ -152,13 +152,26 @@ def test_lme_find_power_without_set_cluster_raises():
         m.find_power(sample_size=100)
 
 
-def test_lme_validate_runtime_derives_n_from_cluster_size():
-    """cluster_size + sample_size → n_clusters derivation populates effective."""
+def test_lme_validate_runtime_keeps_cluster_size_sizing():
+    """A cluster_size spec stays FixedSize after a find_power-style check: the
+    cluster count grows with N, it is not frozen at sample_size // cluster_size
+    for later runs."""
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.5").set_cluster("school", ICC=0.2, cluster_size=10)
     m._apply()
     m._validate_lme_runtime(sample_size=100, scenario_filter=["optimistic"])
-    assert m._effective_n_clusters == 10
+    sizing = m.to_simulation_spec()["generation"]["cluster"]["sizing"]
+    assert sizing == {"FixedSize": {"cluster_size": 10}}
+
+
+def test_find_power_rejects_derived_cluster_count_below_min_clusters():
+    """cluster_size=10 passes the rows-per-cluster check, so only the derived
+    cluster count (40 // 10 = 4, below the min_clusters limit of 5) can raise."""
+    m = MCPower("y ~ x + (1|g)", family="lme")
+    m.set_effects("x=0.3")
+    m.set_cluster("g", ICC=0.2, cluster_size=10)
+    with pytest.raises(ValueError, match=r"derived n_clusters=4 is below 5"):
+        m.find_power(sample_size=40, n_sims=10, seed=1, verbose=False)
 
 
 def test_lme_validate_runtime_silent_for_non_lme_family():
@@ -167,21 +180,19 @@ def test_lme_validate_runtime_silent_for_non_lme_family():
     m.set_effects("x=0.5")
     m._apply()
     m._validate_lme_runtime(sample_size=100, scenario_filter=["optimistic"])
-    assert m._effective_n_clusters is None
 
 
 def test_lme_validate_runtime_clustered_ols_fallthrough():
     """Clustered-OLS fall-through: a non-LME family whose formula carries a
     random-effect term plus a set_cluster spec must NOT be rejected. The
     decoupled DGP (clusters) still needs validating, so _validate_lme_runtime
-    falls through to the per-cluster checks and populates _effective_n_clusters.
+    falls through to the per-cluster checks.
     """
     m = MCPower("y ~ x + (1|g)", family="ols")
     m.set_effects("x=0.4")
     m.set_cluster("g", ICC=0.2, n_clusters=12)
     # Must not raise even though family != "lme".
     m._validate_lme_runtime(sample_size=120, scenario_filter=["optimistic"])
-    assert m._effective_n_clusters == 12
     # The DGP stays clustered while the estimator remains OLS.
     spec = m.to_simulation_spec()
     assert spec["estimator"] == "ols"
@@ -237,7 +248,6 @@ def test_clusters_json_two_crossed_groupings():
     m.set_effects("x1=0.3")
     m.set_cluster("school", ICC=0.2, n_clusters=20)
     m.set_cluster("teacher", ICC=0.1, n_clusters=30)
-    m._effective_n_clusters = 20  # simulate post-_validate_lme_runtime
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert len(specs) == 1  # one top-level ClusterSpec entry
@@ -258,7 +268,6 @@ def test_clusters_json_nested_grouping():
     m.set_effects("treatment=0.5")
     m.set_cluster("school", ICC=0.15, n_clusters=10)
     m.set_cluster("school:classroom", ICC=0.10, n_per_parent=3)
-    m._effective_n_clusters = 10
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert len(specs) == 1
@@ -282,7 +291,6 @@ def test_set_cluster_accepts_n_per_parent_alone():
     assert m._pending_clusters["school:classroom"]["n_clusters"] is None
     assert m._pending_clusters["school:classroom"]["cluster_size"] is None
 
-    m._effective_n_clusters = 10
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     primary = specs[0]
@@ -299,7 +307,6 @@ def test_nested_child_without_n_per_parent_uses_config_default():
     m.set_effects("treatment=0.5")
     m.set_cluster("school", ICC=0.15, n_clusters=10)
     m.set_cluster("school:classroom", ICC=0.10)
-    m._effective_n_clusters = 10
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     eg = _json.loads(clusters_json)[0]["extra_groupings"][0]
     default = get_simulation_defaults()["nested_n_per_parent"]
@@ -331,20 +338,17 @@ def test_set_cluster_n_per_parent_alone_passes_runtime_validation():
     m._apply()
     # Must not raise "Must specify either n_clusters or cluster_size".
     m._validate_lme_runtime(sample_size=60, scenario_filter=["optimistic"])
-    assert m._effective_n_clusters == 10
 
 
-def test_validate_lme_runtime_multi_grouping_sets_effective_n():
-    """_validate_lme_runtime with two groupings populates _effective_n_clusters
-    from the primary (first) grouping and validates each spec independently."""
+def test_validate_lme_runtime_multi_grouping_passes():
+    """_validate_lme_runtime with two groupings validates each spec
+    independently."""
     m = MCPower("y ~ x1 + (1|school) + (1|teacher)", family="lme")
     m.set_effects("x1=0.3")
     m.set_cluster("school", ICC=0.2, n_clusters=20)
     m.set_cluster("teacher", ICC=0.1, n_clusters=30)
     m._apply()
     m._validate_lme_runtime(sample_size=200, scenario_filter=["optimistic"])
-    # Primary grouping governs effective_n_clusters
-    assert m._effective_n_clusters == 20
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +376,6 @@ def test_clusters_json_random_slope_shape():
         slope_variance=0.05,
         slope_intercept_corr=0.3,
     )
-    m._effective_n_clusters = 20
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert specs[0]["slopes"] == [
@@ -385,7 +388,6 @@ def test_clusters_json_no_slopes_key_absent():
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.3")
     m.set_cluster("school", ICC=0.2, n_clusters=20)
-    m._effective_n_clusters = 20
     _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
     specs = _json.loads(clusters_json)
     assert "slopes" not in specs[0]
@@ -424,6 +426,27 @@ def test_find_power_nested_groupings_smoke():
     # Floor guards against a broken path returning all-zeros/NaN→0.
     # Observed: 1.0 at seed=2137 (treatment=0.5, N=150, nested LME).
     assert pw > 0.3, f"power {pw} too low — nested-groupings engine path may be broken"
+
+
+def test_nested_cluster_size_design_keeps_cluster_size_across_runs():
+    """Schools of 30 with 3 classes each: N=600 is 20 whole schools, so it is
+    not snapped, and a later find_sample_size on the same model still steps by
+    one school (atom 30), not by a school count frozen by find_power."""
+    import warnings
+
+    m = MCPower("y ~ treatment + (1|school/class)", family="lme")
+    m.set_variable_type("treatment=binary")
+    m.set_effects("treatment=0.4")
+    m.set_cluster("school", ICC=0.15, cluster_level_vars=["treatment"], cluster_size=30)
+    m.set_cluster("school:class", ICC=0.10, n_per_parent=3)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        m.find_power(sample_size=600, n_sims=50, seed=2137, verbose=False)
+    assert not [w for w in caught if "cluster atom" in str(w.message)]
+    result = m.find_sample_size(
+        from_size=600, to_size=660, n_sims=50, seed=2137, verbose=False
+    )
+    assert result["cluster_atom"] == 30
 
 
 def test_find_power_random_slope_smoke():

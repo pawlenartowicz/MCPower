@@ -130,6 +130,13 @@ pub struct LogitSpec {
     #[serde(default)]
     pub scenarios: Vec<ScenarioInput>,
     pub csv: Option<CsvData>,
+    /// Omnibus LRT vs intercept-only (see `LinearSpec.report_overall`).
+    /// Skip-serialize when off so a spec without it round-trips unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub report_overall: bool,
+    /// Pairwise contrast pairs (see `LinearSpec.contrasts`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contrasts: Vec<(String, String)>,
     /// Baseline (intercept) probability for the logistic model. The assembler
     /// converts this to the corresponding log-odds intercept passed to
     /// `BuilderLogitSpec`. Required — no meaningful default exists.
@@ -174,6 +181,13 @@ pub struct PoissonSpec {
     #[serde(default)]
     pub scenarios: Vec<ScenarioInput>,
     pub csv: Option<CsvData>,
+    /// Omnibus LRT vs intercept-only (see `LinearSpec.report_overall`).
+    /// Skip-serialize when off so a spec without it round-trips unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub report_overall: bool,
+    /// Pairwise contrast pairs (see `LinearSpec.contrasts`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contrasts: Vec<(String, String)>,
     /// Baseline (intercept) rate for the Poisson model. The assembler
     /// converts this to the corresponding log intercept passed to
     /// `BuilderLinearSpec`. Required — no meaningful default exists.
@@ -463,15 +477,14 @@ impl NumericDistribution {
 /// Outcome-level *structural* knobs from the GUI's Model "More options"
 /// dialog. Magnitudes (λ, heterogeneity) are scenario-only and have no wire
 /// here. An absent struct (the wire default) reproduces the default
-/// behaviour exactly: unpinned normal residual, lp-driven heteroskedasticity.
+/// behaviour exactly: normal residual, lp-driven heteroskedasticity.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OutcomeOptions {
     /// Residual distribution, canonical spec-builder vocabulary: `"normal"` |
     /// `"right_skewed"` | `"left_skewed"` | `"high_kurtosis"` | `"uniform"`.
-    /// `None` = unpinned default (normal; scenarios may swap it). `Some` =
-    /// the user explicitly chose a shape → pinned; an explicit `"normal"`
-    /// must be sent (neutral keys on unpinned-default, not on the value). A
-    /// pinned `high_kurtosis` takes its df from the active scenario.
+    /// `None` = normal. `high_kurtosis` is Student t with 10 df; the two
+    /// skewed shapes are scaled chi-square with 10 df. The shape is the same
+    /// in every scenario.
     #[serde(default)]
     pub residual_distribution: Option<String>,
     /// Heteroskedasticity driver predictor name (must be a non-factor

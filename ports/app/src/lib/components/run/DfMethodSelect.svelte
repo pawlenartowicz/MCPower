@@ -9,6 +9,7 @@
     SelectTrigger,
   } from '$lib/components/ui/select';
   import { Label } from '$lib/components/ui/label';
+  import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import { ESTIMATION } from '$lib/configs/app-config';
   import {
@@ -23,7 +24,10 @@
 </script>
 
 <div>
-  <Label for="df-method">Denominator df</Label>
+  <div class="flex items-center gap-2">
+    <Label for="df-method">Denominator df</Label>
+    <InfoIcon tipKey="dfMethod" />
+  </div>
   <Select
     type="single"
     {value}
@@ -40,11 +44,4 @@
       {/each}
     </SelectContent>
   </Select>
-  <p class="mt-1 text-xs text-muted-foreground">
-    Between-within tests each fixed effect against a t rather than a Wald z — between-cluster
-    df if the predictor is cluster-level, within-cluster df otherwise. Mark cluster-level
-    predictors (cluster settings → Cluster-level variables) for the between df to apply.
-    With crossed or nested extra groupings, a linear mixed model uses Satterthwaite df and a
-    GLMM uses Wald z.
-  </p>
 </div>

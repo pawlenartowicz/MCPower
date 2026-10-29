@@ -8,7 +8,7 @@
 //! method as the original OLS contrast path, modulo the t² rewrite.
 
 use crate::correction::apply_correction;
-use crate::spec::CorrectionMethod;
+use crate::spec::{CorrectionMethod, PosthocBlockShape};
 use faer::MatRef;
 use glmm::loop_advanced::OlsFitView;
 
@@ -23,10 +23,11 @@ pub type Contrast = Vec<f64>;
 /// - `fit`: borrowed view from `fit_suff_stats_t_sq`.
 /// - `contrasts`: list of length-`P` contrast vectors.
 /// - `posthoc_t_crit_sq`: scalar squared posthoc-α critical value (uncorrected).
-/// - `correction_method`: typed enum applied over the contrast set
-///   (independent of the main target correction).
+/// - `blocks`: one shape per factor, in contrast order (`Σ n_contrasts == C`).
+/// - `correction_method`: typed enum applied within each block: every factor
+///   is its own family (independent of the main target correction).
 /// - `correction_crit_sq`: per-contrast thresholds under `None`/Bonferroni/Tukey,
-///   per-rank under Holm/BH; length `C`.
+///   per-rank-within-block under Holm/BH; length `C`, blocks concatenated.
 /// - `t_sq_scratch`: caller-owned per-contrast `t²` staging buffer. Grown to
 ///   `C` on first use, reused thereafter (the contrast count is not known at
 ///   workspace construction, so this is a `Vec` rather than a fixed slice).
@@ -41,6 +42,7 @@ pub type Contrast = Vec<f64>;
 pub fn evaluate_posthoc(
     fit: &OlsFitView<'_>,
     contrasts: &[Contrast],
+    blocks: &[PosthocBlockShape],
     posthoc_t_crit_sq: f64,
     correction_method: CorrectionMethod,
     correction_crit_sq: &[f64],
@@ -107,8 +109,20 @@ pub fn evaluate_posthoc(
         }
     }
 
-    // Corrected — delegate to `apply_correction` over the contrast set.
-    apply_correction(correction_method, t_sq_all, correction_crit_sq, cor_out);
+    // Corrected: delegate to `apply_correction` one block at a time, so a
+    // Holm/BH rank indexes its own block's threshold row.
+    let mut start = 0;
+    for block in blocks {
+        let end = start + block.n_contrasts as usize;
+        apply_correction(
+            correction_method,
+            &t_sq_all[start..end],
+            &correction_crit_sq[start..end],
+            &mut cor_out[start..end],
+        );
+        start = end;
+    }
+    debug_assert_eq!(start, c_count, "blocks must cover every contrast");
 }
 
 /// Solve `L u = b` by forward substitution on the lower-triangular Cholesky
@@ -249,6 +263,14 @@ mod tests {
 
         let mut t_sq_scratch: Vec<f64> = Vec::new();
         let mut u_scratch = vec![0.0_f64; p];
+        let one = PosthocBlockShape {
+            n_levels: 2,
+            n_contrasts: 1,
+        };
+        let three = PosthocBlockShape {
+            n_levels: 3,
+            n_contrasts: 3,
+        };
 
         // (1) Crit-boundary sandwich: pin each contrast's t² to ±1e-5 relative.
         //     `t² > crit` ⇒ pass, so a crit just below the golden must pass and
@@ -262,6 +284,7 @@ mod tests {
             evaluate_posthoc(
                 &ols,
                 &list,
+                std::slice::from_ref(&one),
                 lo,
                 CorrectionMethod::None,
                 &[lo],
@@ -274,6 +297,7 @@ mod tests {
             evaluate_posthoc(
                 &ols,
                 &list,
+                std::slice::from_ref(&one),
                 hi,
                 CorrectionMethod::None,
                 &[hi],
@@ -298,6 +322,7 @@ mod tests {
         evaluate_posthoc(
             &ols,
             &contrasts,
+            &[three.clone(), one.clone()],
             crit,
             CorrectionMethod::Bonferroni,
             &crit_sq,
@@ -316,6 +341,36 @@ mod tests {
             vec![1, 0, 1, 0],
             "Bonferroni corrected pass pattern at crit=4.0"
         );
+
+        // (3) Holm ranks within each factor block. Two identical 3-contrast
+        //     blocks (t² 12.81, 0.67, 8.30) with per-rank thresholds
+        //     [10, 9, 1]: in each block B passes rank 0, B−C fails rank 1 and
+        //     stops. Ranking all six together would test B−C at rank 2 (crit 1)
+        //     and pass it.
+        let two_blocks = vec![
+            c_b.clone(),
+            c_c.clone(),
+            c_b_minus_c.clone(),
+            c_b.clone(),
+            c_c.clone(),
+            c_b_minus_c.clone(),
+        ];
+        let holm_crit_sq = [10.0, 9.0, 1.0, 10.0, 9.0, 1.0];
+        let mut unc = vec![0u8; 6];
+        let mut cor = vec![0u8; 6];
+        evaluate_posthoc(
+            &ols,
+            &two_blocks,
+            &[three.clone(), three],
+            1.0,
+            CorrectionMethod::Holm,
+            &holm_crit_sq,
+            &mut t_sq_scratch,
+            &mut u_scratch,
+            &mut unc,
+            &mut cor,
+        );
+        assert_eq!(cor, vec![1, 0, 0, 1, 0, 0], "Holm corrected per block");
     }
 
     #[test]
@@ -374,6 +429,10 @@ mod tests {
         evaluate_posthoc(
             &ols,
             &contrasts,
+            &[PosthocBlockShape {
+                n_levels: 2,
+                n_contrasts: 1,
+            }],
             1.0,
             CorrectionMethod::None,
             &[],
@@ -472,6 +531,10 @@ mod tests {
             vec![0.0, 0.0, 1.0, -1.0],
         ];
         let crit_sq = vec![ols.sigma_sq.max(1.0); contrasts.len()];
+        let blocks = [PosthocBlockShape {
+            n_levels: 3,
+            n_contrasts: 3,
+        }];
         let mut unc = vec![0u8; contrasts.len()];
         let mut cor = vec![0u8; contrasts.len()];
         let mut t_sq_scratch: Vec<f64> = Vec::new();
@@ -481,6 +544,7 @@ mod tests {
         evaluate_posthoc(
             &ols,
             &contrasts,
+            &blocks,
             1.0,
             CorrectionMethod::Bonferroni,
             &crit_sq,
@@ -495,6 +559,7 @@ mod tests {
             evaluate_posthoc(
                 &ols,
                 &contrasts,
+                &blocks,
                 1.0,
                 CorrectionMethod::Bonferroni,
                 &crit_sq,

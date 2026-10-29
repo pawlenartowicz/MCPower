@@ -95,15 +95,5 @@
         <span class="hidden @[22rem]/effects:inline">{p.long}</span>
       </button>
     {/each}
-    {#if useOddsPresets}
-      <span
-        class="rounded bg-muted px-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground"
-        title={isPoisson
-          ? 'Rate-ratio benchmarks (Chen et al. 2010 odds anchor reused for rate) — beta'
-          : 'Odds-ratio benchmarks (Chen et al. 2010) — beta'}
-      >
-        beta
-      </span>
-    {/if}
   </div>
 </div>

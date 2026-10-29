@@ -185,66 +185,6 @@ run_px_t3 <- function(case) {
   ), tm = tm, var_mean = mean(res[3, ]))
 }
 
-# Re (preset pool): swap frequency, pick split, df recovery from shape laws.
-run_re <- function(case) {
-  m   <- scenario_model(case)
-  cfg <- case$scenario_configs[[case$scenario]]
-  d0  <- scen_draw(m, case$scenario, case$seed + 1)
-  tb  <- true_beta_vector(case, d0$columns)
-  res <- lapply(seq_len(case$K), function(k) {
-    d <- scen_draw(m, case$scenario, case$seed + k)
-    e <- d$outcome - as.numeric(d$design %*% tb)
-    list(cls = classify_residual(e), sk = samp_skew(e), kt = samp_exkurt(e))
-  })
-  cls   <- vapply(res, `[[`, character(1), "cls")
-  n_sw  <- sum(cls != "normal")
-  df    <- cfg$residual_df
-  gates <- list(`swap frequency = q_r` = zgate(as.numeric(cls != "normal"),
-                                               cfg$residual_change_prob))
-  for (cnd in c("heavy_tailed", "skewed")) {
-    gates[[sprintf("pick share %s = 1/2", cnd)]] <- zgate_se(
-      mean(cls[cls != "normal"] == cnd), 0.5, sqrt(0.25 / n_sw))
-  }
-  gates[[sprintf("skewed: skew = √(8/df), df = %d", df)]] <-
-    zgate(vapply(res[cls == "skewed"], `[[`, numeric(1), "sk"), sqrt(8 / df))
-  gates[[sprintf("heavy: excess kurtosis = 6/(df−4), df = %d", df)]] <-
-    zgate(vapply(res[cls == "heavy_tailed"], `[[`, numeric(1), "kt"), 6 / (df - 4))
-  list(gates = gates, cls_table = table(cls))
-}
-
-# Re (pinned residual, swap inert): set_residual_distribution("high_kurtosis")
-# PINS the spec residual, and pick_residual (scenarios.rs) only swaps an UNPINNED
-# default-normal residual — so the configured right_skewed swap
-# (residual_change_prob = 1, residual_dists = right_skewed, residual_df = 6) never
-# fires; every draw keeps the pinned high_kurtosis residual — a standardized t(6)
-# (residual_df = 6; draw_residual in data_gen.rs), NOT the censored-t3 *table* used
-# for the high_kurtosis predictor *marginal*. Gates assert the pin holds (symmetric,
-# heavy-tailed, unit-variance), NOT the old χ²(6) replacement shape. A fired swap
-# would push skew to √(8/df)=1.15 (z≈+70) — the skew=0 gate is the swap-inert
-# tripwire. Sample excess kurtosis of the t(6) residual is downward-biased and
-# high-variance, so (like run_px_t3) it is NOT gated against a point law;
-# heavy-tailedness is asserted via the classifier share instead.
-run_re_replace <- function(case) {
-  m   <- scenario_model(case)
-  d0  <- scen_draw(m, case$scenario, case$seed + 1)
-  tb  <- true_beta_vector(case, d0$columns)
-  res <- vapply(seq_len(case$K), function(k) {
-    d <- scen_draw(m, case$scenario, case$seed + k)
-    e <- d$outcome - as.numeric(d$design %*% tb)
-    c(as.numeric(classify_residual(e) == "heavy_tailed"), samp_skew(e), mean(e), stats::var(e))
-  }, numeric(4))
-  list(gates = list(
-    # ≥0.95 floor (not all==1 like run_px_t3): classify_residual's skew/kurtosis
-    # cuts slip on ~2% of the heavy-tailed RESIDUAL samples (realised share ~0.98);
-    # a fired swap drops this share to ~0.
-    `pin holds: residual stays high_kurtosis (right_skewed swap inert)` =
-      dgate(mean(res[1, ]) >= 0.95, mean(res[1, ]), 1),
-    `symmetric: skew = 0 (pinned t(6), not the χ² swap)` = zgate(res[2, ], 0),
-    `mean = 0`                                           = zgate(res[3, ], 0),
-    `var = 1 (t(6) standardized)`                        = zgate(res[4, ], 1)
-  ))
-}
-
 # Fa: fixed (deterministic counts) vs sampled (multinomial variance).
 run_fa <- function(case) {
   m     <- scenario_model(case)
@@ -361,7 +301,8 @@ run_b2 <- function(case) {
   ), res = res, h = h, tb = tb)
 }
 
-# B3: Hs ratio preserved under forced t / chi² residuals (shape-blind slope).
+# B3: Hs ratio preserved under a t or chi² residual set with
+# set_residual_distribution (shape-blind slope).
 run_b3 <- function(case) {
   m  <- scenario_model(case)
   d0 <- scen_draw(m, case$scenarios[1], case$seed + 1)
@@ -375,8 +316,7 @@ run_b3 <- function(case) {
       d <- scen_draw(m, sc, case$seed + offs + k)
       hsk_gamma(d, tb, d$design[, 2])
     }, numeric(1))
-    pool <- case$scenario_configs[[sc]]$residual_dists[[1]]
-    gates[[sprintf("γ = ln(λ)/4 under forced %s residual", pool)]] <-
+    gates[[sprintf("γ = ln(λ)/4 under a %s residual", case$residual$name)]] <-
       zgate(g_k, log(lam) / 4)
   }
   list(gates = gates)
@@ -488,7 +428,7 @@ run_fg_flip <- function(case) {
 MCPower's **sensitivity analysis** deliberately stresses a planned study: instead of
 simulating the idealised design you specified, each scenario *perturbs* it —
 slopes wobble between observations, residual variance trends with the predictors,
-correlations differ from the plan, predictor and residual distributions get
+correlations differ from the plan, predictor distributions get
 swapped, group allocation becomes random. Each perturbation is controlled by a
 knob in `configs/scenarios.json`, and each knob documents a precise statistical
 *law* for the disturbance it injects.
@@ -521,8 +461,6 @@ R5 <- list(
   scen_co_psd     = run_co_psd(SCENARIO_CASES$scen_co_psd),
   scen_px         = run_px(SCENARIO_CASES$scen_px),
   scen_px_t3      = run_px_t3(SCENARIO_CASES$scen_px_t3),
-  scen_re         = run_re(SCENARIO_CASES$scen_re),
-  scen_re_replace = run_re_replace(SCENARIO_CASES$scen_re_replace),
   scen_fa_ols     = run_fa(SCENARIO_CASES$scen_fa_ols),
   scen_fa_mle     = run_fa(SCENARIO_CASES$scen_fa_mle),
   scen_fa_mle_fp  = run_fa_mle_smoke(SCENARIO_CASES$scen_fa_mle),
@@ -532,7 +470,8 @@ R5 <- list(
   scen_b1_ols     = run_b1(SCENARIO_CASES$scen_b1_ols),
   scen_b1_glm     = run_b1(SCENARIO_CASES$scen_b1_glm),
   scen_b2         = run_b2(SCENARIO_CASES$scen_b2),
-  scen_b3         = run_b3(SCENARIO_CASES$scen_b3),
+  scen_b3_t       = run_b3(SCENARIO_CASES$scen_b3_t),
+  scen_b3_chi     = run_b3(SCENARIO_CASES$scen_b3_chi),
   scen_b4         = run_b4(SCENARIO_CASES$scen_b4),
   scen_b5         = run_b5(SCENARIO_CASES$scen_b5),
   fg_glm_ident    = run_fg_ident(SCENARIO_CASES$scen_fg_glm_ident),
@@ -696,26 +635,6 @@ construction.
 knitr::kable(gates_table("scen_px_t3", R5$scen_px_t3$gates), digits = 5)
 ```
 
-## Residual swaps
-
-With probability q_r the block's residual distribution is **replaced** —
-distribution *and* df — by a pool pick (t(df)·√((df−2)/df) or
-(χ²(df)−df)/√(2df)). The shape laws (skew = √(8/df), excess kurtosis =
-6/(df−4)) recover the df, proving the scenario's df is carried, not the spec's.
-
-```{r re}
-knitr::kable(rbind(gates_table("scen_re",         R5$scen_re$gates),
-                   gates_table("scen_re_replace", R5$scen_re_replace$gates)), digits = 5)
-```
-
-The pinned case (`scen_re_replace`) verifies the swap-eligibility rule: it
-*pins* the spec residual with `set_residual_distribution("high_kurtosis")`, then
-configures a forced right_skewed swap (q_r = 1). Because `pick_residual` only
-swaps an **unpinned default-normal** residual, the swap is inert — every draw
-keeps the pinned, symmetric censored-t3 high_kurtosis residual (skew ≈ 0,
-table-normalised to var 1), never the χ²(6) the config asks for. The skew = 0
-gate is the tripwire: a fired swap would force skew = √(8/6) ≈ 1.15.
-
 ## Factor-proportion sampling
 
 `sampled_factor_proportions = FALSE` (the optimistic default) assigns factor
@@ -797,12 +716,14 @@ contamination the naive probe would misread as an He × Hs interaction.
 ## B3 — Hs × Re preservation
 
 ```{r b3}
-knitr::kable(gates_table("scen_b3", R5$scen_b3$gates), digits = 5)
+knitr::kable(rbind(gates_table("scen_b3_t",   R5$scen_b3_t$gates),
+                   gates_table("scen_b3_chi", R5$scen_b3_chi$gates)), digits = 5)
 ```
 
-Under a forced t(10) or χ²(10) residual the log-e² slope still reads ln(λ)/4 —
-the multiplicative variance trend amplifies the swapped tails without bending
-the ratio.
+The residual is set with `set_residual_distribution`: a *t*(10) in `scen_b3_t`
+and a χ²(10) in `scen_b3_chi`, each under λ = 4. The log-e² slope still reads
+ln(λ)/4: the multiplicative variance trend amplifies the heavy or skewed tails
+without bending the ratio.
 
 ## B4 — Co × Px (NORTA)
 
@@ -855,10 +776,9 @@ knitr::kable(rbind(gates_table("fg_glm_ident",     R5$fg_glm_ident$gates),
 fg <- R5$fg_glm_flip
 ```
 
-- **GLM λ / residual swaps — inert by bit-identity.** `apply_hsk` requires a
-  continuous outcome and consumes no RNG, so a λ toggle is an exact no-op under
-  logit; a forced residual swap only consumes scenario-stream draws after every
-  other consumer, leaving the Bernoulli outcomes bit-identical.
+- **GLM λ: inert by bit-identity.** `apply_hsk` requires a continuous outcome
+  and consumes no RNG, so a λ toggle is an exact no-op under logit, leaving the
+  Bernoulli outcomes bit-identical.
 - **GLM heterogeneity — live, latent.** The per-row log-odds jitter is hidden
   behind a single Bernoulli draw, so the observable is the paired h-toggle
   **flip rate**: X and the uniforms are drawn before the jitter normals, the
@@ -868,11 +788,10 @@ fg <- R5$fg_glm_flip
   The Jensen mean-rate shift (`r sprintf("%+.4f", mean(fg$res[3, ]))`) is
   expected and reported, not gated — median latent-rate invariance is
   unobservable.
-- **Probit / Poisson λ + residual swaps — inert by bit-identity.** Same premise
-  as logit: `apply_hsk` needs a continuous Gaussian outcome and consumes no RNG,
-  so a λ toggle is an exact no-op under probit (binary) and Poisson (count), and a
-  forced residual swap leaves the outcomes bit-identical. Both pairs reproduce
-  bit-for-bit across K draws (`fg_probit_ident`, `fg_poisson_ident`).
+- **Probit / Poisson λ: inert by bit-identity.** Same premise as logit:
+  `apply_hsk` needs a continuous Gaussian outcome and consumes no RNG, so a λ
+  toggle is an exact no-op under probit (binary) and Poisson (count). Both pairs
+  reproduce bit-for-bit across K draws (`fg_probit_ident`, `fg_poisson_ident`).
 - **MLE — only `sampled_factor_proportions` is live** (see the Fa section above);
   every other knob is rejected by the engine's estimator gate.
 
@@ -897,9 +816,9 @@ else "> **Some gates need review** — investigate before trusting scenario resu
 
 The uniformity law on a crossed extra beside the primary:
 `random_effect_dist` / `random_effect_df` apply to *every* grouping's draw, and
-`icc_noise_sd` jitters every grouping's τ² **independently**. Measurement
-mirrors `scen_re`'s level-mean-variance recovery (solver-free); β̂ unbiased is
-the leak tripwire. The jitter-presence check is paired against a no-jitter
+`icc_noise_sd` jitters every grouping's τ² **independently**. Measurement is
+a level-mean-variance recovery (solver-free); β̂ unbiased is the leak
+tripwire. The jitter-presence check is paired against a no-jitter
 (`optimistic`) control: the realised τ̂² spread under the knob must exceed the
 control's Monte-Carlo floor on the *extra* grouping too.
 
@@ -907,7 +826,7 @@ control's Monte-Carlo floor on the *extra* grouping too.
 case <- SCENARIO_CASES$scen_re_multi
 
 # Level-mean-variance estimator of a grouping's tau^2 from OLS residuals:
-# Var(level means) minus the within-noise floor (mirrors scen_re's measurement).
+# Var(level means) minus the within-noise floor.
 real_var <- function(ids, resid) {
   lv  <- tapply(resid, ids, mean)
   n_l <- tapply(resid, ids, length)

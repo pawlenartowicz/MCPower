@@ -80,12 +80,7 @@ pub fn build_linear_contract_with_skeleton(
 
     // Apply uploaded frame data when present.
     if let Some(upload) = &spec.upload {
-        let non_factor_std = apply_upload(
-            &mut generation,
-            &predictor_names,
-            table.non_factor_names.len(),
-            upload,
-        )?;
+        let non_factor_std = apply_upload(&mut generation, &table, upload)?;
         // An upload-bound column is resampled from the frame, so it cannot be
         // reclassified as drawn once per cluster.
         for &ColumnId(c) in &generation.cluster_level_columns {
@@ -782,10 +777,7 @@ fn build_contract_residual(r: &crate::input::ResidualSpec) -> Result<ContractRes
         "uniform" => ResidualDist::Uniform,
         other => return Err(SpecError::UnknownResidualDist { name: other.into() }),
     };
-    Ok(ContractResidual {
-        distribution,
-        pinned: r.pinned,
-    })
+    Ok(ContractResidual { distribution })
 }
 
 /// Project `spec.posthoc_requests` into `Vec<PosthocSpec>` for the contract.
@@ -866,9 +858,10 @@ pub const DIST_CODES: &[(&str, i32)] = &[
 
 /// FULL residual-distribution name → integer code table — the canonical five
 /// parameterless shapes, sharing codes with [`DIST_CODES`] (one code space;
-/// code 1 `binary` has no residual meaning and is absent). The codes match
-/// the [`residual_dist_from_code`] decode arms. The v1 aliases
-/// (`heavy_tailed`/`skewed`/`t`) are dropped — pre-1.0 break, accepted.
+/// code 1 `binary` has no residual meaning and is absent). The hosts validate
+/// residual names against this table, so its names must match the arms of
+/// `build_contract_residual`. The v1 aliases (`heavy_tailed`/`skewed`/`t`) are
+/// dropped (pre-1.0 break, accepted).
 pub const RESIDUAL_CODES: &[(&str, i32)] = &[
     ("normal", 0),
     ("right_skewed", 2),
@@ -879,7 +872,7 @@ pub const RESIDUAL_CODES: &[(&str, i32)] = &[
 
 /// Random-effect distribution name → code table. The RE knob keeps its own
 /// `normal`/`heavy_tailed`/`right_skewed` vocabulary (it is not the
-/// residual-pool space); `heavy_tailed` realizes the t kernel. Matches
+/// [`RESIDUAL_CODES`] space); `heavy_tailed` realizes the t kernel. Matches
 /// [`re_dist_from_code`].
 pub const RE_DIST_CODES: &[(&str, i32)] =
     &[("normal", 0), ("heavy_tailed", 1), ("right_skewed", 2)];
@@ -906,27 +899,6 @@ pub fn re_dist_codes_json() -> String {
     codes_to_json(RE_DIST_CODES)
 }
 
-/// Decode a single residual-distribution code (the `RESIDUAL_CODES` space —
-/// the canonical five, sharing codes with `DIST_CODES`) into a `ResidualDist`.
-fn residual_dist_from_code(code: i32) -> Result<ResidualDist, SpecError> {
-    match code {
-        0 => Ok(ResidualDist::Normal),
-        2 => Ok(ResidualDist::RightSkewed),
-        3 => Ok(ResidualDist::LeftSkewed),
-        4 => Ok(ResidualDist::HighKurtosis),
-        5 => Ok(ResidualDist::Uniform),
-        // `binary` (code 1) shares the DIST_CODES space but has no residual meaning
-        // (RESIDUAL_CODES omits it) — reject it by name, not as an opaque
-        // "residual_code=1".
-        1 => Err(SpecError::UnknownResidualDist {
-            name: "binary".into(),
-        }),
-        other => Err(SpecError::UnknownResidualDist {
-            name: format!("residual_code={other}"),
-        }),
-    }
-}
-
 /// Decode a random-effect distribution code (the `RE_DIST_CODES` space:
 /// 0=normal, 1=heavy_tailed, 2=right_skewed) into a `ResidualDist`.
 /// `heavy_tailed` realizes the t kernel (`HighKurtosis`).
@@ -943,9 +915,8 @@ fn re_dist_from_code(code: i32) -> Result<ResidualDist, SpecError> {
 
 /// Decode integer-coded scenario fields into typed contract values.
 ///
-/// The decode arms here must stay in sync with [`DIST_CODES`] (synthetic codes 0–5)
-/// and [`RESIDUAL_CODES`] (residual codes 0–2). Those tables' docs cite this function;
-/// this is the reciprocal coupling declaration.
+/// The `new_distributions` decode arms here must stay in sync with [`DIST_CODES`]
+/// (synthetic codes 0–5).
 fn scenario_to_contract(s: &ScenarioInput) -> Result<ContractScenario, SpecError> {
     let new_distributions = s
         .new_distributions
@@ -968,15 +939,10 @@ fn scenario_to_contract(s: &ScenarioInput) -> Result<ContractScenario, SpecError
             }),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let residual_dists = s
-        .residual_dists
-        .iter()
-        .map(|&code| residual_dist_from_code(code))
-        .collect::<Result<Vec<_>, _>>()?;
     // LME RE knobs: emit only when a non-default knob is present, so an
     // all-Gaussian/zero-jitter scenario stays `lme: None` (and thus
     // optimistic-eligible). The RE code lives in the RE_DIST_CODES space
-    // (normal/heavy_tailed), not the residual-pool space.
+    // (normal/heavy_tailed), not the RESIDUAL_CODES space.
     let lme = if s.random_effect_dist != 0 || s.icc_noise_sd != 0.0 {
         Some(LmeScenarioPerturbations {
             random_effect_dist: re_dist_from_code(s.random_effect_dist)?,
@@ -986,23 +952,6 @@ fn scenario_to_contract(s: &ScenarioInput) -> Result<ContractScenario, SpecError
     } else {
         None
     };
-    // An armed residual swap with a df-consuming pool entry must carry an
-    // explicit df ≥ 3 — otherwise the kernel's df floor would silently turn
-    // an unset df into t(3)/χ²(3), the heaviest shape. Normal and uniform
-    // consume no df and stay exempt (the residual analog of the
-    // swap-to-normal dilution case above).
-    let df_consuming = residual_dists.iter().any(|d| {
-        matches!(
-            d,
-            ResidualDist::HighKurtosis | ResidualDist::RightSkewed | ResidualDist::LeftSkewed
-        )
-    });
-    if s.residual_change_prob > 0.0 && df_consuming && s.residual_df < 3.0 {
-        return Err(SpecError::ScenarioResidualDfTooLow {
-            name: s.name.clone(),
-            got: s.residual_df,
-        });
-    }
     Ok(ContractScenario {
         name: s.name.clone(),
         heterogeneity: s.heterogeneity,
@@ -1010,9 +959,6 @@ fn scenario_to_contract(s: &ScenarioInput) -> Result<ContractScenario, SpecError
         correlation_noise_sd: s.correlation_noise_sd,
         distribution_change_prob: s.distribution_change_prob,
         new_distributions,
-        residual_change_prob: s.residual_change_prob,
-        residual_dists,
-        residual_df: s.residual_df,
         sampled_factor_proportions: s.sampled_factor_proportions,
         truth_start: s.truth_start,
         lme,
@@ -1044,9 +990,6 @@ mod tests {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: vec![],
-            residual_change_prob: 0.0,
-            residual_dists: vec![],
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             random_effect_dist: 1, // t / heavy-tailed
@@ -1067,9 +1010,6 @@ mod tests {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: vec![],
-            residual_change_prob: 0.0,
-            residual_dists: vec![],
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             random_effect_dist: 0,
@@ -1439,9 +1379,6 @@ mod tests {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: vec![],
-            residual_change_prob: 0.0,
-            residual_dists: vec![],
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             random_effect_dist: 0,
@@ -1584,6 +1521,92 @@ mod tests {
             }
             other => panic!("expected Matrix, got {other:?}"),
         }
+    }
+
+    /// The engine codes a factor's reference as level 0: a non-first declared
+    /// reference moves to the front of the proportions, and the remaining levels
+    /// keep their declared order as dummies 1, 2, ….
+    #[test]
+    fn non_first_reference_is_engine_level_zero() {
+        let mut spec = contrast_spec_base();
+        let VarKind::Factor {
+            proportions,
+            reference,
+            ..
+        } = &mut spec.predictors[0].kind
+        else {
+            unreachable!()
+        };
+        *proportions = vec![0.6, 0.2, 0.2];
+        *reference = "B".into();
+        spec.effects = vec![
+            EffectAssignment {
+                name: "group[A]".into(),
+                size: 0.3,
+            },
+            EffectAssignment {
+                name: "group[C]".into(),
+                size: 0.5,
+            },
+        ];
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
+        match &c.generation.columns[0] {
+            ColumnSpec::FactorSynthetic { proportions, .. } => {
+                assert_eq!(proportions, &vec![0.2, 0.6, 0.2])
+            }
+            other => panic!("expected FactorSynthetic, got {other:?}"),
+        }
+        // group[A] is dummy level 1, group[C] dummy level 2.
+        assert_eq!(
+            c.design_generation.terms[1],
+            DesignTerm::DummyOf {
+                column: ColumnId(0),
+                level_index: 1
+            }
+        );
+        assert_eq!(c.outcome.coefficients, vec![0.0, 0.3, 0.5]);
+    }
+
+    /// An uploaded factor's frame codes (which index its labels) are rewritten
+    /// to engine codes, so the declared reference B becomes code 0.
+    #[test]
+    fn uploaded_factor_codes_follow_declared_reference() {
+        let mut spec = contrast_spec_base();
+        let VarKind::Factor { reference, .. } = &mut spec.predictors[0].kind else {
+            unreachable!()
+        };
+        *reference = "B".into();
+        spec.effects = vec![
+            EffectAssignment {
+                name: "group[A]".into(),
+                size: 0.3,
+            },
+            EffectAssignment {
+                name: "group[C]".into(),
+                size: 0.5,
+            },
+        ];
+        spec.upload = Some(UploadInput {
+            mode: UploadMode::Partial,
+            n_rows: 4,
+            columns: vec![UploadColumn {
+                name: "group".into(),
+                col_type: UploadColumnType::Factor,
+                // Frame codes index labels: A, A, B, C.
+                values: vec![0.0, 0.0, 1.0, 2.0],
+                labels: vec!["A".into(), "B".into(), "C".into()],
+            }],
+        });
+        let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
+        match &c.generation.columns[0] {
+            ColumnSpec::FactorFromFrame { proportions, .. } => {
+                assert_eq!(proportions, &vec![0.25, 0.5, 0.25])
+            }
+            other => panic!("expected FactorFromFrame, got {other:?}"),
+        }
+        // Engine codes: B = 0, A = 1, C = 2.
+        let frame = c.generation.uploaded_frame.as_ref().unwrap();
+        assert_eq!(frame.data, vec![1.0, 1.0, 0.0, 2.0]);
     }
 
     // A contrast pair where both sides are the reference level is a degenerate
@@ -2091,10 +2114,11 @@ mod tests {
         assert!(matches!(err, SpecError::UnknownPredictor { ref name } if name == "nope"));
     }
 
-    /// Every code the hosts read from `DIST_CODES`, `RESIDUAL_CODES` and
-    /// `RE_DIST_CODES` decodes, through the real decode arms, to the variant its
-    /// name says; and every code a decode arm accepts is in its table. A table
-    /// edit without the matching arm edit (or the reverse) fails here.
+    /// Every code the hosts read from `DIST_CODES` and `RE_DIST_CODES` decodes,
+    /// through the real decode arms, to the variant its name says; every
+    /// `RESIDUAL_CODES` name builds, through `build_contract_residual`, to the
+    /// variant it names; and every code a decode arm accepts is in its table. A
+    /// table edit without the matching arm edit (or the reverse) fails here.
     #[test]
     fn code_tables_match_decode_arms() {
         let synthetic_named = |name: &str| match name {
@@ -2121,9 +2145,6 @@ mod tests {
                 correlation_noise_sd: 0.0,
                 distribution_change_prob: 0.0,
                 new_distributions: vec![code],
-                residual_change_prob: 0.0,
-                residual_dists: vec![],
-                residual_df: 0.0,
                 sampled_factor_proportions: false,
                 truth_start: false,
                 random_effect_dist: 0,
@@ -2155,11 +2176,15 @@ mod tests {
                 ),
             }
         }
-        for &(name, code) in RESIDUAL_CODES {
+        for &(name, _) in RESIDUAL_CODES {
             assert_eq!(
-                residual_dist_from_code(code).unwrap(),
+                build_contract_residual(&ResidualSpec {
+                    distribution: name.into(),
+                })
+                .unwrap()
+                .distribution,
                 residual_named(name),
-                "RESIDUAL_CODES {name}={code}"
+                "RESIDUAL_CODES {name}"
             );
         }
         for &(name, code) in RE_DIST_CODES {
@@ -2182,12 +2207,6 @@ mod tests {
                 assert!(
                     in_table(DIST_CODES, code),
                     "synthetic arm {code} not in DIST_CODES"
-                );
-            }
-            if residual_dist_from_code(code).is_ok() {
-                assert!(
-                    in_table(RESIDUAL_CODES, code),
-                    "residual arm {code} not in RESIDUAL_CODES"
                 );
             }
             if re_dist_from_code(code).is_ok() {
@@ -2226,17 +2245,6 @@ mod tests {
                 .map(|(n, c)| (n.to_string(), *c))
                 .collect::<std::collections::BTreeMap<_, _>>()
         });
-    }
-
-    /// `binary` (code 1) is in DIST_CODES but has no residual meaning, so
-    /// `residual_dist_from_code(1)` must reject it by name — not fall through to the
-    /// opaque "residual_code=1" catch-all.
-    #[test]
-    fn residual_dist_from_code_rejects_binary_by_name() {
-        match residual_dist_from_code(1) {
-            Err(SpecError::UnknownResidualDist { name }) => assert_eq!(name, "binary"),
-            other => panic!("expected UnknownResidualDist(\"binary\"), got {other:?}"),
-        }
     }
 
     /// The per-factor `sampled_proportions` override (explicit true / false, or
@@ -2288,9 +2296,6 @@ mod tests {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: vec![],
-            residual_change_prob: 0.0,
-            residual_dists: vec![],
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             random_effect_dist: 1, // t — triggers lme = Some(...)

@@ -201,6 +201,15 @@ class VariableRegistry:
         ]
 
     @property
+    def effect_components(self) -> List[List[str]]:
+        """Each effect's component names, in effect order: ``[name]`` for a
+        main effect, the interacting columns for an interaction."""
+        return [
+            [eff.name] if eff.effect_type == "main" else list(eff.var_names)
+            for eff in self._effects.values()
+        ]
+
+    @property
     def cluster_effect_names(self) -> List[str]:
         """List of cluster random effect column names."""
         return [name for name, pred in self._predictors.items() if pred.var_type == "cluster_effect"]

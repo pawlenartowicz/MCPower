@@ -51,16 +51,16 @@ print(result.summary())
 ==================================================
 formula: recovered = treatment + age
 estimator: GLM  N=300  sims=1600  α=0.05  target=80%
-effects: treatment=0.50, age=0.30
+effects: treatment=0.50 (OR 1.65), age=0.30 (OR 1.35)
 
 Per-test power
-───────────────────────────────────
-Test                 Power   Target
-───────────────────────────────────
-LR χ²                82.3%      80%
-treatment            54.4%      80%
-age                  69.4%      80%
-───────────────────────────────────
+──────────────────────────────────────────
+Test                 Power     OR   Target
+──────────────────────────────────────────
+LR χ²                82.3%             80%
+treatment            54.4%   1.65      80%
+age                  69.4%   1.35      80%
+──────────────────────────────────────────
 
 Power & 95% CI
 ───────────────────────────────────────────
@@ -82,7 +82,7 @@ k     Exactly   At least
 ────────────────────────
 
 Estimator details
-  baseline_prob_realized: nan
+  baseline_prob_realized: 0.3595
   singular_fit_rate: 0
   tau_squared_hat_mean: nan
 

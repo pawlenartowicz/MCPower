@@ -8,7 +8,6 @@ def test_default_scenarios_match_canonical():
     cfg = get_default_scenario_config()
     assert set(cfg) == {"optimistic", "realistic", "doomer"}
     opt = cfg["optimistic"]
-    assert opt["residual_dists"] == ["high_kurtosis", "right_skewed"]
     assert opt["new_distributions"] == ["right_skewed", "left_skewed", "uniform"]
     assert opt["random_effect_dist"] == "normal"
     assert "lme" not in opt

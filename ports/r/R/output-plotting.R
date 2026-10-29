@@ -185,20 +185,22 @@ NULL
       label          = inner$scenario %||% "default",
       sample_sizes   = I(as.integer(inner$sample_sizes)),
       target_indices = I(as.integer(inner$target_indices)),
+      contrast_pairs = lapply(inner$contrast_pairs %||% list(), function(p) I(as.integer(p))),
       power          = power_rows,
       ci             = ci_rows
     )
+    # The overall/omnibus test is a first-class result: one more bar (last) on
+    # the power-at-N chart and one more curve series, matching the table. The
+    # envelope carries it per N; find_power's single-N scalar is wrapped to
+    # match. NULL entries (family suppressed the overall test) draw nothing.
+    rates <- inner$overall_significant_rate
+    cis   <- inner$overall_significant_ci
     if (kind == "find_power") {
-      # The overall/omnibus test is a first-class result: it draws one more bar
-      # (last) on the power-at-N chart, matching the table. NULL when the family
-      # suppressed the overall test (mixed/GLMM) → no bar.
-      if (!is.null(inner$overall_significant_rate)) {
-        out$overall_power <- inner$overall_significant_rate[[1]]
-        if (!is.null(inner$overall_significant_ci)) {
-          out$overall_ci <- I(as.numeric(inner$overall_significant_ci)[1:2])
-        }
-      }
+      rates <- list(rates)
+      cis   <- list(cis)
     }
+    out$overall_power <- as.list(rates)
+    out$overall_ci    <- lapply(cis, function(ci) if (is.null(ci)) NULL else I(as.numeric(ci)[1:2]))
     if (kind == "find_sample_size") {
       # histogram: always corrected (for at_least_k / exactly_k curves)
       if (!is.null(inner$success_count_histogram_corrected)) {

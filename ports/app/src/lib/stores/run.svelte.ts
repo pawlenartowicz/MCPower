@@ -199,6 +199,7 @@ function createRunStore() {
     }>,
     extras: Partial<Pick<RunTab, 'sample_size' | 'bounds' | 'method'>>,
   ) {
+    if (runState === 'running') return;
     runState = 'running';
     lastError = null;
     lastRun = descriptor;

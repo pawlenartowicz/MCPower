@@ -26,7 +26,7 @@ MCPower <- R6::R6Class(
     alpha = NULL,            # type-I error rate (default 0.05)
     n_simulations = NULL,    # per-call MC count; NULL until set_simulations (resolved per design at run time)
     max_failed_simulations = NULL,  # failed-sim tolerance (default 1.0)
-    intercept = NULL,        # logit(p) once set_baseline_probability is called
+    intercept = NULL,        # logit(p) or qnorm(p) once set_baseline_probability is called
 
     #' @param formula An R `formula` or a string (e.g. `"y ~ x1 + x2"`).
     #' @param family  "ols" (default), "logit", "probit", "poisson", or "lme".
@@ -109,9 +109,8 @@ MCPower <- R6::R6Class(
       # Scenario configs start at the defaults (deep copy via modifyList on a fresh list).
       private$scenario_configs <- .scenario_defaults()
 
-      # Residual distribution (name), pinned flag, encoded at build time.
+      # Residual distribution (name), encoded at build time.
       private$residual_dist_name <- "normal"
-      private$residual_pinned <- FALSE
 
       # Heteroskedasticity input for the Rust spec-builder.
       # Always a named list with driver_var_index so jsonlite emits a JSON
@@ -124,6 +123,10 @@ MCPower <- R6::R6Class(
       private$pending_variable_types <- NULL
       private$pending_effects <- NULL
       private$pending_correlations <- NULL
+      # Per-factor sampling override set by set_factor_sampling:
+      # list(name = TRUE (sampled) | FALSE (exact)). An absent name inherits
+      # the scenario's sampled_factor_proportions.
+      private$pending_factor_sampling <- list()
       private$applied <- FALSE
       private$effects_set <- FALSE
 
@@ -134,10 +137,8 @@ MCPower <- R6::R6Class(
       private$pending_baseline_rate <- NULL
 
       # LME state: pending_clusters keyed by grouping var, each entry holds
-      # icc / n_clusters / cluster_size. effective_n_clusters is populated at
-      # runtime from sample_size for cluster_size-only specs.
+      # icc / n_clusters / cluster_size.
       private$pending_clusters <- list()
-      private$effective_n_clusters <- NULL
 
       # Upload data state — populated by upload_data().
       # pending_data holds: columns_typed (matched predictors), raw_columns
@@ -186,7 +187,12 @@ MCPower <- R6::R6Class(
       if (length(n_simulations) != 1L || !is.numeric(n_simulations)) {
         stop("n_simulations must be numeric")
       }
-      self$n_simulations <- as.integer(n_simulations)
+      # validators.py _validate_simulations: at least 1, rounded to an integer.
+      if (is.na(n_simulations) || n_simulations < 1) {
+        stop(sprintf("Validation failed:\n• Number of simulations must be >= 1, got %s",
+                     format(n_simulations)), call. = FALSE)
+      }
+      self$n_simulations <- as.integer(round(n_simulations))
       invisible(self)
     },
 
@@ -250,14 +256,40 @@ MCPower <- R6::R6Class(
       invisible(self)
     },
 
+    #' Set how one factor's level shares are realised in each simulation.
+    #'
+    #' Overrides the scenario-wide \code{sampled_factor_proportions} for this
+    #' factor only. Works for declared and uploaded factors.
+    #'
+    #' @param name A factor predictor.
+    #' @param mode \code{"exact"} holds the level counts at their shares in
+    #'   every simulation; \code{"sampled"} draws each row's level at random, so
+    #'   counts vary between simulations; \code{NULL} removes the override and
+    #'   the scenario setting applies again.
+    #' @return The \code{MCPower} object invisibly (for chaining).
+    set_factor_sampling = function(name, mode) {
+      modes <- c(exact = FALSE, sampled = TRUE)
+      if (is.null(mode)) {
+        private$pending_factor_sampling[[name]] <- NULL
+      } else if (is.character(mode) && length(mode) == 1L && mode %in% names(modes)) {
+        private$pending_factor_sampling[[name]] <- modes[[mode]]
+      } else {
+        stop(sprintf(
+          "factor sampling mode must be 'exact', 'sampled' or NULL, got %s",
+          deparse(mode)), call. = FALSE)
+      }
+      private$applied <- FALSE
+      invisible(self)
+    },
+
     set_residual_distribution = function(name) {
       # Validate via .residual_code (all five canonical names accepted:
       # normal, right_skewed, left_skewed, high_kurtosis, uniform).
       .residual_code(name)
       private$residual_dist_name <- name
-      # Any explicit call (including "normal") pins the residual — scenario
-      # distribution swaps will leave it alone.
-      private$residual_pinned <- TRUE
+      # high_kurtosis is Student t with 10 df; right_skewed and left_skewed are
+      # scaled chi-square with 10 df (mirrored for left_skewed). Every shape has
+      # unit variance and is the same in every scenario.
       invisible(self)
     },
 
@@ -287,6 +319,7 @@ MCPower <- R6::R6Class(
       # Always store driver_var_index so jsonlite emits a JSON object {} (not []).
       # null = "null" in toJSON serializes NULL as JSON null; Rust Option<u32>
       # with serde(default) deserializes JSON null -> None correctly.
+      private$heteroskedasticity_var <- var
       private$heteroskedasticity <- list(driver_var_index = driver_var_index)
       invisible(self)
     },
@@ -379,7 +412,10 @@ MCPower <- R6::R6Class(
           ), call. = FALSE)
         }
         # (d) each remaining name must be a modeled predictor
-        bad <- setdiff(cluster_level_vars, private$registry$predictor_names)
+        # Factors by their own name: after a run the registry lists their
+        # dummies, not the factor, in predictor_names.
+        bad <- setdiff(cluster_level_vars,
+                       c(private$registry$non_factor_names, private$registry$factor_names))
         if (length(bad) > 0L) {
           stop(sprintf(
             "cluster_level_vars contains names not in the formula: %s",
@@ -409,6 +445,17 @@ MCPower <- R6::R6Class(
           "random effect by ICC="), self$family), call. = FALSE)
       }
 
+      # validators.py _validate_cluster_config; message text changes all ports
+      # together. A nested `(1|A/B)` parses to "A" and "A:B", so a bare "B"
+      # is rejected here too.
+      parsed_grouping_vars <- vapply(private$registry$`_random_effects_parsed`,
+                                     function(re) re$grouping_var, character(1))
+      if (!grouping_var %in% parsed_grouping_vars) {
+        stop(sprintf(
+          "Grouping variable '%s' not found in formula random effects. Expected one of: %s",
+          grouping_var, paste(parsed_grouping_vars, collapse = ", ")), call. = FALSE)
+      }
+
       if (is.null(ICC)) ICC <- 0.0
       icc_val <- as.numeric(ICC)
       # Hard range: ICC must be in [0, 1).
@@ -436,11 +483,22 @@ MCPower <- R6::R6Class(
         if (any(given)) {
           parts <- strsplit(grouping_var, ":", fixed = TRUE)[[1L]]
           stop(sprintf(
-            "%s is nested in %s; give n_per_parent (%ss per %s), not %s.",
+            "%s is nested in %s; give n_per_parent (%s groups per %s), not %s.",
             parts[length(parts)], parts[1L], parts[length(parts)], parts[1L],
             names(given)[given][1L]),
             call. = FALSE)
         }
+      }
+      if (!is.null(n_per_parent)) {
+        if (!is.numeric(n_per_parent) || length(n_per_parent) != 1L ||
+            is.na(n_per_parent) || n_per_parent != round(n_per_parent) ||
+            n_per_parent < 2) {
+          stop(sprintf("n_per_parent must be an integer >= 2, got %s",
+                       format(n_per_parent)), call. = FALSE)
+        }
+      } else if (!grouping_var %in% private$nested_child_vars() &&
+                 is.null(n_clusters) && is.null(cluster_size)) {
+        stop("Must specify either n_clusters or cluster_size", call. = FALSE)
       }
       # n_clusters must be at least 2 when provided.
       if (!is.null(n_clusters) && as.integer(n_clusters) < 2L) {
@@ -576,6 +634,32 @@ MCPower <- R6::R6Class(
           format(n_rows, big.mark = ","), format(max_rows, big.mark = ",")
         ), call. = FALSE)
       }
+      # validators.py _validate_upload_data: missing cells in any column, and
+      # infinite cells in numeric ones, are rejected before they can reach the
+      # spec JSON. Message text changes all ports together.
+      nan_cols <- character(0)
+      inf_cols <- character(0)
+      for (j in seq_len(n_cols)) {
+        col <- mat[, j]
+        if (anyNA(col) ||
+            (is.character(col) && any(trimws(col) %in% c("", "NA", "NaN", "nan", "na")))) {
+          nan_cols <- c(nan_cols, cols[j])
+        }
+        num <- suppressWarnings(as.numeric(col))
+        numeric_col <- !anyNA(num[!is.na(col)])
+        if (numeric_col && any(is.infinite(num))) inf_cols <- c(inf_cols, cols[j])
+      }
+      errors <- c(
+        if (length(nan_cols) > 0L) sprintf(paste0(
+          "Uploaded data contains NaN values in columns: %s. Remove or impute ",
+          "missing values before uploading."), paste(nan_cols, collapse = ", ")),
+        if (length(inf_cols) > 0L) sprintf(paste0(
+          "Uploaded data contains Inf values in columns: %s. Remove or replace ",
+          "infinite values before uploading."), paste(inf_cols, collapse = ", ")))
+      if (length(errors) > 0L) {
+        stop(paste0("Validation failed:\n", paste(sprintf("• %s", errors), collapse = "\n")),
+             call. = FALSE)
+      }
       max_k     <- as.integer(upload_cfg$max_factor_k_soft)
       max_ratio <- as.numeric(upload_cfg$max_factor_ratio)
       detected  <- .detect_column_types(mat, cols, max_k, max_ratio)
@@ -586,7 +670,10 @@ MCPower <- R6::R6Class(
       raw_columns <- lapply(seq_len(n_cols), function(j) as.list(mat[, j]))
       names(raw_columns) <- cols
 
-      # Identify columns that match modeled predictors (before _apply expansion).
+      # Identify columns that match modeled predictors. A fresh registry, so
+      # the names are the formula's predictors even after a run expanded
+      # factors into dummies; apply() rebuilds it again before use.
+      private$registry <- RVariableRegistry$new(private$registry$equation)
       modeled_names  <- private$registry$predictor_names
       columns_typed  <- list()  # list of list(name, col_type, raw_vals, col_labels)
 
@@ -604,20 +691,6 @@ MCPower <- R6::R6Class(
           raw_vals  = raw_vals,
           col_labels = col_labels
         )
-
-        # Update registry with detected type for matched predictors.
-        if (col_type == "factor") {
-          n_lvl <- length(col_labels)
-          private$registry$set_variable_type(
-            col_name, "factor",
-            n_levels = n_lvl,
-            labels   = col_labels,
-            reference = if (length(col_labels) > 0L) col_labels[[1]] else NULL
-          )
-        } else if (col_type == "binary") {
-          private$registry$set_variable_type(col_name, "binary")
-        }
-        # continuous: leave as default "normal" — engine handles via upload path
       }
 
       if (isTRUE(verbose)) {
@@ -634,6 +707,7 @@ MCPower <- R6::R6Class(
         mode          = mode,
         uploaded_n    = n_rows
       )
+      private$set_upload_types()
       private$applied <- FALSE
       invisible(self)
     },
@@ -702,7 +776,6 @@ MCPower <- R6::R6Class(
         alpha = self$alpha, correction = NULL, target_test = NULL,
         heteroskedasticity = private$heteroskedasticity,
         residual_name = private$residual_dist_name,
-        residual_pinned = private$residual_pinned,
         max_failed = self$max_failed_simulations, test_formula = NULL,
         scenario_configs = private$scenario_configs, pending_data = pending,
         estimator = self$estimator)
@@ -956,6 +1029,8 @@ MCPower <- R6::R6Class(
 
       # Logit pre-flight (model.py _validate_logit_runtime).
       private$validate_logit_runtime(names)
+      private$validate_lme_runtime()
+      private$validate_cluster_sample_size(sample_size)
 
       n <- if (!is.null(n_sims)) as.integer(n_sims) else private$resolved_n_simulations()
       base_seed <- private$resolve_base_seed(seed)
@@ -1005,7 +1080,7 @@ MCPower <- R6::R6Class(
         if (!is.null(primary$cluster_size)) {
           min_cs <- as.integer(primary$cluster_size)
         } else {
-          nc <- private$effective_n_clusters %||% primary$n_clusters %||% 1L
+          nc <- primary$n_clusters %||% 1L
           min_cs <- as.integer(sample_size) %/% as.integer(nc)
         }
       }
@@ -1098,6 +1173,10 @@ MCPower <- R6::R6Class(
       est <- private$resolve_estimation(wald_se, agq, df_method)
 
       names <- private$resolve_scenarios_arg(scenarios)
+
+      private$validate_logit_runtime(names)
+      private$validate_lme_runtime()
+
       n <- if (!is.null(n_sims)) as.integer(n_sims) else private$resolved_n_simulations()
       base_seed <- private$resolve_base_seed(seed)
 
@@ -1162,7 +1241,7 @@ MCPower <- R6::R6Class(
         if (!is.null(primary$cluster_size)) {
           min_cs <- as.integer(primary$cluster_size)
         } else {
-          nc <- private$effective_n_clusters %||% primary$n_clusters %||% 1L
+          nc <- primary$n_clusters %||% 1L
           # `from_size` is in the caller's unit: under unit="cluster_size" it
           # already is the per-cluster count (the "clusters" unit cannot reach
           # here — the engine rejects it for a fixed number of clusters).
@@ -1239,7 +1318,6 @@ MCPower <- R6::R6Class(
         alpha = self$alpha,
         power_target = self$power,
         residual_distribution = private$residual_dist_name,
-        residual_pinned = private$residual_pinned,
         scenarios = sort(names(private$scenario_configs))
       )
     }
@@ -1254,18 +1332,18 @@ MCPower <- R6::R6Class(
     registry = NULL,
     scenario_configs = NULL,
     residual_dist_name = NULL,
-    residual_pinned = FALSE,
     heteroskedasticity = NULL,
+    heteroskedasticity_var = NULL,
     # Accumulating fragment stores (NULL = empty). variable_types / effects are
     # character vectors grown with c(); correlations is a list() of string-or-
     # matrix fragments. apply() replays each in call order.
     pending_variable_types = NULL,
     pending_effects = NULL,
     pending_correlations = NULL,
+    pending_factor_sampling = NULL,
     pending_baseline_probability = NULL,
     pending_baseline_rate = NULL,
     pending_clusters = NULL,
-    effective_n_clusters = NULL,
     applied = FALSE,
     effects_set = FALSE,
     pending_data = NULL,
@@ -1273,9 +1351,40 @@ MCPower <- R6::R6Class(
     # find_power / find_sample_size call.  .build_report_meta reads this.
     skeleton_json = NULL,
 
+    # model.py _set_upload_types: write each matched uploaded column's
+    # detected type into the registry: factor levels and labels from the data
+    # (first label is the reference), binary as binary. Continuous columns are
+    # left alone, so a declared distribution (e.g. right_skewed) survives.
+    set_upload_types = function() {
+      for (entry in private$pending_data$columns_typed) {
+        col_labels <- entry$col_labels
+        if (entry$col_type == "factor") {
+          private$registry$set_variable_type(
+            entry$name, "factor",
+            n_levels  = length(col_labels),
+            labels    = col_labels,
+            reference = if (length(col_labels) > 0L) col_labels[[1]] else NULL
+          )
+        } else if (entry$col_type == "binary") {
+          private$registry$set_variable_type(entry$name, "binary")
+        }
+      }
+      invisible(NULL)
+    },
+
     # model.py _apply — apply pending settings to the registry.
     apply = function() {
+      # Start from the bare formula every time. Step 2 expands factors in
+      # place, so the registry an earlier apply left behind lists dummies
+      # (g[2]) instead of the predictors the pending settings name.
+      private$registry <- RVariableRegistry$new(private$registry$equation)
       reg <- private$registry
+
+      # 0. Uploaded columns take their detected type, so an undeclared
+      #    uploaded predictor passes the type-lock check in step 1b.
+      if (!is.null(private$pending_data)) {
+        private$set_upload_types()
+      }
 
       # 1. Variable types. Fragments replay in call order; a predictor
       #    re-declared in a later fragment last-wins in the registry.
@@ -1291,8 +1400,6 @@ MCPower <- R6::R6Class(
         for (entry in private$pending_data$columns_typed) {
           col_name      <- entry$name
           detected_type <- entry$col_type   # "continuous" | "binary" | "factor"
-          col_labels    <- entry$col_labels
-          raw_vals      <- entry$raw_vals
 
           modeled_class <- private$upload_type_class(reg, col_name)
 
@@ -1302,26 +1409,41 @@ MCPower <- R6::R6Class(
               col_name, detected_type, modeled_class),
               call. = FALSE)
           }
-
-          # Data wins: re-apply detected type/levels for factor and binary.
-          if (detected_type == "factor") {
-            n_lvl <- length(col_labels)
-            reg$set_variable_type(
-              col_name, "factor",
-              n_levels  = n_lvl,
-              labels    = col_labels,
-              reference = if (n_lvl > 0L) col_labels[[1]] else NULL
-            )
-          } else if (detected_type == "binary") {
-            reg$set_variable_type(col_name, "binary")
-          }
-          # continuous: leave the declared distribution untouched
         }
+        # Data wins on details: factor labels and n_levels always come from
+        # the upload, not from a factor(k) declaration.
+        private$set_upload_types()
+      }
+
+      # 1c. Per-factor sampling override. Applied after the upload re-apply,
+      #     which rebuilds an uploaded factor's entry from the data.
+      for (name in names(private$pending_factor_sampling)) {
+        if (!name %in% reg$factor_names) {
+          stop(sprintf(
+            "set_factor_sampling: '%s' is not a factor predictor; factors: %s",
+            name, paste(reg$factor_names, collapse = ", ")), call. = FALSE)
+        }
+        reg$`_factors`[[name]]$sampled_proportions <- private$pending_factor_sampling[[name]]
       }
 
       # 2. Expand factors.
       if (length(reg$factor_names) > 0L) {
         reg$expand_factors()
+      }
+
+      # 2b. Heteroskedasticity driver. Its index counts non-factor predictors,
+      #     which are only final once factors are typed, so the stored name is
+      #     re-resolved here; the setter's index used whatever registry was live
+      #     at call time. Mirrors set_heteroskedasticity_driver's check.
+      var <- private$heteroskedasticity_var
+      if (!is.null(var)) {
+        non_factor <- reg$non_factor_names
+        if (!(var %in% non_factor)) {
+          stop(sprintf(paste0(
+            "heteroskedasticity variable %s must be a non-factor predictor; ",
+            "available: %s"), sQuote(var), paste(non_factor, collapse = ", ")))
+        }
+        private$heteroskedasticity <- list(driver_var_index = as.integer(match(var, non_factor) - 1L))
       }
 
       # 3. Effects. Fragments replay in call order; an effect re-declared in a
@@ -1330,7 +1452,7 @@ MCPower <- R6::R6Class(
         reg$set_effects(frag)
       }
 
-      # 4. Baseline probability -> intercept (logit only; no-op otherwise).
+      # 4. Baseline probability -> intercept (logit or probit; no-op otherwise).
       private$apply_baseline_probability()
 
       # 5. Correlations — the accumulator holds string fragments and/or a full
@@ -1449,6 +1571,103 @@ MCPower <- R6::R6Class(
       invisible(NULL)
     },
 
+    # model.py _validate_lme_runtime (grouping-coverage part): every formula
+    # grouping variable needs a set_cluster call, and set_cluster needs a
+    # random-effect term to attach to. A non-lme family with no set_cluster is
+    # an unclustered fit and passes. Message text changes all ports together.
+    validate_lme_runtime = function() {
+      parsed_grouping_vars <- vapply(private$registry$`_random_effects_parsed`,
+                                     function(re) re$grouping_var, character(1))
+      clustered <- length(private$pending_clusters) > 0L
+      if (!identical(self$family, "lme")) {
+        if (clustered && length(parsed_grouping_vars) == 0L) {
+          stop(paste0(
+            "set_cluster(...) was called but the formula has no random-effect ",
+            "terms and family is not 'lme'; add '(1|group)' to the formula or ",
+            "use family='lme'"), call. = FALSE)
+        }
+        if (!clustered) return(invisible(NULL))
+      }
+      if (length(parsed_grouping_vars) == 0L) {
+        stop(paste0(
+          "family='lme' requires a random-effect term in the formula, ",
+          "e.g. 'y ~ x + (1|group)'"), call. = FALSE)
+      }
+      if (!clustered) {
+        stop(sprintf(paste0(
+          "family='lme' requires set_cluster(...) for each random effect ",
+          "grouping variable; missing: [%s]"),
+          paste0("'", parsed_grouping_vars, "'", collapse = ", ")), call. = FALSE)
+      }
+      for (g in parsed_grouping_vars) {
+        if (!g %in% names(private$pending_clusters)) {
+          stop(sprintf(paste0(
+            "random effect '(1|%s)' has no set_cluster call; every grouping ",
+            "variable in the formula must be configured before find_power"), g),
+            call. = FALSE)
+        }
+      }
+      invisible(NULL)
+    },
+
+    # model.py _validate_lme_runtime (sample-size part) + validators.py
+    # _validate_cluster_sample_size: observations per cluster of the primary
+    # grouping at the requested N. Errors below reliable_rows_per_cluster, warns
+    # below recommended_rows_per_cluster. find_power only: find_sample_size
+    # sweeps N, so there is no single N to check. Message text changes all
+    # ports together.
+    validate_cluster_sample_size = function(sample_size) {
+      if (length(private$pending_clusters) == 0L) return(invisible(NULL))
+      # A bad sample_size is left to the engine's positive_count error.
+      if (!is.numeric(sample_size) || length(sample_size) != 1L ||
+          is.na(sample_size) || sample_size < 1) return(invisible(NULL))
+      primary <- private$pending_clusters[[1L]]
+      n_clusters <- primary$n_clusters
+      cluster_size <- primary$cluster_size
+      if (is.null(n_clusters) && is.null(cluster_size)) return(invisible(NULL))
+      sample_size <- as.integer(sample_size)
+      lims <- .config()$limits
+      reliable <- as.integer(lims$reliable_rows_per_cluster)
+      recommended <- as.integer(lims$recommended_rows_per_cluster)
+      effective <- if (!is.null(cluster_size)) {
+        as.integer(cluster_size)
+      } else {
+        sample_size %/% as.integer(n_clusters)
+      }
+      nc_text <- if (is.null(n_clusters)) "None" else as.character(as.integer(n_clusters))
+      if (effective < reliable) {
+        hint <- if (!is.null(n_clusters)) {
+          sprintf(" Either increase sample_size to %d or reduce n_clusters to %d.",
+                  as.integer(n_clusters) * reliable, sample_size %/% reliable)
+        } else {
+          sprintf(" Increase cluster_size to at least %d.", reliable)
+        }
+        stop(sprintf(paste0(
+          "Insufficient observations per cluster: %d (sample_size=%d, ",
+          "n_clusters=%s). Need at least %d observations per cluster for reliable ",
+          "mixed model estimation.%s"),
+          effective, sample_size, nc_text, reliable, hint), call. = FALSE)
+      }
+      if (effective < recommended) {
+        warning(sprintf(paste0(
+          "Low observations per cluster: %d (sample_size=%d, n_clusters=%s). ",
+          "Recommended: at least %d observations per cluster. Small cluster sizes ",
+          "may cause convergence issues or biased variance estimates."),
+          effective, sample_size, nc_text, recommended), call. = FALSE)
+      }
+      if (is.null(n_clusters)) {
+        derived <- sample_size %/% as.integer(cluster_size)
+        min_clusters <- as.integer(lims$min_clusters)
+        if (derived < min_clusters) {
+          stop(sprintf(paste0(
+            "derived n_clusters=%d is below %d (sample_size=%d, cluster_size=%d); ",
+            "increase sample_size"), derived, min_clusters, sample_size, as.integer(cluster_size)),
+            call. = FALSE)
+        }
+      }
+      invisible(NULL)
+    },
+
     # model.py _resolved_n_simulations — the set_simulations() value, else the
     # config default for the design: `glmm` for a clustered binary/count
     # outcome, `mixed` for a clustered continuous one, `ols` otherwise.
@@ -1478,8 +1697,8 @@ MCPower <- R6::R6Class(
 
     # model.py _agq_eligible — whether the design admits AGQ (nagq > 1).
     # Binary/count GLMM fitted by the GLM estimator, single grouping factor,
-    # ≤3 REs per group (intercept + slopes). Mirrors contract invariant 25 +
-    # glmm assert_model_shape.
+    # ≤3 REs per group (intercept + slopes). Mirrors contract invariant 25;
+    # change them together.
     agq_eligible = function() {
       if (!self$outcome_kind %in% c("binary", "count")) return(FALSE)
       if (!identical(self$estimator, "glm")) return(FALSE)
@@ -1584,10 +1803,35 @@ MCPower <- R6::R6Class(
       } else {
         NULL
       }
+      # effect_names / effect_sizes: the simulated model's effects in formula
+      # order, zeros included (the `effects:` header line). Under test_formula
+      # the skeleton is the tested model's, so it cannot feed the header.
+      effect_names <- reg$effect_names
+      effect_sizes <- reg$get_effect_sizes()
+      # The OR column reads the β of engine column idx as
+      # column_effect_sizes[[idx]]; the skeleton's column order can differ from
+      # formula order (y ~ x1 + x1:x2 + x2 puts x2 before x1:x2) and under
+      # test_formula covers the tested model only. A column finds its model
+      # effect by the set of its components, so a test term written b:a reads
+      # the model's a:b. A slot with no model effect (the intercept placeholder
+      # a test design leaves where it drops a column) gets NA; no target reads
+      # it. Mirrors Python _report_meta.
+      column_effect_sizes <- effect_sizes
+      if (!is.null(effect_skeleton)) {
+        term_key <- function(parts) paste(sort(parts), collapse = "\u001f")
+        model_keys <- vapply(reg$effect_components, term_key, character(1))
+        column_effect_sizes <- vapply(effect_skeleton[-1L], function(d) {
+          parts <- .descriptor_components(d, factors)
+          if (is.null(parts)) return(NA_real_)
+          i <- match(term_key(parts), model_keys)
+          if (is.na(i)) NA_real_ else as.numeric(effect_sizes[[i]])
+        }, numeric(1))
+      }
       meta <- list(
-        effect_names = reg$effect_names,
+        effect_names = effect_names,
         effect_skeleton = effect_skeleton,
-        effect_sizes = reg$get_effect_sizes(),
+        effect_sizes = effect_sizes,
+        column_effect_sizes = column_effect_sizes,
         factors = factors,
         estimator = self$estimator,
         # "binary" for logit-link outcomes (logistic regression and binary GLMM,
@@ -1651,7 +1895,6 @@ MCPower <- R6::R6Class(
         target_test = target_test,
         heteroskedasticity = private$heteroskedasticity,
         residual_name = private$residual_dist_name,
-        residual_pinned = private$residual_pinned,
         max_failed = self$max_failed_simulations,
         test_formula = test_formula,
         scenario_configs = private$scenario_configs,
@@ -1720,6 +1963,15 @@ MCPower <- R6::R6Class(
 # report line (.diagnostic_warnings) so the two never diverge.
 .glmm_laplace_bias_warning <- function(extras, min_cluster_size) {
   if (is.null(min_cluster_size) || is.na(min_cluster_size)) return(NULL)
+  # find_sample_size carries one unnamed extras block per grid N; the first
+  # breaching N decides.
+  if (is.list(extras) && length(extras) > 0L && is.null(names(extras))) {
+    for (ex in extras) {
+      msg <- .glmm_laplace_bias_warning(ex, min_cluster_size)
+      if (!is.null(msg)) return(msg)
+    }
+    return(NULL)
+  }
   if (is.null(extras) || !identical(extras$estimator, "glm")) return(NULL)
   tau_hat <- extras$tau_squared_hat_mean
   if (is.null(tau_hat) || is.na(tau_hat)) return(NULL)

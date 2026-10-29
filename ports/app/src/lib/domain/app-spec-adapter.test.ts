@@ -34,7 +34,7 @@ vi.mock('$lib/stores/shared-prefs.svelte', () => ({ sharedPrefs: sharedPrefsMock
 vi.mock('$lib/stores/scenarios.svelte', () => ({ scenariosStore: scenariosStoreMock }));
 
 import { familyConfigToAppSpec } from './app-spec-adapter';
-import type { FamilyConfig } from './family';
+import type { FamilyConfig, OutcomeOptionsConfig } from './family';
 import { defaultFamilyConfig } from './family';
 
 function linearConfig(overrides: Partial<FamilyConfig> = {}): FamilyConfig {
@@ -283,9 +283,6 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         correlation_noise_sd: 0.0,
         distribution_change_prob: 0.0,
         new_distributions: [],
-        residual_change_prob: 0.0,
-        residual_dists: [],
-        residual_df: 10,
         sampled_factor_proportions: false,
         truth_start: true,
         lme: { random_effect_dist: 'normal', random_effect_df: 0, icc_noise_sd: 0 },
@@ -310,7 +307,7 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
     scenariosStoreMock.scenarios = [];
   });
 
-  it('projects enabled scenarios from the store (lme dropped, residual encoded) when the toggle is on', () => {
+  it('projects enabled scenarios from the store (lme dropped) when the toggle is on', () => {
     sharedPrefsMock.scenariosEnabled = true;
     scenariosStoreMock.scenarios = [
       {
@@ -320,9 +317,6 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
         correlation_noise_sd: 0.2,
         distribution_change_prob: 0.0,
         new_distributions: [],
-        residual_change_prob: 0.3,
-        residual_dists: ['high_kurtosis'], // canonical name (replaces legacy 'heavy_tailed')
-        residual_df: 5,
         sampled_factor_proportions: false,
         truth_start: false,
         lme: { random_effect_dist: 'normal', random_effect_df: 0, icc_noise_sd: 0 },
@@ -339,7 +333,6 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
     const wire = r.spec!.scenarios[0]!;
     expect(wire.name).toBe('realistic');
     expect(wire.heteroskedasticity_ratio).toBe(1.5);
-    expect(wire.residual_dists).toEqual([4]); // "high_kurtosis" → RESIDUAL_CODE 4
     expect('lme' in wire).toBe(false); // lme sub-object gone — its fields are hoisted
     expect(wire.random_effect_dist).toBe(0); // 'normal' → 0
     expect(wire.random_effect_df).toBe(0);
@@ -476,6 +469,15 @@ describe('familyConfigToAppSpec — Mixed', () => {
     expect(spec.icc).toBe(0.2);
     expect(spec.cluster_dim).toEqual({ kind: 'n_clusters', value: 20 });
     expect(spec.parsed_formula.predictors).toEqual(['x']); // (1|school) stripped
+  });
+
+  it('drops contrasts (the engine tests them on OLS only)', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    cfg.contrasts = [{ positiveName: 'g[2]', negativeName: 'g[1]', enabled: true }];
+    const { spec } = familyConfigToAppSpec('mixed', cfg);
+    expect((spec as any).contrasts).toEqual([]);
   });
 
   it('forces report_overall=false for the mixed family even if reportOverall is set', () => {
@@ -1051,6 +1053,20 @@ describe('familyConfigToAppSpec — Regression entrypoint + outcome toggle', () 
     expect(spec).toBeNull();
     expect(errors.join(' ')).toMatch(/baseline/i);
   });
+
+  it('contrasts reach the wire for a linear outcome only (engine tests them on OLS only)', () => {
+    const cfg = regressionConfig({
+      baselineProbability: 0.3,
+      baselineRate: 2,
+      contrasts: [{ positiveName: 'g[2]', negativeName: 'g[1]', enabled: true }],
+    });
+    expect((familyConfigToAppSpec('regression', cfg, 'linear').spec as any).contrasts).toEqual([
+      ['g[2]', 'g[1]'],
+    ]);
+    for (const kind of ['logit', 'probit', 'poisson'] as const) {
+      expect((familyConfigToAppSpec('regression', cfg, kind).spec as any).contrasts).toEqual([]);
+    }
+  });
 });
 
 describe('familyConfigToAppSpec — lme scenario zeroing (contract invariant 13)', () => {
@@ -1062,9 +1078,6 @@ describe('familyConfigToAppSpec — lme scenario zeroing (contract invariant 13)
       correlation_noise_sd: 0,
       distribution_change_prob: 0,
       new_distributions: [],
-      residual_change_prob: 0,
-      residual_dists: [],
-      residual_df: 0,
       sampled_factor_proportions: false,
       truth_start: false,
       lme: { random_effect_dist: 'heavy_tailed', random_effect_df: 5, icc_noise_sd: 0.2 },
@@ -1132,14 +1145,13 @@ describe('familyConfigToAppSpec — lme scenario zeroing (contract invariant 13)
 });
 
 describe('familyConfigToAppSpec — outcome options projection', () => {
-  it('omits outcome_options entirely when all knobs are neutral (unpinned, no driver)', () => {
+  it('omits outcome_options entirely when all knobs are neutral (no residual, no driver)', () => {
     const cfg = linearConfig({
       formula: 'y ~ x1',
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [{ name: 'x1', value: 0.3 }],
       outcomeOptions: {
         residualDistribution: null,
-        pinnedResidual: false,
         heteroskedasticityDriver: '',
       },
     });
@@ -1149,14 +1161,13 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
     expect(r.spec.outcome_options).toBeUndefined();
   });
 
-  it('pinned non-normal residual reaches the wire', () => {
+  it('non-normal residual reaches the wire', () => {
     const cfg = linearConfig({
       formula: 'y ~ x1',
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [{ name: 'x1', value: 0.3 }],
       outcomeOptions: {
         residualDistribution: 'high_kurtosis',
-        pinnedResidual: true,
         heteroskedasticityDriver: '',
       },
     });
@@ -1166,21 +1177,47 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
     expect(r.spec.outcome_options).toEqual({ residual_distribution: 'high_kurtosis' });
   });
 
-  it('pinned explicit normal reaches the wire (neutral keys on unpinned-default, not on value)', () => {
+  it('explicit normal is neutral: outcome_options omitted', () => {
     const cfg = linearConfig({
       formula: 'y ~ x1',
       variables: [{ name: 'x1', kind: 'continuous' }],
       effects: [{ name: 'x1', value: 0.3 }],
       outcomeOptions: {
         residualDistribution: 'normal',
-        pinnedResidual: true,
         heteroskedasticityDriver: '',
       },
     });
     const r = familyConfigToAppSpec('regression', cfg, 'linear');
     expect(r.errors).toEqual([]);
     if (r.spec?.family !== 'linear') throw new Error('expected linear');
-    expect(r.spec.outcome_options).toEqual({ residual_distribution: 'normal' });
+    expect(r.spec.outcome_options).toBeUndefined();
+  });
+
+  it('a 1.4.x stored config with pinnedResidual projects by distribution alone', () => {
+    const project = (outcomeOptions: OutcomeOptionsConfig) => {
+      const cfg = linearConfig({
+        formula: 'y ~ x1',
+        variables: [{ name: 'x1', kind: 'continuous' }],
+        effects: [{ name: 'x1', value: 0.3 }],
+        outcomeOptions,
+      });
+      const r = familyConfigToAppSpec('regression', cfg, 'linear');
+      expect(r.errors).toEqual([]);
+      if (r.spec?.family !== 'linear') throw new Error('expected linear');
+      return r.spec.outcome_options;
+    };
+    expect(project({
+      residualDistribution: 'right_skewed',
+      pinnedResidual: true,
+      heteroskedasticityDriver: '',
+    } as unknown as OutcomeOptionsConfig)).toEqual({
+      residual_distribution: 'right_skewed',
+    });
+    expect(project({
+      residualDistribution: 'normal',
+      pinnedResidual: true,
+      heteroskedasticityDriver: '',
+    } as unknown as OutcomeOptionsConfig)).toBeUndefined();
   });
 
   it('heteroskedasticity driver reaches the wire when non-empty', () => {
@@ -1190,7 +1227,6 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
       effects: [{ name: 'x1', value: 0.3 }],
       outcomeOptions: {
         residualDistribution: null,
-        pinnedResidual: false,
         heteroskedasticityDriver: 'x1',
       },
     });
@@ -1208,7 +1244,6 @@ describe('familyConfigToAppSpec — outcome options projection', () => {
       baselineProbability: 0.3,
       outcomeOptions: {
         residualDistribution: 'right_skewed',
-        pinnedResidual: true,
         heteroskedasticityDriver: 'x1',
       },
     });

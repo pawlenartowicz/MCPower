@@ -151,6 +151,20 @@
   "(Intercept)"
 }
 
+# Component names of one EffectDescriptor, in the registry's effect_components
+# form: the name for a main effect, one rendered name per component for an
+# interaction, NULL for an intercept (including the placeholder a test design
+# leaves in a dropped column's slot). Mirrors _descriptor_components in Python's
+# tables.py; change together.
+.descriptor_components <- function(desc, factors) {
+  k <- desc$kind
+  if (k == "interaction") {
+    return(vapply(desc$components, function(c) .render_descriptor(c, factors), character(1)))
+  }
+  if (k %in% c("continuous", "factor_level")) return(.render_descriptor(desc, factors))
+  NULL
+}
+
 # Display label for the pairwise contrast β_p − β_n: both sides rendered from
 # the skeleton, joined by the vs token (mirrors _contrast_label in Python's
 # tables.py — change together). p/n are engine 0-based β-column indices.
@@ -510,10 +524,10 @@
 
 # Port of tables.py:_row_or_cell — OR cell for one .build_rows row, or "" when no
 # single configured β applies (omnibus/post-hoc rows; factor headers are spans).
-# β is recovered from meta$effect_sizes via the row's β-column index: the skeleton
-# carries the intercept at index 0 and the n effects at 1..n in the same order as
-# effect_sizes, so engine index `idx` maps to the 1-based `sizes[[idx]]`. A pairwise
-# contrast's OR is exp(β_p − β_n).
+# β is recovered from meta$column_effect_sizes via the row's β-column index: the
+# skeleton carries the intercept at index 0 and the n effects at 1..n in the same
+# order as column_effect_sizes, so engine index `idx` maps to the 1-based
+# `sizes[[idx]]`. A pairwise contrast's OR is exp(β_p − β_n).
 .row_or_cell <- function(r, tix, cpairs, sizes) {
   kind <- r$kind
   if (identical(kind, "continuous") || identical(kind, "factor_level")) {
@@ -550,7 +564,7 @@
   # Logit-outcome models (logistic regression / binary GLMM) get an OR = exp(β)
   # column before the always-last Target column; other families render unchanged.
   is_logit <- identical(meta$outcome_kind, "binary")
-  sizes <- meta$effect_sizes %||% list()
+  sizes <- meta$column_effect_sizes %||% list()
   tix   <- inner0$target_indices %||% list()
   or_col <- function(columns) {
     if (!is_logit) return(columns)
@@ -1167,6 +1181,9 @@
   blocks <- character(0)
   for (nm in names(scen)) {
     extras <- as.list(scen[[nm]]$estimator_extras %||% list())
+    # A sample-size result carries one unnamed extras block per grid N, which
+    # this single-run block does not summarise.
+    if (is.null(names(extras))) next
     extras[["estimator"]] <- NULL
     if (length(extras) == 0L) next
     head <- if (length(scen) > 1L) sprintf("%s — %s", caption, nm) else caption

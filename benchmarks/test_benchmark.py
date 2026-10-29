@@ -22,6 +22,14 @@ def test_load_cases_merges_family_defaults():
     assert glm.max_failed_frac == 0.25
 
 
+def test_load_cases_skips_agreement_only_cases(tmp_path):
+    assert "lme_crossed" not in {c.id for c in load_cases(CASES_JSON)}
+    doc = json.loads(CASES_JSON.read_text())
+    doc["cases"] = [dict(doc["cases"][0], benchmark=False)]
+    cj = tmp_path / "cases.json"; cj.write_text(json.dumps(doc))
+    assert load_cases(cj) == []
+
+
 def test_load_cases_new_fields():
     cases = load_cases(CASES_JSON)
     by_id = {c.id: c for c in cases}

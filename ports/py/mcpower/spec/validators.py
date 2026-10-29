@@ -484,6 +484,23 @@ def _validate_test_formula(test_formula: str, available_variables: List[str]) ->
         return _ValidationResult(False, errors, [])
 
 
+def _is_missing(v: Any) -> bool:
+    """True for a missing upload cell: ``None``, a blank or NA/NaN string, a NaN, or
+    pandas' ``NA`` / ``NaT`` (matched by type name so pandas is never imported)."""
+    if isinstance(v, float):
+        return v != v
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return v.strip() in ("", "NA", "NaN", "nan", "na")
+    if type(v).__name__ in ("NAType", "NaTType"):
+        return True
+    try:
+        return math.isnan(v)
+    except (TypeError, ValueError):
+        return False
+
+
 def _validate_upload_data(
     columns_data: List[List[Any]], columns: Optional[List[str]] = None
 ) -> _ValidationResult:
@@ -491,7 +508,8 @@ def _validate_upload_data(
 
     Checks:
         - Row count within ``[upload.min_rows, upload.max_rows]``.
-        - No NaN or Inf values in numeric columns (string columns skipped).
+        - No missing cells (see ``_is_missing``) in any column.
+        - No Inf values in numeric columns (string columns skipped).
     """
     from ..config import get_upload
     errors = []
@@ -504,24 +522,20 @@ def _validate_upload_data(
     elif n_rows > max_rows:
         errors.append(f"Uploaded data has too many rows ({n_rows:,}); the maximum is {max_rows:,}.")
 
-    # NaN/Inf check on numeric columns. Non-numeric (string) columns can't cast
-    # to float, so they are detected and skipped column-by-column.
+    # Missing cells are checked in every column (a blank or NA cell in a string
+    # column would otherwise become its own factor level). The Inf check runs
+    # on numeric columns only; string columns can't cast to float and are
+    # skipped.
     nan_cols: List[str] = []
     inf_cols: List[str] = []
     for ci, col in enumerate(columns_data):
-        floats: List[float] = []
-        numeric = True
-        for v in col:
-            try:
-                floats.append(float(v))
-            except (TypeError, ValueError):
-                numeric = False
-                break
-        if not numeric:
-            continue
         col_name = columns[ci] if columns is not None and ci < len(columns) else f"column_{ci + 1}"
-        if any(math.isnan(x) for x in floats):
+        if any(_is_missing(v) for v in col):
             nan_cols.append(col_name)
+        try:
+            floats = [float(v) for v in col]
+        except (TypeError, ValueError):
+            continue
         if any(math.isinf(x) for x in floats):
             inf_cols.append(col_name)
     if nan_cols:
@@ -585,7 +599,7 @@ def _validate_cluster_config(
             if value is not None:
                 errors.append(
                     f"{child} is nested in {parent}; give n_per_parent "
-                    f"({child}s per {parent}), not {name}."
+                    f"({child} groups per {parent}), not {name}."
                 )
 
     if n_per_parent is not None:

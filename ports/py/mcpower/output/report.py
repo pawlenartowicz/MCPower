@@ -300,7 +300,11 @@ class Report:
         """Surface GLM/MLE numerics whenever present (not only on a
         threshold trip). OLS carries only {'estimator': ...} -> nothing shown.
         One block per scenario (mirroring the per-scenario power table) so a doomer scenario hitting
-        separation isn't hidden behind the first scenario's numbers."""
+        separation isn't hidden behind the first scenario's numbers.
+        find_power only: a find_sample_size result carries one extras block per
+        grid N, which this single-block layout does not show."""
+        if self._kind == "find_sample_size":
+            return ""
         def fmt_val(v):
             return f"{v:.4g}" if isinstance(v, float) else str(v)
         scenarios = _scenarios(self._result)

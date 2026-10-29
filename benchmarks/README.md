@@ -28,7 +28,8 @@ power-agreement check against the reference loops and tools lives in
 
 `validation/agreement/cases.json` is the single source of cases, read by every
 harness (`cases.py`, `cases.jl`, `load_cases` in `validation/agreement/harness.R`).
-Sixteen designs across four families:
+Cases marked `benchmark: false` there are agreement-only and the loaders skip
+them, so the benchmark keeps sixteen designs across four families:
 
 | family | cases | shapes covered |
 |--------|-------|----------------|

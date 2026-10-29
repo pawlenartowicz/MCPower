@@ -236,6 +236,16 @@ RVariableRegistry <- R6::R6Class(
       names(private$predictors)[keep]
     },
 
+    # variables.py effect_components: each effect's component names, in effect
+    # order. list(name) for a main effect, the interacting columns for an
+    # interaction.
+    effect_components = function() {
+      unname(lapply(names(private$effects), function(nm) {
+        eff <- private$effects[[nm]]
+        if (identical(eff$effect_type, "main")) nm else as.character(unlist(eff$var_names))
+      }))
+    },
+
     # variables.py cluster_effect_names
     cluster_effect_names = function() {
       if (length(private$predictors) == 0L) return(character(0))
@@ -702,29 +712,10 @@ RVariableRegistry <- R6::R6Class(
   out
 }
 
-# Mirror of model.py _encode_residual_list. All five canonical residual names
-# are valid in scenario residual_dists pools. Code table from `.residual_codes()`.
-.encode_residual_list <- function(names, scenario_name) {
-  residual_codes <- .residual_codes()
-  out <- integer(0)
-  for (n in names) {
-    code <- residual_codes[[n]]
-    if (is.null(code)) {
-      stop(sprintf(
-        "scenario %s: unknown residual distribution %s; valid: %s",
-        sQuote(scenario_name), sQuote(n),
-        paste(sort(names(residual_codes)), collapse = ", ")
-      ))
-    }
-    out <- c(out, code)
-  }
-  out
-}
-
 # Mirror of spec/spec_builder.py build_scenario_dict. `scenario_configs` defaults to
 # `.scenario_defaults()`; callers may pass merged per-model configs.
-# Integer code lists are wrapped in I() so length-1 lists still serialize as
-# JSON arrays under auto_unbox. The three RE knobs (random_effect_dist/df,
+# The integer code list is wrapped in I() so a length-1 list still serializes
+# as a JSON array under auto_unbox. The three RE knobs (random_effect_dist/df,
 # icc_noise_sd) are always emitted here; .to_linear_spec_list zeros them for
 # non-LME families so the spec-builder produces lme: None for those calls.
 .scenario_dict <- function(name, scenario_configs = .scenario_defaults()) {
@@ -740,10 +731,9 @@ RVariableRegistry <- R6::R6Class(
   }
 
   new_dists <- .encode_dist_list(unlist(getf("new_distributions", list())), name)
-  residual_dists <- .encode_residual_list(unlist(getf("residual_dists", list())), name)
 
   # random_effect_dist: single RE dist name -> integer code via the RE-dist
-  # table (normal/heavy_tailed vocabulary, NOT the residual-pool space).
+  # table (normal/heavy_tailed vocabulary, NOT the residual-code space).
   re_dist_name <- getf("random_effect_dist", "normal")
   re_dist_code <- {
     re_codes <- .re_dist_codes()
@@ -763,9 +753,6 @@ RVariableRegistry <- R6::R6Class(
     correlation_noise_sd = as.numeric(getf("correlation_noise_sd", 0.0)),
     distribution_change_prob = as.numeric(getf("distribution_change_prob", 0.0)),
     new_distributions = I(as.integer(new_dists)),
-    residual_change_prob = as.numeric(getf("residual_change_prob", 0.0)),
-    residual_dists = I(as.integer(residual_dists)),
-    residual_df = as.numeric(getf("residual_df", 0.0)),
     sampled_factor_proportions = as.logical(getf("sampled_factor_proportions", FALSE)),
     truth_start = as.logical(getf("truth_start", FALSE)),
     random_effect_dist = re_dist_code,
@@ -967,7 +954,7 @@ RVariableRegistry <- R6::R6Class(
 .to_linear_spec_list <- function(reg, scenario_names, alpha, correction,
                                   wald_se = NULL, nagq = 1L, target_test,
                                   heteroskedasticity,
-                                  residual_name, residual_pinned = FALSE, max_failed,
+                                  residual_name, max_failed,
                                   test_formula, scenario_configs = .scenario_defaults(),
                                   pending_data = NULL, cluster_level_vars = NULL,
                                   estimator = "ols", df_method = NULL) {
@@ -1118,12 +1105,9 @@ RVariableRegistry <- R6::R6Class(
 
   posthoc_requests <- lapply(wire_posthoc_factors, function(f) list(factor = f))
 
-  # Build the residual block: distribution + pinned flag (no df — df is
-  # scenario-only via residual_df in ScenarioInput).
+  # Build the residual block: distribution only. The engine draws the
+  # non-normal shapes at a fixed df of 10.
   residual_block <- list(distribution = residual_name)
-  if (isTRUE(residual_pinned)) {
-    residual_block$pinned <- TRUE
-  }
 
   payload <- list(
     formula = formula_for_builder,
@@ -1175,18 +1159,25 @@ RVariableRegistry <- R6::R6Class(
           }
           as.numeric(code)
         }, numeric(1))
+        # I() on an atomic vector: serialises as a JSON array (even at length 1)
+        # without jsonlite walking a per-cell list. unname: Rust expects an
+        # array, not an object.
         upload_columns[[length(upload_columns) + 1L]] <- list(
           name     = col_name,
           col_type = "factor",
-          values   = as.list(unname(values_encoded)),  # unname: Rust expects array not object
+          values   = I(unname(values_encoded)),
           labels   = as.list(col_labels)
         )
       } else {
-        # binary or continuous: raw numeric values
+        values <- as.numeric(raw_vals)
+        # The engine reads a binary column's proportion as the share of 1s, so
+        # its two values are coded lower -> 0, other -> 1 (mirrors the app's
+        # upload-detect.ts).
+        if (identical(col_type, "binary")) values <- as.numeric(values != min(values))
         upload_columns[[length(upload_columns) + 1L]] <- list(
           name     = col_name,
           col_type = col_type,
-          values   = as.list(as.numeric(raw_vals)),
+          values   = I(values),
           labels   = list()
         )
       }

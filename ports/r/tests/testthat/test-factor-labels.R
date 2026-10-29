@@ -73,8 +73,7 @@ test_that("build_contract_from_spec returns a non-empty $skeleton JSON string", 
     '"max_failed_fraction":1.0,',
     '"scenarios":[{"name":"optimistic","heterogeneity":0.0,"heteroskedasticity_ratio":1.0,',
     '"correlation_noise_sd":0.0,"distribution_change_prob":0.0,',
-    '"new_distributions":[2,3,5],"residual_change_prob":0.0,',
-    '"residual_dists":[4,2],"residual_df":10.0}]}'
+    '"new_distributions":[2,3,5]}]}'
   )
   out <- mcpower:::build_contract_from_spec(spec_json, "continuous", "canonical", "ols", 0.0, "[]")
   expect_type(out$skeleton, "character")

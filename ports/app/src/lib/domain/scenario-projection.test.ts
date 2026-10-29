@@ -1,16 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { ScenarioConfig } from '$lib/configs/scenarios';
-import {
-  DIST_CODE,
-  RESIDUAL_CODE,
-  RE_DIST_CODE,
-  projectScenario,
-} from './scenario-projection';
+import { DIST_CODE, RE_DIST_CODE, projectScenario } from './scenario-projection';
 
-// These tables are the parity guard: they MUST equal the engine's `DIST_CODES` /
-// `RESIDUAL_CODES` (engine-spec-builder `project_contract.rs`, which Python
-// reads via `get_dist_codes()` / `get_residual_codes()`) verbatim, or app
-// scenario numbers silently diverge from the engine's at equal X.Y.
+// DIST_CODE is the parity guard: it MUST equal the engine's `DIST_CODES`
+// (engine-spec-builder `project_contract.rs`, which Python reads via
+// `get_dist_codes()`) verbatim, or app scenario numbers silently diverge from
+// the engine's at equal X.Y.
 describe('scenario code tables match the engine tables', () => {
   it('DIST_CODE matches the engine DIST_CODES', () => {
     expect(DIST_CODE).toEqual({
@@ -23,16 +18,6 @@ describe('scenario code tables match the engine tables', () => {
       uploaded_factor: 97,
       uploaded_binary: 98,
       uploaded_data: 99,
-    });
-  });
-
-  it('RESIDUAL_CODE matches canonical RESIDUAL_CODES in project_contract.rs (aliases dropped)', () => {
-    expect(RESIDUAL_CODE).toEqual({
-      normal: 0,
-      right_skewed: 2,
-      left_skewed: 3,
-      high_kurtosis: 4,
-      uniform: 5,
     });
   });
 
@@ -49,9 +34,6 @@ function cfg(overrides: Partial<ScenarioConfig> = {}): ScenarioConfig {
     correlation_noise_sd: 0.2,
     distribution_change_prob: 0.4,
     new_distributions: [],
-    residual_change_prob: 0.3,
-    residual_dists: [],
-    residual_df: 5,
     sampled_factor_proportions: false,
     truth_start: false,
     lme: { random_effect_dist: 'normal', random_effect_df: 0, icc_noise_sd: 0 },
@@ -69,9 +51,6 @@ describe('projectScenario (mirrors Python build_scenario_dict)', () => {
       correlation_noise_sd: 0.2,
       distribution_change_prob: 0.4,
       new_distributions: [],
-      residual_change_prob: 0.3,
-      residual_dists: [],
-      residual_df: 5,
       sampled_factor_proportions: false,
       truth_start: false,
       // lme fields hoisted onto the wire (default cfg() lme is neutral → all zero)
@@ -118,15 +97,15 @@ describe('projectScenario (mirrors Python build_scenario_dict)', () => {
     expect(wire.new_distributions).toEqual([2, 3, 5]);
   });
 
-  it('encodes all five canonical residual distributions', () => {
-    const wire = projectScenario(
-      cfg({ residual_dists: ['normal', 'right_skewed', 'left_skewed', 'high_kurtosis', 'uniform'] }),
-    );
-    expect(wire.residual_dists).toEqual([0, 2, 3, 4, 5]);
-  });
-
-  it('throws on a completely unknown residual name', () => {
-    const bad = cfg({ residual_dists: ['nonsense'] as unknown as ScenarioConfig['residual_dists'] });
-    expect(() => projectScenario(bad)).toThrow(/unknown residual distribution/);
+  it('a stored 1.4.x copy carrying the removed keys projects without them', () => {
+    const wire = projectScenario({
+      ...cfg(),
+      residual_change_prob: 0.5,
+      residual_dists: ['high_kurtosis'],
+      residual_df: 8,
+    } as unknown as ScenarioConfig);
+    for (const key of ['residual_change_prob', 'residual_dists', 'residual_df']) {
+      expect(key in wire).toBe(false);
+    }
   });
 });

@@ -114,3 +114,15 @@ test_that("long-form summary shows unit columns in every required-N table", {
   expect_true(grepl("Number of school   Required N   CI 95%", text, fixed = TRUE))
   expect_true(grepl("Joint target         Number of school   Required N", text, fixed = TRUE))
 })
+
+test_that("a cluster_size-only design keeps its cluster size after find_power", {
+  # 200 / 10 = 20 clusters at the find_power N: a run that froze that count
+  # would step the later search by 20 observations, not by one cluster of 10.
+  m <- MCPower$new("y ~ x1 + (1|school)", family = "lme")$
+    set_effects("x1=0.5")$
+    set_cluster("school", ICC = 0.2, cluster_size = 10L)
+  m$find_power(sample_size = 200L, n_sims = 20L, verbose = FALSE)
+  res <- m$find_sample_size(from_size = 200L, to_size = 300L, by = 50L,
+                             n_sims = 20L, verbose = FALSE)
+  expect_equal(as.integer(res$cluster_atom), 10L)
+})

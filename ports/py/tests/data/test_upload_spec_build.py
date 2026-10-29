@@ -109,3 +109,51 @@ def test_upload_column_order_assigns_effect_to_correct_predictor():
         f"Expected power(x1=0.5) > power(x2=0.1) but got x1={p[0]:.3f}, x2={p[1]:.3f}; "
         "column-to-predictor assignment may be incorrect."
     )
+
+
+@pytest.mark.parametrize("coding", [(1, 2), (-1, 1)])
+def test_binary_upload_coding_does_not_change_power(coding):
+    """A two-value column is binary whatever its coding: the same 0/1 pattern
+    coded 1/2 or -1/1 gives exactly the power of the 0/1 coding."""
+    from mcpower import MCPower
+
+    rng = np.random.default_rng(2)
+    x1 = rng.normal(size=300).tolist()
+    pattern = rng.integers(0, 2, size=300).tolist()
+
+    def power(codes):
+        data = {"x1": x1, "sex": [codes[b] for b in pattern]}
+        m = MCPower("y = x1 + sex").upload_data(data, verbose=False)
+        m.set_effects("x1=0.2, sex=0.5")
+        r = m.find_power(200, n_sims=200, progress_callback=False, verbose=False)
+        return r["power_uncorrected"]
+
+    assert power(coding) == power((0, 1))
+
+
+@pytest.mark.parametrize("missing", [None, "", " ", "NA", float("nan"), "pd.NA"])
+def test_upload_rejects_missing_cell_in_string_column(missing):
+    """A missing cell in a string column is rejected like a NaN in a numeric
+    one, instead of becoming a factor level of its own."""
+    import pandas as pd
+
+    from mcpower import MCPower
+
+    g = ["a", "b", "c"] * 10
+    g[5] = pd.NA if missing == "pd.NA" else missing
+    df = pd.DataFrame({"x1": np.arange(30, dtype=float), "g": g})
+    with pytest.raises(ValueError, match="NaN values in columns: g"):
+        MCPower("y = x1 + g").upload_data(df, verbose=False)
+
+
+def test_upload_rejects_blank_csv_cell(tmp_path):
+    """A blank cell in a numeric CSV column is rejected as missing, instead of
+    turning the column into a factor with one level per value."""
+    from mcpower import MCPower
+
+    rows = [f"{i * 0.1:.3f},{(i % 7) * 0.3:.3f}" for i in range(30)]
+    rows[3] = "," + rows[3].split(",")[1]
+    path = tmp_path / "blank.csv"
+    path.write_text("x1,x2\n" + "\n".join(rows) + "\n")
+    with pytest.raises(ValueError, match="NaN values in columns: x1"):
+        MCPower("y = x1 + x2").upload_data(str(path), verbose=False)

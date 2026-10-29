@@ -2,8 +2,8 @@
 //!
 //! For fixed `(base_seed, sim_id)`, row `i` is deterministic and independent of
 //! `max_n`. Prefix `X_full[:N]` is bit-identical across runs with different
-//! `max_n`. The scenario design (Σ, L, var_types, residual choice) is drawn
-//! fresh every sim from the scenario stream.
+//! `max_n`. The scenario design (Σ, L, var_types) is drawn fresh every sim
+//! from the scenario stream.
 //!
 //! Generation is split by draw shape: the hot block-shaped draws run as planar
 //! column passes over class-addressed Philox sub-streams — continuous X
@@ -22,13 +22,13 @@ use crate::distributions::{marginal_uniform, phi, sample_t};
 use crate::rng::{
     CLASS_RESID, CLASS_XNORM, SimRng, fill_normal_column, fill_uniform_column, poisson_quantile,
 };
-use crate::scenarios::{
-    STREAM_TAG_HET, perturb_correlation, perturb_var_types, pick_residual, scenario_rng,
-};
+use crate::scenarios::{STREAM_TAG_HET, perturb_correlation, perturb_var_types, scenario_rng};
 use crate::spec::{
-    ClusterSizing, Distribution, EngineError, LinkKind, OutcomeKind, ResidualDist, SimulationSpec,
+    ClusterSizing, ClusterSpec, Distribution, EngineError, LinkKind, OutcomeKind, ResidualDist,
+    SimulationSpec,
 };
 use crate::workspace::SimWorkspace;
+use engine_contract::GroupingRelation;
 
 // Censored Exp(1) at E ≤ EXP_CAP, standardized to exact unit variance; they
 // standardize the Right/LeftSkewed marginals in apply_marginal.
@@ -40,6 +40,8 @@ const EXP_CAP: f64 = 6.959_255_993_647_11;
 const EXP_CENSORED_MEAN: f64 = 0.999_050_197_028_828_9;
 const EXP_CENSORED_STD: f64 = 0.993_367_632_769_713_4;
 const SQRT3: f64 = 1.732_050_807_568_877_2;
+/// Degrees of freedom of every non-normal residual (t and scaled chi-square), in every scenario.
+const RESIDUAL_DF: f64 = 10.0;
 
 /// Lower Cholesky factor of a symmetric PSD `q×q` matrix (row-major in/out).
 /// validate() guarantees PSD, so a zero pivot is treated as exact 0 (its
@@ -295,15 +297,19 @@ pub fn generate_sim_data(
     // Fixed allocation consumes no RNG and its proportions are fixed by the
     // spec, so every sim gets the same cell sequences: the walks (O(cells)
     // per step) run once per workspace and later sims only read them. The
-    // cache key is everything the sequences depend on — the cell weights,
-    // the radices (which also fix the row/cluster cell split) and max_n — so
-    // a workspace reused for another design rebuilds it.
+    // cache key is everything the sequences depend on: the cell weights,
+    // the radices (which also fix the row/cluster cell split), the row-walk
+    // group count and max_n. A workspace reused for another design
+    // rebuilds it. The row-to-group map behind that count is fixed by the
+    // cluster layout, which a workspace keeps from construction.
     let split = fixed_cell_weights(
         spec,
         &mut ws.factor_cell_weights,
         &mut ws.factor_cell_radices,
     );
+    let row_groups = row_walk_groups(spec, max_n);
     if ws.factor_seq_n != max_n
+        || ws.factor_seq_groups != row_groups
         || ws.factor_seq_weights != ws.factor_cell_weights
         || ws.factor_seq_radices != ws.factor_cell_radices
     {
@@ -311,6 +317,8 @@ pub fn generate_sim_data(
             &ws.factor_cell_weights,
             &ws.factor_cell_radices,
             split,
+            spec.cluster.as_ref(),
+            row_groups,
             max_n,
             &mut ws.factor_alloc_counts,
             &mut ws.factor_row_seq,
@@ -318,6 +326,7 @@ pub fn generate_sim_data(
         );
         ws.factor_seq_weights.clone_from(&ws.factor_cell_weights);
         ws.factor_seq_radices.clone_from(&ws.factor_cell_radices);
+        ws.factor_seq_groups = row_groups;
         ws.factor_seq_n = max_n;
     }
     let mut cl_step = 0usize;
@@ -380,10 +389,9 @@ pub fn generate_sim_data(
     // slots 1..=df = χ² accumulator normals; Right/LeftSkewed → slots
     // 0..df-1 = χ² accumulator normals. Mirrors draw_residual's math
     // (T standardization df/(df−2), χ² centering (χ²−df)/√(2df), LeftSkewed
-    // sign flip) — change together. df is clamped ≥ 3 exactly as there. One
-    // harmless cast difference vs draw_residual: .max(1) here is applied
-    // before the u32 cast rather than at the loop bound — equivalent under
-    // the df ≥ 3 clamp.
+    // sign flip); change together. df is the fixed RESIDUAL_DF, so there is
+    // no clamp here; draw_residual keeps its own df >= 3 clamp because it also
+    // serves random-effect draws at the scenario's random_effect_df.
     match spec.outcome_kind {
         OutcomeKind::Binary if matches!(spec.link, Some(LinkKind::Probit)) => {
             // Probit latent-normal formulation: draw z ~ N(0,1); the link site
@@ -433,7 +441,7 @@ pub fn generate_sim_data(
                 );
             }
             ResidualDist::HighKurtosis => {
-                let df = ws.residual_df_design.max(3.0);
+                let df = RESIDUAL_DF;
                 let df_int = (df.round() as i64).max(1) as u32;
                 let scale = 1.0 / (df / (df - 2.0)).sqrt();
                 fill_normal_column(
@@ -467,7 +475,7 @@ pub fn generate_sim_data(
                 }
             }
             ResidualDist::RightSkewed | ResidualDist::LeftSkewed => {
-                let df = ws.residual_df_design.max(3.0);
+                let df = RESIDUAL_DF;
                 let df_int = (df.round() as i64).max(1) as u32;
                 let scale = 1.0 / (2.0 * df).sqrt();
                 let sign = if matches!(ws.residual_dist_design, ResidualDist::LeftSkewed) {
@@ -1052,7 +1060,9 @@ fn factor_alloc(spec: &SimulationSpec, f: usize, first_dummy: usize) -> FactorAl
 /// product of its levels' raw proportions, normalised within its group.
 ///
 /// Fixed allocation walks these cells, one step per row (per cluster for the
-/// cluster-level group), and reads each factor's level off the chosen cell.
+/// cluster-level group), and reads each factor's level off the chosen cell;
+/// with interleaved clusters or nested children the row walk also balances
+/// each group's rows (`row_walk_groups`, `walk_cells_by_cluster`).
 /// Walking each factor on its own would give two factors with equal
 /// proportions the same sequence, i.e. identical columns, and others
 /// deterministically aligned ones. The cell walk keeps every cell count near
@@ -1117,7 +1127,7 @@ fn fixed_cell_weights(
 /// Representative (first) row of row `i`'s cluster. The cluster-level
 /// broadcast and the cluster-level allocation walk both key on it, and it
 /// must group rows the same way `ws.cluster_ids` does (both derive from the
-/// sizing) — change together.
+/// sizing) — change together, with `row_walk_groups`.
 fn cluster_rep_row(sizing: &ClusterSizing, i: usize) -> usize {
     match sizing {
         ClusterSizing::FixedClusters { n_clusters } => i % ((*n_clusters).max(1) as usize),
@@ -1128,17 +1138,79 @@ fn cluster_rep_row(sizing: &ClusterSizing, i: usize) -> usize {
     }
 }
 
+/// Group count the row-level allocation walk balances over within the first
+/// `n` rows, 0 for the plain walk. Read at a stride, the plain walk aliases
+/// with an interleaved grouping: a 50/50 factor alternates by row, so each of
+/// an even number of interleaved groups gets a single level, and a factor
+/// meant to vary within groups becomes a group-level one. The rule:
+/// 1. A `NestedWithin` grouping (there is at most one, one level below the
+///    primary, so it is the deepest grouping): its child ids, under either
+///    sizing. Children alternate within their parent under both sizings, and
+///    they sit inside the primary clusters, so balancing each child also
+///    spreads each primary cluster's rows (more loosely than rule 2).
+/// 2. Else `FixedClusters` with more than one cluster: row i is in cluster
+///    i % n_clusters (the layout of `cluster_rep_row` and `ws.cluster_ids`).
+/// 3. Else 0: `FixedSize` clusters are contiguous row blocks, which the plain
+///    walk already balances, and one cluster needs nothing extra.
+///
+/// Crossed groupings never steer the walk: one walk cannot balance two
+/// crossed partitions at once, and with the primary balanced each crossed
+/// level already receives every factor level (a counterbalanced design).
+/// `row_walk_group` maps rows to these groups; change the two together.
+fn row_walk_groups(spec: &SimulationSpec, n: usize) -> usize {
+    let Some(c) = spec.cluster.as_ref() else {
+        return 0;
+    };
+    if let Some(g) = nested_grouping(c) {
+        return c.extra_n_levels_at(g, n);
+    }
+    match c.sizing {
+        ClusterSizing::FixedClusters { n_clusters } if n_clusters > 1 => n_clusters as usize,
+        _ => 0,
+    }
+}
+
+/// Index of the `NestedWithin` extra grouping, if the design has one.
+fn nested_grouping(c: &ClusterSpec) -> Option<usize> {
+    c.extra_groupings
+        .iter()
+        .position(|g| matches!(g.relation, GroupingRelation::NestedWithin { .. }))
+}
+
+/// Row `i`'s group for the row-level walk, under rule 1 or 2 of
+/// `row_walk_groups` (mirrors it; change together): the nested child id
+/// from `extra_level_of_row` (the ids the fit groups by), else the primary
+/// cluster i % n_clusters. `nested` is `nested_grouping(c)`. Never called
+/// for FixedSize without a nested grouping (`row_walk_groups` is 0 there).
+fn row_walk_group(c: &ClusterSpec, nested: Option<usize>, i: usize) -> usize {
+    match (nested, &c.sizing) {
+        (Some(g), _) => c.extra_level_of_row(g, i),
+        (None, ClusterSizing::FixedClusters { n_clusters }) => i % (*n_clusters).max(1) as usize,
+        (None, ClusterSizing::FixedSize { .. }) => {
+            unreachable!("row_walk_groups is 0 for FixedSize without a nested grouping")
+        }
+    }
+}
+
 /// Run the fixed-allocation walks for n steps. `row_seq[i]` is row i's
 /// row-level cell; `cl_seq[c]` is the cluster-level cell of the c-th cluster,
 /// clusters taken in representative-row order. n steps cover every cluster
 /// of an n-row design under either sizing, so the sequences depend only on
-/// the weights, the radices and n. A group with no cells gets an empty
-/// sequence. `weights`, `radices` and `(row_cells, cl_cells)` come from
+/// the weights, the radices, `row_groups` (`row_walk_groups`: when > 0 the
+/// row walk balances each group, rows mapped by `row_walk_group` over
+/// `cluster`, which is then `Some`) and n. A group with no cells gets an
+/// empty sequence. `weights`, `radices` and `(row_cells, cl_cells)` come from
 /// `fixed_cell_weights`; `counts` is scratch.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "walk inputs plus caller-owned scratch and output buffers"
+)]
 fn fixed_cell_sequences(
     weights: &[f64],
     radices: &[u32],
     (row_cells, cl_cells): (usize, usize),
+    cluster: Option<&ClusterSpec>,
+    row_groups: usize,
     n: usize,
     counts: &mut Vec<u32>,
     row_seq: &mut Vec<u32>,
@@ -1153,7 +1225,18 @@ fn fixed_cell_sequences(
         .position(|&k| k == 0)
         .unwrap_or(radices.len());
     let (row_counts, cl_counts) = counts.split_at_mut(row_cells);
-    if row_cells > 0 {
+    if let Some(c) = cluster.filter(|_| row_cells > 0 && row_groups > 0) {
+        let nested = nested_grouping(c);
+        walk_cells_by_cluster(
+            &weights[..row_cells],
+            &radices[..sep],
+            row_groups,
+            |i| row_walk_group(c, nested, i),
+            n,
+            row_counts,
+            row_seq,
+        );
+    } else if row_cells > 0 {
         walk_cells(
             &weights[..row_cells],
             &radices[..sep],
@@ -1213,6 +1296,144 @@ fn walk_cells(weights: &[f64], radices: &[u32], n: usize, counts: &mut [u32], se
     }
 }
 
+/// `walk_cells` for rows spread over `groups` interleaved groups, row i in
+/// group c = `group_of(i)` < `groups` (`row_walk_group`: a primary cluster or
+/// a nested child): n steps appended to `seq`.
+///
+/// Read through an interleaved layout, the plain walk aliases: a 50/50
+/// factor alternates by row, so with rows dealt round-robin over an even
+/// number of groups each group only ever gets one level, and a factor meant
+/// to vary within groups becomes a group-level one (likewise whenever the
+/// walk's cycle and the layout's period share a factor). This walk keeps the
+/// plain walk's global bounds and spends the freedom they leave on the row's
+/// group ("cluster" below). With D_g = t·w_g −
+/// count_g the cell deficit at step t, and marginal deficits t·p − m per
+/// factor level:
+/// - a cell whose deficit has reached 1 is taken as `fixed_level_next`
+///   takes it, which bounds the shortfall;
+/// - otherwise only cells with D_g > 0 are eligible, so no cell count ever
+///   exceeds t·w_g by 1 or more and integer cell targets are hit exactly.
+///   For crossed factors, cells whose levels are all below their marginal
+///   targets come first, and among them cells holding a level whose marginal
+///   shortfall has reached 1 (largest such shortfall first).
+///
+/// The remaining choice goes to the cell whose levels are furthest behind
+/// their within-cluster marginal targets, Σ_f (n_c·p_f − m_{c,f}) with n_c
+/// the cluster's rows so far (for one factor: the cell's within-cluster
+/// deficit), then the cell's own within-cluster deficit, then the plain
+/// walk's keys (D_g, then the global marginal score). Exact ties left over
+/// (equal proportions) rotate with the cluster, lowest (g − c) mod cells
+/// first: with as many clusters as cells, a lowest-index tie-break makes the
+/// early clusters take the cells the later ones need, while the rotation
+/// gives a Latin-square order. A cluster with no rows yet has zero
+/// within-cluster keys, so the global keys alone decide.
+///
+/// Over a sweep of 1–3 factors, skewed and equal proportions and 2–30
+/// clusters, cell over-counts stay under 1 and shortfalls under 1.5 (the
+/// plain walk's bounds), so a two-level factor's count is always N·p rounded
+/// one way or the other; equal-proportion crossings keep their marginals
+/// within 1.4 of N·p (plain walk: 1). Each cluster's level counts stay
+/// within about 1 of n_c·p for a two-level or equal-proportion factor and
+/// within a few rows for skewed many-level factors and crossings, where the
+/// plain walk can leave a level out of a cluster entirely. Consumes no RNG
+/// and is prefix-stable, like `walk_cells`.
+fn walk_cells_by_cluster(
+    weights: &[f64],
+    radices: &[u32],
+    groups: usize,
+    group_of: impl Fn(usize) -> usize,
+    n: usize,
+    counts: &mut [u32],
+    seq: &mut Vec<u32>,
+) {
+    let n_cells = weights.len();
+    let crossed = radices.len() > 1;
+    let n_marg: usize = radices.iter().map(|&k| k as usize).sum();
+    let mut marg_p = vec![0.0f64; n_marg];
+    for (cell, &w) in weights.iter().enumerate() {
+        for k in cell_levels(cell, radices) {
+            marg_p[k] += w;
+        }
+    }
+    let mut marg_c = vec![0u32; n_marg];
+    // Nested child ids are parent·n_per_parent + child, so a short prefix can
+    // hold ids past n: size the counters by the group count, not by n.
+    let slots = groups;
+    let mut cl_rows = vec![0u32; slots];
+    let mut cl_marg = vec![0u32; slots * n_marg];
+    let mut cl_cell = vec![0u32; slots * n_cells];
+    let mut marg_def = vec![0.0f64; n_marg];
+    let mut cl_def = vec![0.0f64; n_marg];
+    for i in 0..n {
+        let c = group_of(i);
+        let t = (i + 1) as f64;
+        let n_c = cl_rows[c] as f64;
+        for k in 0..n_marg {
+            marg_def[k] = marg_p[k] * t - marg_c[k] as f64;
+            cl_def[k] = marg_p[k] * n_c - cl_marg[c * n_marg + k] as f64;
+        }
+        let forced = weights
+            .iter()
+            .zip(counts.iter())
+            .any(|(&w, &x)| w * t - x as f64 >= 1.0);
+        let cell = if forced {
+            fixed_level_next(weights, counts, |_, g| {
+                if !crossed {
+                    return 0.0;
+                }
+                cell_levels(g, radices).map(|k| marg_def[k]).sum()
+            })
+        } else {
+            // Lexicographic key, larger wins: [all levels below marginal
+            // target, marginal urgency, within-cluster marginal deficit,
+            // within-cluster cell deficit, D_g, global marginal score,
+            // −rotation].
+            let mut best = usize::MAX;
+            let mut best_key = [f64::NEG_INFINITY; 7];
+            for g in 0..n_cells {
+                let d = weights[g] * t - counts[g] as f64;
+                if d <= 0.0 {
+                    continue;
+                }
+                let (mut below, mut urgent, mut cl_score, mut score) = (true, 0.0, 0.0, 0.0);
+                for k in cell_levels(g, radices) {
+                    below &= marg_def[k] > 0.0;
+                    if marg_def[k] >= 1.0 {
+                        urgent += marg_def[k];
+                    }
+                    cl_score += cl_def[k];
+                    score += marg_def[k];
+                }
+                let cl_cell_def = weights[g] * n_c - cl_cell[c * n_cells + g] as f64;
+                let rotation = (g + n_cells - c % n_cells) % n_cells;
+                let key = [
+                    f64::from(u8::from(below)),
+                    urgent,
+                    cl_score,
+                    cl_cell_def,
+                    d,
+                    if crossed { score } else { 0.0 },
+                    -(rotation as f64),
+                ];
+                if key > best_key {
+                    best = g;
+                    best_key = key;
+                }
+            }
+            debug_assert!(best < n_cells, "deficits sum to 1, so one is positive");
+            counts[best] += 1;
+            best
+        };
+        for k in cell_levels(cell, radices) {
+            marg_c[k] += 1;
+            cl_marg[c * n_marg + k] += 1;
+        }
+        cl_cell[c * n_cells + cell] += 1;
+        cl_rows[c] += 1;
+        seq.push(cell as u32);
+    }
+}
+
 /// Flat marginal index of each factor's level in `cell`: factor f's levels
 /// occupy a block of `radices[f]` slots after the earlier factors' blocks.
 fn cell_levels(cell: usize, radices: &[u32]) -> impl Iterator<Item = usize> + '_ {
@@ -1244,6 +1465,8 @@ fn walk_fixed_allocation(
         &weights,
         &radices,
         split,
+        spec.cluster.as_ref(),
+        row_walk_groups(spec, n_max),
         n_max,
         &mut scratch,
         &mut row_seq,
@@ -1374,7 +1597,6 @@ fn populate_design(
                 .unwrap_or(Distribution::Normal);
         }
         ws.residual_dist_design = spec.residual_dist;
-        ws.residual_df_design = spec.scenario.residual_df;
         ws.tau_squared_design = spec.cluster.as_ref().map(|c| c.tau_squared).unwrap_or(0.0);
         if let Some(c) = spec.cluster.as_ref() {
             for (g, gs) in c.extra_groupings.iter().enumerate() {
@@ -1417,13 +1639,7 @@ fn populate_design(
         &mut scen_rng,
         &mut ws.var_types_design,
     );
-    ws.residual_dist_design = pick_residual(
-        &spec.scenario,
-        spec.residual_dist,
-        spec.residual_pinned,
-        &mut scen_rng,
-    );
-    ws.residual_df_design = spec.scenario.residual_df;
+    ws.residual_dist_design = spec.residual_dist;
     // Effective τ² per sim (D6): base cluster variance plus an optional ICC
     // jitter drawn from the scenario RNG (after the design draws above). Clamped
     // ≥ 0 (D5). No cluster ⇒ 0.0; no jitter ⇒ base τ² (so re_dist=Normal,
@@ -2061,6 +2277,311 @@ mod tests {
                 assert_eq!(pre[0].as_ref(), Some(&realized[0]), "{sizing:?} N={m}");
                 assert_eq!(pre[1].as_ref(), Some(&realized[1]), "{sizing:?} N={m}");
             }
+        }
+    }
+
+    /// `spec` with a random-intercept cluster of `sizing`, generated over n
+    /// rows; `between` lists the dummy columns broadcast per cluster.
+    fn clustered_design(
+        mut spec: SimulationSpec,
+        sizing: crate::spec::ClusterSizing,
+        between: Vec<u32>,
+        n: usize,
+    ) -> (SimulationSpec, SimWorkspace) {
+        spec.estimator = EstimatorSpec::Mle;
+        spec.cluster = Some(crate::spec::ClusterSpec {
+            sizing: sizing.clone(),
+            tau_squared: 0.2,
+            slopes: vec![],
+            extra_groupings: vec![],
+        });
+        spec.between_var_indices = between;
+        let n_pred = 1 + 2 + spec.n_factor_dummies as usize;
+        let mut ws = SimWorkspace::new(
+            n,
+            n_pred,
+            2,
+            spec.factor_n_levels.len(),
+            Some(&engine_contract::ClusterSpec::intercept_only(sizing, 0.25)),
+        );
+        generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
+        (spec, ws)
+    }
+
+    /// Largest |m − n_c·p| over every cluster, every prefix of that
+    /// cluster's rows, and every level of factor `f` (row order, level read
+    /// off the reference-coded dummies).
+    fn within_cluster_dev(spec: &SimulationSpec, ws: &SimWorkspace, n: usize, f: usize) -> f64 {
+        let col: usize = 1
+            + spec.n_non_factor as usize
+            + spec.factor_n_levels[..f]
+                .iter()
+                .map(|&k| k as usize - 1)
+                .sum::<usize>();
+        let k = spec.factor_n_levels[f] as usize;
+        let off: usize = spec.factor_n_levels[..f].iter().map(|&k| k as usize).sum();
+        let props = &spec.factor_proportions[off..off + k];
+        let n_cl = 1 + (0..n).map(|i| ws.cluster_ids[i] as usize).max().unwrap();
+        let mut counts = vec![vec![0u32; k]; n_cl];
+        let mut worst = 0.0f64;
+        for i in 0..n {
+            let c = ws.cluster_ids[i] as usize;
+            let lvl = (1..k)
+                .find(|&l| ws.x_full[(i, col + l - 1)] == 1.0)
+                .unwrap_or(0);
+            counts[c][lvl] += 1;
+            let rows: u32 = counts[c].iter().sum();
+            for (l, &m) in counts[c].iter().enumerate() {
+                worst = worst.max((m as f64 - rows as f64 * props[l]).abs());
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn row_level_fixed_factor_varies_within_fixed_clusters() {
+        // FixedClusters puts row i in cluster i % G. The plain walk gives a
+        // 50/50 factor level i % 2, which for an even G would hold every
+        // cluster at one level and turn the within-cluster factor into a
+        // between-cluster one. The cluster-aware walk alternates within each
+        // cluster: its level-1 count stays within 0.5 of n_c/2 at every
+        // cluster prefix, so both levels appear once a cluster has two rows.
+        use crate::spec::ClusterSizing;
+        for g in [2u32, 4, 6, 10] {
+            let n = 12 * g as usize;
+            let spec = ols_spec_2x(1, vec![2], vec![0.5, 0.5]);
+            let sizing = ClusterSizing::FixedClusters { n_clusters: g };
+            let (spec, ws) = clustered_design(spec, sizing, vec![], n);
+            let dev = within_cluster_dev(&spec, &ws, n, 0);
+            assert!(dev <= 0.5, "G={g}: within-cluster deviation {dev}");
+            assert_eq!(
+                realized_level_counts(&spec, &ws, n)[0],
+                vec![n as u32 / 2; 2],
+                "G={g}: overall split stays exact"
+            );
+        }
+    }
+
+    #[test]
+    fn fixed_clusters_spread_levels_when_cycle_and_cluster_count_share_a_factor() {
+        // The walk's cycle (cells for equal proportions, 10 for 70/30) and
+        // the cluster count share a factor without one dividing the other,
+        // or coincide: the plain walk gives each cluster a fixed subset of
+        // levels (deviation grows with n), the cluster-aware walk keeps
+        // every cluster near n_c·p. Bounds are the measured deviations,
+        // tight to this walk. The last case mixes in a cluster-level factor
+        // (factor 0), which walks clusters separately and leaves the
+        // row-level factor's balance alone. Preflight counts still equal the
+        // generated ones.
+        use crate::spec::ClusterSizing;
+        let cases = [
+            (vec![4], vec![0.25; 4], 6, vec![], vec![(0, 1.25)]),
+            (vec![6], vec![1.0 / 6.0; 6], 4, vec![], vec![(0, 7.0 / 6.0)]),
+            (vec![2], vec![0.7, 0.3], 10, vec![], vec![(0, 0.9)]),
+            (
+                vec![2, 3],
+                vec![0.5, 0.5, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+                4,
+                vec![],
+                vec![(0, 1.0), (1, 5.0 / 3.0)],
+            ),
+            (vec![2, 2], vec![0.5; 4], 10, vec![3], vec![(1, 0.5)]),
+        ];
+        for (levels, props, g, between, bounds) in cases {
+            let n = 120 * g as usize;
+            let n_dummies: i32 = levels.iter().map(|k| k - 1).sum();
+            let spec = ols_spec_2x(n_dummies as u32, levels.clone(), props);
+            let sizing = ClusterSizing::FixedClusters { n_clusters: g };
+            let (spec, ws) = clustered_design(spec, sizing, between, n);
+            for (f, bound) in bounds {
+                let dev = within_cluster_dev(&spec, &ws, n, f);
+                assert!(
+                    dev <= bound + 1e-9,
+                    "{levels:?} G={g}: factor {f} within-cluster deviation {dev} > {bound}"
+                );
+            }
+            for m in [1, 7, g as usize + 3, n] {
+                let realized = realized_level_counts(&spec, &ws, m);
+                let pre = fixed_allocation_counts(&spec, m);
+                for f in 0..levels.len() {
+                    assert_eq!(
+                        pre[f].as_ref(),
+                        Some(&realized[f]),
+                        "{levels:?} G={g} N={m}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Generate a 50/50 row-level factor over n rows of a design whose primary
+    /// grouping has `sizing` and one `NestedWithin { n_per_parent: 2 }` child
+    /// grouping, then assert that every child (ids from `extra_level_of_row`)
+    /// holds both levels with a level-1 count within 0.5 of half its rows at
+    /// every prefix of that child, and that the preflight replay
+    /// (`fixed_allocation_counts`) still equals the generated counts.
+    fn assert_factor_varies_within_nested_children(sizing: crate::spec::ClusterSizing, n: usize) {
+        use engine_contract::{GroupingRelation, GroupingSpec};
+        let mut spec = ols_spec_2x(1, vec![2], vec![0.5, 0.5]);
+        spec.estimator = EstimatorSpec::Mle;
+        let mut cluster = crate::spec::ClusterSpec::intercept_only(sizing.clone(), 0.2);
+        cluster.extra_groupings = vec![GroupingSpec {
+            relation: GroupingRelation::NestedWithin { n_per_parent: 2 },
+            tau_squared: 0.1,
+            slopes: vec![],
+        }];
+        spec.cluster = Some(cluster.clone());
+        let mut ws = SimWorkspace::new(n, 4, 2, 1, Some(&cluster));
+        generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
+        let mut counts = vec![[0u32; 2]; cluster.extra_n_levels_at(0, n)];
+        for i in 0..n {
+            let child = cluster.extra_level_of_row(0, i);
+            counts[child][usize::from(ws.x_full[(i, 3)] == 1.0)] += 1;
+            let [c0, c1] = counts[child];
+            let dev = (c1 as f64 - (c0 + c1) as f64 / 2.0).abs();
+            assert!(dev <= 0.5, "{sizing:?} row {i}: child {child} at {c0}/{c1}");
+        }
+        for (child, c) in counts.iter().enumerate() {
+            assert!(
+                c[0] > 0 && c[1] > 0,
+                "{sizing:?}: child {child} holds one level ({c:?})"
+            );
+        }
+        for m in [1, 7, n / 2, n] {
+            let realized = realized_level_counts(&spec, &ws, m);
+            let pre = fixed_allocation_counts(&spec, m);
+            assert_eq!(pre[0].as_ref(), Some(&realized[0]), "{sizing:?} N={m}");
+        }
+    }
+
+    #[test]
+    fn row_level_factor_varies_within_nested_children() {
+        // FixedClusters, 4 schools with 2 classes each (atom 8), N = 5 atoms.
+        // Rows join schools round-robin and classes alternate within a school,
+        // so a walk balanced per school alone gives each class one level of a
+        // 50/50 factor, making a within-class factor a class-level treatment.
+        use crate::spec::ClusterSizing;
+        assert_factor_varies_within_nested_children(
+            ClusterSizing::FixedClusters { n_clusters: 4 },
+            8 * 5,
+        );
+    }
+
+    #[test]
+    fn row_level_factor_varies_within_nested_children_fixed_size() {
+        // FixedSize, 10 rows per school with 2 classes (atom 10), N = 5 atoms.
+        // Classes alternate within each contiguous school block, which the
+        // plain walk's alternation of a 50/50 factor matches exactly.
+        use crate::spec::ClusterSizing;
+        assert_factor_varies_within_nested_children(
+            ClusterSizing::FixedSize { cluster_size: 10 },
+            10 * 5,
+        );
+    }
+
+    #[test]
+    fn cluster_aware_walk_keeps_global_bounds() {
+        // The cluster-aware row walk keeps the plain walk's global bounds at
+        // every prefix — no cell over its target by 1 or more, shortfall
+        // under 1.5 — over skewed and balanced proportion sets and several
+        // cluster counts; equal-proportion crossings keep every marginal
+        // within 1.4 of N·p (the plain walk: within 1).
+        let mut rng = SimRng::new(2137, 0);
+        let shapes = [
+            &[2usize][..],
+            &[5],
+            &[2, 2],
+            &[3, 4],
+            &[2, 3, 5],
+            &[4, 4, 4],
+        ];
+        for shape in shapes {
+            let radices: Vec<u32> = shape.iter().map(|&k| k as u32).collect();
+            for rep in 0..9 {
+                // Rep 8 is equal proportions; exponents 1, 3, 5, 7 skew the
+                // level weights more on later reps.
+                let mut cells = vec![1.0f64];
+                for &k in shape {
+                    let skew = 1 + (rep % 4) * 2;
+                    let w: Vec<f64> = (0..k)
+                        .map(|_| {
+                            if rep == 8 {
+                                1.0
+                            } else {
+                                (rng.next_uniform() as f64).powi(skew) + 1e-3
+                            }
+                        })
+                        .collect();
+                    let t: f64 = w.iter().sum();
+                    cells = w
+                        .iter()
+                        .flat_map(|&p| cells.iter().map(move |&c| c * p / t))
+                        .collect();
+                }
+                let cells = norm(&cells);
+                let mut marg_p = vec![0.0f64; shape.iter().sum()];
+                for (cell, &w) in cells.iter().enumerate() {
+                    for k in cell_levels(cell, &radices) {
+                        marg_p[k] += w;
+                    }
+                }
+                for groups in [2usize, 3, 4, 6, 10, 30] {
+                    let n = 600;
+                    let mut counts = vec![0u32; cells.len()];
+                    let mut seq = Vec::new();
+                    walk_cells_by_cluster(
+                        &cells,
+                        &radices,
+                        groups,
+                        |i| i % groups,
+                        n,
+                        &mut counts,
+                        &mut seq,
+                    );
+                    let mut c = vec![0u32; cells.len()];
+                    let mut m = vec![0u32; marg_p.len()];
+                    for (i, &cell) in seq.iter().enumerate() {
+                        c[cell as usize] += 1;
+                        for k in cell_levels(cell as usize, &radices) {
+                            m[k] += 1;
+                        }
+                        let t = (i + 1) as f64;
+                        for (g, &x) in c.iter().enumerate() {
+                            let dev = x as f64 - t * cells[g];
+                            assert!(dev < 1.0, "over {dev} at N={t}, {shape:?} G={groups}");
+                            assert!(dev > -1.5, "short {dev} at N={t}, {shape:?} G={groups}");
+                        }
+                        if rep == 8 {
+                            for (k, &x) in m.iter().enumerate() {
+                                let dev = (x as f64 - t * marg_p[k]).abs();
+                                assert!(dev <= 1.4 + 1e-9, "marginal {dev}, {shape:?} G={groups}");
+                            }
+                        }
+                    }
+                    assert_eq!(c, counts, "walk counts match its sequence");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_size_row_walk_is_the_plain_walk() {
+        // FixedSize clusters are contiguous row blocks, which the plain walk
+        // already balances, so a row-level fixed factor keeps the plain
+        // fixed_level_next sequence there.
+        use crate::spec::ClusterSizing;
+        let props = [0.2, 0.3, 0.5];
+        let w = norm(&props);
+        let mut walk_counts = [0u32; 3];
+        let walk: Vec<usize> = (0..60)
+            .map(|_| fixed_level_next(&w, &mut walk_counts, |_, _| 0.0))
+            .collect();
+        let spec = ols_spec_2x(2, vec![3], props.to_vec());
+        let sizing = ClusterSizing::FixedSize { cluster_size: 5 };
+        let (_, ws) = clustered_design(spec, sizing, vec![], 60);
+        for (i, &lvl) in walk.iter().enumerate() {
+            let got = (1..3).find(|&l| ws.x_full[(i, 2 + l)] == 1.0).unwrap_or(0);
+            assert_eq!(got, lvl, "row {i}");
         }
     }
 
@@ -3930,11 +4451,11 @@ mod tests {
         );
     }
 
-    /// Stage-2 batched residuals: HighKurtosis t(5) → var≈1, symmetric;
-    /// RightSkewed χ²(5) → var≈1, positive skew; LeftSkewed mirrors; Uniform
+    /// Stage-2 batched residuals: HighKurtosis t(10) → var≈1, symmetric;
+    /// RightSkewed χ²(10) → var≈1, positive skew; LeftSkewed mirrors; Uniform
     /// U(−√3,√3) → var≈1, symmetric. 50k draws → var SE ≈ 0.9%; the skew
     /// gates are intentionally loose (0.15 ≈ 14·SE for symmetry, 0.3 ≈ a
-    /// quarter of χ²(5)'s population skew √(8/5)≈1.26) — they catch
+    /// third of χ²(10)'s population skew √(8/10) ≈ 0.89), so they catch
     /// slot/formula mix-ups, not calibration drift.
     #[test]
     fn batched_t_and_chi2_residuals_have_unit_variance_and_correct_shape() {
@@ -3946,7 +4467,6 @@ mod tests {
         ] {
             let mut spec = ols_spec_2x(0, vec![], vec![]);
             spec.residual_dist = dist;
-            spec.scenario.residual_df = 5.0;
             let max_n = 50_000usize;
             let mut ws = SimWorkspace::new(max_n, 3, 2, 0, None);
             generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
@@ -3971,6 +4491,76 @@ mod tests {
                 assert!(skew.abs() < 0.15, "{dist:?} skew={skew}");
             } else {
                 assert!(skew * want_skew_sign > 0.3, "{dist:?} skew={skew}");
+            }
+        }
+    }
+
+    /// A non-normal residual draws at df 10 on both data-gen paths: the
+    /// optimistic fast path (default scenario) and the scenario path. Each is
+    /// compared bit for bit with a reference built from the same CLASS_RESID
+    /// slots in the kernel's f64 order.
+    #[test]
+    fn non_normal_residual_uses_fixed_df_10_on_every_path() {
+        let max_n = 64usize;
+        let key = SimRng::new(2137, 0).key();
+        let mut words = vec![0u32; max_n];
+        let mut tail = Vec::new();
+        let mut slot = |s: u32| {
+            let mut out = vec![0.0f32; max_n];
+            fill_normal_column(key, CLASS_RESID, s, &mut words, &mut tail, &mut out);
+            out
+        };
+        let slots: Vec<Vec<f32>> = (0..=10).map(&mut slot).collect();
+        let sum_sq = |range: std::ops::RangeInclusive<usize>, i: usize| -> f64 {
+            let mut acc = 0.0f64;
+            for s in range {
+                let g = slots[s][i] as f64;
+                acc += g * g;
+            }
+            acc
+        };
+        for dist in [
+            ResidualDist::HighKurtosis,
+            ResidualDist::RightSkewed,
+            ResidualDist::LeftSkewed,
+        ] {
+            let reference: Vec<f32> = (0..max_n)
+                .map(|i| match dist {
+                    ResidualDist::HighKurtosis => {
+                        let z = slots[0][i] as f64;
+                        let acc = sum_sq(1..=10, i);
+                        ((z / (acc / 10.0).sqrt()) * (1.0 / (10.0f64 / 8.0).sqrt())) as f32
+                    }
+                    _ => {
+                        let sign = if matches!(dist, ResidualDist::LeftSkewed) {
+                            -1.0
+                        } else {
+                            1.0
+                        };
+                        let acc = sum_sq(0..=9, i);
+                        (sign * (acc - 10.0) * (1.0 / 20.0f64.sqrt())) as f32
+                    }
+                })
+                .collect();
+
+            let mut opt = ols_spec_simple();
+            opt.residual_dist = dist;
+            let mut scen = opt.clone();
+            scen.scenario = ScenarioPerturbations {
+                name: "doomer".into(),
+                correlation_noise_sd: 0.4,
+                ..Default::default()
+            };
+            for (path, spec) in [("optimistic", &opt), ("scenario", &scen)] {
+                let mut ws = SimWorkspace::new(max_n, 3, 2, 0, None);
+                generate_sim_data(spec, 0, 2137, &mut ws).unwrap();
+                for (i, (got, want)) in ws.residuals[..max_n].iter().zip(&reference).enumerate() {
+                    assert_eq!(
+                        got.to_bits(),
+                        want.to_bits(),
+                        "{dist:?} on the {path} path, row {i}: {got} vs {want}"
+                    );
+                }
             }
         }
     }

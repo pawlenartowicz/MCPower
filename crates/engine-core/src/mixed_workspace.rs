@@ -71,36 +71,19 @@ pub(crate) fn cluster_to_model_spec(
         extra_slope_cols.is_empty() || extra_slope_cols.len() == c.extra_groupings.len(),
         "extra_slope_cols must line up 1:1 with ClusterSpec.extra_groupings"
     );
-    glmm::ModelSpec {
-        family,
-        re: Some(glmm::ReStructure {
-            sizing: match c.sizing {
-                engine_contract::ClusterSizing::FixedClusters { n_clusters } => {
-                    glmm::Sizing::FixedClusters { n_clusters }
-                }
-                engine_contract::ClusterSizing::FixedSize { cluster_size } => {
-                    glmm::Sizing::FixedSize { cluster_size }
-                }
-            },
-            slopes: primary_slope_cols.to_vec(),
-            extra_groupings: c
-                .extra_groupings
-                .iter()
-                .enumerate()
-                .map(|(i, g)| glmm::Grouping {
-                    relation: match g.relation {
-                        engine_contract::GroupingRelation::Crossed { n_clusters } => {
-                            glmm::GroupingRelation::Crossed { n_clusters }
-                        }
-                        engine_contract::GroupingRelation::NestedWithin { n_per_parent } => {
-                            glmm::GroupingRelation::NestedWithin { n_per_parent }
-                        }
-                    },
-                    slopes: extra_slope_cols.get(i).cloned().unwrap_or_default(),
-                })
-                .collect(),
-        }),
+    // Topology only: glmm derives every level count (primary clusters, crossed
+    // levels, children per parent) from the `GroupIds` a workspace is built
+    // with, so the contract's sizing and per-grouping counts are not carried.
+    let mut re = glmm::ReStructure::intercept().slopes(primary_slope_cols.iter().copied());
+    for (i, g) in c.extra_groupings.iter().enumerate() {
+        let grouping = match g.relation {
+            engine_contract::GroupingRelation::Crossed { .. } => glmm::Grouping::crossed(),
+            engine_contract::GroupingRelation::NestedWithin { .. } => glmm::Grouping::nested(),
+        };
+        let slopes = extra_slope_cols.get(i).map_or(&[][..], Vec::as_slice);
+        re = re.extra(grouping.slopes(slopes.iter().copied()));
     }
+    glmm::ModelSpec::mixed(family, re)
 }
 
 /// The DGP-truth warm-start θ (RE Cholesky parameters) in the kernel's
@@ -186,27 +169,30 @@ pub(crate) fn wald_se_to_glmm(wald_se: engine_contract::WaldSe) -> glmm::WaldSe 
 }
 
 /// The `fit_on` options for one spec: glmm's defaults plus the spec's `wald_se`
-/// and `nagq`, with the caller's target set (the full one for the batch
-/// workspace, a reduced one for the cold reduced/exclusion fits).
+/// and `nagq`, with SEs for the caller's target set only (the full one for the
+/// batch workspace, a reduced one for the cold reduced/exclusion fits).
 pub(crate) fn fit_options(spec: &SimulationSpec, target_indices: Vec<u32>) -> glmm::FitOptions {
     let mut opts = glmm::FitOptions::default();
-    opts.target_indices = target_indices;
+    opts.se_for = glmm::SeFor::Only(target_indices);
     opts.wald_se = wald_se_to_glmm(spec.wald_se);
     opts.nagq = spec.nagq;
     opts
 }
 
-/// The per-grid-point `fit_on` inputs for one mixed-model batch: a workspace and
-/// the level ids for every sample-size grid point, plus the frozen options each
-/// call must present unchanged. `None` for OLS / unclustered GLM, which never
-/// reach `fit_on`.
+/// The per-grid-point `fit_on` inputs for one mixed-model batch: a workspace
+/// for every sample-size grid point, the raw level ids each one was built with,
+/// and the frozen options each call must present unchanged. `None` for OLS /
+/// unclustered GLM, which never reach `fit_on`.
 ///
-/// **One workspace per grid point, not one per batch.** `fit_on` pins the primary
-/// cluster count at build and hard-panics when a draw's count differs. A
-/// `FixedClusters` design holds that count constant across the grid, but a
-/// `FixedSize` design grows it with N, so a single `n_max` workspace would panic
-/// at every smaller-N point. Building per point covers both uniformly — K
-/// allocations at batch entry, dwarfed by the `n_sims` inner loop.
+/// **One workspace per grid point, not one per batch.** A workspace keeps the
+/// ids it was built with and fits exactly those `n` rows, so every grid point
+/// needs its own (a `FixedSize` design also grows the primary cluster count
+/// with N). K allocations at batch entry, dwarfed by the `n_sims` inner loop.
+///
+/// The ids come back in declaration order (primary, then extras as declared),
+/// as `build_workspace` takes them, for the cold reduced/exclusion fits that
+/// build a one-shot workspace on the same rows. The hot `fit_on` calls never
+/// pass them: the workspace owns its (possibly reordered) copy.
 ///
 /// Unlike the retired `build_lmm_workspace`, this does NOT exempt the degenerate
 /// single-intercept LMM: the scalar Brent path is gone, so every clustered `Mle`
@@ -243,12 +229,11 @@ pub fn build_mixed_workspaces(
         }
         _ => n_predictors,
     };
-    // Frozen across the batch: `fit_on` asserts nagq / weights-presence /
-    // offset-presence / parallel_inner match the build. `target_indices` is NOT
-    // frozen (it only sizes the OLS/GLM scratch, unused by the mixed arms), so the
-    // cold reduced fits may vary it on their own workspace. nagq's eligibility
-    // backstop ran in validate() — mirrors glmm's `assert_model_shape`, change
-    // together.
+    // Frozen across the batch: `fit_on` asserts nagq, the resolved REML
+    // criterion, parallel_inner and the NUMBER of SE columns match the build.
+    // The SE columns themselves may change per call, so a reduced fit on this
+    // workspace may present its remapped target set of the same length. nagq's
+    // eligibility backstop ran in validate().
     let opts = fit_options(spec, spec.target_indices.clone());
     let model = cluster_to_model_spec(
         cluster,
@@ -262,19 +247,15 @@ pub fn build_mixed_workspaces(
         let n = n as usize;
         // Structural and invariant across sims (`SimWorkspace::new` fills them
         // once), so the ids are materialized here per grid point rather than
-        // rebuilt on every draw.
-        let ids = glmm::GroupIds {
-            primary: cluster_ids[..n].to_vec(),
-            extra: extra_grouping_ids.iter().map(|v| v[..n].to_vec()).collect(),
-        };
-        // `build_workspace` requires a spec whose RE level counts already match
-        // the data; reuse glmm's own normalizer instead of reimplementing the
-        // crossed/nested count derivation.
-        let (sized, sized_ids, perm) = glmm::loop_advanced::spec_sized_from_ids_pub(&model, &ids);
+        // rebuilt on every draw. glmm derives the level counts from them.
+        let mut ids = glmm::GroupIds::new(cluster_ids[..n].to_vec());
+        for v in extra_grouping_ids {
+            ids = ids.extra(v[..n].to_vec());
+        }
         workspaces.push(glmm::loop_advanced::build_workspace(
-            &sized, perm, n, p, &opts,
+            &model, &ids, n, p, &opts,
         ));
-        ids_per_point.push(sized_ids.into_owned());
+        ids_per_point.push(ids);
     }
     Some((workspaces, ids_per_point, opts))
 }
@@ -284,10 +265,11 @@ mod tests {
     use super::*;
 
     /// `cluster_to_model_spec` must reproduce every structural field the `glmm`
-    /// kernels read — sizing, slope column ids, and the extra groupings
-    /// (relation/slope column ids) — plus thread the caller-supplied `family`
-    /// straight through. Pins the cross-crate conversion the carve relies on
-    /// (nothing else enforces it).
+    /// kernels read: the slope column ids and the extra groupings (relation and
+    /// slope column ids), plus thread the caller-supplied `family` straight
+    /// through. Level counts are not in the spec (glmm reads them off the ids).
+    /// Pins the cross-crate conversion the carve relies on (nothing else
+    /// enforces it).
     #[test]
     fn cluster_to_model_spec_round_trips_every_field() {
         let c = engine_contract::ClusterSpec {
@@ -331,23 +313,13 @@ mod tests {
         // through verbatim rather than re-read off the ClusterSpec.
         let m = cluster_to_model_spec(&c, glmm::Family::Gaussian, &[4, 5], &[vec![], vec![6]]);
 
-        let expected = glmm::ModelSpec {
-            family: glmm::Family::Gaussian,
-            re: Some(glmm::ReStructure {
-                sizing: glmm::Sizing::FixedClusters { n_clusters: 30 },
-                slopes: vec![4, 5],
-                extra_groupings: vec![
-                    glmm::Grouping {
-                        relation: glmm::GroupingRelation::Crossed { n_clusters: 12 },
-                        slopes: vec![],
-                    },
-                    glmm::Grouping {
-                        relation: glmm::GroupingRelation::NestedWithin { n_per_parent: 4 },
-                        slopes: vec![6],
-                    },
-                ],
-            }),
-        };
+        let expected = glmm::ModelSpec::mixed(
+            glmm::Family::Gaussian,
+            glmm::ReStructure::intercept()
+                .slopes([4, 5])
+                .extra(glmm::Grouping::crossed())
+                .extra(glmm::Grouping::nested().slopes([6])),
+        );
         assert_eq!(m, expected);
     }
 

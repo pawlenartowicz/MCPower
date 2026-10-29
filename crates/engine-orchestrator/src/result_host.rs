@@ -207,6 +207,14 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
             HostValue::VecU64(grid.iter().map(|pr| in_unit(pr.n) as u64).collect()),
         ),
         (
+            "estimator_extras",
+            HostValue::Seq(
+                grid.iter()
+                    .map(|pr| estimator_extras_to_host(&pr.estimator_extras))
+                    .collect(),
+            ),
+        ),
+        (
             "first_achieved",
             HostValue::IndexMap(
                 ssr.first_achieved
@@ -295,6 +303,22 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
                 rows: bh_rows,
                 cols: bh_cols,
             },
+        ),
+        (
+            "overall_significant_rate",
+            HostValue::Seq(
+                grid.iter()
+                    .map(|pr| HostValue::OptF64(pr.overall_significant_rate))
+                    .collect(),
+            ),
+        ),
+        (
+            "overall_significant_ci",
+            HostValue::Seq(
+                grid.iter()
+                    .map(|pr| HostValue::OptCi(pr.overall_significant_ci))
+                    .collect(),
+            ),
         ),
         (
             "fitted",
@@ -734,6 +758,7 @@ mod tests {
                 "convergence_rate",
                 "sample_sizes",
                 "sample_sizes_unit",
+                "estimator_extras",
                 "first_achieved",
                 "first_achieved_unit",
                 "success_count_histogram_uncorrected",
@@ -748,6 +773,8 @@ mod tests {
                 "target_power",
                 "scenario",
                 "boundary_hit",
+                "overall_significant_rate",
+                "overall_significant_ci",
                 "fitted",
                 "fitted_joint",
                 "fitted_overall",
@@ -801,6 +828,43 @@ mod tests {
                 other => panic!("block not IndexMap: {other:?}"),
             },
             other => panic!("posthoc_fitted not Seq: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sample_size_host_projects_per_n_extras_and_overall() {
+        let mut ssr = sample_ssr();
+        ssr.grid_or_trace[1].overall_significant_rate = None;
+        ssr.grid_or_trace[1].overall_significant_ci = None;
+        let hv = sample_size_result_to_host(&ssr, "opt");
+        match field(&hv, "estimator_extras") {
+            HostValue::Seq(items) => {
+                assert_eq!(items.len(), 2);
+                assert!(matches!(
+                    field(&items[1], "estimator"),
+                    HostValue::Str(s) if s == "ols"
+                ));
+            }
+            other => panic!("estimator_extras not Seq: {other:?}"),
+        }
+        match field(&hv, "overall_significant_rate") {
+            HostValue::Seq(items) => {
+                assert_eq!(items.len(), 2);
+                assert!(matches!(items[0], HostValue::OptF64(Some(r)) if r == 0.9));
+                assert!(matches!(items[1], HostValue::OptF64(None)));
+            }
+            other => panic!("overall_significant_rate not Seq: {other:?}"),
+        }
+        match field(&hv, "overall_significant_ci") {
+            HostValue::Seq(items) => {
+                assert_eq!(items.len(), 2);
+                assert!(matches!(
+                    items[0],
+                    HostValue::OptCi(Some(Ci { lo, hi })) if lo == 0.8 && hi == 0.95
+                ));
+                assert!(matches!(items[1], HostValue::OptCi(None)));
+            }
+            other => panic!("overall_significant_ci not Seq: {other:?}"),
         }
     }
 

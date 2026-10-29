@@ -135,8 +135,31 @@ export function detectColumnTypes(
 // csvDataFromParsed — produces the wire CsvData shape from parsed CSV
 // ---------------------------------------------------------------------------
 
+const MISSING_CELL = /^\s*(|NA|NaN|nan|na)\s*$/;
+
+function missingCellError(column: string): Error {
+    return new Error(
+        `Uploaded data contains missing values in column: ${column}. Remove or impute missing values before uploading.`,
+    );
+}
+
+/** Parse a numeric/binary cell; throws on a missing or non-finite value. */
+function numericCell(cell: string, column: string): number {
+    const n = Number(cell);
+    if (MISSING_CELL.test(cell) || Number.isNaN(n)) {
+        throw missingCellError(column);
+    }
+    if (!Number.isFinite(n)) {
+        throw new Error(
+            `Uploaded data contains Inf values in column: ${column}. Remove or replace infinite values before uploading.`,
+        );
+    }
+    return n;
+}
+
 /** Build a CsvData from a parsed CSV and a chosen mode.
  * Uses UPLOAD config for max_factor_k_soft and max_factor_ratio.
+ * Throws when any column has a missing cell, or a continuous or binary column a non-finite one.
  */
 export function csvDataFromParsed(parsed: ParsedCsv, mode: UploadMode): CsvData {
     const { header, columns, nRows } = parsed;
@@ -157,12 +180,12 @@ export function csvDataFromParsed(parsed: ParsedCsv, mode: UploadMode): CsvData 
             // Encode values as 0-indexed level codes (labels[code] = level string).
             const codeMap = new Map(labels.map((lv, idx) => [lv, idx]));
             const values = rawCol.map((cell) => {
+                if (MISSING_CELL.test(cell)) throw missingCellError(name);
                 // For numeric factor columns, valueToLabel normalises the cell first.
                 const n = Number(cell);
                 const labelKey = (!Number.isNaN(n) && Number.isFinite(n))
                     ? valueToLabel(cell)
                     : String(cell);
-                // Phase-1 intentional: missing/unknown cells fall to code 0 (first level), mirroring Python.
                 return codeMap.get(labelKey) ?? 0;
             });
             return { name, col_type: 'factor', values, labels };
@@ -170,18 +193,13 @@ export function csvDataFromParsed(parsed: ParsedCsv, mode: UploadMode): CsvData 
 
         if (colType === 'binary') {
             // Encode as 0/1: map the two distinct values to 0 and 1 (lower → 0).
-            const floatVals = rawCol.map((cell) => Number(cell));
-            const distinct = [...new Set(floatVals.filter((v) => !Number.isNaN(v)))].sort((a, b) => a - b);
-            const zeroVal = distinct[0] ?? 0;
+            const floatVals = rawCol.map((cell) => numericCell(cell, name));
+            const zeroVal = floatVals.reduce((a, b) => (b < a ? b : a), Infinity);
             const values = floatVals.map((v) => (v === zeroVal ? 0 : 1));
             return { name, col_type: 'binary', values, labels: [] };
         }
 
-        // continuous — raw numeric values (missing → 0 as a safe sentinel; engine will handle)
-        const values = rawCol.map((cell) => {
-            const n = Number(cell);
-            return Number.isNaN(n) ? 0 : n;
-        });
+        const values = rawCol.map((cell) => numericCell(cell, name));
         return { name, col_type: 'continuous', values, labels: [] };
     });
 

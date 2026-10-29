@@ -25,5 +25,8 @@ fn adapter_to_spec_error(e: AdapterError) -> SpecError {
             "TestTarget::Joint {got:?} unsupported by current engine"
         )),
         AdapterError::ContractInvalid(msg) => SpecError::InternalContractValidate(msg),
+        e @ AdapterError::TestInteractionNotGenerated { .. } => {
+            SpecError::InternalContractValidate(e.to_string())
+        }
     }
 }

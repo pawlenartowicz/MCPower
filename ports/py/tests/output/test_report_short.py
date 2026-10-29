@@ -191,3 +191,15 @@ def test_sample_size_short_form_shows_specific_achieved_n():
     assert re.search(r"(?<!≥ )\b[1-9][0-9]+\b", required_n_section), (
         f"No concrete N found in Required N column — all cells may be showing '≥ ceiling'. Rendered output:\n{s}"
     )
+
+
+def test_or_column_follows_beta_column_when_interaction_precedes_main_effect():
+    """`x1 + x1:x2 + x2` orders β columns [x1, x2, x1:x2]; each row's OR must be
+    exp of its own effect, not of the effect next to it in formula order."""
+    m = (MCPower("y = x1 + x1:x2 + x2", family="logit")
+         .set_baseline_probability(0.3)
+         .set_effects("x1=0.0, x1:x2=1.386, x2=0.405"))
+    r = m.find_power(300, n_sims=50, progress_callback=False, verbose=False)
+    cells = {ln.split()[0]: ln.split() for ln in str(r).splitlines() if ln.strip()}
+    assert cells["x2"][2] == "1.50"
+    assert cells["x1:x2"][2] == "4.00"

@@ -27,6 +27,7 @@
     "baseline_p_warn": [0.05, 0.95],
     "factor_levels": [2, 20],
     "min_clusters": 5,
+    "glmm_reliable_clusters": 20,
     "min_rows_per_cluster": 2,
     "reliable_rows_per_cluster": 5,
     "recommended_rows_per_cluster": 10,

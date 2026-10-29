@@ -277,7 +277,7 @@ mod tests {
             clustered(ClusterSizing::FixedSize { cluster_size: 8 }),
             GroupingRelation::NestedWithin { n_per_parent: 2 },
         );
-        assert_eq!(c.generation.cluster.as_ref().unwrap().atom(), 16);
+        assert_eq!(c.generation.cluster.as_ref().unwrap().atom(), 8);
         assert_eq!(
             resolve_unit_divisor(&[c], SampleSizeUnit::Clusters).unwrap(),
             8

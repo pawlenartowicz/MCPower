@@ -91,6 +91,8 @@ fn sample_logit_spec_for_driver() -> AppSpec {
         wald_se: Default::default(),
         scenarios: vec![],
         csv: None,
+        report_overall: false,
+        contrasts: vec![],
         baseline_probability: 0.3,
         link: Default::default(),
         test_formula: None,

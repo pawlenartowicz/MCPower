@@ -22,7 +22,7 @@ import { startRun } from '$lib/run/run';
 import { runStore } from '$lib/stores/run.svelte';
 import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
 import { SELECTABLE_FAMILIES } from '$lib/domain/family';
-import { unitNoun } from '$lib/domain/unit-label';
+import { powerNToObservations, unitNoun } from '$lib/domain/unit-label';
 import { SIMULATION } from '$lib/configs/app-config';
 
 // collapsed (mobile only): hide the scenarios toggle on scroll-down, like the family
@@ -100,7 +100,7 @@ async function onFindPower() {
   const spec = adaptResult?.spec;
   if (!spec) return;
   const cfg = familyStore.byFamily[familyStore.active];
-  await runStore.startFindPower(spec, cfg.findPower.n);
+  await runStore.startFindPower(spec, powerNToObservations(spec, cfg.findPower.n));
 }
 
 async function onFindSample() {

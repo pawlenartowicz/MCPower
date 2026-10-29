@@ -223,6 +223,23 @@ def test_find_power_glmm_emits_laplace_warning(monkeypatch):
     assert any("Laplace-approximation bias" in str(w.message) for w in record)
 
 
+def test_find_sample_size_glmm_emits_laplace_warning():
+    """find_sample_size reads the per-N estimator extras: a high-ICC logit GLMM
+    with small clusters (120//20 = 6 obs/cluster at the lower bound) gets the
+    Laplace-bias warning and the matching summary diagnostic."""
+    m = (
+        MCPower("y ~ x + (1|group)", family="logit")
+        .set_effects("x=0.5")
+        .set_baseline_probability(0.3)
+        .set_cluster("group", ICC=0.3, n_clusters=20)  # τ² ≈ 1.41 > threshold 1.0
+    )
+    with pytest.warns(UserWarning) as record:
+        r = m.find_sample_size(from_size=120, to_size=180, by=60, n_sims=100,
+                               progress_callback=False, verbose=False)
+    assert any("Laplace-approximation bias" in str(w.message) for w in record)
+    assert "Laplace-approximation bias" in str(r.summary())
+
+
 def test_find_power_glmm_no_warning_when_tau_low(monkeypatch):
     """find_power does not warn when τ̂² is below threshold."""
     from mcpower import _engine as eng
@@ -327,6 +344,22 @@ def test_glmm_end_to_end_find_power():
     )
     tau_hat = extras["tau_squared_hat_mean"]
     assert isinstance(tau_hat, float) and tau_hat >= 0.0
+
+
+def test_find_power_small_cluster_glmm_warning_surfaces():
+    """A logit GLMM testing a cluster-level effect with 6 clusters warns."""
+    m = (
+        MCPower("y ~ x1 + x2 + (1|school)", family="logit")
+        .set_effects("x1=0.5, x2=0.3")
+        .set_baseline_probability(0.3)
+        .set_cluster("school", ICC=0.2, n_clusters=6, cluster_level_vars=["x2"])
+    )
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        m.find_power(120, n_sims=40, verbose=False)
+    msgs = [str(w.message) for w in record if "cluster-level effect" in str(w.message)]
+    assert len(msgs) == 1, msgs
+    assert msgs[0].startswith("6 clusters at N=120 (fewer than 20)")
 
 
 def test_glmm_to_simulation_spec_uses_latent_scale_tau():

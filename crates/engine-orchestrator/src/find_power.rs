@@ -8,11 +8,12 @@ use crate::cancel::CancellationToken;
 use crate::progress::{ProgressEvent, ProgressSink};
 use crate::result::{OrchestratorError, PowerResult, Scenario, ScenarioResult};
 use crate::scenario_loop::for_each_scenario;
-use engine_contract::{ClusterSizing, SimulationContract};
+use engine_contract::{ClusterSizing, EstimatorSpec, SimulationContract};
 use engine_core::ProgressSink as EngineProgressSink;
-use engine_core::SimulationSpec;
 use engine_core::contract_adapter::contract_to_simulation_spec;
+use engine_core::critvals::BetweenWithinDf;
 use engine_core::rng::splitmix64_finalize;
+use engine_core::{BatchResult, EngineError, SimulationSpec};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Floor a single requested N to the cluster atom (so the nested-prefix
@@ -148,6 +149,50 @@ pub(crate) fn factor_preflight_sample_size(spec: &SimulationSpec, grid: &[usize]
             ),
         })
         .collect()
+}
+
+/// Pre-run advisory for a clustered binary/count model (GLMM) that tests a
+/// cluster-level effect with few clusters. The between-within t still
+/// over-rejects there for cluster-level targets (logit calibration: 6.6–9.6%
+/// Type I error at α = 0.05 with 5–10 clusters, about 6% at 20–30), while
+/// within-cluster targets stay calibrated, so only cluster-level targets
+/// (marginals, and contrasts whose both sides are cluster-level) count.
+/// Contrasts are OLS-only at batch entry today, so for a GLMM only marginals
+/// reach this check.
+/// `BetweenWithinDf::resolve` carries every other condition: it is `None` under
+/// `df_method = asymptotic` and for crossed / nested groupings (Wald z), and
+/// its per-N cluster counts match the generated data. `grid` is ascending; a
+/// single-N power run passes a one-element slice.
+pub(crate) fn small_cluster_glmm_warning(spec: &SimulationSpec, grid: &[usize]) -> Option<String> {
+    if spec.estimator != EstimatorSpec::Glm {
+        return None;
+    }
+    let sizes: Vec<u32> = grid.iter().map(|&n| n as u32).collect();
+    // p_between only feeds the df values, which this check does not read.
+    let bw = BetweenWithinDf::resolve(spec, &sizes, 0)?;
+    if !bw.between_per_target.iter().any(|&b| b) {
+        return None;
+    }
+    let min = crate::config().limits.glmm_reliable_clusters as usize;
+    let &g_lo = bw.clusters_per_n.first()?;
+    if g_lo >= min {
+        return None;
+    }
+    let reached = grid
+        .iter()
+        .zip(&bw.clusters_per_n)
+        .find(|&(_, &g)| g >= min)
+        .map(|(&n, _)| n);
+    let lead = match (grid, reached) {
+        ([n], _) => format!("{g_lo} clusters at N={n} (fewer than {min})"),
+        (_, Some(n)) => format!("fewer than {min} clusters at grid points below N={n}"),
+        (_, None) => format!("fewer than {min} clusters at every grid point"),
+    };
+    Some(format!(
+        "{lead}: with few clusters the between-within t test of a cluster-level effect \
+         in a clustered binary/count model rejects more often than alpha, so power for \
+         cluster-level effects is overstated; add clusters"
+    ))
 }
 
 /// Adapter wrapping the orchestrator's outer sink + cancellation token into
@@ -295,6 +340,38 @@ pub fn find_power(
     sample_size: usize,
     n_sims: usize,
     base_seed: u64,
+    progress: Option<&mut dyn ProgressSink>,
+    cancel: &CancellationToken,
+) -> Result<ScenarioResult<PowerResult>, OrchestratorError> {
+    find_power_with(
+        engine_core::run_batch,
+        contracts,
+        sample_size,
+        n_sims,
+        base_seed,
+        progress,
+        cancel,
+    )
+}
+
+/// `engine_core::run_batch` (multi-core) or `run_batch_st` (single-threaded):
+/// the only thing that differs between each entry and its dispatch twin.
+pub(crate) type RunBatch = fn(
+    &SimulationSpec,
+    &[u32],
+    u32,
+    u64,
+    Option<&dyn EngineProgressSink>,
+) -> Result<BatchResult, EngineError>;
+
+/// Body of `find_power` / `single_core_find_power`, parameterised by the
+/// batch runner.
+pub(crate) fn find_power_with(
+    run_batch: RunBatch,
+    contracts: &[SimulationContract],
+    sample_size: usize,
+    n_sims: usize,
+    base_seed: u64,
     mut progress: Option<&mut dyn ProgressSink>,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<PowerResult>, OrchestratorError> {
@@ -314,7 +391,7 @@ pub fn find_power(
     }
 
     // NOTE: per-scenario dispatch is sequential today; the inner per-sim
-    // parallelism lives inside `run_batch`. Do NOT replace that inner loop
+    // parallelism lives inside `engine_core::run_batch`. Do NOT replace that inner loop
     // with `par_chunks_mut` chunked dispatch (measured −7%/−6.5% throughput
     // at p<10, n<1000).
     let out = for_each_scenario(
@@ -329,7 +406,7 @@ pub fn find_power(
             let taken: Option<&mut dyn ProgressSink> = progress.take();
             let offset = (idx as u64) * (n_sims as u64);
             let adapter = EngineSinkAdapter::new(sample_size, offset, 1, total_sims, taken, cancel);
-            let batch_res = engine_core::run_batch(
+            let batch_res = run_batch(
                 &scenario.spec,
                 &[sample_size as u32],
                 n_sims as u32,
@@ -361,6 +438,8 @@ pub fn find_power(
             // and sampled-allocation designs are silent here).
             pr.grid_warnings
                 .extend(factor_preflight_warnings(&scenario.spec, sample_size));
+            pr.grid_warnings
+                .extend(small_cluster_glmm_warning(&scenario.spec, &[sample_size]));
 
             if let Some(p) = progress.as_deref_mut() {
                 p.on_event(ProgressEvent::NPointCompleted {
@@ -429,7 +508,6 @@ mod tests {
             cluster_slope_design_cols: vec![],
             extra_slope_cols: Vec::new(),
             residual_dist: ResidualDist::Normal,
-            residual_pinned: false,
             outcome_kind: OutcomeKind::Continuous,
             link: None,
             estimator: EstimatorSpec::Ols,
@@ -442,6 +520,7 @@ mod tests {
             cluster: None,
             scenario: ScenarioPerturbations::optimistic(),
             t3_table: None,
+            tukey_thresholds: Default::default(),
             het_coeffs: HeteroskedasticityCoeffs::default(),
             report_overall: false,
             factor_min_level_count: 0,

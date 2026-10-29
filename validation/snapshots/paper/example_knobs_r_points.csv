@@ -1,0 +1,15 @@
+case,family,target,n,comparator,mc_power,ref_power,mc_n_sims,ref_n_sims,z,flagged,mcpower_version
+ex4_baseline,ols,stress:sleep,130,loop,0.7429,0.735,10000,2000,0.7317796728717088,False,1.4.1
+ex4_baseline,ols,treatment[2],130,loop,0.7967,0.805,10000,2000,-0.8525460936219896,False,1.4.1
+ex4_correlation_noise,ols,stress:sleep,130,loop,0.7446,0.7485,10000,2000,-0.3665487822518455,False,1.4.1
+ex4_correlation_noise,ols,treatment[2],130,loop,0.7967,0.7845,10000,2000,1.2150820343988655,False,1.4.1
+ex4_distribution_swap,ols,stress:sleep,130,loop,0.6588,0.6585,10000,2000,0.025825320131259374,False,1.4.1
+ex4_distribution_swap,ols,treatment[2],130,loop,0.7989,0.795,10000,2000,0.39467731771124237,False,1.4.1
+ex4_heterogeneity,ols,stress:sleep,130,loop,0.7238,0.7215,10000,2000,0.20951450238647704,False,1.4.1
+ex4_heterogeneity,ols,treatment[2],130,loop,0.7644,0.754,10000,2000,0.9879324419246539,False,1.4.1
+ex4_heteroskedasticity,ols,stress:sleep,130,loop,0.7247,0.7165,10000,2000,0.7437242124862206,False,1.4.1
+ex4_heteroskedasticity,ols,treatment[2],130,loop,0.7955,0.798,10000,2000,-0.2538913331058091,False,1.4.1
+ex4_residual_swap,ols,stress:sleep,130,loop,0.7383,0.7485,10000,2000,-0.957380990532935,False,1.4.1
+ex4_residual_swap,ols,treatment[2],130,loop,0.7997,0.799,10000,2000,0.07129124690405346,False,1.4.1
+ex4_sampled_groups,ols,stress:sleep,130,loop,0.7431,0.734,10000,2000,0.8421260430313391,False,1.4.1
+ex4_sampled_groups,ols,treatment[2],130,loop,0.7937,0.7955,10000,2000,-0.18200905175292525,False,1.4.1

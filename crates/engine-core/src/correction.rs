@@ -107,7 +107,7 @@ pub fn apply_correction(
 ///   non-NA p-values in `m`; counting the slot is the more conservative
 ///   choice and matches the t² path.
 /// - Tukey HSD has no t p-value (it is a studentized-range test); its callers
-///   decide it from `critvals::tukey_tail_sq`, so it never reaches here.
+///   decide it from `critvals::TukeyThresholds`, so it never reaches here.
 pub(crate) fn apply_correction_p(
     correction_method: CorrectionMethod,
     p: &[f64],
@@ -154,7 +154,7 @@ pub(crate) fn apply_correction_p(
             }
         }
         CorrectionMethod::TukeyHsd => {
-            unreachable!("Tukey HSD is decided from critvals::tukey_tail_sq")
+            unreachable!("Tukey HSD is decided from critvals::TukeyThresholds")
         }
     }
 }
@@ -311,7 +311,7 @@ mod tests {
     // Tukey HSD threshold construction (CritValueTable::build_with_tukey_k)
     // -----------------------------------------------------------------------
 
-    use crate::critvals::CritValueTable;
+    use crate::critvals::{CritValueTable, TukeyTargets, TukeyThresholds};
     use crate::spec::{CritValues, EstimatorSpec};
 
     /// Tukey single-step threshold for one target whose factor has `l` levels,
@@ -329,7 +329,10 @@ mod tests {
             1,
             CorrectionMethod::TukeyHsd,
             EstimatorSpec::Ols,
-            &[l],
+            Some(TukeyTargets {
+                k_per_target: &[l],
+                thresholds: &TukeyThresholds::default(),
+            }),
             None,
         )
         .unwrap();
@@ -421,7 +424,10 @@ mod tests {
             2,
             CorrectionMethod::TukeyHsd,
             EstimatorSpec::Ols,
-            &[3.0, 2.0],
+            Some(TukeyTargets {
+                k_per_target: &[3.0, 2.0],
+                thresholds: &TukeyThresholds::default(),
+            }),
             None,
         )
         .unwrap();

@@ -16,7 +16,7 @@ mod common;
 use engine_core::batch::run_batch;
 use engine_core::data_gen::generate_sim_data;
 use engine_core::spec::{
-    Distribution, EstimatorSpec, OutcomeKind, ResidualDist, ScenarioPerturbations, SimulationSpec,
+    Distribution, EstimatorSpec, OutcomeKind, ScenarioPerturbations, SimulationSpec,
 };
 use engine_core::workspace::SimWorkspace;
 
@@ -242,7 +242,7 @@ fn binary_doomer_power_below_optimistic() {
     let optimistic = base_spec(OutcomeKind::Binary, vec![intercept, 0.5]);
 
     let mut doomer = optimistic.clone();
-    // configs/scenarios.json doomer values (residual knobs inert for binary).
+    // configs/scenarios.json doomer values.
     doomer.scenario = ScenarioPerturbations {
         name: "doomer".into(),
         heterogeneity: 0.4,
@@ -254,9 +254,6 @@ fn binary_doomer_power_below_optimistic() {
             Distribution::LeftSkewed,
             Distribution::Uniform,
         ],
-        residual_change_prob: 0.8,
-        residual_dists: vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
-        residual_df: 5.0,
         sampled_factor_proportions: true,
         truth_start: false,
         lme: None,

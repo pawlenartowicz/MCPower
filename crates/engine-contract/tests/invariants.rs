@@ -619,7 +619,6 @@ fn example2_logit_with_uploaded_data_validates_cleanly() {
             coefficients: vec![-1.3863, 0.4, 0.2, 0.5],
             residual: ResidualSpec {
                 distribution: ResidualDist::Normal,
-                pinned: false,
             },
             heteroskedasticity_driver: None,
             link: None,

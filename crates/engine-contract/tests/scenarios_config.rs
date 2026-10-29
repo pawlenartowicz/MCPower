@@ -12,9 +12,6 @@ fn enum_shaped_scenario_payload_deserializes_with_defaults() {
             "correlation_noise_sd": 0.15,
             "distribution_change_prob": 0.5,
             "new_distributions": ["RightSkewed", "LeftSkewed", "Uniform"],
-            "residual_change_prob": 0.5,
-            "residual_dists": ["high_kurtosis", "right_skewed"],
-            "residual_df": 8.0,
             "lme": {
                 "random_effect_dist": "high_kurtosis",
                 "random_effect_df": 10.0,

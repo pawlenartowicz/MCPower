@@ -101,14 +101,23 @@ pub fn build_recovery_design(
     for (fi, factor_name) in table.factor_names.iter().enumerate() {
         let col = require_col(factor_name)?;
         let raw_vals = &col.values;
+        let to_engine = frame_to_engine_codes(col, table, fi);
         for level in &table.factor_levels[fi] {
             let dummy_name = format!("{factor_name}[{level}]");
             let indicator: Vec<f64> = if !col.labels.is_empty() {
-                // values are level codes; find the code for this level name.
-                let code = col.labels.iter().position(|l| l == level).map(|i| i as f64);
+                // values are frame level codes; mark the code(s) that decode to
+                // this level, the same decoding the power run uses.
+                let engine_code = std::iter::once(&table.factor_references[fi])
+                    .chain(&table.factor_levels[fi])
+                    .position(|l| l == level);
                 raw_vals
                     .iter()
-                    .map(|&v| if Some(v) == code { 1.0 } else { 0.0 })
+                    .map(|&v| {
+                        let hit = v.fract() == 0.0
+                            && v >= 0.0
+                            && to_engine.get(v as usize).copied() == engine_code;
+                        if hit { 1.0 } else { 0.0 }
+                    })
                     .collect()
             } else {
                 raw_vals
@@ -228,6 +237,38 @@ fn level_proportions(col: &UploadColumn) -> Result<Vec<f64>, SpecError> {
     Ok(counts.iter().map(|&c| c as f64 / n).collect())
 }
 
+/// Engine level code of each frame code (`0..labels.len()`) of uploaded factor
+/// `fi`. The engine codes a factor as `[reference, non-reference levels in
+/// declared order]` (`factor_references` + `factor_levels`), while frame codes
+/// index `col.labels`. A frame code maps through its label when every label
+/// names a declared level, and by position in the declared level list
+/// otherwise (a column whose labels are not the level names, e.g. levels left
+/// at "1".."k"). Identity when the label count differs from the declared level
+/// count, so no frame code is dropped.
+fn frame_to_engine_codes(col: &UploadColumn, table: &PredictorTable, fi: usize) -> Vec<usize> {
+    let declared = &table.factor_declared_levels[fi];
+    if col.labels.len() != declared.len() {
+        return (0..col.labels.len()).collect();
+    }
+    let engine_order: Vec<&String> = std::iter::once(&table.factor_references[fi])
+        .chain(&table.factor_levels[fi])
+        .collect();
+    let by_label = col.labels.iter().all(|l| declared.contains(l));
+    (0..col.labels.len())
+        .map(|c| {
+            let level = if by_label {
+                &col.labels[c]
+            } else {
+                &declared[c]
+            };
+            engine_order
+                .iter()
+                .position(|l| *l == level)
+                .expect("declared levels are the reference plus the non-reference levels")
+        })
+        .collect()
+}
+
 /// Compute Pearson r over two already-standardized vectors (mean ≈ 0).
 fn pearson(a: &[f64], b: &[f64]) -> f64 {
     debug_assert_eq!(a.len(), b.len());
@@ -336,8 +377,10 @@ fn ridge_shrink_to_psd(r: &[f64], n: usize) -> Vec<f64> {
 /// Unmatched predictor columns keep their synthetic spec untouched.
 /// Extra upload columns (not in the model) are ignored.
 ///
-/// `predictor_names` must be `non_factor_names` concatenated with `factor_names`
-/// from the `PredictorTable` — this matches the contract column index layout.
+/// Columns are matched against `table`'s `non_factor_names` followed by its
+/// `factor_names` — the contract column index layout. A factor column's frame
+/// codes are rewritten to the engine's level codes (reference = 0; see
+/// `frame_to_engine_codes`) and its proportions follow the same order.
 ///
 /// Fails with [`SpecError::FactorCodeOutOfRange`] on an invalid factor level code.
 ///
@@ -348,10 +391,11 @@ fn ridge_shrink_to_psd(r: &[f64], n: usize) -> Vec<f64> {
 /// `measure_correlations` so standardization is computed once.
 pub(crate) fn apply_upload(
     generation: &mut GenerationSpec,
-    predictor_names: &[String],
-    n_non_factor: usize,
+    table: &PredictorTable,
     upload: &UploadInput,
 ) -> Result<Vec<Option<Vec<f64>>>, SpecError> {
+    let n_non_factor = table.non_factor_names.len();
+    let predictor_names = table.non_factor_names.iter().chain(&table.factor_names);
     let n_rows = upload.n_rows as usize;
     let col_by_name: std::collections::HashMap<&str, &UploadColumn> = upload
         .columns
@@ -368,10 +412,10 @@ pub(crate) fn apply_upload(
     // for matched continuous/binary columns; None for unmatched or factor.
     let mut non_factor_std: Vec<Option<Vec<f64>>> = vec![None; n_non_factor];
 
-    for (contract_col_idx, pred_name) in predictor_names.iter().enumerate() {
+    for (contract_col_idx, pred_name) in predictor_names.enumerate() {
         if let Some(uc) = col_by_name.get(pred_name.as_str()) {
             let fc = frame_col_cursor;
-            let std_vals = standardize_column(uc);
+            let mut std_vals = standardize_column(uc);
             // Capture standardized values for matched *continuous* non-factor
             // columns only. Correlation is continuous-only by design — binary and
             // factor columns are generated from their marginals (independent); their
@@ -385,6 +429,35 @@ pub(crate) fn apply_upload(
                     UploadColumnType::Binary | UploadColumnType::Factor => {}
                 }
             }
+            // A factor's frame codes and proportions move to engine code order.
+            // `level_proportions` validates every code against the labels first,
+            // so each one indexes `to_engine` (a label-less column has no codes
+            // to map and an empty `to_engine`).
+            let factor_props = match uc.col_type {
+                UploadColumnType::Factor => {
+                    let frame_props = level_proportions(uc)?;
+                    match contract_col_idx.checked_sub(n_non_factor) {
+                        Some(fi) => {
+                            let to_engine = frame_to_engine_codes(uc, table, fi);
+                            if !to_engine.is_empty() {
+                                for v in &mut std_vals {
+                                    *v = to_engine[*v as usize] as f64;
+                                }
+                            }
+                            let mut props = vec![0.0; frame_props.len()];
+                            for (c, p) in frame_props.into_iter().enumerate() {
+                                props[to_engine[c]] = p;
+                            }
+                            props
+                        }
+                        // A factor column bound to a non-factor predictor has no
+                        // level order to map into; contract validation rejects
+                        // the Direct term on it.
+                        None => frame_props,
+                    }
+                }
+                UploadColumnType::Continuous | UploadColumnType::Binary => Vec::new(),
+            };
             frame_cols.push(std_vals);
             // Replace the contract column spec
             match uc.col_type {
@@ -400,7 +473,7 @@ pub(crate) fn apply_upload(
                     };
                 }
                 UploadColumnType::Factor => {
-                    let props = level_proportions(uc)?;
+                    let props = factor_props;
                     let n_levels = props.len() as u32;
                     // Preserve the per-factor override set on the synthetic column
                     // this rewrite replaces (set_variable_type runs before upload).

@@ -256,7 +256,6 @@ test_that(".unwrap_scenario_result keeps the full envelope for multiple scenario
 
 test_that("unknown scenario distribution rejected at spec build (APIC-80)", {
   expect_error(mcpower:::.encode_dist_list(c("zzz"), "optimistic"))
-  expect_error(mcpower:::.encode_residual_list(c("zzz"), "optimistic"))
 })
 
 # --- boundary-hit-rate injection shape/range (APIC-67) ---------------------
@@ -377,4 +376,19 @@ test_that("a factor with a main term still registers its main dummy effects", {
   reg$set_variable_type("cyl", "factor", n_levels = 3L)
   reg$expand_factors()
   expect_equal(reg$effect_names, c("cyl[2]", "cyl[3]", "cyl[2]:x", "cyl[3]:x"))
+})
+
+test_that("removed residual-swap keys are rejected by set_scenario_configs", {
+  for (key in c("residual_change_prob", "residual_dists", "residual_df")) {
+    cfg <- list(realistic = setNames(list(0.5), key))
+    expect_error(MCPower$new("y ~ x1")$set_scenario_configs(cfg),
+                 regexp = paste0("unknown config key.*", key))
+  }
+})
+
+test_that("a chosen residual runs under every preset", {
+  m <- MCPower$new("y ~ x1")$set_effects("x1=0.5")$set_residual_distribution("high_kurtosis")
+  r <- m$find_power(60, n_sims = 50, seed = 2137, scenarios = TRUE,
+                    progress_callback = FALSE, verbose = FALSE)
+  expect_setequal(names(r$scenarios), c("optimistic", "realistic", "doomer"))
 })

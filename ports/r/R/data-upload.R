@@ -29,14 +29,14 @@
 # Mirror of upload_data_utils.py:detect_column_types.
 #
 # Args:
-#   mat       2-D matrix or data.frame (n_rows x n_cols).
+#   mat       2-D matrix or data.frame (n_rows x n_cols). A data.frame is read
+#             column by column, so one column's type never changes another's.
 #   names_vec character vector length n_cols.
 #   max_k     integer — soft upper bound on factor levels (max_factor_k_soft from config).
 #   max_ratio numeric — min rows-per-level ratio for a numeric column to be a factor.
 #
 # Returns list(types = <character vector>, labels = <list of character vectors>).
 .detect_column_types <- function(mat, names_vec, max_k, max_ratio) {
-  if (is.data.frame(mat)) mat <- as.matrix(mat)
   n_rows <- nrow(mat)
   n_cols <- ncol(mat)
   types  <- character(n_cols)
@@ -98,7 +98,11 @@
 # When columns is not NULL it overrides the inferred column names (only for
 # matrix / unnamed-list inputs that lack inherent names).
 #
-# Returns list(matrix = <matrix>, names = <character vector>).
+# Returns list(matrix = <matrix or data.frame>, names = <character vector>).
+# Data frames and named lists stay a data.frame: as.matrix() would turn every
+# column into strings as soon as one column is character, which flips how
+# unrelated columns are detected and rounds numbers to 7 significant digits.
+# Factor columns become character and logical columns integer 0/1.
 .normalize_upload_input <- function(data, columns = NULL) {
   # --- file path ---
   if (is.character(data) && length(data) == 1L && file.exists(data)) {
@@ -118,21 +122,13 @@
     return(.normalize_upload_input(df, NULL))
   }
 
-  # --- data.frame ---
-  if (is.data.frame(data)) {
-    col_names <- colnames(data)
-    mat <- as.matrix(data)
-    return(list(matrix = mat, names = col_names))
-  }
-
-  # --- named list ---
-  if (is.list(data) && !is.null(names(data))) {
-    col_names <- names(data)
-    mat <- do.call(cbind, lapply(data, function(x) {
-      if (is.factor(x)) as.character(x) else x
-    }))
-    if (!is.matrix(mat)) mat <- matrix(mat, ncol = length(col_names))
-    return(list(matrix = mat, names = col_names))
+  # --- data.frame / named list ---
+  if (is.data.frame(data) || (is.list(data) && !is.null(names(data)))) {
+    cols <- lapply(data, function(x) {
+      if (is.factor(x)) as.character(x) else if (is.logical(x)) as.integer(x) else x
+    })
+    df <- as.data.frame(cols, stringsAsFactors = FALSE, check.names = FALSE)
+    return(list(matrix = df, names = names(data)))
   }
 
   # --- matrix ---

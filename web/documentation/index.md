@@ -33,8 +33,9 @@ power for many p-values at once: the chance that *all* your key tests come out
 significant in the same study, which is what a multi-hypothesis paper actually
 stands on. On top of that, built-in sensitivity analysis stress-tests the
 design under three scenarios: flip a switch and the same analysis reruns with heterogeneous effects,
-non-normal residuals, and outliers, so you see the power you'd get from messy
-real-world data, not just the textbook case.
+uneven residual variance, non-normal predictors, and noisier correlations, so
+you see the power you'd get from messy real-world data, not just the textbook
+case.
 
 ## Bring your own data (optional)
 

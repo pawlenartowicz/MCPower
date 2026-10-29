@@ -142,15 +142,6 @@ pub struct ScenarioPerturbations {
     /// Distribution variants the scenario may swap in.
     pub new_distributions: Vec<Distribution>,
 
-    /// Per-sim probability of replacing an unpinned default-normal residual
-    /// distribution with one drawn from `residual_dists`.
-    pub residual_change_prob: f64,
-    pub residual_dists: Vec<ResidualDist>,
-    /// df for any t-kernel residual this scenario realizes — both pool swaps
-    /// and a pinned `HighKurtosis` spec residual read it (there is no
-    /// model-level df).
-    pub residual_df: f64,
-
     /// Factor-proportion sampling. `false` (default, optimistic) → the factor
     /// block assigns levels by the deterministic largest-remainder walk (exact
     /// requested proportions, no RNG consumed); `true` → per-row categorical
@@ -190,9 +181,6 @@ impl Default for ScenarioPerturbations {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: Vec::new(),
-            residual_change_prob: 0.0,
-            residual_dists: Vec::new(),
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             lme: None,
@@ -213,13 +201,12 @@ impl ScenarioPerturbations {
     /// Returns true if every perturbation knob is at its no-op value: all
     /// f64 noise knobs `== 0.0` and `lme` is None.
     ///
-    /// The pool-of-candidates Vec fields (`new_distributions`, `residual_dists`)
-    /// are NOT checked: they act as menus sampled with probability
-    /// `distribution_change_prob` / `residual_change_prob`. When those
-    /// probabilities are 0.0 the menus are never consulted, so a non-empty
-    /// menu with zero probability is still an optimistic (no-perturbation) run.
-    /// The Python frontend always populates the menus unconditionally; treating
-    /// non-empty menus as "not optimistic" would reject every default Logit call.
+    /// The pool-of-candidates field `new_distributions` is NOT checked: it acts
+    /// as a menu sampled with probability `distribution_change_prob`. When that
+    /// probability is 0.0 the menu is never consulted, so a non-empty menu with
+    /// zero probability is still an optimistic (no-perturbation) run. The
+    /// Python frontend always populates the menu unconditionally; treating a
+    /// non-empty menu as "not optimistic" would reject every default Logit call.
     ///
     /// `sampled_factor_proportions` is also NOT consulted: the factor block
     /// reads it directly in the row loop, so the fast path (skip per-block
@@ -233,7 +220,6 @@ impl ScenarioPerturbations {
             && self.heteroskedasticity_ratio == 1.0
             && self.correlation_noise_sd == 0.0
             && self.distribution_change_prob == 0.0
-            && self.residual_change_prob == 0.0
             && self.lme.is_none()
     }
 }
@@ -343,11 +329,6 @@ pub struct SimulationSpec {
     #[serde(default)]
     pub extra_slope_cols: Vec<Vec<u32>>,
     pub residual_dist: ResidualDist,
-    /// `true` = the user explicitly chose `residual_dist` (incl. explicit
-    /// normal), so scenario residual swaps leave it alone. The df for a
-    /// t-kernel residual always comes from `scenario.residual_df`.
-    #[serde(default)]
-    pub residual_pinned: bool,
     /// Consumed by data generation (Gaussian vs Bernoulli vs Poisson draw).
     pub outcome_kind: OutcomeKind,
     /// Non-canonical link override. `None` = canonical (Binary→logit,
@@ -405,6 +386,13 @@ pub struct SimulationSpec {
     #[serde(skip)]
     #[serde(default)]
     pub het_coeffs: HeteroskedasticityCoeffs,
+
+    /// The run's Tukey HSD threshold source, planned by run_batch from the
+    /// run's own grid and tables; the default solves every threshold exactly.
+    /// Not serialised — derived value rebuilt per run.
+    #[serde(skip)]
+    #[serde(default)]
+    pub tukey_thresholds: crate::critvals::TukeyThresholds,
 
     /// When `true`, `BatchResult.overall` carries an extra per-`(sim, n_idx)`
     /// boolean: OLS F-test for `estimator == Ols`, Logit LRT for `estimator == Glm`,
@@ -793,9 +781,6 @@ pub(crate) mod tests {
                 Distribution::LeftSkewed,
                 Distribution::Uniform,
             ],
-            residual_change_prob: 0.5,
-            residual_dists: vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
-            residual_df: 8.0,
             sampled_factor_proportions: true,
             truth_start: true,
             lme: Some(LmeScenarioPerturbations {

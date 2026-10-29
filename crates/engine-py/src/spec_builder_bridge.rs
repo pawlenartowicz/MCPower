@@ -337,7 +337,6 @@ fn map_spec_error(e: SpecError) -> PyErr {
         | SpecError::UnknownTarget { .. }
         | SpecError::UnknownResidualDist { .. }
         | SpecError::ScenarioBinarySwapUnsupported { .. }
-        | SpecError::ScenarioResidualDfTooLow { .. }
         | SpecError::EffectCountMismatch { .. }
         | SpecError::ClusterFamilyMismatch
         | SpecError::MalformedAssignment { .. }

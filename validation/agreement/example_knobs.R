@@ -4,8 +4,8 @@
 #
 # Model: y ~ treatment + stress * sleep, OLS, N = 130. treatment a two-level
 # factor (proportions 0.5/0.5), effect treatment[2] = 0.50; stress, sleep
-# continuous, corr 0.5, effects 0.25; stress:sleep fixed at 0.22. Targets
-# treatment[2] and stress:sleep. Seven cases: ex4_baseline
+# continuous, corr 0.5, effects 0.25; stress:sleep fixed at 0.235. Targets
+# treatment[2] and stress:sleep. Six cases: ex4_baseline
 # (the optimistic scenario) and one custom scenario per knob, every other knob
 # at its optimistic value. MCPower side: find_power at 10,000 sims per scenario.
 # Loop side: 2,000 sims. Seed 2137 + n on both sides.
@@ -32,7 +32,7 @@ TARGETS <- c("treatment[2]", "stress:sleep")
 MC_LABEL <- c(`treatment[2]` = "2", `stress:sleep` = "stress:sleep")
 LOOP_TERM <- c(`treatment[2]` = "treatment", `stress:sleep` = "stress:sleep")
 # Design columns in x_full order: factor dummy, continuous columns, interaction.
-BETA <- c(treatment = 0.50, stress = 0.25, sleep = 0.25, `stress:sleep` = 0.22)
+BETA <- c(treatment = 0.50, stress = 0.25, sleep = 0.25, `stress:sleep` = 0.235)
 # Treatment levels 1 and 2; the factor is outside the correlation matrix.
 P_TREAT <- c(0.5, 0.5)
 MAIN <- c("stress", "sleep")
@@ -45,16 +45,13 @@ CORR <- matrix(c(1, R_SS, R_SS, 1), 2, 2, dimnames = list(MAIN, MAIN))
 OPTIMISTIC <- list(
   heterogeneity = 0, heteroskedasticity_ratio = 1, correlation_noise_sd = 0,
   sampled_factor_proportions = FALSE, distribution_change_prob = 0,
-  new_distributions = c("right_skewed", "left_skewed", "uniform"),
-  residual_change_prob = 0, residual_dists = c("high_kurtosis", "right_skewed"),
-  residual_df = 10
+  new_distributions = c("right_skewed", "left_skewed", "uniform")
 )
 
 KNOBS <- list(
   heterogeneity      = list(heterogeneity = 0.2),
   correlation_noise  = list(correlation_noise_sd = 0.15),
   distribution_swap  = list(distribution_change_prob = 0.5),
-  residual_swap      = list(residual_change_prob = 0.5, residual_df = 8),
   heteroskedasticity = list(heteroskedasticity_ratio = 2.0),
   sampled_groups     = list(sampled_factor_proportions = TRUE)
 )
@@ -128,25 +125,6 @@ pick_dists <- function(k) {
   dists
 }
 
-# Residual swap — mirrors scenarios.rs pick_residual and the residual pass in
-# data_gen.rs — change together: once per simulation, with probability
-# residual_change_prob, the normal residual becomes a uniform pick from
-# residual_dists. high_kurtosis is t(df) scaled to unit variance; right_skewed
-# is (chi2_df - df) / sqrt(2 df). df is floored at 3 and the chi-square sums
-# round(df) squared normals.
-draw_residual <- function(k) {
-  dist <- "normal"
-  if (runif(1) < k$residual_change_prob) {
-    dist <- k$residual_dists[sample.int(length(k$residual_dists), 1L)]
-  }
-  df <- max(k$residual_df, 3)
-  switch(dist,
-    normal        = rnorm(N),
-    high_kurtosis = rnorm(N) / sqrt(rchisq(N, round(df)) / df) * sqrt((df - 2) / df),
-    right_skewed  = (rchisq(N, round(df)) - df) / sqrt(2 * df),
-    stop(sprintf("unknown residual %s", dist)))
-}
-
 # Heterogeneity — mirrors the per-study beta jitter in data_gen.rs — change
 # together: once per simulation each effect (the interaction included) gets
 # N(0, (heterogeneity * |beta|)^2) added and is clipped toward 0, never across it.
@@ -206,7 +184,7 @@ draw_data <- function(k) {
                   sleep = marginal(Z[, 2], dists[["sleep"]]))
   X <- cbind(as.matrix(d), d$stress * d$sleep)
   b <- if (k$heterogeneity > 0) jitter_beta(k$heterogeneity) else BETA
-  e <- draw_residual(k)
+  e <- rnorm(N)
   g <- log(max(k$heteroskedasticity_ratio, 1)) / 4
   if (g > 0) {
     z <- (drop(X %*% BETA) - LP_MEAN) / LP_SD

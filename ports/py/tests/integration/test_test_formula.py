@@ -104,6 +104,68 @@ def test_summary_renders_when_leading_term_dropped() -> None:
     assert "caffeine" in repr(result)
 
 
+def test_summary_header_lists_simulated_effects_under_test_formula() -> None:
+    """The ``effects:`` header echoes the model the data are simulated from,
+    every effect including zeros, in formula order, even when ``test_formula``
+    fits a reduced model. Dropping ``study`` must not hide its true 0.30."""
+    model = MCPower("score = study + caffeine")
+    model.set_effects("study=0.3, caffeine=0")
+    result = model.find_power(
+        sample_size=100,
+        n_sims=50,
+        target_test="caffeine",
+        test_formula="score = caffeine",
+        verbose=False,
+    )
+    header = [ln for ln in str(result.summary()).splitlines() if ln.startswith("effects:")]
+    assert header == ["effects: study=0.30, caffeine=0.00"]
+
+
+def _or_cells(result) -> dict:
+    """Test name -> its row's cells in the short-form table (OR is cell 2)."""
+    return {ln.split()[0]: ln.split() for ln in str(result).splitlines() if ln.strip()}
+
+
+def test_test_formula_reversed_interaction_reports_its_odds_ratio() -> None:
+    """A test interaction written in the other order (``b:a`` for the model's
+    ``a:b``) is the same term: the run reports it with exp of a:b's effect."""
+    model = MCPower("y = a + b + a:b", family="logit")
+    model.set_baseline_probability(0.3)
+    model.set_effects("a=0.2, b=0.3, a:b=1.0")
+    result = model.find_power(
+        sample_size=200,
+        n_sims=50,
+        test_formula="y = a + b + b:a",
+        verbose=False,
+        progress_callback=False,
+    )
+    cells = _or_cells(result)
+    assert cells["a"][2] == "1.22"
+    assert cells["b"][2] == "1.35"
+    assert cells["b:a"][2] == "2.72"
+    assert "effects: a=0.20 (OR 1.22), b=0.30 (OR 1.35), a:b=1.00 (OR 2.72)" in str(result.summary())
+
+
+def test_test_formula_interaction_without_its_main_effect() -> None:
+    """A test model that keeps an interaction but drops one of its main
+    effects (``y = x1:x2 + x2``) runs and reports both kept terms."""
+    model = MCPower("y = x1 + x2 + x1:x2", family="logit")
+    model.set_baseline_probability(0.3)
+    model.set_effects("x1=0.2, x2=0.5, x1:x2=1.0")
+    result = model.find_power(
+        sample_size=200,
+        n_sims=50,
+        test_formula="y = x1:x2 + x2",
+        verbose=False,
+        progress_callback=False,
+    )
+    cells = _or_cells(result)
+    assert cells["x2"][2] == "1.65"
+    assert cells["x1:x2"][2] == "2.72"
+    assert "x1" not in cells
+    assert "effects: x1=0.20 (OR 1.22), x2=0.50 (OR 1.65), x1:x2=1.00 (OR 2.72)" in str(result.summary())
+
+
 def test_test_formula_reduced_fit_recovers_marginal_coefficient() -> None:
     """A reduced ``test_formula`` must REFIT the reduced model, not just narrow
     reported targets.

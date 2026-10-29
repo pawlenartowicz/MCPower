@@ -78,6 +78,25 @@ describe('runStore.startFindPower', () => {
   });
 });
 
+describe('runStore concurrent start', () => {
+  it('ignores a second start while a run is in flight', async () => {
+    runStore.clearTabs();
+    runStore.runState = 'idle';
+    vi.clearAllMocks();
+    let release!: () => void;
+    vi.mocked(findPower).mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({ run_id: 'r1', result: sampleResult as any, plots: { blocks: [] } }); }),
+    );
+    const first = runStore.startFindPower(sampleSpec, 80);
+    await runStore.startFindPower(sampleSpec, 80);
+    expect(findPower).toHaveBeenCalledTimes(1);
+    expect(runStore.runState).toBe('running');
+    release();
+    await first;
+    expect(runStore.runState).toBe('done');
+  });
+});
+
 describe('runStore run failure → lastError', () => {
   beforeEach(() => {
     runStore.clearTabs();

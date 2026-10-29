@@ -34,6 +34,18 @@ pub fn decode_contracts(bytes: &[u8]) -> Result<Vec<SimulationContract>> {
     Ok(v)
 }
 
+/// Convert an R count argument to `usize`. R integers are signed, and a bare
+/// `as usize` turns a negative value into a huge count whose allocation aborts
+/// the whole R session, so anything below 1 is an R error instead.
+fn positive_count(name: &str, v: i32) -> Result<usize> {
+    match usize::try_from(v) {
+        Ok(n) if n >= 1 => Ok(n),
+        _ => Err(Error::Other(format!(
+            "{name} must be a positive integer, got {v}"
+        ))),
+    }
+}
+
 // ── find_power binding ────────────────────────────────────────────────────────
 
 /// Run a power simulation for all scenarios encoded in `contracts` (a msgpack
@@ -58,13 +70,15 @@ pub fn find_power(
 ) -> Result<List> {
     // Decode to plain Rust types before the background thread starts — no Robj
     // may cross the thread boundary (`Robj` is `!Send`).
+    let sample_size = positive_count("sample_size", sample_size)?;
+    let n_sims = positive_count("n_sims", n_sims)?;
     let contracts = decode_contracts(contracts)?;
     let cancel = engine_orchestrator::CancellationToken::new();
     let result = run_engine(progress, &cancel, |sink, cancel| {
         engine_orchestrator::find_power(
             &contracts,
-            sample_size as usize,
-            n_sims as usize,
+            sample_size,
+            n_sims,
             base_seed as u64,
             Some(sink),
             cancel,
@@ -87,14 +101,16 @@ pub fn find_power_precancelled(
     n_sims: i32,
     base_seed: f64,
 ) -> Result<List> {
+    let sample_size = positive_count("sample_size", sample_size)?;
+    let n_sims = positive_count("n_sims", n_sims)?;
     let contracts = decode_contracts(contracts)?;
     let cancel = engine_orchestrator::CancellationToken::new();
     cancel.cancel();
     let result = run_with_progress(r!(NULL), &cancel, |sink, cancel| {
         engine_orchestrator::find_power(
             &contracts,
-            sample_size as usize,
-            n_sims as usize,
+            sample_size,
+            n_sims,
             base_seed as u64,
             Some(sink),
             cancel,
@@ -254,8 +270,12 @@ pub fn find_sample_size(
 ) -> Result<List> {
     let _ = tol_n; // bisection-only; retained for FFI signature stability.
 
-    let method = SampleSizeMethod::from_host_args(method, by.map(|v| v as usize), by_kind, mode)
-        .map_err(Error::Other)?;
+    let lo = positive_count("from_size", lo)?;
+    let hi = positive_count("to_size", hi)?;
+    let n_sims = positive_count("n_sims", n_sims)?;
+    let by = by.map(|v| positive_count("by", v)).transpose()?;
+    let method =
+        SampleSizeMethod::from_host_args(method, by, by_kind, mode).map_err(Error::Other)?;
 
     // Decode to plain Rust types before the background thread starts — no Robj
     // may cross the thread boundary (`Robj` is `!Send`).
@@ -265,8 +285,7 @@ pub fn find_sample_size(
         .map_err(orchestrator_err)?;
     let divisor =
         engine_orchestrator::resolve_unit_divisor(&contracts, unit).map_err(orchestrator_err)?;
-    let ((lo, hi), method) =
-        engine_orchestrator::bounds_to_rows((lo as usize, hi as usize), method, divisor);
+    let ((lo, hi), method) = engine_orchestrator::bounds_to_rows((lo, hi), method, divisor);
 
     let cancel = engine_orchestrator::CancellationToken::new();
     let result = run_engine(progress, &cancel, |sink, cancel| {
@@ -274,7 +293,7 @@ pub fn find_sample_size(
             &contracts,
             target_power,
             (lo, hi),
-            n_sims as usize,
+            n_sims,
             method,
             divisor,
             base_seed as u64,

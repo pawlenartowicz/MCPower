@@ -4,13 +4,13 @@
 //! math because it executes inside the per-sim hot path; Python only assembles
 //! the `ScenarioPerturbations` payload from defaults + user overrides.
 //!
-//! Every sim draws its own perturbed correlation matrix / var_types / residual
-//! choice from the scenario stream, independent of the *data* stream that
-//! supplies X rows and y values. Sims are therefore iid Bernoulli trials and
-//! the naive Wilson interval on `successes / n_sims` is exact.
+//! Every sim draws its own perturbed correlation matrix and var_types from the
+//! scenario stream, independent of the *data* stream that supplies X rows and
+//! y values. Sims are therefore iid Bernoulli trials and the naive Wilson
+//! interval on `successes / n_sims` is exact.
 
 use crate::rng::SimRng;
-use crate::spec::{Distribution, ResidualDist, ScenarioPerturbations};
+use crate::spec::{Distribution, ScenarioPerturbations};
 use faer::{MatMut, MatRef};
 
 /// Stream tag for the scenario-perturbation RNG. Independent of the data-gen
@@ -155,36 +155,6 @@ pub fn perturb_var_types(
     }
 }
 
-/// With probability `scenario.residual_change_prob`, returns a residual
-/// distribution drawn from `scenario.residual_dists`; otherwise returns
-/// `spec_residual_dist`. The df for any t-kernel realization comes from
-/// `scenario.residual_df` regardless (no model-level df). The uniform is
-/// drawn unconditionally before the eligibility check, plus the pin rule.
-pub fn pick_residual(
-    scenario: &ScenarioPerturbations,
-    spec_residual_dist: ResidualDist,
-    spec_residual_pinned: bool,
-    rng: &mut SimRng,
-) -> ResidualDist {
-    let prob = scenario.residual_change_prob;
-    if prob <= 0.0 || scenario.residual_dists.is_empty() {
-        return spec_residual_dist;
-    }
-    // Deliberate v1 deviation: only an unpinned default-normal residual is
-    // swap-eligible (v1 swapped whatever the spec carried). The uniform is
-    // drawn before the eligibility check so default-normal payloads keep the
-    // exact v1 stream; ineligible specs discard the draw.
-    let u = rng.next_uniform() as f64;
-    if u < prob && matches!(spec_residual_dist, ResidualDist::Normal) && !spec_residual_pinned {
-        // Clamp guards the rare u→1 edge.
-        let k = ((rng.next_uniform() as f64 * scenario.residual_dists.len() as f64) as usize)
-            .min(scenario.residual_dists.len() - 1);
-        scenario.residual_dists[k]
-    } else {
-        spec_residual_dist
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -240,14 +210,6 @@ mod tests {
         let mut rng = scenario_rng(42, 0);
         perturb_var_types(&scenario, &base, &[], &mut rng, &mut out);
         assert_eq!(out, base);
-    }
-
-    #[test]
-    fn optimistic_fast_path_pick_residual_returns_spec() {
-        let scenario = ScenarioPerturbations::default();
-        let mut rng = scenario_rng(42, 0);
-        let dist = pick_residual(&scenario, ResidualDist::HighKurtosis, false, &mut rng);
-        assert_eq!(dist, ResidualDist::HighKurtosis);
     }
 
     #[test]
@@ -389,65 +351,5 @@ mod tests {
             "pinned normal must survive"
         );
         assert_eq!(out_pinned[2], Distribution::RightSkewed);
-    }
-
-    #[test]
-    fn pick_residual_swap_returns_pool_dist() {
-        // SCEN-10: when `pick_residual` swaps, it returns a dist drawn from the
-        // scenario's `residual_dists` pool; when it does not swap, it returns
-        // the spec dist unchanged (df always comes from scenario.residual_df,
-        // outside this function). These per-draw invariants are deterministic
-        // and hold on every draw. The swap *rate* (≈ change_prob) is a
-        // statistical property (L3 seed) and is not asserted.
-        let scenario = ScenarioPerturbations {
-            residual_change_prob: 0.5,
-            residual_dists: vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
-            residual_df: 8.0,
-            ..Default::default()
-        };
-        let mut rng = scenario_rng(42, 0);
-        let mut saw_swap = false;
-        let mut saw_keep = false;
-        for _ in 0..5000 {
-            let dist = pick_residual(&scenario, ResidualDist::Normal, false, &mut rng);
-            if !matches!(dist, ResidualDist::Normal) {
-                saw_swap = true;
-                assert!(
-                    matches!(dist, ResidualDist::HighKurtosis | ResidualDist::RightSkewed),
-                    "swapped dist must come from the pool, got {dist:?}"
-                );
-            } else {
-                saw_keep = true;
-            }
-        }
-        // With change_prob=0.5 over 5000 draws both branches are reached (this is a
-        // reachability check on the deterministic branches, not a rate assertion).
-        assert!(
-            saw_swap && saw_keep,
-            "both swap and keep branches must be exercised"
-        );
-    }
-
-    #[test]
-    fn pick_residual_never_swaps_pinned_or_non_normal() {
-        // Pin rule (and the deliberate v1 deviation): a pinned normal and any
-        // non-normal spec residual are never swapped, even at change_prob 1.
-        let scenario = ScenarioPerturbations {
-            residual_change_prob: 1.0,
-            residual_dists: vec![ResidualDist::RightSkewed],
-            residual_df: 8.0,
-            ..Default::default()
-        };
-        let mut rng = scenario_rng(42, 0);
-        for _ in 0..100 {
-            let pinned = pick_residual(&scenario, ResidualDist::Normal, true, &mut rng);
-            assert_eq!(pinned, ResidualDist::Normal, "pinned normal must survive");
-            let non_normal = pick_residual(&scenario, ResidualDist::HighKurtosis, false, &mut rng);
-            assert_eq!(
-                non_normal,
-                ResidualDist::HighKurtosis,
-                "non-normal spec residual must survive"
-            );
-        }
     }
 }

@@ -110,8 +110,8 @@ def normalize_upload_input(
     # --- pandas DataFrame (lazy, by module name) ---------------------------
     if _is_module(data, "pandas"):
         names = list(data.columns)
-        rows = data.values.tolist()  # ndarray method → row-major python lists, no numpy import
-        columns_data = [list(c) for c in zip(*rows)] if rows else [[] for _ in names]
+        # ndarray methods → column-major python lists, no numpy import
+        columns_data = data.values.T.tolist()
         return columns_data, names
 
     # --- dict ---------------------------------------------------------------

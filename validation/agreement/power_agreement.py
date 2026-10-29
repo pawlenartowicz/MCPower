@@ -13,6 +13,14 @@ with pt = (x + 1) / (n + 2) in the variances only, and x = round(power * n_sims)
 A point is flagged when |z| > qnorm(0.95). Flags are leads to investigate, not a
 pass/fail verdict.
 
+Signed difference, per (case, comparator) over its k points:
+    mean_diff = mean(mc_power - ref_power)
+    se = sqrt(sum of the per-point variances) / k, CI = mean_diff +/- qnorm(0.975) * se
+where each point's variance is the squared denominator of z above. Like
+se_mean_z = 1/sqrt(k), this treats the points as independent: it ignores that
+two targets at one n share simulations, so the interval is model-based, not an
+empirical spread.
+
 Output, beside the input file (<stem> = input file name without extension):
     <stem>_points.csv, <stem>_summary.csv,
     <stem>_scatter.png, <stem>_curves_<k>.png
@@ -26,6 +34,7 @@ import statistics
 from collections import defaultdict
 
 Z_FLAG = statistics.NormalDist().inv_cdf(0.95)
+Z95 = statistics.NormalDist().inv_cdf(0.975)
 ALPHA = 0.1                                 # per-test flag rate, matches Z_FLAG
 
 COMPARATORS = {"loop_best": "loop", "tool_simglm": "simglm",
@@ -34,14 +43,18 @@ COMPARATORS = {"loop_best": "loop", "tool_simglm": "simglm",
 POINT_COLS = ["case", "family", "target", "n", "comparator", "mc_power", "ref_power",
               "mc_n_sims", "ref_n_sims", "z", "flagged", "mcpower_version"]
 SUMMARY_COLS = ["case", "family", "comparator", "n_points", "n_flagged",
-                "expected_flagged", "mean_z", "se_mean_z", "max_abs_diff"]
+                "expected_flagged", "mean_z", "se_mean_z", "max_abs_diff",
+                "mean_diff", "mean_diff_lo", "mean_diff_hi"]
+
+
+def diff_var(x_mc, n_mc, x_ref, n_ref):
+    """Variance of x_mc/n_mc - x_ref/n_ref: binomial variances at pt = (x + 1) / (n + 2)."""
+    t_mc, t_ref = (x_mc + 1) / (n_mc + 2), (x_ref + 1) / (n_ref + 2)
+    return t_mc * (1 - t_mc) / n_mc + t_ref * (1 - t_ref) / n_ref
 
 
 def agree_z(x_mc, n_mc, x_ref, n_ref):
-    p_mc, p_ref = x_mc / n_mc, x_ref / n_ref
-    t_mc, t_ref = (x_mc + 1) / (n_mc + 2), (x_ref + 1) / (n_ref + 2)
-    se = math.sqrt(t_mc * (1 - t_mc) / n_mc + t_ref * (1 - t_ref) / n_ref)
-    return (p_mc - p_ref) / se
+    return (x_mc / n_mc - x_ref / n_ref) / math.sqrt(diff_var(x_mc, n_mc, x_ref, n_ref))
 
 
 def build_points(doc):
@@ -81,13 +94,21 @@ def summarise(points):
     for (case, family, comparator), pts in groups.items():
         zs = [p["z"] for p in pts]
         diffs = [abs(p["mc_power"] - p["ref_power"]) for p in pts if "mc_power" in p and "ref_power" in p]
+        signed = [p["mc_power"] - p["ref_power"] for p in pts]
+        var_sum = sum(diff_var(round(p["mc_power"] * p["mc_n_sims"]), p["mc_n_sims"],
+                               round(p["ref_power"] * p["ref_n_sims"]), p["ref_n_sims"])
+                      for p in pts)
+        mean_diff = statistics.mean(signed)
+        half = Z95 * math.sqrt(var_sum) / len(pts)
         rows.append({"case": case, "family": family, "comparator": comparator,
                      "n_points": len(pts),
                      "n_flagged": sum(abs(z) > Z_FLAG for z in zs),
                      "expected_flagged": ALPHA * len(pts),
                      "mean_z": statistics.mean(zs),
                      "se_mean_z": 1 / math.sqrt(len(pts)),
-                     "max_abs_diff": max(diffs) if diffs else float("nan")})
+                     "max_abs_diff": max(diffs) if diffs else float("nan"),
+                     "mean_diff": mean_diff, "mean_diff_lo": mean_diff - half,
+                     "mean_diff_hi": mean_diff + half})
     return rows
 
 

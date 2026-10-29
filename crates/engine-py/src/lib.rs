@@ -12,9 +12,11 @@
 //!     orchestrator via `find_power` / `find_sample_size`, which lower each
 //!     contract to the kernel's `SimulationSpec` internally.
 //!   - Progress / cancel flows through a Python callable
-//!     `fn(current: int, total: int) -> bool`.
+//!     `fn(current: int, total: int) -> bool`, invoked on the calling thread;
+//!     Ctrl-C cancels via `run_with_progress`'s signal poll.
 //!
-//! All heavy work happens inside `Python::detach` so other Python
+//! All heavy work runs on a background thread while the calling thread holds
+//! the GIL only to deliver progress and check signals, so other Python
 //! threads can run in parallel during engine calls.
 
 use pyo3::prelude::*;
@@ -27,8 +29,7 @@ mod spec_builder_bridge;
 
 use crate::errors::engine_err_to_py;
 use crate::orchestrator_bridge::{
-    OrchestratorProgressSink, decode_contracts, power_result_to_pydict,
-    sample_size_result_to_pydict,
+    decode_contracts, power_result_to_pydict, run_with_progress, sample_size_result_to_pydict,
 };
 
 /// Configure the rayon thread pool. Must be called *before* any engine
@@ -54,23 +55,22 @@ fn find_power(
 ) -> PyResult<Py<PyAny>> {
     let contracts = decode_contracts(contracts_bytes)?;
     let cancel = engine_orchestrator::CancellationToken::new();
-    let mut sink = OrchestratorProgressSink::new(progress, &cancel);
 
     // catch_unwind turns a Rust engine panic into an actionable RuntimeError
     // (with the report hint) instead of a bare PanicException — mirrors
     // engine-r's `run_engine` (progress.rs), change together.
-    let outcome = py.detach(|| {
+    let outcome = run_with_progress(py, progress, &cancel, |sink, cancel| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             engine_orchestrator::find_power(
                 &contracts,
                 sample_size,
                 n_sims,
                 base_seed,
-                Some(&mut sink as &mut dyn engine_orchestrator::ProgressSink),
-                &cancel,
+                Some(sink),
+                cancel,
             )
         }))
-    });
+    })?;
     let result = match outcome {
         Ok(r) => r.map_err(orchestrator_err_to_py)?,
         Err(payload) => return Err(crate::errors::panic_to_py(payload)),
@@ -110,7 +110,6 @@ fn find_sample_size(
 ) -> PyResult<Py<PyAny>> {
     let contracts = decode_contracts(contracts_bytes)?;
     let cancel = engine_orchestrator::CancellationToken::new();
-    let mut sink = OrchestratorProgressSink::new(progress, &cancel);
     let _ = tol_n; // bisection-only; retained for FFI signature stability.
 
     let method = engine_orchestrator::SampleSizeMethod::from_host_args(method, by, by_kind, mode)
@@ -123,7 +122,7 @@ fn find_sample_size(
     let ((lo, hi), method) = engine_orchestrator::bounds_to_rows((lo, hi), method, divisor);
 
     // Panic boundary — see find_power (mirrors engine-r's run_engine).
-    let outcome = py.detach(|| {
+    let outcome = run_with_progress(py, progress, &cancel, |sink, cancel| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             engine_orchestrator::find_sample_size(
                 &contracts,
@@ -133,11 +132,11 @@ fn find_sample_size(
                 method,
                 divisor,
                 base_seed,
-                Some(&mut sink as &mut dyn engine_orchestrator::ProgressSink),
-                &cancel,
+                Some(sink),
+                cancel,
             )
         }))
-    });
+    })?;
     let result = match outcome {
         Ok(r) => r.map_err(orchestrator_err_to_py)?,
         Err(payload) => return Err(crate::errors::panic_to_py(payload)),

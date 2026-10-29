@@ -115,4 +115,19 @@ describe('ConvergenceNotice', () => {
     await expandBadge(getByText);
     expect(getByText(/Laplace-approximation bias likely/)).toBeTruthy();
   });
+
+  it('renders an engine grid warning (small-cluster GLMM) without expanding', () => {
+    const msg = '6 clusters at N=120 (fewer than 20): with few clusters the between-within t test of a cluster-level effect in a clustered binary/count model rejects more often than alpha, so power for cluster-level effects is overstated; add clusters';
+    const mixedSpec: AppSpec = {
+      family: 'mixed', ...LINEAR_BODY, cluster_name: 'school', icc: 0.2,
+      cluster_dim: { kind: 'n_clusters', value: 6 },
+      outcome: { kind: 'binary', baseline_probability: 0.3 },
+    };
+    const result = makeResult({
+      n: 120, grid_warnings: [msg],
+      estimator_extras: { estimator: 'glm', baseline_prob_realized: 0.3 } as EstimatorExtras,
+    });
+    const { getByText } = render(ConvergenceNotice, { props: { tab: makeTab(mixedSpec, result) } });
+    expect(getByText(msg)).toBeTruthy();
+  });
 });

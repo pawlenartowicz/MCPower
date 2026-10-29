@@ -8,9 +8,9 @@
 //! One exception: a draw tested at its own Satterthwaite df
 //! ([`uses_satterthwaite`]) has no df known before the fit, so it is decided
 //! from tail probabilities instead — [`t_tail_sq`] and [`f_tail`], one
-//! incomplete-beta evaluation each, a fraction of one `t_ppf` Newton search,
-//! and [`tukey_tail_sq`] under Tukey HSD, one studentized-range CDF quadrature
-//! where the threshold would run a Newton search over it.
+//! incomplete-beta evaluation each, a fraction of one `t_ppf` Newton search.
+//! Tukey HSD there compares against [`TukeyThresholds`], whose curve gives the
+//! threshold at any df without a quantile search.
 //!
 //! **NR** = Press, Teukolsky, Vetterling & Flannery (2007), *Numerical Recipes:
 //! The Art of Scientific Computing*, 3rd ed., Cambridge University Press.
@@ -18,14 +18,15 @@
 //! cumulative distribution function* (unpublished web note).
 //! **Lanczos** = Lanczos, C. (1964), *A precision approximation of the gamma
 //! function*, SIAM J. Numer. Anal. Ser. B, 1, 86–96.
-//! **Lenth** = Lenth, R. V. (1989), *Algorithm AS 190: Probabilities and Upper
-//! Quantiles for the Studentized Range*, Appl. Statist. 38(1), 185–189.
 
-use crate::distributions::phi;
 use crate::spec::{
     ClusterSizing, CorrectionMethod, CritValues, DfMethod, EngineError, EstimatorSpec,
     SimulationSpec,
 };
+use commonstats::dist::ContinuousCdf;
+use commonstats::dist::continuous::StudentizedRange;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 // ---------------------------------------------------------------------------
 // Student-t inverse CDF
@@ -501,276 +502,317 @@ pub fn f_ppf(p: f64, dfn: f64, dfd: f64) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// Studentized-range (Tukey HSD) inverse CDF
+// Tukey HSD thresholds
 // ---------------------------------------------------------------------------
 
-/// Standard-normal PDF φ(z).
-#[inline]
-fn norm_pdf(z: f64) -> f64 {
-    use std::f64::consts::PI;
-    (-0.5 * z * z).exp() / (2.0 * PI).sqrt()
-}
-
-/// 32-node Gauss–Legendre abscissae/weights on [-1, 1] (symmetric; only the
-/// 16 non-negative nodes are stored — negatives are mirror images with equal
-/// weight). Used for both the inner normal integral and the outer χ mixing.
-const GL32_X: [f64; 16] = [
-    0.048_307_665_687_738_32,
-    0.144_471_961_582_796_5,
-    0.239_287_362_252_137_07,
-    0.331_868_602_282_127_65,
-    0.421_351_276_130_635_35,
-    0.506_899_908_932_229_4,
-    0.587_715_757_240_762_3,
-    0.663_044_266_930_215_2,
-    0.732_182_118_740_289_7,
-    0.794_483_795_967_942_4,
-    0.849_367_613_732_57,
-    0.896_321_155_766_052_1,
-    0.934_906_075_937_739_7,
-    0.964_762_255_587_506_4,
-    0.985_611_511_545_268_3,
-    0.997_263_861_849_481_6,
-];
-const GL32_W: [f64; 16] = [
-    0.096_540_088_514_727_8,
-    0.095_638_720_079_274_86,
-    0.093_844_399_080_804_57,
-    0.091_173_878_695_763_89,
-    0.087_652_093_004_403_81,
-    0.083_311_924_226_946_76,
-    0.078_193_895_787_070_31,
-    0.072_345_794_108_848_5,
-    0.065_822_222_776_361_85,
-    0.058_684_093_478_535_55,
-    0.050_998_059_262_376_18,
-    0.042_835_898_022_226_69,
-    0.034_273_862_913_021_43,
-    0.025_392_065_309_262_06,
-    0.016_274_394_730_905_67,
-    0.007_018_610_009_470_117,
-];
-
-/// Integrate `f` over `[lo, hi]` with a composite Gauss–Legendre rule: the
-/// interval is split into `panels` equal sub-intervals, each integrated with
-/// the 32-node rule. Effective order is `32·panels`, which resolves sharply
-/// peaked integrands (large-k inner integral, small-df χ mixing) that a single
-/// GL32 panel under-resolves. Off the hot loop, so the per-call allocation-free
-/// double sum is fine.
-#[inline]
-fn gl_composite<F: Fn(f64) -> f64>(lo: f64, hi: f64, panels: usize, f: F) -> f64 {
-    let step = (hi - lo) / panels as f64;
-    let half = 0.5 * step;
-    let mut acc = 0.0;
-    for p in 0..panels {
-        let mid = lo + (p as f64 + 0.5) * step;
-        for i in 0..16 {
-            let dx = half * GL32_X[i];
-            acc += GL32_W[i] * (f(mid + dx) + f(mid - dx));
-        }
-    }
-    half * acc
-}
-
-/// Composite GL over `[0, hi]` with panel boundaries graded as `(i/panels)^grade`
-/// so they cluster near 0. Used for the χ-mixing integral, whose integrand
-/// `g(u)·range_cdf(q·√u)` develops a sharp transition near `u = 0` for high
-/// quantiles (large q): `range_cdf(q·√u)` climbs from 0 to 1 within
-/// `u ~ (1/q)²`, which a uniform mesh under-resolves. `grade > 1` packs the
-/// nodes there. Each graded panel still uses the 32-node rule internally.
-#[inline]
-fn gl_graded<F: Fn(f64) -> f64>(hi: f64, panels: usize, grade: f64, f: F) -> f64 {
-    let mut acc = 0.0;
-    let mut a = 0.0_f64;
-    for p in 1..=panels {
-        let b = hi * (p as f64 / panels as f64).powf(grade);
-        let half = 0.5 * (b - a);
-        let mid = 0.5 * (b + a);
-        for i in 0..16 {
-            let dx = half * GL32_X[i];
-            acc += half * GL32_W[i] * (f(mid + dx) + f(mid - dx));
-        }
-        a = b;
-    }
-    acc
-}
-
-/// Inner integral: P(range ≤ w | k) for k iid standard normals, where
-/// `w = q·s` is the (scaled) range threshold. Equals
-/// `k · ∫_{-∞}^{∞} φ(z) [Φ(z) − Φ(z − w)]^{k−1} dz`.
-///
-/// Integrated over the effectively-finite support `z ∈ [-8, 8]` with a composite
-/// Gauss–Legendre rule. The integrand `φ(z)·[Φ(z) − Φ(z − w)]^{k−1}` is confined
-/// to `[-8, 8]` by `φ(z)` *regardless of w* (the `[Φ(z) − Φ(z − w)]` factor is
-/// bounded by 1), so the domain must NOT widen with w — doing so spreads all the
-/// nodes into the φ-dead region `[8, 8+w]` for large w and starves the live
-/// `[-8, 8]` band, which made `range_cdf` collapse toward 0 for huge w and broke
-/// the total CDF mass. The integrand also becomes sharply peaked for large `k`,
-/// so the panel count grows with `k` (a single GL32 panel loses accuracy past
-/// k ≈ 8).
-fn range_cdf(w: f64, k: f64) -> f64 {
-    if w <= 0.0 {
-        return 0.0;
-    }
-    let lo = -8.0;
-    let hi = 8.0;
-    // More panels for larger k: the (k−1) power sharpens the peak.
-    let panels = 4 + (k as usize).saturating_sub(1);
-    let acc = gl_composite(lo, hi, panels, |z| {
-        let inner = phi(z) - phi(z - w);
-        if inner > 0.0 {
-            norm_pdf(z) * inner.powf(k - 1.0)
-        } else {
-            0.0
-        }
-    });
-    (k * acc).min(1.0)
-}
-
-/// Studentized-range CDF P(W ≤ q) for `k` groups and `df` error df (Lenth).
-///
-/// `P(W ≤ q) = ∫_0^∞ f_df(s) · range_cdf(q·s, k) ds`, where `s = χ_df/√df`
-/// (the random scale factor) has density
-/// `f_df(s) = 2 (df/2)^{df/2} / Γ(df/2) · s^{df−1} e^{−df s²/2}`.
-///
-/// For `df → ∞` the scale concentrates at `s = 1` and the mixing drops out, so
-/// we short-circuit to `range_cdf(q, k)`.
-///
-/// Finite-df mixing is integrated in the variable `u = s² = χ²_df / df`, whose
-/// density is `g(u) = (df/2)^{df/2}/Γ(df/2) · u^{df/2−1} e^{−df u/2}` (a gamma
-/// density). The substitution is what makes small df tractable: in the original
-/// `s` variable the factor `s^{df−1}` has an infinite slope at `s = 0` for
-/// `df < 2` and a near-vertical rise for `df` just above 2, which a fixed GL
-/// grid mis-resolves and which made the CDF non-monotone in q. In `u` the
-/// exponent `df/2 − 1` is ≥ 0 for all `df ≥ 2`, so the integrand is smooth on
-/// `[0, u_max]` and the composite GL rule converges. Small df gets extra panels
-/// near `u = 0` where `u^{df/2−1}` still bends sharply.
-///
-/// `P(W ≤ q) = ∫_0^∞ g(u) · range_cdf(q·√u, k) du`, truncated at the χ²_df upper
-/// tail. Requires `df ≥ 2`; callers guard `df < 2` upstream.
-///
-/// After editing this quadrature (or `range_cdf` / `gl_graded`), run the
-/// exhaustive monotonicity sweep, which is `#[ignore]`d for cost:
-/// `cargo test -p engine-core --release -- --ignored tukey_cdf_monotone`.
-fn studentized_range_cdf(q: f64, k: f64, df: f64) -> f64 {
-    if q <= 0.0 {
-        return 0.0;
-    }
-    if !df.is_finite() || df > 2.0e4 {
-        // df → ∞: s ≡ 1.
-        return range_cdf(q, k);
-    }
-    let half_df = 0.5 * df;
-    // log g(u) = (df/2) ln(df/2) − lnΓ(df/2) + (df/2 − 1) ln u − (df/2) u.
-    let ln_c = half_df * half_df.ln() - ln_gamma(half_df);
-    let g = |u: f64| -> f64 {
-        if u <= 0.0 {
-            return 0.0;
-        }
-        let dens = (ln_c + (half_df - 1.0) * u.ln() - half_df * u).exp();
-        dens * range_cdf(q * u.sqrt(), k)
-    };
-    // u = χ²_df/df has mean 1 and sd √(2/df). Cap at mean+12·sd, comfortably
-    // past the χ² upper tail for df ≥ 2 (range_cdf(q√u) ≈ 1 out there, so over-
-    // shooting only adds negligible mass — but undershooting truncates real mass
-    // and makes the CDF non-monotone in q).
-    let u_max = 1.0 + 12.0 * (2.0 / df).sqrt();
-    // Grade the mesh toward u = 0: for high quantiles range_cdf(q√u) climbs from
-    // 0 to 1 within u ~ (1/q)², a sharp transition a uniform mesh misses. Small
-    // df also needs more panels because u^{df/2−1} bends hard near 0.
-    let (panels, grade) = if df < 6.0 { (96, 3.0) } else { (24, 2.0) };
-    gl_graded(u_max, panels, grade, g).min(1.0)
-}
-
-/// Tukey HSD upper tail for a pairwise t statistic, from `t_sq = t²`:
-/// `P(W ≥ √2·|t|)` for the studentized range `W` with `k` means and `df` error
-/// df — one CDF quadrature, where the threshold `q_tukey_ppf(1 − α, k, df)`
-/// runs a Newton search over it. `tail ≤ α` decides as `t² > (q / √2)²` does.
-/// NaN where the quantile is (`k ≤ 1`, `df < 2`, non-finite inputs).
-pub(crate) fn tukey_tail_sq(t_sq: f64, k: f64, df: f64) -> f64 {
-    if !t_sq.is_finite() || !k.is_finite() || k <= 1.0 || !df.is_finite() || df < 2.0 {
+/// Upper studentized-range quantile `q_{1−α,k,df}` from commonstats
+/// `StudentizedRange::isf` (20–80 ms per solve), memoized process-wide by the
+/// bit patterns of `(α, k, df)`. NaN where the test is undefined: `df < 2`
+/// (R's `qtukey` is NaN at df = 1, and between-within allows
+/// `df_between = 1`), `k ≤ 1` or NaN (a target with no factor), or a solver
+/// error. The cache lock is released during the solve, so worker threads
+/// rebuilding a sparse-exclusion table never wait on each other's solves; two
+/// threads racing on one key compute the same value.
+fn tukey_q_exact(alpha: f64, k: f64, df: f64) -> f64 {
+    if df.is_nan() || df < 2.0 {
         return f64::NAN;
     }
-    1.0 - studentized_range_cdf(std::f64::consts::SQRT_2 * t_sq.sqrt(), k, df)
-}
-
-/// Inverse CDF (quantile) of the studentized-range distribution: returns the
-/// `p`-quantile `q` such that `P(W ≤ q) = p` for `k` groups and `df` error df.
-///
-/// Seeded from the Bonferroni bound `q0 = √2 · t_ppf(1 − (1−p)/(k(k−1)), df)`,
-/// then refined by Newton iteration on `studentized_range_cdf(q) − p` (the
-/// derivative is estimated by a central finite difference, since the CDF is
-/// itself a quadrature). Falls back to bisection on a bracketing interval if
-/// Newton diverges or leaves the bracket.
-///
-/// Used by `CritValueTable::build` to compute Tukey-HSD thresholds
-/// `(q_{α,k,df} / √2)²`. Built once per `run_batch`, off the hot loop.
-///
-/// Edge cases: `p ≤ 0` → 0.0; `p ≥ 1` → +∞; `k ≤ 1`, `df < 2`, or non-finite
-/// inputs → NaN. The `df < 2` case matches R: `qtukey(p, k, 1)` returns NaN
-/// (the df=1 studentized range is degenerate), so we never emit finite garbage
-/// there — the χ-mixing density `u^{df/2−1}` is non-integrable in our quadrature
-/// for `df < 2` and the CDF stops being monotone in q, which would let the
-/// bracket/Newton search lock onto a spurious crossing.
-pub(crate) fn q_tukey_ppf(p: f64, k: f64, df: f64) -> f64 {
-    if !k.is_finite() || k <= 1.0 || !df.is_finite() || df < 2.0 || !p.is_finite() {
-        return f64::NAN;
+    let key = (alpha.to_bits(), k.to_bits(), df.to_bits());
+    if let Some(&q) = tukey_cache().exact.get(&key) {
+        return q;
     }
-    if p <= 0.0 {
-        return 0.0;
+    let q = StudentizedRange::new(k, df)
+        .and_then(|d| d.isf(alpha))
+        .unwrap_or(f64::NAN);
+    let mut cache = tukey_cache();
+    if cache.exact.len() >= TUKEY_EXACT_CAP {
+        cache.exact.clear();
     }
-    if p >= 1.0 {
-        return f64::INFINITY;
-    }
-
-    // Bonferroni seed: √2 · t-quantile at the per-comparison level for the
-    // k(k−1)/2 pairwise contrasts (two-sided ⇒ factor k(k−1)).
-    let m = k * (k - 1.0);
-    let t_q = t_ppf(1.0 - (1.0 - p) / m, df);
-    let mut q = if t_q.is_finite() && t_q > 0.0 {
-        std::f64::consts::SQRT_2 * t_q
-    } else {
-        3.0
-    };
-
-    // Bracket for the bisection fallback: widen until the CDF straddles p.
-    let mut lo = 0.0_f64;
-    let mut hi = q.max(1.0) * 2.0 + 4.0;
-    while studentized_range_cdf(hi, k, df) < p && hi < 1.0e3 {
-        hi *= 1.5;
-    }
-
-    // Newton with central-difference derivative; bisection fallback.
-    let h = 1e-4;
-    for _ in 0..60 {
-        let f = studentized_range_cdf(q, k, df) - p;
-        if f.abs() < 1e-9 {
-            return q;
-        }
-        // Tighten the bracket using the sign of the residual.
-        if f < 0.0 {
-            lo = q;
-        } else {
-            hi = q;
-        }
-        let f_hi = studentized_range_cdf(q + h, k, df);
-        let f_lo = studentized_range_cdf(q - h, k, df);
-        let deriv = (f_hi - f_lo) / (2.0 * h);
-        let mut next = if deriv.is_finite() && deriv > 1e-12 {
-            q - f / deriv
-        } else {
-            f64::NAN
-        };
-        // Fall back to bisection if Newton leaves the bracket or diverges.
-        if !next.is_finite() || next <= lo || next >= hi {
-            next = 0.5 * (lo + hi);
-        }
-        if (next - q).abs() < 1e-10 {
-            return next;
-        }
-        q = next;
-    }
+    cache.exact.insert(key, q);
     q
+}
+
+/// Bounds on the process-wide Tukey cache, so a long GUI session cannot grow
+/// it without limit. A full map is cleared, not trimmed: every entry is a pure
+/// function of its key, so eviction only costs a re-solve, never a result.
+const TUKEY_EXACT_CAP: usize = 4096;
+const TUKEY_CURVE_CAP: usize = 64;
+
+/// Exact quantiles keyed by `(α, k, df)` bits, and curves keyed by
+/// `(α, k, df_lo, df_hi)` bits; `None` records a range whose curve hit the node
+/// cap, so a re-run does not rebuild it.
+#[derive(Default)]
+struct TukeyCache {
+    exact: HashMap<(u64, u64, u64), f64>,
+    curves: HashMap<(u64, u64, u64, u64), Option<Arc<TukeyCurve>>>,
+}
+
+static TUKEY_CACHE: OnceLock<Mutex<TukeyCache>> = OnceLock::new();
+
+fn tukey_cache() -> MutexGuard<'static, TukeyCache> {
+    TUKEY_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Empty the process-wide cache: tests use it to compare a cold run with a
+/// warm one. Other tests share the process-wide cache and run in parallel, so
+/// 'cold' means just cleared, not guaranteed empty; that can only make the runs
+/// agree more easily, never fail spuriously. Run with `--test-threads=1` for a
+/// guaranteed cold start.
+#[cfg(test)]
+pub(crate) fn clear_tukey_cache() {
+    let mut cache = tukey_cache();
+    cache.exact.clear();
+    cache.curves.clear();
+}
+
+/// Chebyshev interpolant of `q_{1−α,k,df}` in `x = 1/df` over
+/// `[df_lo, df_hi]`. For fixed α and k the Tukey quantile is a very smooth
+/// function of `1/df`: 9–17 nodes reproduce it to 1e-12 relative over a
+/// sample-size grid's df range, and about 33 over `[2, 1000]`.
+///
+/// Nodes are Chebyshev–Lobatto points `x_j = c + h·cos(πj/n)`, `j = 0..=n`,
+/// each an exact `isf` solve, evaluated by the barycentric formula (weights
+/// `(−1)^j`, halved at both ends). The build starts at `n = 8` and checks the
+/// interpolant against exact solves at the θ-midpoints of intervals 0, 1,
+/// `n/2` and `n − 1` (two near the small-df end, where `q` is steepest). Every
+/// check must agree to 1e-11 relative, or `n` doubles. The midpoints are
+/// exactly the new nodes of the doubled grid, so no solve is wasted. At most
+/// `n = 64` intervals; a range that still fails there gets no curve.
+#[derive(Debug, PartialEq)]
+struct TukeyCurve {
+    df_lo: f64,
+    df_hi: f64,
+    x: Vec<f64>,
+    q: Vec<f64>,
+}
+
+const TUKEY_CURVE_START: usize = 8;
+const TUKEY_CURVE_MAX: usize = 64;
+const TUKEY_CURVE_TOL: f64 = 1e-11;
+
+impl TukeyCurve {
+    fn build(alpha: f64, k: f64, df_lo: f64, df_hi: f64) -> Option<TukeyCurve> {
+        let (c, h) = (
+            0.5 * (1.0 / df_hi + 1.0 / df_lo),
+            0.5 * (1.0 / df_lo - 1.0 / df_hi),
+        );
+        // Node `j` of `n` intervals. `2j / 2n` and `j / n` round to the same
+        // f64, so a node keeps its bits when `n` doubles.
+        let node = |j: usize, n: usize| c + h * (std::f64::consts::PI * j as f64 / n as f64).cos();
+        // Clamped so the end nodes never round past the range (df = 2 − 1 ulp
+        // would solve to NaN).
+        let solve = |x: f64| tukey_q_exact(alpha, k, (1.0 / x).clamp(df_lo, df_hi));
+        let mut n = TUKEY_CURVE_START;
+        let mut x: Vec<f64> = (0..=n).map(|j| node(j, n)).collect();
+        let mut q: Vec<f64> = x.iter().map(|&xj| solve(xj)).collect();
+        loop {
+            if q.iter().any(|v| !v.is_finite()) {
+                return None;
+            }
+            let curve = TukeyCurve { df_lo, df_hi, x, q };
+            let mut checks = vec![0, 1, n / 2, n - 1];
+            checks.dedup();
+            let passed = checks.iter().all(|&i| {
+                let xm = node(2 * i + 1, 2 * n);
+                let exact = solve(xm);
+                ((curve.eval_x(xm) - exact) / exact).abs() <= TUKEY_CURVE_TOL
+            });
+            if passed {
+                return Some(curve);
+            }
+            if 2 * n > TUKEY_CURVE_MAX {
+                return None;
+            }
+            n *= 2;
+            x = (0..=n).map(|j| node(j, n)).collect();
+            q = (0..=n)
+                .map(|j| {
+                    if j % 2 == 0 {
+                        curve.q[j / 2]
+                    } else {
+                        solve(x[j])
+                    }
+                })
+                .collect();
+        }
+    }
+
+    /// Barycentric interpolation at `x = 1/df`.
+    fn eval_x(&self, x: f64) -> f64 {
+        let last = self.x.len() - 1;
+        let (mut num, mut den) = (0.0, 0.0);
+        for (j, (&xj, &qj)) in self.x.iter().zip(&self.q).enumerate() {
+            let d = x - xj;
+            if d == 0.0 {
+                return qj;
+            }
+            let mut w = if j % 2 == 0 { 1.0 } else { -1.0 };
+            if j == 0 || j == last {
+                w *= 0.5;
+            }
+            num += w * qj / d;
+            den += w / d;
+        }
+        num / den
+    }
+
+    fn covers(&self, df: f64) -> bool {
+        df >= self.df_lo && df <= self.df_hi
+    }
+}
+
+/// The curve for `(α, k)` over `[df_lo, df_hi]`, from the process-wide cache
+/// or built (lock released during the build).
+fn tukey_curve_cached(alpha: f64, k: f64, df_lo: f64, df_hi: f64) -> Option<Arc<TukeyCurve>> {
+    let key = (
+        alpha.to_bits(),
+        k.to_bits(),
+        df_lo.to_bits(),
+        df_hi.to_bits(),
+    );
+    if let Some(c) = tukey_cache().curves.get(&key) {
+        return c.clone();
+    }
+    let curve = TukeyCurve::build(alpha, k, df_lo, df_hi).map(Arc::new);
+    let mut cache = tukey_cache();
+    if cache.curves.len() >= TUKEY_CURVE_CAP {
+        cache.curves.clear();
+    }
+    cache.curves.insert(key, curve.clone());
+    curve
+}
+
+/// The one source of every Tukey HSD threshold in a run: the squared t-scale
+/// threshold `(q_{1−α,k,df} / √2)²` at any df, and the per-draw decision at a
+/// Satterthwaite df.
+///
+/// Planned once per run from the run's own inputs ([`TukeyThresholds::plan`]),
+/// so results never depend on what earlier calls left in the cache. The
+/// default value holds no curves: every threshold is an exact solve. A curve
+/// is read without locking; the exact path goes through the process-wide cache.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TukeyThresholds {
+    curves: Vec<(f64, f64, Arc<TukeyCurve>)>,
+}
+
+/// One `(α, k)` family a run tests at, with every table df it needs.
+pub struct TukeyFamily {
+    pub alpha: f64,
+    pub k: f64,
+    pub dfs: Vec<f64>,
+}
+
+/// A family with at most this many distinct table df is solved exactly: a curve
+/// costs at least 9 node solves plus 4 check solves (13).
+const TUKEY_EXACT_MAX_DFS: usize = 13;
+
+impl TukeyThresholds {
+    /// Choose, per `(α, k)` family, between exact solves and a curve:
+    /// - k = 2 never needs either (the threshold is the two-sided t);
+    /// - a Satterthwaite run (`satterthwaite`) gets a curve over
+    ///   `[2, df_max]`, which its per-draw decisions and its asymptotic
+    ///   fallback table both read;
+    /// - otherwise a family with at most 13 distinct table df ≥ 2 is solved
+    ///   exactly, and a larger one gets a curve over `[smallest table df ≥ 2,
+    ///   df_max]`.
+    ///
+    /// `df_max` is the largest df any table of the run can reach, `N_max − 1`
+    /// (a sparse-exclusion rebuild down to the intercept), so rebuilds read the
+    /// same curve. Families sharing `(α, k)` are merged.
+    pub fn plan(families: &[TukeyFamily], df_max: f64, satterthwaite: bool) -> TukeyThresholds {
+        let mut merged: Vec<(f64, f64, Vec<f64>)> = Vec::new();
+        for f in families.iter().filter(|f| f.k > 2.0) {
+            let dfs = f.dfs.iter().copied().filter(|&d| d >= 2.0);
+            match merged
+                .iter_mut()
+                .find(|(a, k, _)| a.to_bits() == f.alpha.to_bits() && k.to_bits() == f.k.to_bits())
+            {
+                Some((_, _, d)) => d.extend(dfs),
+                None => merged.push((f.alpha, f.k, dfs.collect())),
+            }
+        }
+        let mut curves = Vec::new();
+        for (alpha, k, mut dfs) in merged {
+            dfs.sort_by(f64::total_cmp);
+            dfs.dedup();
+            let df_lo = if satterthwaite {
+                2.0
+            } else if dfs.len() > TUKEY_EXACT_MAX_DFS {
+                dfs[0]
+            } else {
+                continue;
+            };
+            if df_max > df_lo {
+                if let Some(c) = tukey_curve_cached(alpha, k, df_lo, df_max) {
+                    curves.push((alpha, k, c));
+                }
+            }
+        }
+        TukeyThresholds { curves }
+    }
+
+    fn curve(&self, alpha: f64, k: f64, df: f64) -> Option<&TukeyCurve> {
+        self.curves
+            .iter()
+            .find(|(a, ck, c)| *a == alpha && *ck == k && c.covers(df))
+            .map(|(_, _, c)| c.as_ref())
+    }
+
+    /// `(q_{1−α,k,df} / √2)²`. NaN where the test is undefined (`df < 2`,
+    /// `k < 2` or NaN), so such a target never rejects. At k = 2 it is
+    /// `t_ppf(1 − α/2, df)²`, the same call as the uncorrected two-sided
+    /// threshold, so a Student-t build's k = 2 row equals its uncorrected row.
+    /// A df outside every curve is solved exactly.
+    pub fn crit_sq(&self, alpha: f64, k: f64, df: f64) -> f64 {
+        if df.is_nan() || df < 2.0 || k.is_nan() || k < 2.0 {
+            return f64::NAN;
+        }
+        if k == 2.0 {
+            let t = t_ppf(1.0 - alpha / 2.0, df);
+            return t * t;
+        }
+        let q = match self.curve(alpha, k, df) {
+            Some(c) => c.eval_x(1.0 / df),
+            None => tukey_q_exact(alpha, k, df),
+        };
+        let t = q / std::f64::consts::SQRT_2;
+        t * t
+    }
+
+    /// Whether a pairwise `t² = t_sq` rejects under Tukey HSD at a draw's own
+    /// Satterthwaite df: `t² > crit_sq(df)` read off the curve, and the exact
+    /// `sf(√2·|t|) ≤ α` where no curve covers `df` (above the run's largest
+    /// table df, or a range that hit the node cap). k = 2 is the two-sided t
+    /// test, decided from its p-value like the uncorrected Satterthwaite flags.
+    /// Never significant at `df < 2`, for `k < 2`, or for a non-finite `t_sq`.
+    pub fn draw_significant(&self, alpha: f64, k: f64, t_sq: f64, df: f64) -> bool {
+        if !t_sq.is_finite() || df.is_nan() || df < 2.0 || k.is_nan() || k < 2.0 {
+            return false;
+        }
+        if k == 2.0 {
+            return t_tail_sq(t_sq, df) <= alpha;
+        }
+        match self.curve(alpha, k, df) {
+            Some(c) => {
+                let t = c.eval_x(1.0 / df) / std::f64::consts::SQRT_2;
+                t_sq > t * t
+            }
+            None => StudentizedRange::new(k, df)
+                .is_ok_and(|d| d.sf(std::f64::consts::SQRT_2 * t_sq.sqrt()) <= alpha),
+        }
+    }
+}
+
+/// Tukey HSD inputs to a table build: the studentized-range `k` of each
+/// target (marginals, then contrasts; the factor level count `L`, `< 2` or
+/// NaN for a target that is not a factor dummy) and the run's threshold source.
+#[derive(Debug, Clone, Copy)]
+pub struct TukeyTargets<'a> {
+    pub k_per_target: &'a [f64],
+    pub thresholds: &'a TukeyThresholds,
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +980,90 @@ pub fn uses_satterthwaite(spec: &SimulationSpec) -> bool {
             .is_some_and(|c| !c.extra_groupings.is_empty())
 }
 
+/// The df split at grid point `n_idx`: the residual df `N − P`, and under the
+/// between-within reference `(df_between, df_within)` (both `N − P` for a
+/// collapsed fit). The one rule behind every target's df:
+/// [`CritValueTable::build_with_tukey_k`] and [`target_df_rows`] both call it.
+fn df_split_at(
+    sample_size: u32,
+    n_idx: usize,
+    n_predictors: u32,
+    bw: Option<&BetweenWithinDf>,
+) -> Result<(f64, Option<(f64, f64)>), EngineError> {
+    let df_signed = sample_size as i64 - n_predictors as i64;
+    if df_signed < 1 {
+        return Err(EngineError::InvalidSpec(format!(
+            "df = N - P = {sample_size} - {n_predictors} < 1"
+        )));
+    }
+    let df = df_signed as f64;
+
+    // Between-within denominator degrees of freedom (SAS `DDFM=BETWITHIN`): the
+    // residual df splits into a between-cluster part `g − p_between`, which
+    // carries the cluster-level effects, and the within-cluster remainder,
+    // which carries the rest. `None` keeps every target on the asymptotic
+    // reference.
+    let split = match bw {
+        None => None,
+        // Collapsed fit: the single-level model's residual df on every target,
+        // still a Student-t reference.
+        Some(b) if b.collapsed => Some((df, df)),
+        Some(b) => {
+            let g = b.clusters_per_n[n_idx] as i64;
+            let df_between = g - b.p_between as i64;
+            let df_within = df_signed - df_between;
+            if df_between < 1 || df_within < 1 {
+                return Err(EngineError::InvalidSpec(format!(
+                    "between-within df at N = {sample_size}: between = g - p_between = \
+                     {g} - {} = {df_between}, within = {df_within}; both must be >= 1. \
+                     Use df_method = \"asymptotic\" for the Wald z reference, or add clusters",
+                    b.p_between
+                )));
+            }
+            Some((df_between as f64, df_within as f64))
+        }
+    };
+    Ok((df, split))
+}
+
+/// Target `i`'s reference df at one grid point: its between or within df under
+/// the split (`between_flags[i]`), else the residual `df`.
+fn target_df(df: f64, split: Option<(f64, f64)>, between_flags: &[bool], i: usize) -> f64 {
+    match split {
+        Some((between, within)) => {
+            if between_flags.get(i).copied().unwrap_or(false) {
+                between
+            } else {
+                within
+            }
+        }
+        None => df,
+    }
+}
+
+/// The df each of `n_targets` targets is tested at, one row per element of
+/// `sample_sizes` — under Tukey HSD, the df its threshold is solved at (a
+/// Wald-z build has no t df, but Tukey still refers to `N − P`). Errors exactly
+/// as [`CritValueTable::build_with_tukey_k`] does.
+pub fn target_df_rows(
+    sample_sizes: &[u32],
+    n_predictors: u32,
+    n_targets: usize,
+    bw: Option<&BetweenWithinDf>,
+) -> Result<Vec<Vec<f64>>, EngineError> {
+    let between_flags: &[bool] = bw.map(|b| b.between_per_target.as_slice()).unwrap_or(&[]);
+    sample_sizes
+        .iter()
+        .enumerate()
+        .map(|(n_idx, &n)| {
+            let (df, split) = df_split_at(n, n_idx, n_predictors, bw)?;
+            Ok((0..n_targets)
+                .map(|i| target_df(df, split, between_flags, i))
+                .collect())
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // CritValueTable
 // ---------------------------------------------------------------------------
@@ -1007,6 +1133,12 @@ impl CritValueTable {
     /// - `estimator`: `EstimatorSpec::Ols` uses Student-t with `df = N − P`;
     ///   `EstimatorSpec::Glm` and `EstimatorSpec::Mle` both use the standard normal
     ///   (Wald-z, df-independent; the LME engine produces Wald-z statistics).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidSpec` when α or the post-hoc α lies outside (0, 1), when
+    /// `N − P < 1` at some sample size, and under `TukeyHsd`, which needs
+    /// `build_with_tukey_k`.
     pub fn build(
         crit: &CritValues,
         sample_sizes: &[u32],
@@ -1022,30 +1154,37 @@ impl CritValueTable {
             n_targets,
             correction_method,
             estimator,
-            &[],
+            None,
             None,
         )
     }
 
-    /// Like [`build`], but threads a per-target studentized-range `k` (number of
-    /// means compared = the factor level count `L` of the factor each target
-    /// belongs to). Only the `TukeyHsd` arm reads it; every other correction
-    /// method ignores `tukey_k_per_target` entirely, so non-Tukey callers pass
-    /// an empty slice via [`build`].
+    /// Like [`build`], but threads the Tukey HSD inputs: a per-target
+    /// studentized-range `k` (number of means compared = the factor level count
+    /// `L` of the factor each target belongs to) and the run's
+    /// [`TukeyThresholds`]. Only the `TukeyHsd` arm reads them, and it needs
+    /// them: under `TukeyHsd` a `None`, or a `k_per_target` whose length is not
+    /// `n_targets`, is an error. Non-Tukey callers pass `None` via [`build`].
     ///
-    /// `tukey_k_per_target` is indexed by target position (same order as the
-    /// per-`N` correction row: marginal targets first, then contrasts). Each
-    /// entry is the factor's `L`; targets that are not factor dummies (a
-    /// continuous predictor, the intercept, or a cross-factor contrast) carry
-    /// `< 2` (e.g. `0.0` or `NaN`), which `q_tukey_ppf` maps to `NaN` → those
-    /// targets always fail under Tukey (a Tukey design should not point a target
-    /// at a non-factor column).
+    /// `k_per_target` is indexed by target position (same order as the per-`N`
+    /// correction row: marginal targets first, then contrasts). Targets that
+    /// are not factor dummies (a continuous predictor, the intercept, or a
+    /// cross-factor contrast) carry `< 2` (e.g. `0.0` or `NaN`), which
+    /// [`TukeyThresholds::crit_sq`] maps to `NaN` → those targets always fail
+    /// under Tukey (a Tukey design should not point a target at a non-factor
+    /// column).
     ///
     /// `bw` is `Some` only for a mixed fit that asked for the between-within
     /// denominator degrees of freedom (SAS `DDFM=BETWITHIN`) and for which the
     /// partition is defined — see [`BetweenWithinDf::resolve`]. It replaces the
     /// standard-normal reference with a Student-t / F reference at a per-target
     /// df; `None` reproduces the asymptotic table exactly.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidSpec` when α or the post-hoc α lies outside (0, 1), when
+    /// `N − P < 1` at some sample size, and when `TukeyHsd` lacks one k per
+    /// target.
     ///
     /// [`build`]: CritValueTable::build
     #[expect(
@@ -1059,7 +1198,7 @@ impl CritValueTable {
         n_targets: u32,
         correction_method: CorrectionMethod,
         estimator: EstimatorSpec,
-        tukey_k_per_target: &[f64],
+        tukey: Option<TukeyTargets<'_>>,
         bw: Option<&BetweenWithinDf>,
     ) -> Result<CritValueTable, EngineError> {
         if !crit.alpha.is_finite() || crit.alpha <= 0.0 || crit.alpha >= 1.0 {
@@ -1075,6 +1214,18 @@ impl CritValueTable {
                 )));
             }
         }
+
+        // `Some` exactly under `TukeyHsd`, with one k per target.
+        let tukey = match tukey {
+            _ if correction_method != CorrectionMethod::TukeyHsd => None,
+            Some(t) if t.k_per_target.len() == n_targets as usize => Some(t),
+            t => {
+                let got = t.map_or(0, |t| t.k_per_target.len());
+                return Err(EngineError::InvalidSpec(format!(
+                    "Tukey HSD needs one studentized-range k per target: {n_targets} targets, {got} k values"
+                )));
+            }
+        };
 
         let alpha = crit.alpha;
         let posthoc_alpha = crit.posthoc_alpha.unwrap_or(alpha);
@@ -1109,51 +1260,8 @@ impl CritValueTable {
         );
 
         for (n_idx, &sample_size) in sample_sizes.iter().enumerate() {
-            let df_signed = sample_size as i64 - n_predictors as i64;
-            if df_signed < 1 {
-                return Err(EngineError::InvalidSpec(format!(
-                    "df = N - P = {sample_size} - {n_predictors} < 1"
-                )));
-            }
-            let df = df_signed as f64;
-
-            // Between-within denominator degrees of freedom (SAS
-            // `DDFM=BETWITHIN`): the residual df splits into a between-cluster
-            // part `g − p_between`, which carries the cluster-level effects, and
-            // the within-cluster remainder, which carries the rest. `None` keeps
-            // every target on the asymptotic reference.
-            let bw_split: Option<(f64, f64)> = match bw {
-                None => None,
-                // Collapsed fit: the single-level model's residual df on every
-                // target, still a Student-t reference.
-                Some(b) if b.collapsed => Some((df, df)),
-                Some(b) => {
-                    let g = b.clusters_per_n[n_idx] as i64;
-                    let df_between = g - b.p_between as i64;
-                    let df_within = df_signed - df_between;
-                    if df_between < 1 || df_within < 1 {
-                        return Err(EngineError::InvalidSpec(format!(
-                            "between-within df at N = {sample_size}: between = g - p_between = \
-                             {g} - {} = {df_between}, within = {df_within}; both must be >= 1. \
-                             Use df_method = \"asymptotic\" for the Wald z reference, or add clusters",
-                            b.p_between
-                        )));
-                    }
-                    Some((df_between as f64, df_within as f64))
-                }
-            };
-            let df_at = |i: usize| -> f64 {
-                match bw_split {
-                    Some((between, within)) => {
-                        if between_flags.get(i).copied().unwrap_or(false) {
-                            between
-                        } else {
-                            within
-                        }
-                    }
-                    None => df,
-                }
-            };
+            let (df, bw_split) = df_split_at(sample_size, n_idx, n_predictors, bw)?;
+            let df_at = |i: usize| target_df(df, bw_split, between_flags, i);
             // Under the between-within reference a mixed Wald statistic is
             // referred to Student-t at the target's own df instead of the
             // standard normal; every other build keeps `crit_quantile`.
@@ -1237,24 +1345,16 @@ impl CritValueTable {
                     }
                     CorrectionMethod::TukeyHsd => {
                         // Tukey HSD: per-target threshold from the studentized-
-                        // range quantile of that target's factor. `k` is the
-                        // factor level count `L` (number of means compared) — it
-                        // varies per target across a multi-factor design, so we
-                        // read it from `tukey_k_per_target[i]` rather than the
-                        // global target count `m`. The studentized-range stat
-                        // compares to `q_{α,k,df}`; dividing by √2 converts it to
-                        // a (two-sided) t-scale critical value, which we square to
-                        // match the `t²` comparison space used by the hot loop.
-                        debug_assert_eq!(
-                            tukey_k_per_target.len(),
-                            m,
-                            "TukeyHsd callers must pass one k per target"
-                        );
-                        for i in 0..m {
-                            let k = tukey_k_per_target.get(i).copied().unwrap_or(f64::NAN);
-                            let q = q_tukey_ppf(1.0 - alpha, k, df_at(i));
-                            let t = q / std::f64::consts::SQRT_2;
-                            row.push(t * t);
+                        // range quantile of that target's factor, at the
+                        // target's own df. `k` is the factor level count `L`
+                        // (number of means compared) — it varies per target
+                        // across a multi-factor design, so it is read per target
+                        // rather than from the global target count `m`.
+                        // Always `Some` here (validated above).
+                        if let Some(t) = tukey {
+                            for (i, &k) in t.k_per_target.iter().enumerate() {
+                                row.push(t.thresholds.crit_sq(alpha, k, df_at(i)));
+                            }
                         }
                     }
                 }
@@ -1339,90 +1439,211 @@ impl CritValueTable {
 mod tests {
     use super::*;
 
-    /// CRIT-10: the studentized-range quantile decreases as df grows (more
-    /// residual df → tighter critical value), holding p and k fixed, and
-    /// converges to a finite asymptote. Replaces the print-only theater test
-    /// `tukey_report_errors` and the scipy/R golden value-matches.
-    #[test]
-    fn q_tukey_monotone_decreasing_in_df() {
-        let p = 0.95;
-        let k = 3.0;
-        let dfs = [3.0_f64, 5.0, 10.0, 20.0, 60.0, 1e6];
-        let mut prev = f64::INFINITY;
-        for &df in &dfs {
-            let q = q_tukey_ppf(p, k, df);
-            assert!(
-                q.is_finite() && q > 0.0,
-                "q_tukey must be finite>0 at df={df}, got {q}"
-            );
-            assert!(
-                q <= prev + 1e-9,
-                "q_tukey must be non-increasing in df: df={df} q={q} > prev={prev}"
-            );
-            prev = q;
-        }
+    /// The exact quantile, as the source's reference: `(isf(α) / √2)²`.
+    fn exact_crit_sq(alpha: f64, k: f64, df: f64) -> f64 {
+        let q = StudentizedRange::new(k, df).unwrap().isf(alpha).unwrap();
+        (q / std::f64::consts::SQRT_2).powi(2)
     }
 
-    #[test]
-    fn tukey_quantile_df_lt_2_is_nan() {
-        // R parity: qtukey(0.95, 3, 1) returns NaN (df=1 range is degenerate),
-        // never finite garbage. Guard returns NaN for all df < 2.
-        assert!(q_tukey_ppf(0.95, 3.0, 1.0).is_nan(), "df=1 must be NaN");
-        assert!(q_tukey_ppf(0.95, 3.0, 0.5).is_nan(), "df=0.5 must be NaN");
-        assert!(q_tukey_ppf(0.95, 3.0, 0.0).is_nan(), "df=0 must be NaN");
-        assert!(q_tukey_ppf(0.95, 3.0, -1.0).is_nan(), "df<0 must be NaN");
-    }
-
-    /// The non-monotonicity that produced finite garbage at small df is gone:
-    /// studentized_range_cdf must be non-decreasing in q across the search
-    /// bracket for every df ≥ 2. Sampling is dense through the rise region
-    /// (where the small-df quadrature bug lived) and sparse out to the
-    /// q_tukey_ppf bracket cap of 1e3 (where the range_cdf collapse at huge
-    /// w showed up) — each CDF call costs the same regardless of q, so the
-    /// flat tails don't earn dense sampling.
-    fn assert_srange_cdf_monotone(df: f64, k: f64) {
-        let mut prev = -1.0_f64;
-        let mut check = |q: f64| {
-            let c = studentized_range_cdf(q, k, df);
-            assert!(
-                c >= prev - 1e-9,
-                "CDF non-monotone: df={df} k={k} q={q} cdf={c} prev={prev}"
-            );
-            prev = c;
+    /// Every off-node df in `[df_lo, df_hi]` (`n` points, evenly spaced in
+    /// `1/df`, clear of the Lobatto nodes) agrees with the exact `isf` to 1e-10.
+    fn assert_curve_matches_exact(alpha: f64, k: f64, df_lo: f64, df_hi: f64, n: usize) {
+        // [2, df_hi] is a Satterthwaite run's range; any other is a grid's, from
+        // more than 13 distinct table df starting at df_lo.
+        let (dfs, satterthwaite) = if df_lo == 2.0 {
+            (vec![], true)
+        } else {
+            ((0..14).map(|i| df_lo + i as f64).collect(), false)
         };
-        let mut q = 0.05_f64;
-        while q <= 50.0 {
-            check(q);
-            q *= 1.5;
-        }
-        for q in [150.0, 450.0, 1.0e3] {
-            check(q);
+        let t = TukeyThresholds::plan(&[TukeyFamily { alpha, k, dfs }], df_hi, satterthwaite);
+        let curve = t.curve(alpha, k, df_lo).expect("curve built");
+        assert!(curve.x.len() <= 65, "node cap");
+        let (x_lo, x_hi) = (1.0 / df_hi, 1.0 / df_lo);
+        for i in 0..n {
+            let df = 1.0 / (x_lo + (x_hi - x_lo) * (i as f64 + 0.37) / n as f64);
+            let (got, want) = (t.crit_sq(alpha, k, df), exact_crit_sq(alpha, k, df));
+            assert!(
+                ((got - want) / want).abs() <= 1e-10,
+                "α {alpha} k {k} [{df_lo}, {df_hi}] df {df}: {got} vs {want}"
+            );
         }
     }
 
     #[test]
-    fn tukey_cdf_monotone_in_q() {
-        // Always-on smoke on the most fragile quadrature path: df=2 is the
-        // small-df singularity worst case (96 graded panels), k=12 the
-        // sharpest range_cdf integrand. The full df×k sweep is the #[ignore]d
-        // test below.
-        assert_srange_cdf_monotone(2.0, 12.0);
+    fn tukey_curve_matches_exact_isf() {
+        for k in [3.0, 20.0] {
+            assert_curve_matches_exact(0.05, k, 2.0, 1000.0, 6);
+        }
     }
 
     #[test]
-    #[ignore = "exhaustive quadrature sweep (~15s) — run after editing studentized_range_cdf / range_cdf / gl_graded"]
-    fn tukey_cdf_monotone_in_q_full() {
-        for &df in &[2.0_f64, 3.0, 5.0, 10.0, 30.0] {
-            for &k in &[3.0_f64, 8.0, 12.0] {
-                assert_srange_cdf_monotone(df, k);
+    #[ignore = "about 2,400 exact studentized-range solves (1–3 min in release)"]
+    fn tukey_curve_matches_exact_isf_full() {
+        for k in [3.0, 5.0, 10.0, 20.0] {
+            for alpha in [0.1, 0.05, 0.01, 0.001] {
+                for (lo, hi) in [(5.0, 100.0), (20.0, 400.0), (2.0, 1000.0)] {
+                    assert_curve_matches_exact(alpha, k, lo, hi, 50);
+                }
             }
         }
     }
 
+    /// A df below 2 has no Tukey threshold on any path — k = 2 (the t path,
+    /// finite at df = 1), exact, and inside a run that holds a curve — and a
+    /// draw at that df never rejects.
     #[test]
-    fn tukey_quantile_monotone_in_k_and_p() {
-        assert!(q_tukey_ppf(0.95, 4.0, 30.0) > q_tukey_ppf(0.95, 3.0, 30.0));
-        assert!(q_tukey_ppf(0.99, 3.0, 30.0) > q_tukey_ppf(0.95, 3.0, 30.0));
+    fn tukey_df_below_2_is_nan_on_every_path() {
+        let exact = TukeyThresholds::default();
+        let curved = TukeyThresholds::plan(
+            &[TukeyFamily {
+                alpha: 0.05,
+                k: 3.0,
+                dfs: vec![],
+            }],
+            50.0,
+            true,
+        );
+        assert!(curved.curve(0.05, 3.0, 2.0).is_some());
+        for t in [&exact, &curved] {
+            for df in [1.0, 1.5, 1.999, f64::NAN] {
+                assert!(t.crit_sq(0.05, 2.0, df).is_nan(), "k 2 df {df}");
+                assert!(t.crit_sq(0.05, 3.0, df).is_nan(), "k 3 df {df}");
+                assert!(!t.draw_significant(0.05, 3.0, 1e6, df), "draw df {df}");
+            }
+            assert!(t.crit_sq(0.05, f64::NAN, 10.0).is_nan());
+            assert!(t.crit_sq(0.05, 1.0, 10.0).is_nan());
+        }
+    }
+
+    /// k = 2 is the two-sided t, so on a Student-t build its Tukey row is the
+    /// uncorrected row bit for bit: OLS, between-within, and the collapsed twin.
+    #[test]
+    fn tukey_k2_row_equals_uncorrected_row() {
+        let exact = TukeyThresholds::default();
+        let tk = TukeyTargets {
+            k_per_target: &[2.0, 2.0],
+            thresholds: &exact,
+        };
+        let ols = CritValueTable::build_with_tukey_k(
+            &CritValues {
+                alpha: 0.05,
+                posthoc_alpha: None,
+            },
+            &[12, 30, 200],
+            3,
+            2,
+            CorrectionMethod::TukeyHsd,
+            EstimatorSpec::Ols,
+            Some(tk),
+            None,
+        )
+        .unwrap();
+        assert_eq!(ols.correction_t_crit_sq, ols.t_crit_sq_uncorrected);
+
+        let spec = bw_two_predictor_spec(
+            EstimatorSpec::Mle,
+            ClusterSizing::FixedSize { cluster_size: 8 },
+        );
+        let split = BetweenWithinDf::resolve(&spec, &[40], 2).unwrap();
+        for bw in [split.clone(), split.collapsed(EstimatorSpec::Mle).unwrap()] {
+            let t = CritValueTable::build_with_tukey_k(
+                &spec.crit_values,
+                &[40],
+                3,
+                2,
+                CorrectionMethod::TukeyHsd,
+                EstimatorSpec::Mle,
+                Some(tk),
+                Some(&bw),
+            )
+            .unwrap();
+            assert_eq!(t.correction_t_crit_sq, t.t_crit_sq_uncorrected);
+        }
+    }
+
+    /// Exact or curve is decided from the run's inputs alone: the same plan
+    /// comes out of a cold and a warm cache, and a warm cache holding another
+    /// run's curve does not give a few-df run one.
+    ///
+    /// Other tests share the process-wide cache and run in parallel, so 'cold'
+    /// means just cleared, not guaranteed empty; that can only make the runs
+    /// agree more easily, never fail spuriously. Run with `--test-threads=1` for
+    /// a guaranteed cold start.
+    #[test]
+    fn tukey_plan_is_the_same_for_a_cold_and_a_warm_cache() {
+        let grid = |n: usize| TukeyFamily {
+            alpha: 0.05,
+            k: 3.0,
+            dfs: (0..n).map(|i| 20.0 + 5.0 * i as f64).collect(),
+        };
+        clear_tukey_cache();
+        let many_cold = TukeyThresholds::plan(&[grid(14)], 99.0, false);
+        let few_cold = TukeyThresholds::plan(&[grid(13)], 99.0, false);
+        let many_warm = TukeyThresholds::plan(&[grid(14)], 99.0, false);
+        let few_warm = TukeyThresholds::plan(&[grid(13)], 99.0, false);
+        assert_eq!(many_cold.curves.len(), 1, "14 distinct df get a curve");
+        assert!(
+            few_cold.curves.is_empty(),
+            "13 distinct df are solved exactly"
+        );
+        assert_eq!(many_cold, many_warm);
+        assert_eq!(few_cold, few_warm);
+        for df in [20.0, 47.5, 99.0] {
+            assert_eq!(
+                few_cold.crit_sq(0.05, 3.0, df).to_bits(),
+                few_warm.crit_sq(0.05, 3.0, df).to_bits()
+            );
+        }
+    }
+
+    /// Tukey HSD reads one studentized-range k per target: a build without
+    /// them, or with a k vector of the wrong length, is an error rather than a
+    /// row of thresholds no target can pass.
+    #[test]
+    fn tukey_hsd_without_one_k_per_target_is_an_error() {
+        let crit = CritValues {
+            alpha: 0.05,
+            posthoc_alpha: None,
+        };
+        let none = CritValueTable::build(
+            &crit,
+            &[30],
+            3,
+            2,
+            CorrectionMethod::TukeyHsd,
+            EstimatorSpec::Ols,
+        );
+        assert!(matches!(none, Err(EngineError::InvalidSpec(_))));
+        let short = CritValueTable::build_with_tukey_k(
+            &crit,
+            &[30],
+            3,
+            2,
+            CorrectionMethod::TukeyHsd,
+            EstimatorSpec::Ols,
+            Some(TukeyTargets {
+                k_per_target: &[3.0],
+                thresholds: &TukeyThresholds::default(),
+            }),
+            None,
+        );
+        assert!(matches!(short, Err(EngineError::InvalidSpec(_))));
+    }
+
+    /// Thresholds fall as df rises and rise with k and with a smaller α.
+    #[test]
+    fn tukey_thresholds_fall_with_df_and_rise_with_k() {
+        let t = TukeyThresholds::default();
+        let mut prev = f64::INFINITY;
+        for df in [3.0, 5.0, 10.0, 20.0, 60.0, 1e6] {
+            let c = t.crit_sq(0.05, 3.0, df);
+            assert!(c.is_finite() && c < prev, "df {df}: {c} after {prev}");
+            prev = c;
+        }
+        let at = |alpha: f64, k: f64| t.crit_sq(alpha, k, 30.0);
+        assert!(at(0.05, 2.0) < at(0.05, 3.0));
+        assert!(at(0.05, 3.0) < at(0.05, 4.0));
+        assert!(at(0.05, 3.0) < at(0.01, 3.0));
     }
 
     #[test]
@@ -1953,25 +2174,29 @@ mod tests {
         assert_eq!(t_tail_sq(f64::INFINITY, 10.0), 0.0);
     }
 
-    /// The Tukey HSD tail decides exactly as the table's threshold
-    /// `(q_tukey_ppf(1 − α, k, df) / √2)²` does: just below the threshold the
-    /// tail is above α, just above it the tail is below α, at a fractional
-    /// df too. Undefined k or df (the quantile's NaN cases) give NaN.
+    /// A per-draw Tukey decision flips where the exact threshold sits, at a
+    /// fractional df too: through the exact `sf` when no curve covers the df,
+    /// and through the curve when one does.
     #[test]
-    fn tukey_tail_sq_crosses_alpha_at_the_table_threshold() {
-        for (k, df) in [(3.0, 10.0), (4.0, 25.5), (5.0, 2.7)] {
-            let q = q_tukey_ppf(0.95, k, df) / std::f64::consts::SQRT_2;
-            let crit_sq = q * q;
-            let below = tukey_tail_sq(crit_sq * (1.0 - 1e-4), k, df);
-            let above = tukey_tail_sq(crit_sq * (1.0 + 1e-4), k, df);
-            assert!(
-                below > 0.05 && above < 0.05,
-                "k {k} df {df}: {below} / {above}"
-            );
+    fn tukey_draw_decision_crosses_at_the_exact_threshold() {
+        let curved = TukeyThresholds::plan(
+            &[3.0, 4.0, 5.0].map(|k| TukeyFamily {
+                alpha: 0.05,
+                k,
+                dfs: vec![],
+            }),
+            40.0,
+            true,
+        );
+        for t in [&TukeyThresholds::default(), &curved] {
+            for (k, df) in [(3.0, 10.0), (4.0, 25.5), (5.0, 2.7)] {
+                let crit_sq = exact_crit_sq(0.05, k, df);
+                assert!(!t.draw_significant(0.05, k, crit_sq * (1.0 - 1e-4), df));
+                assert!(t.draw_significant(0.05, k, crit_sq * (1.0 + 1e-4), df));
+            }
+            assert!(!t.draw_significant(0.05, f64::NAN, 1e6, 10.0));
+            assert!(!t.draw_significant(0.05, 3.0, f64::NAN, 10.0));
         }
-        assert!(tukey_tail_sq(4.0, f64::NAN, 10.0).is_nan());
-        assert!(tukey_tail_sq(4.0, 3.0, 1.5).is_nan());
-        assert!(tukey_tail_sq(f64::NAN, 3.0, 10.0).is_nan());
     }
 
     /// The upper F tail, against R `pf(x, dfn, dfd, lower.tail = FALSE)`,
@@ -1996,23 +2221,27 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
-    // C7 — q_tukey_ppf asymptotic golden value (external oracle: R qtukey)
+    // C7: Tukey threshold golden values (external oracle: scipy
+    // studentized_range.ppf)
     // -----------------------------------------------------------------
 
     #[test]
-    fn q_tukey_ppf_asymptotic_golden_value() {
-        // At df→∞, q_tukey_ppf(0.95, 3) converges to qtukey(0.95, 3, Inf) ≈ 3.314493 (R).
-        // At df=1e6 the approximation error vs Inf is negligible (< 1e-5).
-        let q_large_df = q_tukey_ppf(0.95, 3.0, 1e6);
+    fn tukey_threshold_golden_values() {
+        // scipy studentized_range.ppf(0.95, k, df), rounded to 10 significant
+        // digits.
+        const Q3_1E4: f64 = 3.314987773;
+        const Q4_30: f64 = 3.845401353;
+        let t = TukeyThresholds::default();
+        let q = |k: f64, df: f64| (t.crit_sq(0.05, k, df) * 2.0).sqrt();
         assert!(
-            (q_large_df - 3.314493f64).abs() < 1e-4,
-            "q_tukey_ppf(0.95, 3, 1e6) = {q_large_df}, expected ≈ 3.314493 (R qtukey)"
+            (q(3.0, 1e4) - Q3_1E4).abs() < 1e-6,
+            "q(0.95, 3, 1e4) = {}",
+            q(3.0, 1e4)
         );
-        // Additional point at moderate df: qtukey(0.95, 4, 30) = 3.845401 (R).
-        let q_30 = q_tukey_ppf(0.95, 4.0, 30.0);
         assert!(
-            (q_30 - 3.845401f64).abs() < 1e-4,
-            "q_tukey_ppf(0.95, 4, 30) = {q_30}, expected ≈ 3.845401 (R qtukey)"
+            (q(4.0, 30.0) - Q4_30).abs() < 1e-6,
+            "q(0.95, 4, 30) = {}",
+            q(4.0, 30.0)
         );
     }
 
@@ -2103,7 +2332,10 @@ mod tests {
             (spec.target_indices.len() + spec.contrast_pairs.len()) as u32,
             correction_method,
             spec.estimator,
-            tukey_k,
+            Some(TukeyTargets {
+                k_per_target: tukey_k,
+                thresholds: &TukeyThresholds::default(),
+            }),
             bw.as_ref(),
         )
         .unwrap()
@@ -2224,7 +2456,10 @@ mod tests {
             2,
             CorrectionMethod::TukeyHsd,
             EstimatorSpec::Ols,
-            &[3.0, 3.0],
+            Some(TukeyTargets {
+                k_per_target: &[3.0, 3.0],
+                thresholds: &TukeyThresholds::default(),
+            }),
             None,
         )
         .unwrap();
@@ -2234,7 +2469,9 @@ mod tests {
         );
         assert_eq!(
             c.correction_t_crit_sq,
-            vec![vec![6.147514869456612, 6.147514869456612]]
+            // (q / √2)² for qtukey(0.95, 3, 27); scipy `studentized_range.isf`
+            // gives 6.147512079270201, 1.8e-15 relative from this value.
+            vec![vec![6.147512079270212, 6.147512079270212]]
         );
         assert_eq!(c.posthoc_t_crit_sq, vec![4.210008468359758]);
         assert!(c.joint_t_crit_sq[0].is_nan());
@@ -2439,13 +2676,17 @@ mod tests {
         // within-cluster factor's.
         spec.between_var_indices = vec![1];
         spec.target_indices = vec![1, 2];
-        let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::TukeyHsd, &[2.0, 2.0]);
+        // Target 0 is tested with k = 3 at df_between = 3; target 1 stays k = 2.
+        // The fixture's factor_n_levels stays [2, 2] (bw_table takes k directly).
+        let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::TukeyHsd, &[3.0, 2.0]);
         let row = &table.correction_t_crit_sq[0];
-        let between = q_tukey_ppf(0.95, 2.0, 3.0) / std::f64::consts::SQRT_2;
-        let within = q_tukey_ppf(0.95, 2.0, 34.0) / std::f64::consts::SQRT_2;
-        assert_eq!(row[0], between * between);
-        assert_eq!(row[1], within * within);
-        assert!(row[0] > row[1]);
+        let t = TukeyThresholds::default();
+        assert_eq!(row[0], t.crit_sq(0.05, 3.0, 3.0));
+        assert_eq!(row[1], t.crit_sq(0.05, 2.0, 34.0));
+        assert!(
+            row[0] > t.crit_sq(0.05, 3.0, 34.0),
+            "k = 3 target read at df_between, not df_within"
+        );
     }
 
     /// CRIT-21: the collapsed reference. An LMM whose variance components all
@@ -2469,7 +2710,7 @@ mod tests {
             2,
             CorrectionMethod::None,
             EstimatorSpec::Mle,
-            &[],
+            None,
             Some(&collapsed),
         )
         .unwrap();

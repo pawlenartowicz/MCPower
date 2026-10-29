@@ -117,7 +117,7 @@ describe('routeMenuEvent — run shortcuts', () => {
     // Mirrors StatusBar's Run button: a wired non-regression family runs too.
     familyStore.active = 'mixed';
     vi.mocked(familyConfigToAppSpec).mockReturnValueOnce({
-      spec: { family: 'mixed' },
+      spec: { family: 'mixed', cluster_dim: { kind: 'cluster_size', value: 10 } },
       errors: [],
       warnings: [],
     } as any);

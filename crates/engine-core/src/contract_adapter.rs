@@ -43,6 +43,10 @@ pub enum AdapterError {
     JointNotSupported { got: Vec<u32> },
     #[error("contract failed validate(): {0}")]
     ContractInvalid(String),
+    /// A `design_test` interaction term has no generation interaction with the
+    /// same components (in any order), so the kernel never materialises it.
+    #[error("design_test term {term} is an interaction absent from design_generation")]
+    TestInteractionNotGenerated { term: u32 },
 }
 
 /// True iff `terms` is the set of all non-intercept positions in `design` —
@@ -77,6 +81,13 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
 
     // Resolve the fitted design once: design_test defaults to design_generation.
     let design_test = c.design_test.as_ref().unwrap_or(&c.design_generation);
+    for (term, t) in design_test.terms.iter().enumerate() {
+        if let DesignTerm::Interaction { components } = t {
+            if generation_interaction_pos(c, components).is_none() {
+                return Err(AdapterError::TestInteractionNotGenerated { term: term as u32 });
+            }
+        }
+    }
 
     // Route Joint targets: omnibus shape → report_overall; anything else is
     // rejected. See module-level comment for the rationale.
@@ -211,7 +222,6 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         cluster_slope_design_cols,
         extra_slope_cols,
         residual_dist,
-        residual_pinned: c.outcome.residual.pinned,
         outcome_kind,
         link: c.outcome.link,
         estimator,
@@ -221,6 +231,7 @@ pub fn contract_to_simulation_spec(c: &SimulationContract) -> Result<SimulationS
         cluster,
         scenario,
         t3_table: None,
+        tukey_thresholds: Default::default(),
         het_coeffs: HeteroskedasticityCoeffs::default(),
         report_overall,
         factor_min_level_count: 0,
@@ -699,29 +710,37 @@ fn translate_interactions(c: &SimulationContract, n_non_factor: u32) -> Vec<Vec<
         .collect()
 }
 
-/// Kernel column of an interaction whose components equal `components`,
-/// matched against the generation design (which is what the kernel
-/// materialises). Used for targets that reference a test-design Interaction.
+/// Position among the generation design's interactions of the one whose
+/// components equal `components` as a set: `b:a` in a test formula is the
+/// same column as `a:b` in the model. `None` when the generation design has no
+/// such interaction (`contract_to_simulation_spec` rejects that up front).
+fn generation_interaction_pos(c: &SimulationContract, components: &[DesignTerm]) -> Option<u32> {
+    c.design_generation
+        .terms
+        .iter()
+        .filter_map(|term| match term {
+            DesignTerm::Interaction { components } => Some(components),
+            _ => None,
+        })
+        .position(|generated| {
+            components.iter().all(|t| generated.contains(t))
+                && generated.iter().all(|t| components.contains(t))
+        })
+        .map(|j| j as u32)
+}
+
+/// Kernel column of the generation interaction matching `components` (see
+/// `generation_interaction_pos`). Used for targets that reference a
+/// test-design Interaction.
 fn interaction_kernel_col(
     c: &SimulationContract,
     components: &[DesignTerm],
     n_non_factor: u32,
     n_factor_dummies: u32,
 ) -> u32 {
-    let base = 1 + n_non_factor + n_factor_dummies;
-    let mut j = 0u32;
-    for term in &c.design_generation.terms {
-        if let DesignTerm::Interaction {
-            components: generated,
-        } = term
-        {
-            if generated.as_slice() == components {
-                return base + j;
-            }
-            j += 1;
-        }
-    }
-    unreachable!("test interaction has no matching generation interaction")
+    let j = generation_interaction_pos(c, components)
+        .expect("contract_to_simulation_spec rejects test interactions absent from generation");
+    1 + n_non_factor + n_factor_dummies + j
 }
 
 fn column_position_for_continuous(c: &SimulationContract, gen_idx: u32) -> u32 {
@@ -883,11 +902,6 @@ fn translate_scenario(s: &engine_contract::ScenarioPerturbations) -> KernelScena
             .iter()
             .map(synthetic_to_distribution_only)
             .collect(),
-        residual_change_prob: s.residual_change_prob,
-        // Contract `ResidualDist` IS the kernel `ResidualDist` (engine-core
-        // re-exports it from engine-contract), so no translation needed.
-        residual_dists: s.residual_dists.clone(),
-        residual_df: s.residual_df,
         sampled_factor_proportions: s.sampled_factor_proportions,
         truth_start: s.truth_start,
         // `LmeScenarioPerturbations` is re-exported verbatim from
@@ -989,7 +1003,6 @@ mod tests {
                 coefficients: vec![0.0, 0.3, 0.5, 0.4],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1062,7 +1075,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1132,7 +1144,6 @@ mod tests {
                 coefficients: vec![0.0, 0.1, 0.8],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1221,7 +1232,6 @@ mod tests {
                 coefficients: vec![0.0, 0.3, 0.0],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1329,7 +1339,6 @@ mod tests {
                 coefficients: vec![0.0, 0.0, 0.3, 0.5],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1423,7 +1432,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5, 0.2, 0.4],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1487,15 +1495,13 @@ mod tests {
     }
 
     #[test]
-    fn residual_dist_and_pin_pass_through_as_typed_enum() {
+    fn residual_dist_passes_through_as_typed_enum() {
         let mut c = example1_simple_ols();
         c.outcome.residual = ResidualSpec {
             distribution: ResidualDist::HighKurtosis,
-            pinned: true,
         };
         let s = contract_to_simulation_spec(&c).unwrap();
         assert_eq!(s.residual_dist, ResidualDist::HighKurtosis);
-        assert!(s.residual_pinned);
     }
 
     #[test]
@@ -1515,9 +1521,6 @@ mod tests {
             correlation_noise_sd: 0.15,
             distribution_change_prob: 0.2,
             new_distributions: vec![SyntheticKind::RightSkewed],
-            residual_change_prob: 0.5,
-            residual_dists: vec![ResidualDist::HighKurtosis],
-            residual_df: 8.0,
             sampled_factor_proportions: true,
             truth_start: true,
             lme: Some(LmeScenarioPerturbations {
@@ -1546,7 +1549,6 @@ mod tests {
             s.scenario.new_distributions,
             vec![Distribution::RightSkewed]
         );
-        assert_eq!(s.scenario.residual_dists, vec![ResidualDist::HighKurtosis]);
         let lme = s.scenario.lme.unwrap();
         assert_eq!(lme.random_effect_dist, ResidualDist::Normal);
         assert_eq!(lme.icc_noise_sd, 0.05);
@@ -1626,7 +1628,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5, 0.3, 0.2],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1709,7 +1710,6 @@ mod tests {
                 coefficients: vec![0.0, 0.4, 0.2],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1803,7 +1803,6 @@ mod tests {
                 coefficients: vec![0.0, 0.4, 0.2],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1880,19 +1879,14 @@ mod tests {
         }
     }
 
-    /// A continuous×continuous interaction contract maps to one
-    /// appended kernel column, a correctly-placed effect size, and a target on
-    /// that column.
-    ///
-    /// Design: y = x1 + x2 + x1:x2 with two Normal predictors.
-    /// Kernel layout: [intercept(0), x1(1), x2(2), x1:x2(3)]
-    #[test]
-    fn continuous_interaction_maps_to_appended_kernel_column() {
+    /// y = x1 + x2 + x1:x2 with two Normal predictors, targeting the
+    /// interaction (term 3). Kernel layout: [intercept(0), x1(1), x2(2), x1:x2(3)].
+    fn x1_x2_interaction_contract() -> SimulationContract {
         use engine_contract::{
             ColumnId, CorrectionMethod, DesignSpec, EstimatorSpec, GenerationSpec, OutcomeKind,
             OutcomeSpec, ResidualDist, ResidualSpec, ScenarioPerturbations, TestSpec, TestTarget,
         };
-        let c = SimulationContract {
+        SimulationContract {
             generation: GenerationSpec {
                 columns: vec![
                     ColumnSpec::Synthetic {
@@ -1937,7 +1931,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5, 0.3, 0.2],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -1959,7 +1952,15 @@ mod tests {
             scenario: ScenarioPerturbations::default(),
             max_failed_fraction: 0.03,
             curvature_hints: None,
-        };
+        }
+    }
+
+    /// A continuous×continuous interaction contract maps to one
+    /// appended kernel column, a correctly-placed effect size, and a target on
+    /// that column.
+    #[test]
+    fn continuous_interaction_maps_to_appended_kernel_column() {
+        let c = x1_x2_interaction_contract();
         c.validate().unwrap();
         let s = contract_to_simulation_spec(&c).unwrap();
 
@@ -1972,6 +1973,43 @@ mod tests {
         assert_eq!(s.effect_sizes, vec![0.0, 0.5, 0.3, 0.2]);
         // target on interaction → appended column 3
         assert_eq!(s.target_indices, vec![3u32]);
+    }
+
+    /// A test formula may name an interaction with its components in another
+    /// order (`x2:x1` against the model's `x1:x2`); it is the same kernel column.
+    #[test]
+    fn test_interaction_matches_generation_regardless_of_component_order() {
+        use engine_contract::ColumnId;
+        let mut c = x1_x2_interaction_contract();
+        let mut dt = c.design_generation.clone();
+        dt.terms[3] = DesignTerm::Interaction {
+            components: vec![
+                DesignTerm::Direct {
+                    column: ColumnId(1),
+                },
+                DesignTerm::Direct {
+                    column: ColumnId(0),
+                },
+            ],
+        };
+        c.design_test = Some(dt);
+        let s = contract_to_simulation_spec(&c).unwrap();
+        assert_eq!(s.target_indices, vec![3u32]);
+    }
+
+    /// A test interaction the model never generates is an error, not a panic.
+    #[test]
+    fn test_interaction_absent_from_generation_is_rejected() {
+        let mut c = x1_x2_interaction_contract();
+        let dt = c.design_generation.clone();
+        c.design_generation.terms.truncate(3);
+        c.outcome.coefficients.truncate(3);
+        c.test.targets = vec![engine_contract::TestTarget::Marginal { term: 1 }];
+        c.design_test = Some(dt);
+        assert_eq!(
+            contract_to_simulation_spec(&c).unwrap_err(),
+            AdapterError::TestInteractionNotGenerated { term: 3 }
+        );
     }
 
     // -----------------------------------------------------------------
@@ -2013,7 +2051,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -2137,7 +2174,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5, 0.3, 0.2, 0.4],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -2220,7 +2256,6 @@ mod tests {
                 coefficients: vec![0.0, 0.5, 0.3, 0.2],
                 residual: ResidualSpec {
                     distribution: engine_contract::ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,
@@ -2357,7 +2392,6 @@ mod tests {
                 coefficients: vec![0.0, 0.3, 0.4],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link: None,

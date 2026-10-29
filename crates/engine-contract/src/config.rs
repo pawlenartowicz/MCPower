@@ -90,6 +90,11 @@ pub struct Limits {
     /// `[min, max]` allowed factor levels.
     pub factor_levels: [u32; 2],
     pub min_clusters: u32,
+    /// Cluster count below which a clustered binary/count model (GLMM) testing a
+    /// cluster-level effect gets an advisory: the between-within t over-rejects
+    /// there, so part of the reported power is excess Type I error.
+    #[serde(default = "default_glmm_reliable_clusters")]
+    pub glmm_reliable_clusters: u32,
     pub min_rows_per_cluster: u32,
     pub reliable_rows_per_cluster: u32,
     pub recommended_rows_per_cluster: u32,
@@ -164,6 +169,10 @@ fn default_strict_warning_ratio() -> f64 {
 
 fn default_factor_min_level_count() -> u32 {
     5
+}
+
+fn default_glmm_reliable_clusters() -> u32 {
+    20
 }
 
 fn default_factor_exclusion_max() -> f64 {

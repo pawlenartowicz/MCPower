@@ -25,6 +25,10 @@ pub struct PredictorTable {
     /// Level count per factor, in declaration order.
     pub factor_n_levels: Vec<i32>,
     /// Per-level proportions, flattened across factors in declaration order.
+    /// Within a factor they follow the engine's level codes, not the declared
+    /// level order: the reference first (code 0, no dummy), then the
+    /// non-reference levels in declared order (codes 1.., matching
+    /// `DummyOf { level_index }`).
     pub factor_proportions: Vec<f64>,
     /// Per-factor proportion-sampling override, aligned with `factor_n_levels`.
     /// `None` = inherit scenario `sampled_factor_proportions`; `Some(true/false)` = exact override.
@@ -43,6 +47,10 @@ pub struct PredictorTable {
     /// Reference level string for each factor, in declaration order.
     /// Parallel to `factor_names` and `factor_levels`.
     pub factor_references: Vec<String>,
+    /// Per-factor FULL level list in declared order (reference included).
+    /// Parallel to `factor_names`. Uploaded factor columns whose labels are
+    /// not the level names map their codes to levels by position in this list.
+    pub factor_declared_levels: Vec<Vec<String>>,
     /// All effect names in projection order (main effects + interactions),
     /// after factor expansion. Used by the targets resolver and the effect-
     /// size assembler.
@@ -110,7 +118,17 @@ pub fn build_predictor_table(
                 sampled_proportions,
             } => {
                 factor_n_levels.push(levels.len() as i32);
-                factor_proportions.extend(proportions.iter().copied());
+                // Engine code order: the reference's proportion, then the
+                // non-reference levels' in declared order.
+                let by_level = levels.iter().zip(proportions);
+                factor_proportions.extend(
+                    by_level
+                        .clone()
+                        .filter(|(l, _)| *l == reference)
+                        .map(|(_, &p)| p),
+                );
+                factor_proportions
+                    .extend(by_level.filter(|(l, _)| *l != reference).map(|(_, &p)| p));
                 factor_sampled.push(*sampled_proportions);
                 factor_levels.push((name.clone(), levels.clone(), reference.clone()));
             }
@@ -254,6 +272,8 @@ pub fn build_predictor_table(
     // contrast router to distinguish "factor[reference]" (reference level,
     // maps to Const/β=0) from truly unknown level names.
     let factor_references: Vec<String> = factor_levels.iter().map(|(_, _, r)| r.clone()).collect();
+    let factor_declared_levels: Vec<Vec<String>> =
+        factor_levels.iter().map(|(_, l, _)| l.clone()).collect();
 
     Ok(PredictorTable {
         non_factor_names,
@@ -266,6 +286,7 @@ pub fn build_predictor_table(
         factor_names,
         factor_levels: factor_level_lists,
         factor_references,
+        factor_declared_levels,
         effect_names,
         effect_columns,
         interaction_components,

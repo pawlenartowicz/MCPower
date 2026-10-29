@@ -73,10 +73,13 @@ seed_for <- function(n) 2137L + as.integer(n)
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 # ---- load_cases: mirror cases.py (merge family defaults) ----
+# A case with `benchmark: false` is agreement-only: it is dropped unless
+# `agreement` is TRUE, as the Python and Julia loaders always drop it.
 load_cases <- function(path, agreement = FALSE) {
   doc <- jsonlite::fromJSON(path, simplifyVector = FALSE)
   defaults <- doc$defaults
-  lapply(doc$cases, function(c) {
+  keep <- Filter(function(c) agreement || !isFALSE(c$benchmark), doc$cases)
+  lapply(keep, function(c) {
     d <- defaults[[c$family]]
     n <- c$n %||% d$n                       # per-case grid override
     n_sims <- d$n_sims                      # key-level merge with per-case overrides
@@ -94,6 +97,7 @@ load_cases <- function(path, agreement = FALSE) {
       target_power = d$target_power,
       variable_types = if (is.null(c$variable_types)) list() else c$variable_types,
       cluster = c$cluster,
+      crossed = c$crossed,                  # second grouping, crossed with cluster; NULL if none
       tool = c$tool,                        # NULL = cliff band
       correlations = c$correlations,
       baseline_p = if (!is.null(c$baseline_p)) c$baseline_p else d$baseline_p,
@@ -130,6 +134,9 @@ build_model <- function(case) {
       m$set_cluster(cl$var, ICC = cl$ICC, n_clusters = cl$n_clusters,
                     cluster_level_vars = unlist(cl$cluster_level))
     }
+    # A second set_cluster call adds a grouping crossed with the first.
+    cr <- case$crossed
+    if (!is.null(cr)) m$set_cluster(cr$var, ICC = cr$ICC, n_clusters = cr$n_clusters)
   }
   if (!is.null(case$max_failed_frac)) m$set_max_failed_simulations(case$max_failed_frac)
   # Honest-compare override (benchmark-only): the loops and dedicated tools
@@ -152,9 +159,13 @@ time_call <- function(fn, warmup, reps) {
 }
 
 # The loops return power for every design column; label the target columns so
-# record() can pick them by name.
+# record() can pick them by name. A case with a crossed grouping runs the
+# lme_crossed loops, which have a best kernel only.
 run_loop <- function(case, kind, n, n_sims, seed) {
-  p <- as.numeric(LOOPS[[case$family]][[kind]](case, n, n_sims, seed)$power)
+  fam <- if (!is.null(case$crossed)) "lme_crossed" else case$family
+  fn <- LOOPS[[fam]][[kind]]
+  if (is.null(fn)) stop(sprintf("%s: no %s loop for %s", case$id, kind, fam))
+  p <- as.numeric(fn(case, n, n_sims, seed)$power)
   names(p) <- rep("", length(p))
   names(p)[loop_design(case)$targets] <- case$targets
   p
@@ -229,6 +240,13 @@ main <- function(args) {
   cases <- if (args$case == "all") all_cases else Filter(function(c) c$id == args$case, all_cases)
   if (length(cases) == 0) stop(sprintf("Case '%s' not found", args$case))
   methods <- if (is.null(args$methods)) RECORDED_METHODS else args$methods
+  # Refuse a missing loop kernel before any tier runs, since records are
+  # written only at the end.
+  for (case in cases) for (method in intersect(methods, c("loop_best", "loop_naive"))) {
+    fam <- if (!is.null(case$crossed)) "lme_crossed" else case$family
+    kind <- if (method == "loop_best") "best" else "naive"
+    if (is.null(LOOPS[[fam]][[kind]])) stop(sprintf("%s: no %s loop for %s", case$id, kind, fam))
+  }
 
   records <- list()
   for (case in cases) {

@@ -25,14 +25,12 @@ Each scenario is a named set of knob values:
 | `heteroskedasticity_ratio` (λ) | 1.0 (off) | 2.0 | 4.0 |
 | `correlation_noise_sd` | 0 | 0.15 | 0.30 |
 | `distribution_change_prob` | 0 | 0.5 | 0.8 |
-| `residual_change_prob` | 0 | 0.5 | 0.8 |
-| `residual_df` | 10 | 8 | 5 |
 | `sampled_factor_proportions` | false | true | true |
 | `random_effect_dist` (mixed models) | normal | heavy_tailed | heavy_tailed |
 | `random_effect_df` (mixed models) | 5 | 10 | 5 |
 | `icc_noise_sd` (mixed models) | 0 | 0.15 | 0.30 |
 
-Every knob is documented in **The knobs** below. The replacement pools (`new_distributions`, `residual_dists`) are the same in all three presets; they matter when you build your own scenario (see **Custom scenarios**).
+Every knob is documented in **The knobs** below. The replacement pool (`new_distributions`) is the same in all three presets; it matters when you build your own scenario (see **Custom scenarios**).
 
 ## Reading the output
 
@@ -44,7 +42,7 @@ Read the spread, not just the levels: a test whose power barely moves across col
 
 ## The knobs
 
-Three groups: one **effect knob** (`heterogeneity`), three **design knobs** (`correlation_noise_sd`, `distribution_change_prob` with its pool `new_distributions`, `sampled_factor_proportions`), and the **error knobs** (`heteroskedasticity_ratio`, the residual trio) — plus the mixed-model group (`random_effect_dist`, `random_effect_df`, `icc_noise_sd`). Each follows the same shape: the assumption violation, what MCPower does, what the value means, and the empirical values from the literature that the preset numbers are calibrated to (full citations in **References**).
+Three groups: one **effect knob** (`heterogeneity`), three **design knobs** (`correlation_noise_sd`, `distribution_change_prob` with its pool `new_distributions`, `sampled_factor_proportions`), one **error knob** (`heteroskedasticity_ratio`), plus the mixed-model group (`random_effect_dist`, `random_effect_df`, `icc_noise_sd`). Each follows the same shape: the assumption violation, what MCPower does, what the value means, and the empirical values from the literature that the preset numbers are calibrated to (full citations in **References**).
 
 ### Heterogeneity
 
@@ -109,6 +107,8 @@ This knob decides whether each simulated dataset hits your requested group propo
 
 **With uploaded data.** In the distribution-mapping upload modes (`none` / `partial`), a factor from your data obeys the knob like any other — its empirical proportions are the target, hit exactly (`false`) or with multinomial jitter (`true`). In **strict bootstrap** mode the knob has no effect on uploaded predictors: every simulated row is a resampled real row, so group sizes follow the data — planning exact cell counts would break apart the very joint structure strict exists to preserve. A factor you declare on top of the upload (one that is not a column of your data) is still simulated and still obeys the knob. See [[concepts/upload-data|Using empirical data]].
 
+**Per factor.** The knob sets every factor at once. You can also fix one factor to exact or sampled group sizes, whatever the scenario says. Other factors keep following the scenario. In Python and R this is `set_factor_sampling`, for declared and uploaded factors. In the app it is the factor's Advanced dialog, for declared factors only: uploaded factors open read-only there. The strict-bootstrap rule above still applies: uploaded factors in strict mode follow the data.
+
 > [!note] Empirical values in research
 > - Lim & In (2019) — under simple randomization, the probability of landing outside a 45/55 split is 52.7% at n = 40, 15.7% at n = 200, and 4.6% at n = 400. At typical power-analysis sample sizes imbalance is more likely than not, so sampled counts are the realistic case.
 > - Lim & In (2019), Fig. 1 — the power cost is modest: at n = 40 (two-tailed, d = 0.91, α = 0.05), an exact 20/20 split gives 80% power, a realized 25/15 gives 77%, an extreme 30/10 gives 67%.
@@ -145,40 +145,22 @@ With scenarios off, MCPower runs the single merged optimistic scenario — so th
 >
 > Real heteroskedastic data is typically *worse* than the doomer setting: the observed median (≈ 9.5×) exceeds λ = 4, so the presets are conservative. If your driver strongly governs the variance, λ = 8–10 is empirically defensible — set it in a custom scenario.
 
-### Residual swaps
-
-Residuals assumed normal are often heavy-tailed or skewed in practice. The `residual_change_prob` knob is the per-simulation chance the residual shape is replaced by a draw from the `residual_dists` pool (heavy-tailed t, right-skewed); `residual_df` sets how heavy the t tails are — lower df means more outlier-dominated runs (5 is severe, 10 is mild). Presets pair prob 0.5/0.8 with df 8/5 (realistic/doomer). Linear models only.
-
-**Definition.** Residuals assumed normal are, in practice, often heavy-tailed (outlier-prone) or skewed.
-
-**How MCPower simulates it.** At each simulation, with probability `residual_change_prob`, the residual distribution is *replaced* — not blended — by a shape drawn from the `residual_dists` pool. The canonical pool entries are `high_kurtosis` (Student t, with df from the active scenario's `residual_df`) and `right_skewed`; the built-in presets carry `["high_kurtosis", "right_skewed"]`. A swap fires only when the model's residual distribution is the unpinned default — calling `set_residual_distribution` with any name (including explicit `"normal"`) pins the residual, and a pinned residual is never swapped. `residual_df` also supplies the df when a `high_kurtosis` residual is pinned. On no-swap simulations the model's residual setting stays. `normal` is also a valid pool entry (a swap to normal changes nothing — the same dilution trick as in `new_distributions`). Linear models only.
-
-**What the value means.** df = 5: t residuals with four times the excess kurtosis of df = 8 (6 vs 1.5) — the lower the df, the more simulations are dominated by outliers. A custom scenario that doesn't set `residual_df` inherits 10 from the optimistic baseline, a mild shape. This df also applies when `high_kurtosis` is pinned as the model's residual distribution.
-
-> [!note] Empirical values in research
-> - Cain, Zhang & Yuan (2017) — calibrates the df ladder: the 75th-percentile excess kurtosis observed in real data (1.62) maps to t-df ≈ 7.7 ≈ realistic df = 8; the 95th percentile (9.48) maps to df ≈ 4.6 ≈ doomer df = 5.
-> - Lange, Little & Taylor (1989) — fitted t degrees of freedom across their real-data examples run from about 1 (data with extreme outliers) through 3.4 and 4.6 to 10.3 (near-normal data), and df = 4 is their fixed default that "has worked well in many of our applications"; df ≈ 10 fits near-normal data, the optimistic baseline.
-> - Ng, Zhu, Zhang & Reid (2026) — robust-regression work treating df ∈ {2, 5, 10} as the operative heavy-to-mild range; the 5/8/10 ladder sits within its moderate band.
-> - Micceri (1989); Blanca et al. (2013) — the prevalence backdrop: 49% of real distributions have at least one heavy tail, and the maximum excess kurtosis Blanca et al. observe (7.41) corresponds to df ≈ 4.8.
->
-> Those prevalence rates are for raw observed variables; residuals are pushed toward normality by averaging over predictors, so the true swap rate is plausibly nearer 0.3–0.4. The preset 0.5 therefore errs slightly toward severity — the upper edge of "realistic" — while the df ladder is well-calibrated conditional on a swap.
-
 ### Mixed-model knobs
 
 Mixed models add three knobs that stress-test the random-effect structure. `random_effect_dist` swaps the cluster-effect shape from `normal` to `heavy_tailed` (more extreme clusters) or `right_skewed`, with `random_effect_df` controlling the heavy-tailed t's df (5 is heavy, 10 is mild). `icc_noise_sd` jitters the between-cluster variance to probe ICC uncertainty. They apply to LMM and clustered-logistic (GLMM) models and are inert elsewhere.
 
 Mixed models support three scenario knobs for stress-testing the random-effect structure:
 
-**`random_effect_dist`** — the shape of the group-level random effects. Values: `"normal"` (default), `"heavy_tailed"` (Student t, parameterised by `random_effect_df`; fatter tails mean more extreme cluster-to-cluster variation), `"right_skewed"` (asymmetric — some clusters have systematically higher baselines). In all cases the random effects are scaled to unit variance so that `tau_squared` (set via ICC) remains the between-cluster variance component; the shape changes only the tail behaviour. Heavier tails have a modest power cost: very large or very small cluster random effects add noise around the within-cluster fixed effects.
+**`random_effect_dist`**: the shape of the group-level random effects. Values: `"normal"` (default), `"heavy_tailed"` (Student t, parameterised by `random_effect_df`; fatter tails mean more extreme cluster-to-cluster variation), `"right_skewed"` (asymmetric: some clusters have systematically higher baselines). In all cases the random effects are scaled to unit variance so that `tau_squared` (set via ICC) remains the between-cluster variance component; the shape changes only the tail behaviour. Heavier tails have a modest power cost: very large or very small cluster random effects add noise around the within-cluster fixed effects.
 
-**`random_effect_df`** — degrees of freedom for `heavy_tailed`. Minimum 3. At df = 5 the excess kurtosis is 6 (pronounced tails); at df = 10 it is 1.5 (mild). Shared between `heavy_tailed` and `right_skewed` when both are in a pool (analogous to `residual_df`).
+**`random_effect_df`**: degrees of freedom for `heavy_tailed`. Minimum 3. At df = 5 the excess kurtosis is 6 (pronounced tails); at df = 10 it is 1.5 (mild). Shared between `heavy_tailed` and `right_skewed` when both are in a pool.
 
-**`icc_noise_sd`** — block-to-block Gaussian jitter on the between-cluster variance. At each design draw the random-intercept variance `τ²` (the ICC→τ² conversion of your specified ICC) is perturbed by a draw from N(0, `icc_noise_sd`²) and clamped at 0. Useful for probing sensitivity to ICC uncertainty — a common issue when the ICC is estimated from a pilot study.
+**`icc_noise_sd`**: block-to-block Gaussian jitter on the between-cluster variance. At each design draw the random-intercept variance `τ²` (the ICC→τ² conversion of your specified ICC) is perturbed by a draw from N(0, `icc_noise_sd`²) and clamped at 0. Useful for probing sensitivity to ICC uncertainty, a common issue when the ICC is estimated from a pilot study.
 
 > [!note] `icc_noise_sd` on the logistic path
 > The jitter is applied in raw τ²-space (the random-intercept variance on the scale the link uses — latent log-odds for logistic, identity for Gaussian). Because the latent-scale τ² for a logistic GLMM at the same ICC is ≈3.3× larger than for a Gaussian LMM (the π²/3 latent factor — see the latent-scale ICC convention in the mixed-effects concept), a given `icc_noise_sd` perturbs the GLMM τ² by a *smaller relative amount*. This is intentional: `icc_noise_sd` is a single cross-path knob and its absolute τ²-space magnitude is the controlled quantity. For the same *relative* perturbation on the logistic path, multiply your `icc_noise_sd` by √(π²/3) ≈ 1.81.
 
-These knobs apply to every grouping in the model (primary plus any crossed/nested extras), on both the Gaussian (LMM) and clustered-logistic (GLMM) mixed-model paths. They are independent of the other knobs (heterogeneity, correlation noise, residual swaps), which target the residual/linear-predictor structure of OLS and non-clustered logistic models.
+These knobs apply to every grouping in the model (primary plus any crossed/nested extras), on both the Gaussian (LMM) and clustered-logistic (GLMM) mixed-model paths. They are independent of the other knobs (heterogeneity, correlation noise), which target the residual/linear-predictor structure of OLS and non-clustered logistic models.
 
 ### Estimation conditions
 
@@ -224,35 +206,32 @@ result <- model$find_power(sample_size = 600, target_test = "treatment",
 
 Scenarios are configured per model with `set_scenario_configs` (see the custom-scenarios tutorial for your port for the exact call). The merge has two branches:
 
-- **Overriding a built-in name** (`optimistic`, `realistic`, `doomer`) **updates that preset.** Knobs you don't set keep their preset values — a custom `realistic` that only raises λ still carries realistic heterogeneity, distribution changes, and residual swaps.
-- **A new name inherits the optimistic baseline.** Every knob starts at its optimistic (no-perturbation) value and only your overrides apply — including `residual_df = 10` and the standard pools, so arming a probability knob without restating its pool works out of the box.
+- **Overriding a built-in name** (`optimistic`, `realistic`, `doomer`) **updates that preset.** Knobs you don't set keep their preset values: a custom `realistic` that only raises λ still carries realistic heterogeneity and distribution changes.
+- **A new name inherits the optimistic baseline.** Every knob starts at its optimistic (no-perturbation) value and only your overrides apply. That includes the standard `new_distributions` pool, so setting `distribution_change_prob` without restating the pool works out of the box.
 
 After configuring, select scenarios to run by name; names without a custom config run the built-in presets.
 
-**Valid knob names** — exactly these twelve keys: `heterogeneity`, `heteroskedasticity_ratio`, `correlation_noise_sd`, `distribution_change_prob`, `new_distributions`, `residual_change_prob`, `residual_dists`, `residual_df`, `sampled_factor_proportions`, `random_effect_dist`, `random_effect_df`, `icc_noise_sd`.
+**Valid knob names**, exactly these nine keys: `heterogeneity`, `heteroskedasticity_ratio`, `correlation_noise_sd`, `distribution_change_prob`, `new_distributions`, `sampled_factor_proportions`, `random_effect_dist`, `random_effect_df`, `icc_noise_sd`.
 
 **Valid `new_distributions` entries:** `normal`, `right_skewed`, `left_skewed`, `high_kurtosis`, `uniform`.
-
-**Valid `residual_dists` entries:** `high_kurtosis` (Student t, df from `residual_df`), `right_skewed`, `left_skewed`, `normal`, `uniform`. `binary` is rejected.
 
 Configurations are validated up front, and the errors are loud by design:
 
 - An unknown or misspelled knob raises an error naming the key and listing the valid set. In particular, the key `heteroskedasticity` taught by older versions of these docs is now `heteroskedasticity_ratio` — the old name errors rather than silently doing nothing.
 - The mixed-model keys (`random_effect_dist`, `random_effect_df`, `icc_noise_sd`) take effect only on mixed models — both Gaussian (LMM) and clustered-logistic (GLMM); see **Mixed-model knobs** above. On OLS and non-clustered logistic models they are inert.
 - `binary` in `new_distributions` is rejected: a swapped binary column would collapse to a constant.
-- A scenario that arms the residual swap (`residual_change_prob > 0`) with a `high_kurtosis` or `right_skewed` pool entry must carry `residual_df >= 3`, or it errors.
 
 ## How the knobs interact
 
-The perturbations are designed to compose. Effect jitter and residual swaps are independent noise channels added together: the jitter stays per-observation Gaussian even when the residual shape has been swapped, both inflate the total noise, and their power costs compound.
+The perturbations are designed to compose. Effect jitter and the residual are independent noise channels added together, whatever the residual's shape: both inflate the total noise, and their power costs compound.
 
-The heteroskedasticity multiplier rescales whatever residual was drawn — normal or swapped — so the λ pattern holds under high-kurtosis and right-skewed residuals too, with their tails amplified at the high end of the driver. One accepted approximation: λ is calibrated against the *unperturbed* design, so when distribution swaps or correlation noise change the spread of the predicted values, the realized variance ratio deviates slightly from the nominal λ.
+The heteroskedasticity multiplier rescales the residual whatever its shape (normal, or set with `set_residual_distribution`), so the λ pattern holds under high-kurtosis and skewed residuals too, with their tails amplified at the high end of the driver. One accepted approximation: λ is calibrated against the *unperturbed* design, so when distribution swaps or correlation noise change the spread of the predicted values, the realized variance ratio deviates slightly from the nominal λ.
 
 Distribution swaps and correlation noise interact through the correlation structure: correlations are built on a latent scale and each variable then takes its target shape, so a swapped shape bends the realized correlations — on top of the noise already added to the latent matrix. Under doomer, realized correlations differ from the specification through both channels at once.
 
 ## References
 
-The studies behind the preset values, cited throughout **The knobs**. Three are pre-publication versions (Gelman et al. and Ng et al. are arXiv preprints; Gelfand is a master's thesis).
+The studies behind the preset values, cited throughout **The knobs**. Two are pre-publication versions (Gelman et al. is an arXiv preprint; Gelfand is a master's thesis).
 
 - Adams, G., Gulliford, M. C., Ukoumunne, O. C., Eldridge, S., Chinn, S., & Campbell, M. J. (2004). Patterns of intra-cluster correlation from primary care research to inform study design and analysis. *Journal of Clinical Epidemiology*. https://doi.org/10.1016/j.jclinepi.2003.12.013
 - Blanca, M. J., Arnau, J., López-Montiel, D., Bono, R., & Bendayan, R. (2013). Skewness and kurtosis in real data samples. *Methodology*. https://doi.org/10.1027/1614-2241/a000057
@@ -270,12 +249,10 @@ The studies behind the preset values, cited throughout **The knobs**. Three are 
 - Klein, R. A., Ratliff, K. A., Vianello, M., Adams, R. B., Jr., Bahník, Š., Bernstein, M. J., … Nosek, B. A. (2014). Investigating variation in replicability: A "many labs" replication project. *Social Psychology*. https://doi.org/10.1027/1864-9335/a000178
 - Klein, R. A., Vianello, M., Hasselman, F., Adams, B. G., Adams, R. B., Jr., Alper, S., … Nosek, B. A. (2018). Many Labs 2: Investigating variation in replicability across samples and settings. *Advances in Methods and Practices in Psychological Science*. https://doi.org/10.1177/2515245918810225
 - Lachin, J. M. (1988). Properties of simple randomization in clinical trials. *Controlled Clinical Trials*. https://doi.org/10.1016/0197-2456(88)90046-3
-- Lange, K. L., Little, R. J. A., & Taylor, J. M. G. (1989). Robust statistical modeling using the t distribution. *Journal of the American Statistical Association*. https://doi.org/10.1080/01621459.1989.10478852
 - Lim, C.-Y., & In, J. (2019). Randomization in clinical studies. *Korean Journal of Anesthesiology*. https://doi.org/10.4097/kja.19049
 - Long, J. S., & Ervin, L. H. (2000). Using heteroscedasticity consistent standard errors in the linear regression model. *The American Statistician*. https://doi.org/10.1080/00031305.2000.10474549
 - McCulloch, C. E., & Neuhaus, J. M. (2011). Misspecifying the shape of a random effects distribution: Why getting it wrong may not matter. *Statistical Science*. https://doi.org/10.1214/11-STS361
 - Micceri, T. (1989). The unicorn, the normal curve, and other improbable creatures. *Psychological Bulletin*. https://doi.org/10.1037/0033-2909.105.1.156
-- Ng, A., Zhu, S., Zhang, A. G., & Reid, N. (2026). Robust regression with Student's t: The role of degrees of freedom. *arXiv*. https://arxiv.org/abs/2603.00269
 - Open Science Collaboration. (2015). Estimating the reproducibility of psychological science. *Science*. https://doi.org/10.1126/science.aac4716
 - Schönbrodt, F. D., & Perugini, M. (2013). At what sample size do correlations stabilize? *Journal of Research in Personality*. https://doi.org/10.1016/j.jrp.2013.05.009
 - Schulz, K. F., & Grimes, D. A. (2002a). Generation of allocation sequences in randomised trials: Chance, not choice. *The Lancet*. https://doi.org/10.1016/S0140-6736(02)07683-3

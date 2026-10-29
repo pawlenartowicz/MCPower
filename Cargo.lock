@@ -656,9 +656,9 @@ dependencies = [
 
 [[package]]
 name = "commonstats"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c1779773f7b9a8102504c8f81f59fee44dedd28491c6013c9f4811940bb7c6d"
+checksum = "835364f47bd1a84ea69698d93d8dbd5ff5f910d8b109d651d9d7cd4d70424237"
 dependencies = [
  "libm",
  "rand_philox",
@@ -1160,7 +1160,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine-app-spec"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "engine-contract"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "glmm",
@@ -1187,9 +1187,10 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "approx",
+ "commonstats",
  "dhat",
  "engine-contract",
  "faer",
@@ -1206,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "engine-orchestrator"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "approx",
  "engine-contract",
@@ -1223,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "engine-py"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1237,7 +1238,7 @@ dependencies = [
 
 [[package]]
 name = "engine-r"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1251,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "engine-spec-builder"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1264,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "engine-wasm"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-app-spec",
  "engine-core",
@@ -2064,13 +2065,14 @@ dependencies = [
 
 [[package]]
 name = "glmm"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b32700b74ae75cf95c80baa089afb86b6efcce57330821811a4b3482556125d"
+checksum = "2b68aeada939d19a646d845d18e31cc0c1618d2bbf51a44101b4528fdfacb62d"
 dependencies = [
  "bobyqa",
  "commonstats",
  "faer",
+ "libm",
  "pulp",
 ]
 
@@ -2785,7 +2787,7 @@ dependencies = [
 
 [[package]]
 name = "mcpower-app"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-app-spec",
  "engine-orchestrator",

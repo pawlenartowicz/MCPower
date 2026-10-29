@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Settings tab for editing per-scenario robustness parameters (heterogeneity, residuals, LME random effects); edits this device's copy of configs/scenarios.json with a Reset-to-bundled option.
+  // Settings tab for editing per-scenario robustness parameters (heterogeneity, residual variance, LME random effects); edits this device's copy of configs/scenarios.json with a Reset-to-bundled option.
   import { Label } from '$lib/components/ui/label';
   import { NumberInput } from '$lib/components/ui/number-input';
   import { Button } from '$lib/components/ui/button';
@@ -17,9 +17,9 @@
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
 
   const HINTS: Record<string, string> = {
-    optimistic: 'Best-case — distributions clean, residuals near normal.',
-    realistic: 'Default — moderate heterogeneity and non-normal residuals.',
-    doomer: 'Conservative — strong heterogeneity, heavy tails.',
+    optimistic: 'Best case: no perturbations, every predictor and correlation as specified.',
+    realistic: 'Default: moderate heterogeneity, uneven residual variance, some predictor distribution swaps.',
+    doomer: 'Conservative: strong heterogeneity, larger residual variance ratio, frequent predictor swaps.',
   };
 
   const RANDOM_EFFECT_DISTS: RandomEffectDist[] = ['normal', 'heavy_tailed'];
@@ -118,37 +118,6 @@
                 scenariosStore.update(s.name, { distribution_change_prob: n })}
             />
           </div>
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-1">
-              <Label for="{s.name}-resid-change-p">Residual change prob.</Label>
-              <InfoIcon tipKey="scenResidChange" />
-            </div>
-            <NumberInput
-              id="{s.name}-resid-change-p"
-              class="w-28"
-              step={0.05}
-              min={0}
-              max={1}
-              value={s.residual_change_prob}
-              oninput={(n: number) =>
-                scenariosStore.update(s.name, { residual_change_prob: n })}
-            />
-          </div>
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-1">
-              <Label for="{s.name}-resid-df">Residual df</Label>
-              <InfoIcon tipKey="scenResidDf" />
-            </div>
-            <NumberInput
-              id="{s.name}-resid-df"
-              class="w-28"
-              step={1}
-              min={1}
-              value={s.residual_df}
-              oninput={(n: number) => scenariosStore.update(s.name, { residual_df: n })}
-            />
-          </div>
-
           <div class="flex items-center justify-between gap-3">
             <div>
               <div class="flex items-center gap-1">

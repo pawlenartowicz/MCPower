@@ -50,7 +50,6 @@ pub fn minimal_ols_contract() -> SimulationContract {
             coefficients: vec![0.0, 0.5],
             residual: ResidualSpec {
                 distribution: ResidualDist::Normal,
-                pinned: false,
             },
             heteroskedasticity_driver: None,
             link: None,

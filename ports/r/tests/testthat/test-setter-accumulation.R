@@ -151,3 +151,31 @@ test_that("two-factor accumulation contract matches the Python golden", {
   blob <- priv(m)$build_contract_bytes("optimistic")
   expect_identical(blob, golden)
 })
+
+# ---- setters after a run: apply() expands factors into dummies, so the next
+# apply() must replay the pending settings against the formula, not the dummies.
+
+test_that("a setter after apply replays the factor declaration", {
+  m <- MCPower$new("y = g + h")$
+    set_variable_type("g=(factor,3)")$
+    set_effects("g[2]=0.3, g[3]=0.4, h=0.2")
+  priv(m)$apply()
+  m$set_effects("h=0.5")
+  priv(m)$apply()
+  reg <- priv(m)$registry
+  expect_equal(reg$factor_names, "g")
+  sizes <- reg$get_effect_sizes()
+  names(sizes) <- reg$effect_names
+  expect_equal(sizes[c("h", "g[2]", "g[3]")], c(h = 0.5, `g[2]` = 0.3, `g[3]` = 0.4))
+})
+
+test_that("upload after apply matches a declared factor column", {
+  m <- MCPower$new("y = g + h")$
+    set_variable_type("g=(factor,3)")$
+    set_effects("h=0.2")
+  priv(m)$apply()
+  m$upload_data(data.frame(g = rep(c("a", "b", "c"), 10)), verbose = FALSE)
+  m$set_effects("g[b]=0.3, g[c]=0.3")
+  priv(m)$apply()
+  expect_equal(priv(m)$registry$factor_levels("g"), c("a", "b", "c"))
+})

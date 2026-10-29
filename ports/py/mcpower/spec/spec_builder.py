@@ -5,6 +5,7 @@ Extracted free-function form of the scenario/linear-spec serialisers;
 ``self.*`` fields in as arguments.
 """
 
+import json
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,7 +26,7 @@ def build_scenario_dict(
 
     # Map distribution names to integer codes; unknown names are dropped
     # with a clear message rather than silently producing garbage.
-    from ..config import get_dist_codes, get_residual_codes
+    from ..config import get_dist_codes
 
     def _encode_dist_list(names: List[str]) -> List[int]:
         dist_codes = get_dist_codes()
@@ -37,19 +38,6 @@ def build_scenario_dict(
                     f"name {n!r}; valid: {sorted(dist_codes)}"
                 )
             out.append(dist_codes[n])
-        return out
-
-    def _encode_residual_list(names: List[str]) -> List[int]:
-        # All five canonical residual names are now valid pool entries.
-        residual_codes = get_residual_codes()
-        out: List[int] = []
-        for n in names:
-            if n not in residual_codes:
-                raise ValueError(
-                    f"scenario {scenario_name!r}: unknown residual "
-                    f"distribution {n!r}; valid: {sorted(residual_codes)}"
-                )
-            out.append(residual_codes[n])
         return out
 
     def _encode_re_dist(name: str) -> int:
@@ -65,7 +53,6 @@ def build_scenario_dict(
         return re_codes[name]
 
     new_dists = _encode_dist_list(list(cfg.get("new_distributions", [])))
-    residual_dists = _encode_residual_list(list(cfg.get("residual_dists", [])))
 
     return {
         "name": scenario_name,
@@ -76,9 +63,6 @@ def build_scenario_dict(
             cfg.get("distribution_change_prob", 0.0)
         ),
         "new_distributions": new_dists,
-        "residual_change_prob": float(cfg.get("residual_change_prob", 0.0)),
-        "residual_dists": residual_dists,
-        "residual_df": float(cfg.get("residual_df", 0.0)),
         "sampled_factor_proportions": bool(
             cfg.get("sampled_factor_proportions", False)
         ),
@@ -97,7 +81,6 @@ def build_linear_spec(
     *,
     heteroskedasticity: Dict[str, Any],
     residual_dist_name: str,
-    residual_pinned: bool = False,
     alpha: float,
     correction: Optional[str],
     wald_se: str,
@@ -105,7 +88,6 @@ def build_linear_spec(
     df_method: str,
     target_test: Optional[str],
     test_formula: Optional[str],
-    pending_data: Optional[Dict[str, Any]],
     equation: str,
     scenario_configs: Dict[str, Dict[str, Any]],
     max_failed_simulations: float,
@@ -118,10 +100,9 @@ def build_linear_spec(
     The Rust builder consumes the JSON serialisation of this dict and
     returns one ``SimulationSpec`` per name in ``scenario_names`` (the
     builder seeds default scenarios when the list is empty, so we always
-    pass at least one).
+    pass at least one). The ``upload`` block is not in the dict:
+    ``linear_spec_json`` splices it in when serialising.
     """
-    # Upload block: built below after predictors are resolved.
-
     reg = registry
 
     # Predictors — non-factors first (in formula order), then factors.
@@ -340,10 +321,7 @@ def build_linear_spec(
         "posthoc_requests": [{"factor": f} for f in wire_posthoc_factors],
         # heteroskedasticity carries only driver_var_index — no ratio key.
         "heteroskedasticity": dict(heteroskedasticity),
-        "residual": {
-            "distribution": residual_dist_name,
-            "pinned": bool(residual_pinned),
-        },
+        "residual": {"distribution": residual_dist_name},
         "max_failed_fraction": float(max_failed_simulations),
         "scenarios": scenarios,
     }
@@ -352,37 +330,45 @@ def build_linear_spec(
     if test_formula is not None:
         payload["test_formula"] = test_formula
 
-    # Upload block: emit when _pending_data is set.
-    pending = pending_data
-    if pending is not None:
-        from ..data.upload import value_to_label
-
-        upload_columns: List[Dict[str, Any]] = []
-        for col_name, col_type, raw_vals, col_labels in pending["columns_typed"]:
-            if col_type == "factor":
-                # Encode raw values as integer level codes 0..k-1 using the
-                # single-sourced label renderer (keeps cyl[6]/origin[Japan]
-                # aligned with detect_column_types and the dummy names).
-                label_to_code = {lbl: idx for idx, lbl in enumerate(col_labels)}
-                values_encoded = [float(label_to_code[value_to_label(v)]) for v in raw_vals]
-                upload_columns.append({
-                    "name": col_name,
-                    "col_type": "factor",
-                    "values": values_encoded,
-                    "labels": col_labels,
-                })
-            else:
-                # binary or continuous: raw numeric values
-                upload_columns.append({
-                    "name": col_name,
-                    "col_type": col_type,
-                    "values": [float(v) for v in raw_vals],
-                    "labels": [],
-                })
-        payload["upload"] = {
-            "mode": pending["mode"],
-            "n_rows": pending["uploaded_n"],
-            "columns": upload_columns,
-        }
-
     return payload
+
+
+def encode_upload_block(
+    columns_typed: List[Tuple[str, str, List[Any], List[str]]], mode: str, n_rows: int
+) -> str:
+    """JSON for the ``LinearSpec`` ``upload`` block, built once per
+    ``upload_data`` and spliced into every payload by ``linear_spec_json``."""
+    from ..data.upload import value_to_label
+
+    upload_columns: List[Dict[str, Any]] = []
+    for col_name, col_type, raw_vals, col_labels in columns_typed:
+        if col_type == "factor":
+            # Encode raw values as integer level codes 0..k-1 using the
+            # single-sourced label renderer (keeps cyl[6]/origin[Japan]
+            # aligned with detect_column_types and the dummy names).
+            label_to_code = {lbl: idx for idx, lbl in enumerate(col_labels)}
+            values = [float(label_to_code[value_to_label(v)]) for v in raw_vals]
+        elif col_type == "binary":
+            # The engine reads a binary column's proportion as the mean of its
+            # values, so any two-value coding is sent as 0/1 (lower value -> 0).
+            low = min(float(v) for v in raw_vals)
+            values = [0.0 if float(v) == low else 1.0 for v in raw_vals]
+        else:
+            values = [float(v) for v in raw_vals]
+        upload_columns.append({
+            "name": col_name,
+            "col_type": col_type,
+            "values": values,
+            "labels": col_labels if col_type == "factor" else [],
+        })
+    return json.dumps({"mode": mode, "n_rows": n_rows, "columns": upload_columns})
+
+
+def linear_spec_json(payload: Dict[str, Any], upload_json: Optional[str]) -> str:
+    """Serialise a ``build_linear_spec`` payload, splicing in the pre-encoded
+    ``upload`` block when there is one. Re-dumping a large upload's columns
+    costs seconds per ``find_*`` call, so they are encoded once at upload."""
+    body = json.dumps(payload)
+    if upload_json is None:
+        return body
+    return f'{body[:-1]}, "upload": {upload_json}}}'

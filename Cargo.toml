@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.4.1"              # single source for the eight internal engine-* crates (all publish=false);
+version = "1.5.0"              # single source for the eight internal engine-* crates (all publish=false);
                               # ports version independently
 edition = "2024"
 rust-version = "1.85"          # first release with edition 2024; glmm and its bobyqa set the same floor
@@ -31,6 +31,12 @@ unsafe_code = "warn"
 # (priority 0) override. `deny` makes clippy::all a correctness gate: a new
 # finding fails a plain `cargo clippy`/`cargo build` (clippy), not just CI.
 all = { level = "deny", priority = -1 }
+
+# The Tukey HSD thresholds solve studentized-range quantiles (2-D quadratures)
+# in commonstats; unoptimized, each solve is about 5× slower, which the
+# Tukey tests in debug builds feel. Optimization does not change the values.
+[profile.dev.package.commonstats]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

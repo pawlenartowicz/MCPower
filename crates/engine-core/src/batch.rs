@@ -27,7 +27,9 @@ use std::sync::OnceLock;
 use rayon::prelude::*;
 
 use crate::correction::{apply_correction, apply_correction_p};
-use crate::critvals::{BetweenWithinDf, CritValueTable};
+use crate::critvals::{
+    BetweenWithinDf, CritValueTable, TukeyFamily, TukeyTargets, TukeyThresholds,
+};
 use crate::data_gen::generate_sim_data;
 use crate::posthoc::evaluate_posthoc;
 use crate::spec::{
@@ -482,6 +484,7 @@ fn run_batch_impl(
                 &crit,
                 crit_boundary.as_ref(),
                 &posthoc_contrasts,
+                &posthoc_blocks,
                 &posthoc_correction_crit_sq,
                 n_predictors_total,
                 main_row,
@@ -569,6 +572,7 @@ fn run_batch_impl(
                             &crit,
                             crit_boundary.as_ref(),
                             &posthoc_contrasts,
+                            &posthoc_blocks,
                             &posthoc_correction_crit_sq,
                             n_predictors_total,
                             main_row,
@@ -681,6 +685,13 @@ fn prepare_run(
     if !spec.posthoc.is_empty() && spec.estimator != EstimatorSpec::Ols {
         return Err(EngineError::InvalidSpec(
             "posthoc tests are only supported for estimator=Ols".into(),
+        ));
+    }
+    // Contrasts are Ols-only: the Glm and Mle arms fill only the marginal slots,
+    // and glmm's loop-tier view exposes no Cov(β̂) to build a contrast from.
+    if !spec.contrast_pairs.is_empty() && spec.estimator != EstimatorSpec::Ols {
+        return Err(EngineError::InvalidSpec(
+            "contrasts are only supported for estimator=Ols".into(),
         ));
     }
     if sample_sizes.is_empty() {
@@ -825,6 +836,12 @@ fn prepare_run(
         &mut entry_col_remap,
     );
     let p_between_entry = crate::critvals::between_column_count(spec, Some(&entry_kept_cols));
+    // Planned before the tables, which read it off the spec, as are the
+    // sparse-exclusion rebuilds and the per-draw Satterthwaite decisions.
+    let tukey_thresholds =
+        plan_tukey_thresholds(spec, sample_sizes, p_entry as u32, p_between_entry)?;
+    spec_with_tables.tukey_thresholds = tukey_thresholds;
+    let spec = &spec_with_tables;
     let (crit, crit_boundary, posthoc_correction_crit_sq) =
         build_crit_tables(spec, sample_sizes, p_entry as u32, p_between_entry)?;
     Ok((
@@ -946,6 +963,7 @@ fn pilot_hints(
         // fits only mixed models, so it has no posthoc contrasts.
         &[],
         &[],
+        &[],
         n_predictors_total,
         n_targets,
         0,
@@ -1053,6 +1071,7 @@ fn run_one_sim(
     crit: &CritValueTable,
     crit_boundary: Option<&CritValueTable>,
     posthoc_contrasts: &[Vec<f64>],
+    posthoc_blocks: &[PosthocBlockShape],
     posthoc_correction_crit_sq: &[Vec<f64>],
     n_predictors_total: usize,
     main_row: usize,
@@ -1422,6 +1441,7 @@ fn run_one_sim(
                         evaluate_posthoc(
                             &fit,
                             posthoc_contrasts,
+                            posthoc_blocks,
                             crit_src.posthoc_t_crit_sq[crit_idx],
                             spec.correction_method,
                             posthoc_corr_row,
@@ -1465,6 +1485,7 @@ fn run_one_sim(
                         evaluate_posthoc(
                             &fit,
                             &reduced_contrasts,
+                            posthoc_blocks,
                             crit_src.posthoc_t_crit_sq[crit_idx],
                             spec.correction_method,
                             posthoc_corr_row,
@@ -1599,12 +1620,8 @@ fn run_one_sim(
                         } else {
                             crate::mixed_workspace::truth_theta(cluster, true)
                         };
-                        let start =
-                            (ws.has_prev || spec.scenario.truth_start).then(|| glmm::StartValues {
-                                beta: spec.effect_sizes.clone(),
-                                theta,
-                                dispersion: None,
-                            });
+                        let start = (ws.has_prev || spec.scenario.truth_start)
+                            .then(|| glmm::StartValues::new(spec.effect_sizes.clone(), theta));
                         // The curvature hint describes the deviance near its
                         // optimum, so only a fit that starts near it (truth or
                         // carried θ̂) reads it. From the blind start it costs a
@@ -1613,11 +1630,17 @@ fn run_one_sim(
                         let hint = start
                             .as_ref()
                             .and_then(|_| hints.get(n_idx).and_then(Option::as_ref));
-                        let view = glmm::loop_advanced::fit_on_hinted(
-                            &mut ws.mixed[n_idx],
+                        // `Data` only borrows the two slices (no copy); the
+                        // workspace fits the rows of the ids it was built with.
+                        let data = glmm::Data::new(
                             &ws.x_rowmajor[..n_usize * p],
                             &ws.y_full_f64[..n_usize],
-                            &ws.mixed_ids[n_idx],
+                            n_usize,
+                            p,
+                        );
+                        let view = glmm::loop_advanced::fit_on_hinted(
+                            &mut ws.mixed[n_idx],
+                            &data,
                             start.as_ref(),
                             hint,
                             &ws.mixed_opts,
@@ -1627,8 +1650,9 @@ fn run_one_sim(
                         // Cold path: build a one-shot reduced-spec `FitWorkspace` and
                         // `fit_on` it — a per-fit allocation, same cost profile as the
                         // retired reduced fit. The reduced design keeps every row
-                        // (only columns shrink), so the RE level ids are unchanged —
-                        // reuse this grid point's ids.
+                        // (only columns shrink), so the RE level ids are unchanged:
+                        // reuse this grid point's raw (declaration-order) ids, which
+                        // `build_workspace` sizes and reorders for the reduced spec.
                         let ids = &ws.mixed_ids[n_idx];
                         // Reduced row-major design (n × p_red) — copy the kept columns.
                         let mut red_x = vec![0.0f64; n_usize * p_red];
@@ -1655,7 +1679,7 @@ fn run_one_sim(
                                 g.slopes.clear();
                             }
                         }
-                        // Its OWN FitOptions — target_indices is the reduced set
+                        // Its OWN FitOptions: SEs for the reduced target set
                         // (differs from the hot workspace's frozen opts). wald_se is
                         // inert for a Gaussian LMM; mirror the batch opts anyway.
                         let opts_red =
@@ -1668,21 +1692,18 @@ fn run_one_sim(
                             .iter()
                             .map(|&cj| spec.effect_sizes[cj as usize])
                             .collect();
-                        let start = spec.scenario.truth_start.then_some(glmm::StartValues {
-                            beta,
-                            theta,
-                            dispersion: None,
-                        });
-                        let (sized, sized_ids, perm) =
-                            glmm::loop_advanced::spec_sized_from_ids_pub(&model, ids);
+                        let start = spec
+                            .scenario
+                            .truth_start
+                            .then(|| glmm::StartValues::new(beta, theta));
                         red_ws = Some(glmm::loop_advanced::build_workspace(
-                            &sized, perm, n_usize, p_red, &opts_red,
+                            &model, ids, n_usize, p_red, &opts_red,
                         ));
+                        let data =
+                            glmm::Data::new(&red_x, &ws.y_full_f64[..n_usize], n_usize, p_red);
                         let view = glmm::loop_advanced::fit_on(
                             red_ws.as_mut().expect("just set"),
-                            &red_x,
-                            &ws.y_full_f64[..n_usize],
-                            &sized_ids,
+                            &data,
                             start.as_ref(),
                             &opts_red,
                         );
@@ -1915,8 +1936,8 @@ fn run_one_sim(
                     // Each target at its own df: Holm and BH become R's
                     // `p.adjust` on the p-values (the between-within table instead
                     // refers every rank to the smallest df of the set); Tukey is
-                    // the studentized-range test at the target's df, read as its
-                    // upper tail so no quantile search runs per draw.
+                    // the studentized-range test at the target's df, against the
+                    // run's threshold curve so no quantile search runs per draw.
                     if spec.correction_method == CorrectionMethod::TukeyHsd {
                         cor_slice.fill(0);
                         for (j, &ti) in spec.target_indices.iter().enumerate() {
@@ -1925,12 +1946,12 @@ fn run_one_sim(
                                 spec.n_non_factor,
                                 &spec.factor_n_levels,
                             );
-                            let tail = crate::critvals::tukey_tail_sq(
-                                all_t_sq[j],
+                            cor_slice[j] = u8::from(spec.tukey_thresholds.draw_significant(
+                                alpha,
                                 k,
+                                all_t_sq[j],
                                 ws.satt_target_df[j],
-                            );
-                            cor_slice[j] = u8::from(tail <= alpha);
+                            ));
                         }
                     } else {
                         apply_correction_p(
@@ -2083,17 +2104,14 @@ fn run_one_sim(
                     } else {
                         Vec::new()
                     };
-                    let start = Some(glmm::StartValues {
-                        beta: fit_beta.to_vec(),
-                        theta: start_theta,
-                        dispersion: None,
-                    });
+                    let start = Some(glmm::StartValues::new(fit_beta.to_vec(), start_theta));
 
-                    // Non-reduced uses the frozen batch opts (target_indices =
+                    // Non-reduced uses the frozen batch opts (SEs for
                     // spec.target_indices); the reduced fit needs the reduced target
-                    // set, so it presents its own opts (target_indices is not frozen
-                    // by `fit_on` — only nagq/weights/offset/parallel_inner are, which
-                    // match the batch opts, as both come from `fit_options(spec, …)`).
+                    // set, so it presents its own opts. `fit_on` freezes only the
+                    // NUMBER of SE columns (with nagq, the REML criterion and
+                    // parallel_inner), and the remapped set has the same length; the
+                    // rest matches because both come from `fit_options(spec, ..)`.
                     let opts_red;
                     let opts_ref: &glmm::FitOptions = if test_reduces {
                         opts_red =
@@ -2109,11 +2127,12 @@ fn run_one_sim(
                     // 18.8 → 11.3, nested 20.9 → 14.3, crossed + nested 25.3 →
                     // 17.6, AGQ intercept 12.3 → 7.9), with identical power and
                     // convergence.
+                    // `Data` only borrows the two slices (no copy); the
+                    // workspace fits the rows of the ids it was built with.
+                    let data = glmm::Data::new(x_fit, y_slice, n_usize, p_fit);
                     let view = glmm::loop_advanced::fit_on_hinted(
                         &mut ws.mixed[n_idx],
-                        x_fit,
-                        y_slice,
-                        &ws.mixed_ids[n_idx],
+                        &data,
                         start.as_ref(),
                         hints.get(n_idx).and_then(Option::as_ref),
                         opts_ref,
@@ -2127,7 +2146,12 @@ fn run_one_sim(
                             diag.boundary_hit == 1,
                         );
                     }
-                    let converged = diag.converged;
+                    // A fit whose endpoint admits no fixed-effect covariance comes
+                    // back converged with `se_unavailable` and every t² NaN: no
+                    // usable test, so it counts as not converged (the GLM arm's
+                    // rule). This arm has no factor exclusion, so there is no
+                    // fallback refit to send it to.
+                    let converged = diag.converged && !diag.se_unavailable;
                     let joint_t_sq = view.joint_t_sq();
                     // Predictor-indexed, fitted width (p_red under test_formula, else
                     // full p). A `Solver::Sparse`-routed GLMM (extra-grouping random
@@ -2139,7 +2163,9 @@ fn run_one_sim(
                     // Grid-sequential warm-start update: keep only a converged θ̂. The
                     // Sparse `Prebuilt` route exposes no θ̂ (`view.theta()` is `&[]`) —
                     // skip so the carry keeps its last good value rather than emptying.
-                    if converged {
+                    // A search that converged without SEs still carries: its θ̂ is
+                    // the optimum, only the covariance read off it afterwards failed.
+                    if diag.converged {
                         let th = view.theta();
                         if !th.is_empty() {
                             ws.theta_carry.clear();
@@ -2423,10 +2449,15 @@ fn run_one_sim(
                         None, // offset: no offset feature — byte-identical to the offset-free fit
                         scratch,
                     );
+                    // A fit whose last solve could not separate a column comes
+                    // back converged with `se_unavailable` and every t² NaN: no
+                    // usable test, so it counts as not converged, which also
+                    // sends it to the separation fallback below.
+                    let fit_converged = fit.converged && !fit.se_unavailable;
 
-                    if fit.converged || attempt == 1 {
+                    if fit_converged || attempt == 1 {
                         // Final attempt: record results and break.
-                        fit_final_converged = fit.converged;
+                        fit_final_converged = fit_converged;
                         fit_final_t_sq_buf = fit.t_sq.to_vec();
                         fit_final_target_slots = excl_target_slots.clone();
                         fit_final_deviance = fit.deviance;
@@ -2442,7 +2473,7 @@ fn run_one_sim(
                     // ensures we only enter the separation path when the feature is enabled.
                     if spec.factor_min_level_count == 0 {
                         // Feature disabled — treat as final (non-converged).
-                        fit_final_converged = fit.converged;
+                        fit_final_converged = fit_converged;
                         fit_final_t_sq_buf = fit.t_sq.to_vec();
                         fit_final_target_slots = excl_target_slots.clone();
                         fit_final_deviance = fit.deviance;
@@ -2461,7 +2492,7 @@ fn run_one_sim(
                         }
                         None => {
                             // No factor to drop — record non-converged, done.
-                            fit_final_converged = fit.converged;
+                            fit_final_converged = fit_converged;
                             fit_final_t_sq_buf = fit.t_sq.to_vec();
                             fit_final_target_slots = excl_target_slots.clone();
                             fit_final_deviance = fit.deviance;
@@ -2673,7 +2704,7 @@ fn build_posthoc_contrasts(spec: &SimulationSpec) -> Result<Vec<Vec<f64>>, Engin
 /// columns; `factor_n_levels` lists `L_f` in that same layout order. Returns the
 /// owning factor's `L` as `f64` when `col` lands in a factor's dummy block, else
 /// `f64::NAN` (intercept or continuous predictor — not a Tukey-eligible target).
-/// `q_tukey_ppf` maps `k < 2` / NaN to NaN, so a misdirected target fails.
+/// `TukeyThresholds` maps `k < 2` / NaN to NaN, so a misdirected target fails.
 fn tukey_k_for_kernel_col(col: u32, n_non_factor: u32, factor_n_levels: &[i32]) -> f64 {
     let dummy_base = 1 + n_non_factor;
     if col < dummy_base {
@@ -2736,6 +2767,10 @@ pub(crate) fn tukey_k_per_target(spec: &SimulationSpec) -> Vec<f64> {
 /// `estimator` is plumbed through for consistency — posthoc is only supported
 /// for Ols, so the Glm/Mle arms are effectively dead, but the symmetric signature
 /// preserves layout uniformity.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one independent table input"
+)]
 fn build_posthoc_correction_crit_with_levels(
     crit: &crate::spec::CritValues,
     sample_sizes: &[u32],
@@ -2744,6 +2779,7 @@ fn build_posthoc_correction_crit_with_levels(
     correction_method: CorrectionMethod,
     estimator: EstimatorSpec,
     factor_n_levels_for_posthoc: &[i32],
+    tukey_thresholds: &TukeyThresholds,
 ) -> Result<Vec<Vec<f64>>, EngineError> {
     if n_contrasts == 0 {
         return Ok(sample_sizes.iter().map(|_| Vec::new()).collect());
@@ -2765,7 +2801,10 @@ fn build_posthoc_correction_crit_with_levels(
             n_contrasts,
             correction_method,
             estimator,
-            &tukey_k_per_contrast,
+            Some(TukeyTargets {
+                k_per_target: &tukey_k_per_contrast,
+                thresholds: tukey_thresholds,
+            }),
             // Post-hoc contrasts are OLS-only, so no between-within split here.
             None,
         )?
@@ -2797,6 +2836,59 @@ fn posthoc_block_shapes(spec: &SimulationSpec) -> Vec<PosthocBlockShape> {
         .collect()
 }
 
+/// Plan the run's Tukey HSD thresholds ([`TukeyThresholds::plan`]) from its
+/// own inputs: one family per target at the main α (every df its row takes in
+/// the live table and the collapsed twin, across the grid) and one per post-hoc
+/// block at the post-hoc α (residual df `N − P`). The plan reads nothing else,
+/// so results never depend on earlier runs. Default (exact everywhere) unless
+/// the spec uses `TukeyHsd`.
+fn plan_tukey_thresholds(
+    spec: &SimulationSpec,
+    sample_sizes: &[u32],
+    n_predictors: u32,
+    p_between: u32,
+) -> Result<TukeyThresholds, EngineError> {
+    if spec.correction_method != CorrectionMethod::TukeyHsd {
+        return Ok(TukeyThresholds::default());
+    }
+    let ks = tukey_k_per_target(spec);
+    let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between);
+    let mut rows =
+        crate::critvals::target_df_rows(sample_sizes, n_predictors, ks.len(), bw.as_ref())?;
+    if let Some(b) = &bw {
+        rows.extend(crate::critvals::target_df_rows(
+            sample_sizes,
+            n_predictors,
+            ks.len(),
+            b.collapsed(spec.estimator).as_ref(),
+        )?);
+    }
+    let alpha = spec.crit_values.alpha;
+    let mut families: Vec<TukeyFamily> = ks
+        .iter()
+        .enumerate()
+        .map(|(i, &k)| TukeyFamily {
+            alpha,
+            k,
+            dfs: rows.iter().map(|r| r[i]).collect(),
+        })
+        .collect();
+    let residual_dfs = crate::critvals::target_df_rows(sample_sizes, n_predictors, 1, None)?;
+    for block in posthoc_block_shapes(spec) {
+        families.push(TukeyFamily {
+            alpha: spec.crit_values.posthoc_alpha.unwrap_or(alpha),
+            k: block.n_levels as f64,
+            dfs: residual_dfs.iter().map(|r| r[0]).collect(),
+        });
+    }
+    let n_max = sample_sizes.iter().copied().max().unwrap_or(0);
+    Ok(TukeyThresholds::plan(
+        &families,
+        n_max as f64 - 1.0,
+        crate::critvals::uses_satterthwaite(spec),
+    ))
+}
+
 /// Build every df-dependent critical-value table for a model with
 /// `n_predictors` fitted columns: the main `CritValueTable` plus the per-N
 /// post-hoc correction rows (flat across post-hoc blocks; empty inner vecs
@@ -2825,6 +2917,10 @@ fn build_crit_tables(
 ) -> Result<(CritValueTable, Option<CritValueTable>, Vec<Vec<f64>>), EngineError> {
     let n_targets = spec.target_indices.len() + spec.contrast_pairs.len();
     let tukey_k_per_target = tukey_k_per_target(spec);
+    let tukey = Some(TukeyTargets {
+        k_per_target: &tukey_k_per_target,
+        thresholds: &spec.tukey_thresholds,
+    });
     let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between);
     let crit = CritValueTable::build_with_tukey_k(
         &spec.crit_values,
@@ -2833,7 +2929,7 @@ fn build_crit_tables(
         n_targets as u32,
         spec.correction_method,
         spec.estimator,
-        &tukey_k_per_target,
+        tukey,
         bw.as_ref(),
     )?;
     // The collapsed-fit twin: same inputs, but the reference a fit whose
@@ -2849,7 +2945,7 @@ fn build_crit_tables(
             n_targets as u32,
             spec.correction_method,
             spec.estimator,
-            &tukey_k_per_target,
+            tukey,
             b.collapsed(spec.estimator).as_ref(),
         )?),
     };
@@ -2872,6 +2968,7 @@ fn build_crit_tables(
                     spec.correction_method,
                     spec.estimator,
                     &[block.n_levels as i32],
+                    &spec.tukey_thresholds,
                 )?;
                 for (n_idx, slot) in result.iter_mut().enumerate() {
                     slot.extend_from_slice(&block_crit[n_idx]);
@@ -3421,6 +3518,14 @@ mod tests {
         assert!(matches!(err, EngineError::InvalidSpec(_)));
     }
 
+    #[test]
+    fn run_batch_rejects_logit_with_contrast() {
+        let mut spec = minimal_logit_spec();
+        spec.contrast_pairs = vec![(0, 1)];
+        let err = run_batch(&spec, &[200], 10, 42, None).unwrap_err();
+        assert!(matches!(err, EngineError::InvalidSpec(_)));
+    }
+
     /// GLM (unclustered logit) determinism across dispatch: the multi-core
     /// `run_batch` and the single-core `run_batch_st` return identical buffers
     /// for the same seed (the IRLS arm's twin of
@@ -3708,7 +3813,9 @@ mod tests {
             );
             assert_eq!(batch.corrected[sim * 2], 0, "sim {sim}: continuous target");
             // A k = 3 lookup would decide this draw differently.
-            if (crate::critvals::tukey_tail_sq(t_sq, 3.0, df) <= 0.05) != (p <= 0.05) {
+            use commonstats::dist::ContinuousCdf;
+            let k3 = commonstats::dist::StudentizedRange::new(3.0, df).unwrap();
+            if (k3.sf(std::f64::consts::SQRT_2 * t_sq.sqrt()) <= 0.05) != (p <= 0.05) {
                 wrong_k_differs += 1;
             }
         }
@@ -4154,6 +4261,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn run_batch_lme_rejects_contrast() {
+        let mut spec = minimal_lme_spec();
+        spec.contrast_pairs = vec![(0, 1)];
+        let err = run_batch(&spec, &[50], 10, 42, None).unwrap_err();
+        assert!(matches!(err, EngineError::InvalidSpec(_)));
+    }
+
     /// Removing the gate must not perturb the optimistic Mle path: the default
     /// (optimistic) scenario only ever skipped the now-deleted early return, so
     /// its output is structurally untouched. Pin a representative power count so
@@ -4328,6 +4443,7 @@ mod tests {
             CorrectionMethod::TukeyHsd,
             EstimatorSpec::Ols,
             &factor_n_levels,
+            &TukeyThresholds::default(),
         )
         .unwrap();
         assert_eq!(tukey.len(), 1);
@@ -4870,6 +4986,49 @@ mod tests {
         }
     }
 
+    /// A Tukey grid run with more than 13 distinct df reads a threshold curve,
+    /// sparse-exclusion rebuilds at the low N included (the 0.2 level gets 3
+    /// rows at N = 15). Its results depend on its own inputs only: a cold
+    /// cache, a warm one, and one also holding another range's curve give the
+    /// same tensors.
+    ///
+    /// Other tests share the process-wide cache and run in parallel, so 'cold'
+    /// means just cleared, not guaranteed empty; that can only make the runs
+    /// agree more easily, never fail spuriously. Run with `--test-threads=1` for
+    /// a guaranteed cold start.
+    #[test]
+    fn tukey_grid_run_is_independent_of_the_cache() {
+        let spec = SimulationSpec {
+            n_factor_dummies: 2,
+            factor_n_levels: vec![3],
+            factor_proportions: vec![0.5, 0.3, 0.2],
+            effect_sizes: vec![0.0, 0.2, 0.3, 0.6],
+            target_indices: vec![2, 3],
+            correction_method: CorrectionMethod::TukeyHsd,
+            factor_min_level_count: 5,
+            ..crate::test_support::base_spec()
+        };
+        let grid: Vec<u32> = (0..14).map(|i| 15 + 5 * i).collect();
+        assert_ne!(
+            plan_tukey_thresholds(&spec, &grid, 4, 0).unwrap(),
+            TukeyThresholds::default(),
+            "14 grid df must plan a curve"
+        );
+        let run = |g: &[u32]| run_batch(&spec, g, 200, 2137, None).unwrap();
+        crate::critvals::clear_tukey_cache();
+        let cold = run(&grid);
+        let warm = run(&grid);
+        run(&(0..14).map(|i| 30 + 7 * i).collect::<Vec<u32>>());
+        let after_other = run(&grid);
+        assert!(cold.factor_excluded.contains(&1), "no rebuild exercised");
+        assert!(cold.corrected.contains(&1), "no Tukey rejection");
+        for r in [&warm, &after_other] {
+            assert_eq!(cold.corrected, r.corrected);
+            assert_eq!(cold.uncorrected, r.uncorrected);
+            assert_eq!(cold.factor_excluded, r.factor_excluded);
+        }
+    }
+
     /// Sparse-excluded factor: proportions [0.95, 0.05] at N=40 → minority level
     /// gets ~2 rows (< 5) → excluded in every sim. Target index 1 (g[2]) is the
     /// factor dummy target; it must never be significant and factor_excluded must
@@ -5247,6 +5406,86 @@ mod tests {
             x1_hits_in_code2 > 0,
             "x1 must achieve some hits among {code2_count} code-2 sims (reduced model ran)"
         );
+    }
+
+    /// A GLM fit whose last IRLS solve cannot separate a column (glmm reports
+    /// it converged, with `se_unavailable` and every t² NaN) is not a usable
+    /// fit: it counts as non-converged and sends the draw to the separation
+    /// fallback, as a rank-deficient fit always did.
+    ///
+    /// Poisson y ~ x1 + A * B at N=26. Fixed allocation gives A's level 2 a
+    /// single row, the last one, in the B[2] cell, so A[2]:B[2] repeats the
+    /// one-row indicator A[2]: the full design is rank deficient in every sim.
+    /// A rare level's row landing last is what a small grid point does to it;
+    /// on that shape glmm's QR breaks down at the duplicate in about half the
+    /// draws. With `factor_min_level_count = 1` the one-row level is kept and
+    /// the fallback is armed, so it must drop A (smallest level count) in
+    /// every sim; with 0 there is no fallback and no sim may count as converged.
+    #[test]
+    fn glm_rank_deficient_fit_without_ses_takes_the_separation_fallback() {
+        // Column layout (p = 5): [0=intercept, 1=x1, 2=A[2], 3=B[2], 4=A[2]:B[2]].
+        let intercept = 0.3;
+        let spec = SimulationSpec {
+            n_factor_dummies: 2,
+            factor_n_levels: vec![2, 2],
+            factor_proportions: vec![0.98, 0.02, 0.4, 0.6],
+            effect_sizes: vec![intercept, 0.5, 0.0, 0.3, 0.0],
+            target_indices: vec![1, 3],
+            interactions: vec![vec![2, 3]],
+            outcome_kind: OutcomeKind::Count,
+            estimator: EstimatorSpec::Glm,
+            intercept,
+            factor_min_level_count: 1,
+            ..crate::test_support::base_spec()
+        };
+        let n = 26usize;
+
+        // Premise: one A[2] row, the last, and the interaction repeats it.
+        let mut ws = SimWorkspace::new(n, 5, 1, 2, None);
+        generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
+        let a: Vec<f32> = (0..n).map(|i| ws.x_full[(i, 2)]).collect();
+        let ab: Vec<f32> = (0..n).map(|i| ws.x_full[(i, 4)]).collect();
+        assert_eq!(
+            a.iter().position(|&v| v == 1.0),
+            Some(n - 1),
+            "A[2] on the last row"
+        );
+        assert_eq!(a.iter().filter(|&&v| v == 1.0).count(), 1, "one A[2] row");
+        assert_eq!(ab, a, "A[2]:B[2] repeats A[2]");
+
+        let n_sims = 200u32;
+        let r = run_batch(&spec, &[n as u32], n_sims, 2137, None).unwrap();
+        // factor_excluded layout: sim * n_factors + f (one sample size).
+        for sim in 0..n_sims as usize {
+            assert_eq!(
+                r.factor_excluded[sim * 2],
+                2,
+                "sim {sim}: the rank-deficient full fit must go to the fallback"
+            );
+            assert_eq!(
+                r.converged[sim], 1,
+                "sim {sim}: the fallback refit converges"
+            );
+        }
+
+        let no_fallback = SimulationSpec {
+            factor_min_level_count: 0,
+            ..spec
+        };
+        let r0 = run_batch(&no_fallback, &[n as u32], n_sims, 2137, None).unwrap();
+        assert!(
+            r0.converged.iter().all(|&c| c == 0),
+            "a rank-deficient fit without SEs must not count as converged"
+        );
+
+        // The debug fit of the same draws classifies them the same way.
+        for sim in 0..50u64 {
+            let r = refit_draw(&no_fallback, sim, n, 2137);
+            assert!(
+                !r.converged,
+                "sim {sim}: debug fit must not report converged"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -5667,5 +5906,70 @@ mod tests {
         );
         // Every converged fit's pinned mask uses only the 2 low bits.
         assert!(batch.pinned_components.iter().all(|&m| m & !0b11 == 0));
+    }
+
+    /// A clustered GLMM fit whose endpoint admits no fixed-effect covariance
+    /// (glmm reports it converged, with `se_unavailable` and every t² NaN) is
+    /// not a usable fit: it counts as non-converged, as the GLM arm counts one.
+    ///
+    /// Poisson y ~ x1 + A * B with a random intercept over 2 clusters at N=26.
+    /// Fixed allocation gives A's level 2 a single row, outside the B[2] cell,
+    /// so the A[2]:B[2] column is all zero and the fixed design is rank
+    /// deficient in every sim. The GLMM arm has no factor exclusion, so no
+    /// fallback refit rescues the draw.
+    #[test]
+    fn glmm_rank_deficient_fit_without_ses_does_not_count_as_converged() {
+        // Column layout (p = 5): [0=intercept, 1=x1, 2=A[2], 3=B[2], 4=A[2]:B[2]].
+        let intercept = 0.3;
+        let spec = SimulationSpec {
+            n_factor_dummies: 2,
+            factor_n_levels: vec![2, 2],
+            factor_proportions: vec![0.98, 0.02, 0.4, 0.6],
+            effect_sizes: vec![intercept, 0.5, 0.0, 0.3, 0.0],
+            target_indices: vec![1, 3],
+            interactions: vec![vec![2, 3]],
+            outcome_kind: OutcomeKind::Count,
+            estimator: EstimatorSpec::Glm,
+            intercept,
+            cluster: Some(crate::spec::ClusterSpec {
+                sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters: 2 },
+                tau_squared: 0.25,
+                slopes: vec![],
+                extra_groupings: vec![],
+            }),
+            ..crate::test_support::base_spec()
+        };
+        let n = 26usize;
+
+        // Premise: one A[2] row, and the interaction column is empty.
+        let mut ws = SimWorkspace::new(n, 5, 1, 2, spec.cluster.as_ref());
+        generate_sim_data(&spec, 0, 2137, &mut ws).unwrap();
+        let a_rows = (0..n).filter(|&i| ws.x_full[(i, 2)] == 1.0).count();
+        assert_eq!(a_rows, 1, "one A[2] row");
+        assert!(
+            (0..n).all(|i| ws.x_full[(i, 4)] == 0.0),
+            "A[2]:B[2] is all zero"
+        );
+
+        let n_sims = 50u32;
+        let r = run_batch(&spec, &[n as u32], n_sims, 2137, None).unwrap();
+        assert!(
+            r.converged.iter().all(|&c| c == 0),
+            "a rank-deficient GLMM fit without SEs must not count as converged"
+        );
+        assert!(
+            r.uncorrected.iter().all(|&s| s == 0),
+            "a fit without SEs is never significant"
+        );
+
+        // The debug fit of the same draws classifies them the same way.
+        for sim in 0..10u64 {
+            let d = refit_draw(&spec, sim, n, 2137);
+            assert!(d.se.iter().all(|s| s.is_nan()), "sim {sim}: SEs withheld");
+            assert!(
+                !d.converged,
+                "sim {sim}: debug fit must not report converged"
+            );
+        }
     }
 }

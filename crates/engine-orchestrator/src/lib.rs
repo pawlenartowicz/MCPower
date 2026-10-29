@@ -60,21 +60,11 @@ mod scenarios_embed_tests {
         let obj = v.as_object().expect("scenarios.json must be a JSON object");
         for name in ["optimistic", "realistic", "doomer"] {
             let s = obj.get(name).and_then(|x| x.as_object()).expect(name);
-            // flat invariants; random_effect_dist keeps its own
-            // normal/heavy_tailed vocabulary — only residual pools are canonical
+            // flat invariants: the mixed-model knobs sit at the top level of
+            // each preset (random_effect_dist keeps its own normal/heavy_tailed
+            // vocabulary), never under a nested `lme` block
             assert!(s.contains_key("random_effect_dist"), "{name}: flat lme key");
             assert!(!s.contains_key("lme"), "{name}: must not be nested");
-            let rd = s.get("residual_dists").and_then(|x| x.as_array()).unwrap();
-            assert!(rd.iter().all(|x| x.as_str().is_some()));
-            assert!(
-                rd.iter().any(|x| x == "high_kurtosis"),
-                "{name}: canonical residual pool"
-            );
-            assert!(
-                !rd.iter()
-                    .any(|x| x == "heavy_tailed" || x == "skewed" || x == "t"),
-                "{name}: legacy alias must not appear in residual_dists"
-            );
         }
     }
 }

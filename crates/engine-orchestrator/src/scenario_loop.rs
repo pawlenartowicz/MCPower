@@ -10,7 +10,8 @@ use crate::result::{OrchestratorError, Scenario};
 
 /// Run `op` per scenario, threading the progress sink through. `op` receives
 /// `(idx, &Scenario, &mut Option<&mut dyn ProgressSink>)` and returns the
-/// per-scenario payload `T`. Cancellation is checked before each call;
+/// per-scenario payload `T`. Cancellation is checked before each call, and a
+/// cancel inside the call is folded into the same `Cancelled` event + error;
 /// `ScenarioStarted`/`ScenarioCompleted` are emitted around the call.
 ///
 /// `progress` is taken by `&mut` (not by value) so the caller can still emit
@@ -28,14 +29,17 @@ where
     let total = scenarios.len();
     let mut out = Vec::with_capacity(total);
     for (idx, scenario) in scenarios.iter().enumerate() {
-        if cancel.is_cancelled() {
+        let cancelled = |progress: &mut Option<&mut dyn ProgressSink>| {
             if let Some(p) = progress.as_deref_mut() {
                 p.on_event(ProgressEvent::Cancelled);
             }
-            return Err(OrchestratorError::Cancelled {
+            OrchestratorError::Cancelled {
                 scenario_idx: idx,
                 n: fallback_n,
-            });
+            }
+        };
+        if cancel.is_cancelled() {
+            return Err(cancelled(progress));
         }
         if let Some(p) = progress.as_deref_mut() {
             p.on_event(ProgressEvent::ScenarioStarted {
@@ -44,7 +48,15 @@ where
                 total,
             });
         }
-        let payload = op(idx, scenario, progress)?;
+        // A cancel observed inside the batch surfaces from engine-core as
+        // `EngineError::Cancelled`; report it the same way as a cancel seen
+        // between scenarios.
+        let payload = match op(idx, scenario, progress) {
+            Err(OrchestratorError::Engine(engine_core::EngineError::Cancelled)) => {
+                return Err(cancelled(progress));
+            }
+            r => r?,
+        };
         if let Some(p) = progress.as_deref_mut() {
             p.on_event(ProgressEvent::ScenarioCompleted {
                 label: scenario.label.clone(),

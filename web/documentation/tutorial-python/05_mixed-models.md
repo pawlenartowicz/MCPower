@@ -71,16 +71,16 @@ Per-test power
 ───────────────────────────────────
 Test                 Power   Target
 ───────────────────────────────────
-teaching_method      90.9%      80%
-prior_gpa            85.8%      80%
+teaching_method      90.6%      80%
+prior_gpa            85.6%      80%
 ───────────────────────────────────
 
 Power & 95% CI
 ───────────────────────────────────────────
 Test                 Power           CI 95%
 ───────────────────────────────────────────
-teaching_method      90.9%   [88.7%, 92.7%]
-prior_gpa            85.8%   [83.2%, 88.0%]
+teaching_method      90.6%   [88.4%, 92.5%]
+prior_gpa            85.6%   [83.0%, 87.9%]
 ───────────────────────────────────────────
 95% CIs are Monte-Carlo (Wilson), n_sims=800.
 
@@ -89,15 +89,15 @@ Joint significance distribution
 k     Exactly   At least
 ────────────────────────
 0        1.6%       100%
-1       20.1%      98.4%
-2       78.2%      78.2%
+1       20.5%      98.4%
+2       77.9%      77.9%
 ────────────────────────
 
 Estimator details
   tau_estimate: nan
   boundary_hits: 0
-  joint_uncorrected_rate: 0.9812
-  joint_corrected_rate: 0.9812
+  joint_uncorrected_rate: 0.9762
+  joint_corrected_rate: 0.9762
   singular_fit_rate: 0
   boundary_rate_per_component: [0.0]
 

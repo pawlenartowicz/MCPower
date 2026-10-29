@@ -109,7 +109,7 @@ The choice matters most for cluster-level predictors (see [Cluster-level predict
 ### Constraints
 
 - ICC must be 0 or in 0.05–0.95.
-- With crossed or nested extra groupings, total N must be an exact multiple of the **atom** — the product of primary cluster count and each extra-grouping's level count. `set_cluster` reports the atom size when it does not divide evenly.
+- With crossed or nested extra groupings, total N must be an exact multiple of the **atom**: the product of primary cluster count and each extra-grouping's level count. When the primary grouping is sized by `cluster_size`, the atom is the cluster size itself, because each cluster already holds all of its nested children. `set_cluster` reports the atom size when it does not divide evenly.
 - Random slopes (`random_slopes`) can be placed on any grouping factor — the primary or any crossed/nested extra grouping.
 - `cluster_level_vars` names predictors that are constant within each cluster — typically a cluster-assigned treatment. Their standard error scales with `1/sqrt(n_clusters)`, not `1/sqrt(N)`; the design-effect difference is large when clusters are few.
 
@@ -180,7 +180,7 @@ model$set_cluster("school", ICC = 0.15, n_clusters = 10)
 model$set_cluster("school:classroom", ICC = 0.10, n_per_parent = 4)
 ```
 
-Total N must be an exact multiple of the atom (primary clusters × extra-grouping levels for crossed, or primary clusters × nested-children for nested). Each grouping's ICC sizes its own between-level variance component, independently of the others.
+Total N must be an exact multiple of the atom (primary clusters × extra-grouping levels for crossed, or primary clusters × nested-children for nested; with a `cluster_size` primary, just the cluster size). Each grouping's ICC sizes its own between-level variance component, independently of the others.
 
 ## Random slopes
 
@@ -257,6 +257,23 @@ grouping, `"between_within"` uses Satterthwaite degrees of freedom for an LME
 and the Wald z for a GLMM. It has no effect on OLS or unclustered GLM. See
 [[concepts/simulation-settings#denominator-degrees-of-freedom|Denominator
 degrees of freedom]] for the full explanation.
+
+### Few clusters with a cluster-level effect
+
+With few clusters, the between-within *t* test of a **cluster-level** effect in a
+clustered binary or count model still rejects a true null more often than α.
+In MCPower's calibration (logit, α = 0.05, 20 observations per cluster), the
+Type I error rate was 7.5–9.6% at 5 clusters, 6.6–6.8% at 10, and about 6% at
+20–30. Within-cluster effects stayed near 5% at every cluster count. Part of
+the power reported for a cluster-level effect is then this excess rejection,
+not real sensitivity.
+
+MCPower warns when a clustered binary or count model tests a cluster-level
+effect with fewer than 20 clusters. In a sample-size search, the warning names
+the smallest grid N that reaches 20 clusters. It does not fire under
+`df_method="asymptotic"` or for a design with a crossed or nested extra
+grouping, both of which use the Wald z. When it fires, plan for more clusters
+rather than more observations per cluster.
 
 ## Clustered count (Poisson GLMM) and clustered probit
 

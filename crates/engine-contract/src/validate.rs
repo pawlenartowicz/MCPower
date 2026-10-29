@@ -808,9 +808,6 @@ impl SimulationContract {
     ///   clamps sub-1.0 ratios via `.max(1.0)`, so they are defined-as-off, not
     ///   malformed — only NaN/Inf/negative are rejected)
     /// - `distribution_change_prob` ∈ [0.0, 1.0]  (probability; 0.0 = off)
-    /// - `residual_change_prob` ∈ [0.0, 1.0]  (probability; 0.0 = off)
-    /// - `residual_df` is finite — 0.0 is the inactive sentinel; no positivity
-    ///   check (the kernel interprets 0.0 as "Normal fallback")
     /// - `lme.random_effect_df` is finite and ≥ 0.0 — 0.0 is the Normal-path
     ///   sentinel; negative values are meaningless
     /// - `lme.icc_noise_sd` is finite and ≥ 0.0 — exactly 0.0 is a valid
@@ -847,13 +844,6 @@ impl SimulationContract {
             s.distribution_change_prob.is_finite()
                 && (0.0..=1.0).contains(&s.distribution_change_prob),
         )?;
-        check(
-            s.residual_change_prob,
-            "residual_change_prob",
-            s.residual_change_prob.is_finite() && (0.0..=1.0).contains(&s.residual_change_prob),
-        )?;
-        // residual_df: 0.0 is the inactive sentinel; only reject non-finite.
-        check(s.residual_df, "residual_df", s.residual_df.is_finite())?;
 
         if let Some(lme) = &s.lme {
             let lme_check = |v: f64, field: &'static str, ok: bool| -> Result<(), ContractError> {
@@ -925,9 +915,11 @@ impl SimulationContract {
     /// groupings, ≤ 3 REs per group (intercept + slopes), and the `Glm`
     /// estimator (the only one that runs the GLMM fit). Hosts strip
     /// ineligible `nagq > 1` to 1 with a warning before building the contract,
-    /// so reaching either error here indicates a host bug. Mirrors glmm's
-    /// `assert_model_shape` (glmm crate, `src/fit/common.rs`) and each port's
-    /// spec-builder eligibility check — change all three together.
+    /// so reaching either error here indicates a host bug. Mirrors each
+    /// port's spec-builder eligibility check; change them together. glmm's own
+    /// model-shape check accepts the same eligible shapes but is looser: it
+    /// ignores `nagq > 1` on a Gaussian or fixed-only model instead of
+    /// refusing it.
     fn invariant_25_nagq_backstop(&self) -> Result<(), ContractError> {
         let k = self.nagq;
         if k == 0 || k > 25 || k % 2 == 0 {
@@ -1159,78 +1151,6 @@ mod tests {
                 err,
                 ContractError::ScenarioPerturbationOutOfRange {
                     field: "distribution_change_prob",
-                    ..
-                }
-            ),
-            "got {err:?}"
-        );
-    }
-
-    // residual_change_prob
-
-    #[test]
-    fn inv22_residual_change_prob_nan_rejects() {
-        let mut c = example1_simple_ols();
-        c.scenario.residual_change_prob = f64::NAN;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ContractError::ScenarioPerturbationOutOfRange {
-                    field: "residual_change_prob",
-                    ..
-                }
-            ),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn inv22_residual_change_prob_negative_rejects() {
-        let mut c = example1_simple_ols();
-        c.scenario.residual_change_prob = -0.5;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ContractError::ScenarioPerturbationOutOfRange {
-                    field: "residual_change_prob",
-                    ..
-                }
-            ),
-            "got {err:?}"
-        );
-    }
-
-    // residual_df: 0.0 is the inactive sentinel — only NaN/inf should reject.
-
-    #[test]
-    fn inv22_residual_df_nan_rejects() {
-        let mut c = example1_simple_ols();
-        c.scenario.residual_df = f64::NAN;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ContractError::ScenarioPerturbationOutOfRange {
-                    field: "residual_df",
-                    ..
-                }
-            ),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn inv22_residual_df_inf_rejects() {
-        let mut c = example1_simple_ols();
-        c.scenario.residual_df = f64::INFINITY;
-        let err = c.validate().unwrap_err();
-        assert!(
-            matches!(
-                err,
-                ContractError::ScenarioPerturbationOutOfRange {
-                    field: "residual_df",
                     ..
                 }
             ),

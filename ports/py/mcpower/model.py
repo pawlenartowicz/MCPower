@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .spec.parsers import _parser
 from .spec.scenario_config import get_default_scenario_config
-from .spec.spec_builder import build_linear_spec
+from .spec.spec_builder import build_linear_spec, encode_upload_block, linear_spec_json
 from .spec.validators import (
     _validate_alpha,
     _validate_correction_method,
@@ -48,15 +48,15 @@ import msgpack  # noqa: E402 — import after type stubs
 
 # ── Wire encodings (Python → Rust LinearSpec) ─────────────────────────────
 #
-# The *scenario* sub-payload inside LinearSpec carries integer-coded
-# distribution slots (engine-spec-builder/src/input.rs ::
-# ScenarioInput.{new_distributions: Vec<i32>, residual_dists: Vec<i32>}). The
-# name → code tables are single-sourced in the engine and read via
-# `config.get_dist_codes()` / `config.get_residual_codes()` — no copy here.
+# The *scenario* sub-payload inside LinearSpec carries one integer-coded
+# distribution list (engine-spec-builder/src/input.rs ::
+# ScenarioInput.new_distributions: Vec<i32>). The name → code table is
+# single-sourced in the engine and read via `config.get_dist_codes()`; no copy
+# here.
 #
 # Residual public surface: the canonical five names normal/right_skewed/
-# left_skewed/high_kurtosis/uniform (all valid for model and scenario pools).
-# The engine returns only the canonical names from `residual_codes()`.
+# left_skewed/high_kurtosis/uniform, validated against
+# `config.get_residual_codes()` and sent by name.
 
 
 def _class_of(registry: "VariableRegistry", col_name: str) -> str:
@@ -124,7 +124,16 @@ def _glmm_laplace_bias_warning(
 
     The message is canonical (verbatim across all ports — mirrors the R port's
     .check_glmm_laplace_bias_warning; change all ports together).
+
+    A find_sample_size result carries a list of extras, one per grid N; the
+    first breaching N decides (same rule as the R helper).
     """
+    if isinstance(estimator_extras, list):
+        for extras in estimator_extras:
+            w = _glmm_laplace_bias_warning(extras, min_cluster_size, cfg)
+            if w is not None:
+                return w
+        return None
     tau = estimator_extras.get("tau_squared_hat_mean")
     if tau is None:
         return None
@@ -262,15 +271,14 @@ class MCPower:
         # merges user overrides on top.
         self._scenario_configs: Dict[str, Dict[str, Any]] = get_default_scenario_config()
 
-        # Residual distribution name; True when the user explicitly chose it
-        # (incl. explicit "normal") — scenario residual swaps leave it alone.
+        # Residual distribution name (canonical; "normal" by default).
         self._residual_dist_name: str = "normal"
-        self._residual_pinned: bool = False
 
         # Heteroskedasticity spec. Mirrors ``HeteroskedasticityInput`` from the
         # engine spec-builder: driver_var_index = 0-based non-factor predictor
         # index (None → Xβ). λ is scenario-only — no model-level ratio key.
         self._heteroskedasticity: Dict[str, Any] = {"driver_var_index": None}
+        self._heteroskedasticity_var: Optional[str] = None
 
         # Pending settings — applied lazily before find_power / find_sample_size.
         # The three assignment-string setters ACCUMULATE: each call appends a
@@ -288,6 +296,10 @@ class MCPower:
         # rule and _apply step 5 for the per-element dispatch.
         self._pending_correlations: List[Any] = []
         self._pending_data: Optional[Dict[str, Any]] = None
+        # Per-factor sampling override set by set_factor_sampling:
+        # {factor name: True (sampled) | False (exact)}. An absent name inherits
+        # the scenario's ``sampled_factor_proportions``.
+        self._pending_factor_sampling: Dict[str, bool] = {}
         self._applied: bool = False
         self._effects_set: bool = False
 
@@ -306,13 +318,8 @@ class MCPower:
         self._uploaded_data_mode: Optional[str] = None
 
         # LME state. ``_pending_clusters`` holds {grouping_var: {n_clusters,
-        # cluster_size, icc}} as stored by ``set_cluster``. The
-        # ``_effective_n_clusters`` transient is populated by
-        # ``_validate_lme_runtime`` (which derives missing n_clusters from
-        # ``sample_size``) and consumed by ``to_simulation_spec`` to fill
-        # the engine's ``ClusterSpec``.
+        # cluster_size, icc}} as stored by ``set_cluster``.
         self._pending_clusters: Dict[str, Dict[str, Any]] = {}
-        self._effective_n_clusters: Optional[int] = None
 
     def __getattr__(self, name: str) -> Any:
         """Loud, instructive errors for the removed ``set_*`` setters.
@@ -704,16 +711,42 @@ class MCPower:
         self._applied = False
         return self
 
+    def set_factor_sampling(self, name: str, mode: Optional[str]) -> "MCPower":
+        """Set how one factor's level shares are realised in each simulation.
+
+        Overrides the scenario-wide ``sampled_factor_proportions`` for this
+        factor only. Works for declared and uploaded factors.
+
+        Args:
+            name: A factor predictor.
+            mode: ``"exact"`` holds the level counts at their shares in every
+                simulation; ``"sampled"`` draws each row's level at random, so
+                counts vary between simulations; ``None`` removes the override
+                and the scenario setting applies again.
+        """
+        modes = {"exact": False, "sampled": True}
+        if mode is None:
+            self._pending_factor_sampling.pop(name, None)
+        elif isinstance(mode, str) and mode in modes:
+            self._pending_factor_sampling[name] = modes[mode]
+        else:
+            raise ValueError(
+                f"factor sampling mode must be 'exact', 'sampled' or None, got {mode!r}"
+            )
+        self._applied = False
+        return self
+
     def set_residual_distribution(self, name: str) -> "MCPower":
-        """Set the residual error distribution and pin it against scenario swaps.
+        """Set the residual error distribution.
 
         Args:
             name: One of the canonical five: ``"normal"``, ``"right_skewed"``,
                 ``"left_skewed"``, ``"high_kurtosis"``, ``"uniform"``.
-                ``"high_kurtosis"`` uses the t distribution; its degrees of
-                freedom come from the active scenario's ``residual_df`` knob.
-                Calling this method — including with ``"normal"`` — pins the
-                residual so scenario perturbations do not swap it.
+                ``"high_kurtosis"`` is Student t with 10 degrees of freedom;
+                ``"right_skewed"`` and ``"left_skewed"`` are scaled chi-square
+                with 10 degrees of freedom (mirrored for ``"left_skewed"``).
+                Every shape has unit variance and is the same in every
+                scenario.
         """
         from .config import get_residual_codes
 
@@ -724,7 +757,6 @@ class MCPower:
                 f"{sorted(residual_codes)}"
             )
         self._residual_dist_name = name
-        self._residual_pinned = True
         return self
 
     def set_heteroskedasticity_driver(
@@ -760,6 +792,7 @@ class MCPower:
                 stacklevel=2,
             )
 
+        self._heteroskedasticity_var = var
         self._heteroskedasticity = {"driver_var_index": driver_var_index}
         return self
 
@@ -821,8 +854,8 @@ class MCPower:
 
     def _agq_eligible(self) -> bool:
         """Whether the current design admits adaptive Gauss–Hermite quadrature
-        (``agq > 1``). Mirrors the contract backstop (invariant 25) and glmm's
-        ``assert_model_shape`` — change all three together: a Binary/Count GLMM
+        (``agq > 1``). Mirrors the contract backstop (invariant 25) and the R
+        port's ``agq_eligible``; change them together. A Binary/Count GLMM
         with a single grouping factor and at most 3 random effects per group
         (intercept + slopes), fitted by the GLM estimator (``estimator="mle"``
         and ``"ols"`` fit a Gaussian model with no quadrature)."""
@@ -908,35 +941,20 @@ class MCPower:
         types, labels_list = detect_column_types(columns_data, cols, max_k, max_ratio)
         n_uploaded_rows = len(columns_data[0]) if columns_data else 0
 
-        # Store raw columns for ALL uploaded columns (D4 will need y + predictors).
-        raw_columns: Dict[str, Any] = {}
-        for i, col_name in enumerate(cols):
-            raw_columns[col_name] = list(columns_data[i])
+        # Raw columns for ALL uploaded columns (get_effects_from_data reads the
+        # outcome and grouping columns from here).
+        raw_columns: Dict[str, Any] = dict(zip(cols, columns_data, strict=True))
 
-        # Identify columns that match modeled predictors (before _apply expansion).
+        # Identify columns that match modeled predictors. A fresh registry, so
+        # the names are the formula's predictors even after a run expanded
+        # factors into dummies; _apply rebuilds it again before use.
+        self._registry = VariableRegistry(self._registry.equation)
         modeled_names = set(self._registry.predictor_names)
         columns_typed = []  # only matched predictors
         for i, col_name in enumerate(cols):
             if col_name not in modeled_names:
                 continue
-            col_type = types[i]
-            col_labels = labels_list[i]
-            raw_vals = list(columns_data[i])
-            columns_typed.append((col_name, col_type, raw_vals, col_labels))
-
-            # Update registry with detected type for matched predictors.
-            if col_type == "factor":
-                n_lvl = len(col_labels)
-                self._registry.set_variable_type(
-                    col_name,
-                    "factor",
-                    n_levels=n_lvl,
-                    labels=col_labels,
-                    reference=col_labels[0] if col_labels else None,
-                )
-            elif col_type == "binary":
-                self._registry.set_variable_type(col_name, "binary")
-            # continuous: leave as default "normal" — engine handles via upload path
+            columns_typed.append((col_name, types[i], columns_data[i], labels_list[i]))
 
         if verbose:
             print(f"Uploaded {n_uploaded_rows} rows, {len(cols)} columns.")
@@ -947,9 +965,11 @@ class MCPower:
         self._pending_data = {
             "columns_typed": columns_typed,
             "raw_columns": raw_columns,
+            "upload_json": encode_upload_block(columns_typed, mode, n_uploaded_rows),
             "mode": mode,
             "uploaded_n": n_uploaded_rows,
         }
+        self._set_upload_types()
         self._uploaded_data_n = n_uploaded_rows
         self._uploaded_data_mode = mode
         self._applied = False
@@ -1045,15 +1065,15 @@ class MCPower:
 
         # set_effects is NOT required for the fit — the contract's coefficients
         # are unused by fit_uploaded_data (it fits the provided design directly).
-        # Pass placeholder zero effects so the spec builder validates. The payload
-        # carries the coded upload columns, which the engine reads to assemble the
+        # Pass placeholder zero effects so the spec builder validates. The spec
+        # JSON carries the coded upload columns, which the engine reads to assemble the
         # recovery design [Intercept, non-factors, factor dummies, interactions].
         payload = self._to_linear_spec_dict(["optimistic"])
         for entry in payload["effects"]:
             entry["size"] = 0.0
 
         design_flat, semantic_names, ncol = _engine.build_recovery_design(
-            _json.dumps(payload)
+            self._spec_json(payload)
         )
 
         # Every estimator fits the outcome on its native scale (raw 0/1 /
@@ -1098,7 +1118,7 @@ class MCPower:
                 clusters_json = _json.dumps(clusters)
 
         _names, contracts_bytes, _skeleton_json = _engine.build_contract_from_spec(
-            _json.dumps(payload),
+            self._spec_json(payload),
             outcome_kind_wire,
             link_wire,
             estimator_wire,
@@ -1352,8 +1372,7 @@ class MCPower:
 
         Called from ``find_power`` / ``find_sample_size`` before the engine
         call. Also validates the clustered-OLS path (family != 'lme' but pending_clusters is non-empty due to an estimator override).
-        Populates ``self._effective_n_clusters`` for downstream
-        ``to_simulation_spec`` consumption. Mirrors ``_validate_logit_runtime``.
+        Mirrors ``_validate_logit_runtime``.
 
         Args:
             sample_size: Total observations for ``find_power``; ``None`` from
@@ -1448,10 +1467,8 @@ class MCPower:
                 extra_var in self._nested_child_vars(),
             ).raise_if_invalid()
 
-        # Derive effective n_clusters from the primary grouping only.
+        # Check sample_size against the primary grouping only.
         if sample_size is None:
-            if n_clusters_primary is not None:
-                self._effective_n_clusters = int(n_clusters_primary)
             return
 
         if n_clusters_primary is not None:
@@ -1461,7 +1478,6 @@ class MCPower:
             ss_result.raise_if_invalid()
             for w in ss_result.warnings:
                 warnings.warn(w, UserWarning, stacklevel=2)
-            self._effective_n_clusters = int(n_clusters_primary)
         else:
             ss_result = _validate_cluster_sample_size(
                 int(sample_size), None, int(cluster_size_primary)
@@ -1469,20 +1485,49 @@ class MCPower:
             ss_result.raise_if_invalid()
             for w in ss_result.warnings:
                 warnings.warn(w, UserWarning, stacklevel=2)
+            from .config import get_cluster_limits
+
+            min_clusters = get_cluster_limits()["min_clusters"]
             derived = int(sample_size) // int(cluster_size_primary)
-            if derived < 2:
+            if derived < min_clusters:
                 raise ValueError(
-                    f"derived n_clusters={derived} is below 2 "
+                    f"derived n_clusters={derived} is below {min_clusters} "
                     f"(sample_size={sample_size}, cluster_size={cluster_size_primary}); "
                     "increase sample_size"
                 )
-            self._effective_n_clusters = derived
+
+    def _set_upload_types(self) -> None:
+        """Write each matched uploaded column's detected type into the
+        registry: factor levels and labels from the data (first label is the
+        reference), binary as binary. Continuous columns are left alone, so a
+        declared distribution (e.g. right_skewed) survives."""
+        for (col_name, detected_type, _raw, col_labels) in self._pending_data["columns_typed"]:
+            if detected_type == "factor":
+                self._registry.set_variable_type(
+                    col_name,
+                    "factor",
+                    n_levels=len(col_labels),
+                    labels=col_labels,
+                    reference=col_labels[0] if col_labels else None,
+                )
+            elif detected_type == "binary":
+                self._registry.set_variable_type(col_name, "binary")
 
     def _apply(self) -> None:
         """Flush pending settings into the registry in dependency order: variable
         types first (factors need their type set before dummy expansion), then
         factor level ordering, then effect sizes. Order matters — effects
         reference β-column indices that factor expansion determines."""
+        # Start from the bare formula every time. Step 2 expands factors in
+        # place, so the registry an earlier apply left behind lists dummies
+        # (``g[2]``) instead of the predictors the pending settings name.
+        self._registry = VariableRegistry(self._registry.equation)
+
+        # 0. Uploaded columns take their detected type, so an undeclared
+        #    uploaded predictor passes the type-lock check in step 1b.
+        if self._pending_data is not None:
+            self._set_upload_types()
+
         # 1. Variable types. Fragments are parsed in call order; errors are
         #    aggregated across all of them (nothing is registered until every
         #    fragment parses clean), then registered in order so a predictor
@@ -1512,34 +1557,44 @@ class MCPower:
         #     clear error; matching or undeclared columns have data-wins
         #     re-apply (factor levels/count from data; continuous is no-op).
         if self._pending_data is not None:
-            for (col_name, detected_type, _raw, col_labels) in self._pending_data["columns_typed"]:
+            for (col_name, detected_type, _raw, _labels) in self._pending_data["columns_typed"]:
                 modeled_class = _class_of(self._registry, col_name)
                 if modeled_class != detected_type:
                     raise ValueError(
                         f"Column {col_name!r} was detected as {detected_type} from your uploaded data; "
                         f"it can't be modeled as {modeled_class}. Uploaded columns take their type from the data."
                     )
-                # Data wins on details: re-apply detected type/levels so
-                # factor labels and n_levels always come from the upload,
-                # not from a factor(k) declaration.
-                # Continuous columns: deliberate no-op — leave the declared
-                # distribution (e.g. right_skewed) untouched.
-                if detected_type == "factor":
-                    n_lvl = len(col_labels)
-                    self._registry.set_variable_type(
-                        col_name,
-                        "factor",
-                        n_levels=n_lvl,
-                        labels=col_labels,
-                        reference=col_labels[0] if col_labels else None,
-                    )
-                elif detected_type == "binary":
-                    self._registry.set_variable_type(col_name, "binary")
-                # detected_type == "continuous": no-op (keep declared distribution)
+            # Data wins on details: factor labels and n_levels always come
+            # from the upload, not from a factor(k) declaration.
+            self._set_upload_types()
+
+        # 1c. Per-factor sampling override. Applied after the upload re-apply,
+        #     which rebuilds an uploaded factor's entry from the data.
+        for name, sampled in self._pending_factor_sampling.items():
+            if name not in self._registry.factor_names:
+                raise ValueError(
+                    f"set_factor_sampling: {name!r} is not a factor predictor; "
+                    f"factors: {self._registry.factor_names}"
+                )
+            self._registry._factors[name]["sampled_proportions"] = sampled
 
         # 2. Expand factors.
         if self._registry.factor_names:
             self._registry.expand_factors()
+
+        # 2b. Heteroskedasticity driver. Its index counts non-factor predictors,
+        #     which are only final once factors are typed, so the stored name is
+        #     re-resolved here; the setter's index used whatever registry was live
+        #     at call time. Mirrors set_heteroskedasticity_driver's check.
+        var = self._heteroskedasticity_var
+        if var is not None:
+            non_factor = self._registry.non_factor_names
+            if var not in non_factor:
+                raise ValueError(
+                    f"heteroskedasticity variable {var!r} must be a non-factor "
+                    f"predictor; available: {non_factor}"
+                )
+            self._heteroskedasticity = {"driver_var_index": non_factor.index(var)}
 
         # 3. Effects. Fragments replay in call order; an effect re-declared in a
         #    later fragment last-wins (the registry overwrites its size).
@@ -1669,7 +1724,6 @@ class MCPower:
             scenario_names,
             heteroskedasticity=self._heteroskedasticity,
             residual_dist_name=self._residual_dist_name,
-            residual_pinned=self._residual_pinned,
             alpha=self.alpha,
             correction=correction,
             wald_se=wald_se,
@@ -1677,13 +1731,18 @@ class MCPower:
             df_method=df_method,
             target_test=target_test,
             test_formula=test_formula,
-            pending_data=getattr(self, "_pending_data", None),
             equation=self.equation,
             scenario_configs=self._scenario_configs,
             max_failed_simulations=self.max_failed_simulations,
             estimator=self.estimator,
             cluster_level_vars=_clv if _clv else None,
         )
+
+    def _spec_json(self, payload: Dict[str, Any]) -> str:
+        """``payload`` as the ``LinearSpec`` JSON the engine reads, with the
+        upload block (encoded once in ``upload_data``) spliced in."""
+        pending = getattr(self, "_pending_data", None)
+        return linear_spec_json(payload, pending["upload_json"] if pending else None)
 
     def to_simulation_spec(
         self,
@@ -1709,8 +1768,6 @@ class MCPower:
                 "to_simulation_spec()"
             )
 
-        import json as _json
-
         from . import _engine
 
         payload = self._to_linear_spec_dict([scenario_name], test_formula=test_formula)
@@ -1718,7 +1775,7 @@ class MCPower:
             self._encode_outcome_and_clusters()
         )
         names, contracts_bytes, _skeleton_json = _engine.build_contract_from_spec(
-            _json.dumps(payload),
+            self._spec_json(payload),
             outcome_kind_wire,
             link_wire,
             estimator_wire,
@@ -1846,9 +1903,7 @@ class MCPower:
 
         tau_squared = self._re_tau_squared(primary_cfg)
 
-        n_clusters = self._effective_n_clusters
-        if n_clusters is None:
-            n_clusters = primary_cfg.get("n_clusters")
+        n_clusters = primary_cfg.get("n_clusters")
         cluster_size = primary_cfg.get("cluster_size")
 
         if n_clusters is not None:
@@ -2055,7 +2110,7 @@ class MCPower:
             self._encode_outcome_and_clusters()
         )
         _names, scenarios_bytes, skeleton_json = _engine.build_contract_from_spec(
-            _json.dumps(payload),
+            self._spec_json(payload),
             outcome_kind_wire,
             link_wire,
             estimator_wire,
@@ -2091,7 +2146,7 @@ class MCPower:
             if _cs is not None:
                 _min_cs = int(_cs)
             else:
-                _nc = self._effective_n_clusters or _primary_cfg.get("n_clusters") or 1
+                _nc = _primary_cfg.get("n_clusters") or 1
                 _min_cs = int(sample_size) // int(_nc)
             # Inspect every scenario's extras, warning at most once — any
             # breaching scenario triggers it. Scenarios can carry different
@@ -2166,10 +2221,39 @@ class MCPower:
                 # against (reference included).
                 "levels": self._registry.factor_levels(fname),
             }
+        # effect_names / effect_sizes: the simulated model's effects in formula
+        # order, zeros included (the `effects:` header line). Under test_formula
+        # the skeleton is the tested model's, so it cannot feed the header.
+        effect_names = list(self._registry.effect_names)
+        effect_sizes = list(self._registry.get_effect_sizes())
+        column_effect_sizes = effect_sizes
+        if effect_skeleton:
+            # The OR column reads β by the skeleton's column, whose order can
+            # differ from formula order (`x1 + x1:x2 + x2` puts x1:x2 last) and
+            # which under test_formula covers the tested model only. A column
+            # finds its model effect by the set of its components, so a test
+            # term written `b:a` reads the model's `a:b`. A slot with no model
+            # effect (the intercept placeholder a test design leaves where it
+            # drops a column) gets NaN; no target reads it.
+            from .output.tables import _descriptor_components
+            size_of = {
+                frozenset(parts): size
+                for parts, size in zip(
+                    self._registry.effect_components, effect_sizes, strict=True
+                )
+            }
+            column_effect_sizes = []
+            for d in effect_skeleton[1:]:
+                parts = _descriptor_components(d, factors)
+                column_effect_sizes.append(
+                    float("nan") if parts is None
+                    else size_of.get(frozenset(parts), float("nan"))
+                )
         meta = {
-            "effect_names": list(self._registry.effect_names),
+            "effect_names": effect_names,
             "effect_skeleton": effect_skeleton,
-            "effect_sizes": list(self._registry.get_effect_sizes()),
+            "effect_sizes": effect_sizes,
+            "column_effect_sizes": column_effect_sizes,
             "factors": factors,
             "estimator": self.estimator,
             # "binary" for logit-link outcomes (logistic regression and binary
@@ -2327,7 +2411,7 @@ class MCPower:
             self._encode_outcome_and_clusters()
         )
         _names, scenarios_bytes, skeleton_json = _engine.build_contract_from_spec(
-            _json.dumps(payload),
+            self._spec_json(payload),
             outcome_kind_wire,
             link_wire,
             estimator_wire,
@@ -2377,7 +2461,7 @@ class MCPower:
             if _cs is not None:
                 _min_cs = int(_cs)
             else:
-                _nc = self._effective_n_clusters or _primary_cfg.get("n_clusters") or 1
+                _nc = _primary_cfg.get("n_clusters") or 1
                 # `from_size` is in the caller's unit: under unit="cluster_size" it
                 # already is the per-cluster count (the "clusters" unit cannot reach
                 # here — the engine rejects it for a fixed number of clusters).
@@ -2470,7 +2554,6 @@ class MCPower:
             "alpha": self.alpha,
             "power_target": self.power,
             "residual_distribution": self._residual_dist_name,
-            "residual_pinned": self._residual_pinned,
             "scenarios": sorted(self._scenario_configs),
         }
 

@@ -1,10 +1,11 @@
 <script lang="ts">
-  // "Run" section composing SharedParams, FindPowerCard, and
-  // FindSampleSizeCard inside the shared collapsible shell.
+  // "Run" section composing SharedParams, the sample-size unit switch,
+  // FindPowerCard, and FindSampleSizeCard inside the shared collapsible shell.
   import CollapsibleSection from '$lib/components/shell/CollapsibleSection.svelte';
   import { sharedPrefs } from '$lib/stores/shared-prefs.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import SharedParams from './SharedParams.svelte';
+  import SampleSizeUnitSwitch from './SampleSizeUnitSwitch.svelte';
   import FindPowerCard from './FindPowerCard.svelte';
   import FindSampleSizeCard from './FindSampleSizeCard.svelte';
 
@@ -22,6 +23,7 @@
 <CollapsibleSection title="Run" {summary} bind:open={sharedPrefs.runExpanded}>
   <SharedParams />
   <div class="space-y-2 border-t border-border/40 pt-2">
+    <SampleSizeUnitSwitch />
     <FindPowerCard />
   </div>
   <div class="space-y-2 border-t border-border/40 pt-2">

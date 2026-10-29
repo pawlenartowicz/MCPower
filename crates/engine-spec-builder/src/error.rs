@@ -84,10 +84,6 @@ pub enum SpecError {
         "scenario '{name}': 'binary' is not supported in new_distributions — a swapped binary column would be a degenerate constant; allowed: normal, right_skewed, left_skewed, high_kurtosis, uniform"
     )]
     ScenarioBinarySwapUnsupported { name: String },
-    #[error(
-        "scenario '{name}': residual_dists contains a df-consuming distribution (high_kurtosis / right_skewed / left_skewed) with residual_change_prob > 0, but residual_df is {got}; set residual_df >= 3"
-    )]
-    ScenarioResidualDfTooLow { name: String, got: f64 },
     #[error("effect count mismatch: model has {expected} effects, got {got}")]
     EffectCountMismatch { expected: usize, got: usize },
     #[error("internal contract validation failed: {0}")]

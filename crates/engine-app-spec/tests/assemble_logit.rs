@@ -43,6 +43,8 @@ fn sample_logit_spec(baseline_probability: f64) -> AppSpec {
         wald_se: Default::default(),
         scenarios: vec![],
         csv: None,
+        report_overall: false,
+        contrasts: vec![],
         baseline_probability,
         link: Default::default(),
         test_formula: None,
@@ -60,6 +62,34 @@ fn assemble_logit_returns_one_contract_with_family_logit() {
     assert_eq!(contracts.len(), 1);
     assert_eq!(contracts[0].outcome.kind, OutcomeKind::Binary);
     assert_eq!(contracts[0].estimator, EstimatorSpec::Glm);
+}
+
+#[test]
+fn assemble_logit_forwards_report_overall_and_contrasts() {
+    let AppSpec::Logit(mut logit) = sample_logit_spec(0.3) else {
+        panic!("expected AppSpec::Logit");
+    };
+    logit.report_overall = true;
+    logit.contrasts = vec![("x1".into(), "x2".into())];
+    let contracts = engine_app_spec::assemble_spec(&AppSpec::Logit(logit)).unwrap();
+    let targets = &contracts[0].test.targets;
+    // x1 and x2 sit at design positions 1 and 2 (0 is the intercept).
+    assert!(
+        targets.iter().any(|t| matches!(
+            t,
+            engine_contract::TestTarget::Contrast {
+                positive: 1,
+                negative: 2
+            }
+        )),
+        "expected the x1 - x2 contrast target; got {targets:?}"
+    );
+    assert!(
+        targets
+            .iter()
+            .any(|t| matches!(t, engine_contract::TestTarget::Joint { terms } if *terms == [1, 2])),
+        "expected a Joint omnibus target; got {targets:?}"
+    );
 }
 
 #[test]

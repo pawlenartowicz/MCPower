@@ -297,13 +297,13 @@ def _build_envelope(result: Dict[str, Any], meta: Dict[str, Any], kind: str) -> 
             "contrast_pairs": inner.get("contrast_pairs") or [],
             "power": inner[pkey],
             "ci": inner[ckey],
+            # The overall/omnibus test is a first-class result: one more bar
+            # (last) on the power-at-N chart, one more series on the curve
+            # (per-N lists there). None when the family suppressed the overall
+            # test (mixed/GLMM) → nothing drawn.
+            "overall_power": inner.get("overall_significant_rate"),
+            "overall_ci": inner.get("overall_significant_ci"),
         }
-        if kind == "find_power":
-            # The overall/omnibus test is a first-class result: it draws one more
-            # bar (last) on the power-at-N chart, matching the table. Absent when
-            # the family suppressed the overall test (mixed/GLMM) → no bar.
-            entry["overall_power"] = inner.get("overall_significant_rate")
-            entry["overall_ci"] = inner.get("overall_significant_ci")
         if kind == "find_sample_size":
             entry["histogram"] = inner.get("success_count_histogram_corrected", [])
             # Same divisor across every scenario (the orchestrator rejects a

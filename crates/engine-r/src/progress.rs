@@ -30,7 +30,6 @@
 //! exactly (change together): `SimsCompleted { completed, total }` is already
 //! cumulative across the whole call (fit-based), so it forwards verbatim.
 
-use engine_core::EngineError;
 use engine_orchestrator::{CancellationToken, OrchestratorError, ProgressEvent, ProgressSink};
 use extendr_api::prelude::*;
 use std::os::raw::c_void;
@@ -209,19 +208,12 @@ fn drain_queue(
 /// Map an `OrchestratorError` to an R error, surfacing cancellation with a
 /// stable "cancelled by user" message (mirrors engine-py raising
 /// `KeyboardInterrupt`). All other variants use the curated `Display` text.
-///
-/// User cancellation reaches here on two distinct paths and **both** must map
-/// to the same message (engine-py maps both to `KeyboardInterrupt`): a
-/// scenario-boundary check yields `OrchestratorError::Cancelled`, while a
-/// mid-batch sink callback returning false yields
-/// `OrchestratorError::Engine(EngineError::Cancelled)`. The live Ctrl-C path
-/// usually lands mid-batch, so omitting the second arm would surface the raw
-/// "engine error: cancelled by host" text instead.
+/// The orchestrator folds a mid-batch cancel into `OrchestratorError::Cancelled`
+/// too, so that one arm covers both the scenario-boundary and the live Ctrl-C
+/// path.
 pub fn orchestrator_err(e: OrchestratorError) -> Error {
     match e {
-        OrchestratorError::Cancelled { .. } | OrchestratorError::Engine(EngineError::Cancelled) => {
-            Error::Other("cancelled by user".into())
-        }
+        OrchestratorError::Cancelled { .. } => Error::Other("cancelled by user".into()),
         // Display, not Debug: thiserror's #[error] messages are the curated,
         // host-facing text (mirrors engine-py's exception messages).
         other => Error::Other(format!("{other}")),

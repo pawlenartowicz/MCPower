@@ -8,7 +8,6 @@ function clone(scenarios: readonly ScenarioConfig[]): ScenarioConfig[] {
   return scenarios.map((s) => ({
     ...s,
     new_distributions: [...s.new_distributions],
-    residual_dists: [...s.residual_dists],
     lme: { ...s.lme },
   }));
 }
@@ -59,9 +58,9 @@ function createScenariosStore() {
       scenarios = clone(BUNDLED_SCENARIOS);
       scheduleSave();
     },
-    /** Restore only the two More-options distribution pools to bundled values.
-     *  Family reset calls this — the pools are the dialog's only state living
-     *  outside FamilyConfig — while Settings-tab knobs (heterogeneity, λ, …)
+    /** Restore only the More-options distribution pool to bundled values.
+     *  Family reset calls this (the pool is the dialog's only state living
+     *  outside FamilyConfig), while Settings-tab knobs (heterogeneity, λ, …)
      *  keep their edits. */
     resetDistributionPools() {
       for (const b of BUNDLED_SCENARIOS) {
@@ -70,7 +69,6 @@ function createScenariosStore() {
         scenarios[idx] = {
           ...scenarios[idx]!,
           new_distributions: [...b.new_distributions],
-          residual_dists: [...b.residual_dists],
         };
       }
       scheduleSave();

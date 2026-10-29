@@ -287,9 +287,6 @@ fn scenario_input(name: &str) -> ScenarioInput {
         correlation_noise_sd: 0.0,
         distribution_change_prob: 0.0,
         new_distributions: vec![],
-        residual_change_prob: 0.0,
-        residual_dists: vec![],
-        residual_df: 0.0,
         sampled_factor_proportions: false,
         truth_start: false,
         random_effect_dist: 0,
@@ -331,47 +328,13 @@ fn scenario_normal_in_new_distributions_is_accepted() {
 }
 
 #[test]
-fn scenario_residual_df_unset_with_df_consuming_pool_is_rejected() {
-    use engine_spec_builder::SpecError;
-
-    let mut spec = simple_spec();
-    let mut sc = scenario_input("custom");
-    sc.residual_change_prob = 0.5;
-    sc.residual_dists = vec![4, 2]; // high_kurtosis, right_skewed — both consume df
-    sc.residual_df = 0.0; // unset: the kernel floor would silently give t(3)/χ²(3)
-    spec.scenarios = vec![sc];
-    let err = build_linear_spec(&spec).expect_err("df-consuming pool without df must be rejected");
-    match err {
-        SpecError::ScenarioResidualDfTooLow { name, got } => {
-            assert_eq!(name, "custom");
-            assert_eq!(got, 0.0);
-        }
-        other => panic!("expected ScenarioResidualDfTooLow, got {other:?}"),
-    }
-}
-
-#[test]
-fn scenario_normal_only_residual_pool_without_df_is_accepted() {
-    // `normal` consumes no df — the df bound only arms for the t/χ² shapes.
-    use engine_core::spec::ResidualDist;
-
-    let mut spec = simple_spec();
-    let mut sc = scenario_input("custom");
-    sc.residual_change_prob = 0.5;
-    sc.residual_dists = vec![0]; // normal only
-    spec.scenarios = vec![sc];
-    let specs = build_linear_spec(&spec).unwrap();
-    assert_eq!(specs[0].scenario.residual_dists, vec![ResidualDist::Normal]);
-}
-
-#[test]
 fn builtin_preset_scenario_payloads_still_build() {
     // Every shipped preset in configs/scenarios.json, encoded the way hosts
     // encode it (names → integer codes through the engine's code tables), must
-    // pass the scenario guards (df bound, binary-swap reject) and build. The RE
+    // pass the scenario guards (binary-swap reject) and build. The RE
     // knobs are mixed-model-only; hosts zero them for a model without random
     // effects, as here.
-    use engine_spec_builder::project_contract::{DIST_CODES, RESIDUAL_CODES};
+    use engine_spec_builder::project_contract::DIST_CODES;
     use serde_json::Value;
 
     let presets: Value =
@@ -405,9 +368,6 @@ fn builtin_preset_scenario_payloads_still_build() {
             correlation_noise_sd: f64_of(&p["correlation_noise_sd"]),
             distribution_change_prob: f64_of(&p["distribution_change_prob"]),
             new_distributions: encode(DIST_CODES, &p["new_distributions"]),
-            residual_change_prob: f64_of(&p["residual_change_prob"]),
-            residual_dists: encode(RESIDUAL_CODES, &p["residual_dists"]),
-            residual_df: f64_of(&p["residual_df"]),
             sampled_factor_proportions: p["sampled_factor_proportions"].as_bool().unwrap(),
             truth_start: p["truth_start"].as_bool().unwrap(),
             random_effect_dist: 0,
@@ -419,7 +379,6 @@ fn builtin_preset_scenario_payloads_still_build() {
     assert_eq!(specs.len(), presets.len());
     for (s, (name, p)) in specs.iter().zip(presets) {
         assert_eq!(&s.scenario.name, name);
-        assert_eq!(s.scenario.residual_df, f64_of(&p["residual_df"]), "{name}");
         assert_eq!(
             s.scenario.truth_start,
             p["truth_start"].as_bool().unwrap(),
@@ -439,9 +398,6 @@ fn explicit_scenarios_produce_one_spec_each() {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: vec![],
-            residual_change_prob: 0.0,
-            residual_dists: vec![],
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             random_effect_dist: 0,
@@ -455,9 +411,6 @@ fn explicit_scenarios_produce_one_spec_each() {
             correlation_noise_sd: 0.15,
             distribution_change_prob: 0.2,
             new_distributions: vec![2],
-            residual_change_prob: 0.5,
-            residual_dists: vec![4],
-            residual_df: 8.0,
             sampled_factor_proportions: false,
             truth_start: false,
             random_effect_dist: 0,

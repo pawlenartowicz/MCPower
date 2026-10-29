@@ -83,9 +83,9 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "commonstats"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c1779773f7b9a8102504c8f81f59fee44dedd28491c6013c9f4811940bb7c6d"
+checksum = "835364f47bd1a84ea69698d93d8dbd5ff5f910d8b109d651d9d7cd4d70424237"
 dependencies = [
  "libm",
  "rand_philox",
@@ -183,7 +183,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "engine-contract"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "glmm",
  "serde",
@@ -193,8 +193,9 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
+ "commonstats",
  "engine-contract",
  "faer",
  "glmm",
@@ -209,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "engine-orchestrator"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -222,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "engine-r"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -236,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "engine-spec-builder"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -553,13 +554,14 @@ dependencies = [
 
 [[package]]
 name = "glmm"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b32700b74ae75cf95c80baa089afb86b6efcce57330821811a4b3482556125d"
+checksum = "2b68aeada939d19a646d845d18e31cc0c1618d2bbf51a44101b4528fdfacb62d"
 dependencies = [
  "bobyqa",
  "commonstats",
  "faer",
+ "libm",
  "pulp",
 ]
 

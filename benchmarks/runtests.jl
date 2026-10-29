@@ -25,6 +25,7 @@ byid = Dict(c.id => c for c in CASES)
     @test byid["ols_correlated"].tool === nothing
     @test byid["glmm_slope"].cluster["random_slopes"] == ["x1"]
     @test byid["glmm_multislope"].cluster["random_slopes"] == ["x1", "x2"]
+    @test !haskey(byid, "lme_crossed")              # benchmark: false = agreement only
 end
 
 include("loops_jl.jl"); using .BenchLoops: _design, _draw_X

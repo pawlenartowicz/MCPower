@@ -379,6 +379,30 @@ fn run_single_core_find_power_surfaces_agq_strip_warning_in_grid_warnings() {
     );
 }
 
+#[test]
+fn small_cluster_glmm_warning_reaches_both_app_entries() {
+    let mut m = minimal_mixed_with_effect(ClusterDim::NClusters { value: 6 });
+    m.outcome = MixedOutcome::Binary {
+        baseline_probability: 0.3,
+        link: Default::default(),
+    };
+    m.cluster_level_vars = vec!["x".into()];
+    let spec = AppSpec::Mixed(m);
+    let cancel = CancellationToken::new();
+    let multi = run_find_power(&spec, 120, &NullEmitter, &cancel).expect("find_power ok");
+    let single = run_single_core_find_power(&spec, 120, 20, 2137, None, &NullEmitter, &cancel)
+        .expect("single_core find_power ok");
+    for res in [multi, single] {
+        let w = &res.scenarios[0].1.grid_warnings;
+        assert!(
+            w.iter()
+                .any(|m| m.starts_with("6 clusters at N=120 (fewer than 20)")
+                    && m.contains("cluster-level effect")),
+            "got: {w:?}"
+        );
+    }
+}
+
 // ── Snapshot test ──────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]

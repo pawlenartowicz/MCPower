@@ -12,7 +12,9 @@
 # Decision rules follow MCPower's defaults: OLS t at the residual df; logit
 # Wald z; LME and GLMM Wald statistic against a t at the between-within df
 # (mixed_df(), per coefficient); a fit with every variance component zero uses
-# the single-level reference instead (single_level_fit()).
+# the single-level reference instead (single_level_fit()). LME with a crossed
+# second grouping (lme_crossed): lmerTest Satterthwaite t per draw, Wald z for a
+# draw whose Satterthwaite df cannot be computed.
 # Parser constraints: every formula variable not listed in variable_types is
 # continuous; only pairwise interactions are parsed (a*b*c loses the 3-way term).
 
@@ -608,6 +610,95 @@ lme_naive <- function(case, n, n_sims, seed) {
 }
 
 # ---------------------------------------------------------------------------
+# LME kernel with a crossed grouping (subjects x items)
+# ---------------------------------------------------------------------------
+
+# 0-based subject and item of rows 0..n-1 under a fixed subject count s and a
+# crossed item count i: subject = row %% s, item = (row %/% s) %% i, so every
+# block of s * i rows holds each (subject, item) pair once. Mirrors
+# ClusterSizing::cluster_of_row and ClusterSpec::extra_level_of_row
+# (FixedClusters, one crossed grouping) in engine-contract; change together.
+crossed_ids <- function(n, s, i) {
+  row <- seq_len(n) - 1L
+  list(subject = row %% s, item = (row %/% s) %% i)
+}
+
+# DGP: y = X beta + b_subject + b_item + e, with b_subject ~ N(0, ICC_s/(1-ICC_s)),
+# b_item ~ N(0, ICC_i/(1-ICC_i)) and e ~ N(0, 1) (the tau^2 the R spec builder
+# gives each grouping); cluster-level factors are drawn once per subject.
+# Fit: lmerTest REML with (1|subject) + (1|item). Decision, mirroring MCPower's
+# crossed LMM path (engine-core batch.rs and critvals.rs uses_satterthwaite):
+# every target is tested from its lmerTest Satterthwaite p-value; when the df
+# pass fails or gives a target a non-finite or non-positive df, the whole draw
+# falls back to the Wald z (|t| > qnorm(1 - ALPHA/2)), as MCPower falls back to
+# its asymptotic table. A fit whose variance components are all pinned at zero
+# is not special-cased: on this path MCPower applies no collapsed single-level
+# rule (its asymptotic table has no collapsed twin), so single_level_fit() is
+# not used here. A fit error counts as not significant. The joint test is not
+# scored (f_rej = 0): the agreement check reads marginal power only.
+lme_crossed_best_chunk <- function(case, n, n_sims, seed) {
+  set.seed(seed)
+  spec    <- loop_design(case)
+  BETA    <- spec$beta
+  TARGETS <- spec$targets
+  P       <- length(BETA)
+  S       <- case$cluster$n_clusters
+  I       <- case$crossed$n_clusters
+  TAU_S   <- sqrt(case$cluster$ICC / (1.0 - case$cluster$ICC))
+  TAU_I   <- sqrt(case$crossed$ICC / (1.0 - case$crossed$ICC))
+  zcrit   <- qnorm(1.0 - ALPHA / 2.0)
+  ids     <- crossed_ids(n, S, I)
+
+  t_rej  <- integer(P)
+  usable <- 0L
+
+  vn  <- paste0("V", seq_len(P))
+  fml <- as.formula(paste(".y ~", paste(vn, collapse = " + "), "+ (1 | .s) + (1 | .i)"))
+  muffle <- function(w) invokeRestart("muffleWarning")
+
+  for (k in seq_len(n_sims)) {
+    X  <- draw_X(n, spec, ids$subject)
+    mu <- X %*% BETA + (rnorm(S) * TAU_S)[ids$subject + 1L] + (rnorm(I) * TAU_I)[ids$item + 1L]
+    y  <- mu + rnorm(n)
+
+    df_fit        <- as.data.frame(X)
+    names(df_fit) <- vn
+    df_fit$.y     <- as.numeric(y)
+    df_fit$.s     <- factor(ids$subject)
+    df_fit$.i     <- factor(ids$item)
+
+    fit <- tryCatch(
+      withCallingHandlers(
+        lmerTest::lmer(fml, data = df_fit, REML = TRUE,
+                       control = lme4::lmerControl(calc.derivs = FALSE)),
+        warning = muffle),
+      error = function(e) NULL)
+    if (is.null(fit)) next
+    # summary() without a usable df pass returns lme4's table (no df column).
+    sm <- tryCatch(withCallingHandlers(
+      summary(fit, ddf = "Satterthwaite")$coefficients, warning = muffle),
+      error = function(e) NULL)
+    # A rank-deficient draw (lmer drops an aliased column) scores as not significant.
+    if (is.null(sm) || nrow(sm) != P + 1L) next
+    usable <- usable + 1L
+
+    tv <- sm[-1L, "t value"]                     # drop the intercept row
+    df <- if ("df" %in% colnames(sm)) sm[-1L, "df"] else rep(NA_real_, P)
+    if (all(is.finite(df[TARGETS]) & df[TARGETS] > 0)) {
+      pv  <- sm[-1L, "Pr(>|t|)"]
+      sig <- !is.na(pv) & pv < ALPHA
+    } else {
+      sig <- abs(tv) > zcrit
+    }
+    t_rej <- t_rej + as.integer(sig)
+  }
+
+  list(t_rej = t_rej, f_rej = 0L, usable = usable)
+}
+
+lme_crossed_best <- function(case, n, n_sims, seed) loop_best_pool(lme_crossed_best_chunk, case, n, n_sims, seed)
+
+# ---------------------------------------------------------------------------
 # GLMM kernels (clustered logistic) -- glmer Laplace, Wald statistic against
 # the between-within t (mixed_df()), RX-based SEs (MCPower's wald_se = "rx"). Mirrors
 # lme_best_chunk's clustered DGP but with a binary outcome (like glm_best) and a
@@ -772,5 +863,6 @@ LOOPS <- list(
   ols   = list(best = ols_best,  naive = ols_naive),
   logit = list(best = glm_best,  naive = glm_naive),
   lme   = list(best = lme_best,  naive = lme_naive),
-  glmm  = list(best = glmm_best, naive = glmm_naive)
+  glmm  = list(best = glmm_best, naive = glmm_naive),
+  lme_crossed = list(best = lme_crossed_best)   # no naive crossed loop
 )

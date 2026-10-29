@@ -187,7 +187,8 @@ fn contrast_pairs_of(d: &Bound<'_, PyDict>) -> PyResult<Vec<(u32, u32)>> {
 
 /// Reconstruct a [`PlotScenario`] from a find_sample_size scenario dict.
 ///
-/// Neutral envelope keys: `power`, `ci`, `histogram` (list-of-lists; one row per N).
+/// Neutral envelope keys: `power`, `ci`, `histogram` (list-of-lists; one row per N),
+/// and optional per-N `overall_power` / `overall_ci` lists.
 fn plot_scenario_from_sample_size_dict(
     label: String,
     d: &Bound<'_, PyDict>,
@@ -221,27 +222,53 @@ fn plot_scenario_from_sample_size_dict(
         return Err(PyValueError::new_err("histogram must have one row per N"));
     }
 
+    // Per-N overall/omnibus rate + `(lo, hi)` CI, `None` entries whenever the
+    // family suppressed the overall test (mixed/GLMM). They drive the extra
+    // `"overall"` curve series; absent keys draw none.
+    let per_n = |k: &str| -> PyResult<Option<Bound<'_, PyAny>>> {
+        Ok(d.get_item(k)?.filter(|obj| !obj.is_none()))
+    };
+    let overall_rows: Vec<Option<f64>> = match per_n("overall_power")? {
+        Some(obj) => obj.extract()?,
+        None => vec![None; sample_sizes.len()],
+    };
+    let overall_ci_rows: Vec<Option<(f64, f64)>> = match per_n("overall_ci")? {
+        Some(obj) => obj.extract()?,
+        None => vec![None; sample_sizes.len()],
+    };
+    if overall_rows.len() != sample_sizes.len() || overall_ci_rows.len() != sample_sizes.len() {
+        return Err(PyValueError::new_err(
+            "overall_power and overall_ci must have one entry per N",
+        ));
+    }
+
     let points: Vec<PlotPoint> = sample_sizes
         .iter()
         .copied()
         .zip(power_rows)
         .zip(ci_rows_raw)
         .zip(hist_rows)
-        .map(|(((n, power), ci_raw), histogram)| {
-            let ci = ci_raw.into_iter().map(|(lo, hi)| Ci { lo, hi }).collect();
-            PlotPoint {
-                n,
-                target_indices: target_indices.clone(),
-                contrast_pairs: contrast_pairs.clone(),
-                power,
-                ci,
-                histogram,
-                // Per-N overall rates are not surfaced in the Python envelope,
-                // so the overall curve series is not emitted on this host.
-                overall_power: None,
-                overall_ci: None,
-            }
-        })
+        .zip(overall_rows.into_iter().zip(overall_ci_rows))
+        .map(
+            |((((n, power), ci_raw), histogram), (overall_power, overall_ci))| {
+                let ci = ci_raw.into_iter().map(|(lo, hi)| Ci { lo, hi }).collect();
+                // A rate with no CI degenerates to a zero-width interval at the rate
+                // (same fallback as `optional_overall`).
+                let overall_ci = overall_power.map(|rate| {
+                    overall_ci.map_or(Ci { lo: rate, hi: rate }, |(lo, hi)| Ci { lo, hi })
+                });
+                PlotPoint {
+                    n,
+                    target_indices: target_indices.clone(),
+                    contrast_pairs: contrast_pairs.clone(),
+                    power,
+                    ci,
+                    histogram,
+                    overall_power,
+                    overall_ci,
+                }
+            },
+        )
         .collect();
 
     Ok(PlotScenario { label, points })

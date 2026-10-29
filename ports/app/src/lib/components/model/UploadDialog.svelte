@@ -230,7 +230,13 @@
       loading = false;
     }
     if (!validateFull(full)) return;
-    const data = csvDataFromParsed(full, uploadStore.mode);
+    let data;
+    try {
+      data = csvDataFromParsed(full, uploadStore.mode);
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to read the data.';
+      return;
+    }
     uploadStore.load(data, file.name);
     onOpenChange(false);
   }

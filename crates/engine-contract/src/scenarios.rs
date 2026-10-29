@@ -21,9 +21,6 @@ pub struct ScenarioPerturbations {
     pub correlation_noise_sd: f64,
     pub distribution_change_prob: f64,
     pub new_distributions: Vec<SyntheticKind>,
-    pub residual_change_prob: f64,
-    pub residual_dists: Vec<ResidualDist>,
-    pub residual_df: f64,
     /// Factor-proportion sampling. `false` (default, optimistic) → each synthetic
     /// factor's per-level counts are the closest integer split of N to the
     /// requested proportions (deterministic largest-remainder walk, identical on
@@ -54,9 +51,6 @@ impl Default for ScenarioPerturbations {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: Vec::new(),
-            residual_change_prob: 0.0,
-            residual_dists: Vec::new(),
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             lme: None,
@@ -85,9 +79,6 @@ mod tests {
             correlation_noise_sd: 0.15,
             distribution_change_prob: 0.2,
             new_distributions: vec![SyntheticKind::RightSkewed, SyntheticKind::HighKurtosis],
-            residual_change_prob: 0.5,
-            residual_dists: vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
-            residual_df: 8.0,
             sampled_factor_proportions: true,
             truth_start: true,
             lme: Some(LmeScenarioPerturbations {
@@ -116,9 +107,6 @@ mod tests {
             "correlation_noise_sd": 0.0,
             "distribution_change_prob": 0.0,
             "new_distributions": [],
-            "residual_change_prob": 0.0,
-            "residual_dists": [],
-            "residual_df": 0.0,
             "lme": null
         }"#;
         let spec: ScenarioPerturbations = serde_json::from_str(json).unwrap();

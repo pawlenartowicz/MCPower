@@ -103,6 +103,55 @@ test_that("summary renders when test_formula drops the leading term", {
   expect_false(grepl("out of range", long))
 })
 
+test_that("summary header lists the simulated model's effects under test_formula", {
+  # The effects: line echoes the model the data are simulated from, every effect
+  # including zeros, in formula order; dropping study must not hide its 0.30.
+  res <- MCPower$new("score ~ study + caffeine")$
+    set_effects("study=0.3, caffeine=0")$
+    find_power(sample_size = 100, n_sims = 50,
+               target_test = "caffeine", test_formula = "score ~ caffeine",
+               verbose = FALSE, progress_callback = FALSE)
+  long <- capture.output(print(summary(res)))
+  expect_identical(grep("^effects:", long, value = TRUE),
+                   "effects: study=0.30, caffeine=0.00")
+})
+
+# Test name -> the OR cell of its row in the short-form table.
+.or_cell <- function(res, test) {
+  out <- capture.output(print(res))
+  line <- grep(paste0("^", test, " "), out, value = TRUE, fixed = FALSE)
+  regmatches(line, regexpr("[0-9]+\\.[0-9]{2}(?= +[0-9]+%$)", line, perl = TRUE))
+}
+
+test_that("a test interaction written in the other order reports its odds ratio", {
+  # b:a in the test formula is the model's a:b, so its OR is exp(1.0).
+  res <- MCPower$new("y ~ a + b + a:b", family = "logit")$
+    set_baseline_probability(0.3)$
+    set_effects("a=0.2, b=0.3, a:b=1.0")$
+    find_power(200, n_sims = 50L, test_formula = "y ~ a + b + b:a",
+               verbose = FALSE, progress_callback = FALSE)
+  expect_equal(.or_cell(res, "a"), "1.22")
+  expect_equal(.or_cell(res, "b"), "1.35")
+  expect_equal(.or_cell(res, "b:a"), "2.72")
+  long <- capture.output(print(summary(res)))
+  expect_identical(grep("^effects:", long, value = TRUE),
+                   "effects: a=0.20 (OR 1.22), b=0.30 (OR 1.35), a:b=1.00 (OR 2.72)")
+})
+
+test_that("a test interaction without its main effect runs and reports both kept terms", {
+  res <- MCPower$new("y ~ x1 + x2 + x1:x2", family = "logit")$
+    set_baseline_probability(0.3)$
+    set_effects("x1=0.2, x2=0.5, x1:x2=1.0")$
+    find_power(200, n_sims = 50L, test_formula = "y ~ x1:x2 + x2",
+               verbose = FALSE, progress_callback = FALSE)
+  expect_equal(.or_cell(res, "x2"), "1.65")
+  expect_equal(.or_cell(res, "x1:x2"), "2.72")
+  expect_length(.or_cell(res, "x1"), 0L)
+  long <- capture.output(print(summary(res)))
+  expect_identical(grep("^effects:", long, value = TRUE),
+                   "effects: x1=0.20 (OR 1.22), x2=0.50 (OR 1.65), x1:x2=1.00 (OR 2.72)")
+})
+
 test_that("long form: Diagnostics section is gated — shows only on a threshold trip", {
   # Mirrors Python Report._diagnostics: empty on a healthy run; "⚠ Diagnostics"
   # + "! <bare warning>" once a configured threshold trips. Flip convergence
@@ -156,6 +205,7 @@ test_that("long form: Diagnostics section is gated — shows only on a threshold
 
 .logit_meta <- function() list(
   effect_names = c("x1", "x2"), effect_sizes = list(0.916, 0.405),
+  column_effect_sizes = list(0.916, 0.405),
   factors = list(), estimator = "glm", outcome_kind = "binary",
   alpha = 0.05, correction = "none", target_power = 80, formula = "y ~ x1 + x2",
   effect_skeleton = list(list(kind = "intercept"),
@@ -1134,6 +1184,18 @@ test_that("find_power surfaces grid_warnings as R warnings for sparse factor", {
   )
 })
 
+test_that("find_power surfaces the small-cluster GLMM warning", {
+  expect_warning(
+    MCPower$new("y ~ x1 + x2 + (1|school)", family = "logit")$
+      set_effects("x1=0.5, x2=0.3")$
+      set_baseline_probability(0.3)$
+      set_cluster("school", ICC = 0.2, n_clusters = 6L, cluster_level_vars = "x2")$
+      find_power(sample_size = 120, n_sims = 40, seed = 2137,
+                 verbose = FALSE, progress_callback = FALSE),
+    regexp = "^6 clusters at N=120 \\(fewer than 20\\).*cluster-level effect"
+  )
+})
+
 test_that(".surface_grid_warnings dedupes across scenarios, preserves order", {
   # Two scenarios share 'shared warning'; each adds one unique string. The
   # shared one must fire exactly once, in first-seen order.
@@ -1150,4 +1212,54 @@ test_that(".surface_grid_warnings dedupes across scenarios, preserves order", {
     }
   )
   expect_identical(warns, c("shared warning", "only in A", "only in B"))
+})
+
+# ── report / plot labels follow the engine's β-column order ──────────────
+
+.plot_targets <- function(block) {
+  txt <- jsonlite::toJSON(block, auto_unbox = TRUE, null = "null")
+  unique(gsub('^"target":"|"$', "", regmatches(txt, gregexpr('"target":"[^"]*"', txt))[[1]]))
+}
+
+test_that("OR column reads each effect's own beta when formula order differs from column order", {
+  # y ~ x1 + x1:x2 + x2 lays the β columns out as x1, x2, x1:x2.
+  res <- MCPower$new("y ~ x1 + x1:x2 + x2", family = "logit")$
+    set_baseline_probability(0.3)$
+    set_effects("x1=0.1, x2=0.5, x1:x2=1.0")$
+    find_power(200, n_sims = 50L, verbose = FALSE, progress_callback = FALSE)
+  out <- capture.output(print(res))
+  or_of <- function(test) {
+    line <- grep(paste0("^", test, " "), out, value = TRUE)
+    regmatches(line, regexpr("[0-9]+\\.[0-9]{2}(?= +[0-9]+%$)", line, perl = TRUE))
+  }
+  expect_equal(or_of("x2"), sprintf("%.2f", exp(0.5)))
+  expect_equal(or_of("x1:x2"), sprintf("%.2f", exp(1.0)))
+})
+
+test_that("plot data labels a pairwise contrast like the table, not contrast_0", {
+  res <- MCPower$new("y ~ x + g")$
+    set_variable_type("g=(factor,3)")$
+    set_effects("x=0.3, g[2]=0.4, g[3]=0.6")$
+    find_power(150, target_test = "x, g[2] vs g[3]", n_sims = 50L,
+               verbose = FALSE, progress_callback = FALSE)
+  targets <- .plot_targets(mcpower:::.plot_blocks(res, "find_power")[["power"]])
+  expect_true("g[2] vs g[3]" %in% targets)
+  expect_false(any(grepl("^contrast_", targets)))
+})
+
+test_that("sample-size curve carries the overall test series", {
+  res <- MCPower$new("y ~ x1 + x2")$set_effects("x1=0.4, x2=0.3")$
+    find_sample_size(from_size = 50, to_size = 150, by = 50, n_sims = 50L,
+                     verbose = FALSE, progress_callback = FALSE)
+  targets <- .plot_targets(mcpower:::.plot_blocks(res, "find_sample_size")[["curve"]])
+  expect_true("Overall F" %in% targets)
+})
+
+test_that("sample-size long-form report shows no empty estimator-details block", {
+  res <- MCPower$new("y ~ x1")$set_effects("x1=0.4")$
+    find_sample_size(from_size = 50, to_size = 150, by = 50, n_sims = 50L,
+                     verbose = FALSE, progress_callback = FALSE)
+  out <- capture.output(print(summary(res)))
+  expect_false(any(grepl(mcpower:::.report_config()$text$estimator_extras_caption, out,
+                         fixed = TRUE)))
 })

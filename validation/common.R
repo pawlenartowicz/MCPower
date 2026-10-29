@@ -1085,18 +1085,6 @@ classify_marginal <- function(x) {
   "normal"
 }
 
-# Which residual family generated these (true-beta) residuals? Pool identities:
-# skewed = (chi2(df)-df)/sqrt(2df), skew = sqrt(8/df) (0.89 at df 10); heavy =
-# t(df)*sqrt((df-2)/df), excess kurtosis 6/(df-4) (1.0 at df 10); normal = 0/0.
-# Cuts at the midpoints; at n = 4000 each true class sits >= ~3-10 SDs from a
-# cut, so misclassification is rare (and only nudges the pick-split fractions,
-# never the swap-frequency gate, which counts any non-normal verdict).
-classify_residual <- function(e) {
-  if (abs(samp_skew(e)) > 0.45) return("skewed")
-  if (samp_exkurt(e) > 0.5) return("heavy_tailed")
-  "normal"
-}
-
 # ---- He: jitter-variance probe -------------------------------------------------
 
 # Per-predictor slope of squared true-beta residuals on the squared predictor.

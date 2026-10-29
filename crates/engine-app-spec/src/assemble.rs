@@ -133,6 +133,16 @@ fn logit(p: f64) -> f64 {
     (p / (1.0 - p)).ln()
 }
 
+/// GLM intercept for a baseline probability `p ∈ (0, 1)` under `link`: `logit(p)`
+/// for logit, `Φ⁻¹(p)` for probit. Inverse of the per-link recovery in
+/// `driver.rs` (`logistic` / `phi`); change them together.
+fn binary_intercept(p: f64, link: BinaryLink) -> f64 {
+    match link {
+        BinaryLink::Logit => logit(p),
+        BinaryLink::Probit => engine_core::critvals::norm_ppf(p),
+    }
+}
+
 /// Logistic (inverse-logit / expit) of a log-odds `x`: `1 / (1 + exp(−x))`.
 /// Recovers a baseline probability from a fitted intercept, undoing [`logit`];
 /// change the two together so the round-trip `logistic(logit(p)) == p` stays exact.
@@ -232,7 +242,7 @@ fn assemble_mixed(
                 engine_contract::OutcomeKind::Binary,
                 contract_link(*link),
                 Some(engine_contract::EstimatorSpec::Glm),
-                logit(p),
+                binary_intercept(p, *link),
                 tau_squared,
             )
         }
@@ -378,7 +388,7 @@ fn assemble_logit(
     if !(p > 0.0 && p < 1.0) {
         return Err(AdapterError::BaselineProbabilityOutOfRange { value: p });
     }
-    let intercept = logit(p);
+    let intercept = binary_intercept(p, spec.link);
 
     let mut builder_spec = project_to_builder_spec(
         &spec.parsed_formula,
@@ -390,6 +400,8 @@ fn assemble_logit(
         spec.alpha,
         spec.csv.as_ref(),
     )?;
+    builder_spec.report_overall = spec.report_overall;
+    builder_spec.contrast_pairs = spec.contrasts.clone();
     builder_spec.test_formula = spec.test_formula.clone();
     builder_spec.scenarios = spec.scenarios.clone();
     builder_spec.wald_se = spec.wald_se;
@@ -437,6 +449,8 @@ fn assemble_poisson(
         spec.alpha,
         spec.csv.as_ref(),
     )?;
+    builder_spec.report_overall = spec.report_overall;
+    builder_spec.contrast_pairs = spec.contrasts.clone();
     builder_spec.test_formula = spec.test_formula.clone();
     builder_spec.scenarios = spec.scenarios.clone();
     builder_spec.wald_se = spec.wald_se;
@@ -480,7 +494,7 @@ fn csv_to_upload_input(csv: &CsvData) -> UploadInput {
 /// that need different values (e.g. `assemble_linear`) must override them after
 /// calling this helper.
 #[allow(clippy::too_many_arguments)]
-fn project_to_builder_spec(
+pub(crate) fn project_to_builder_spec(
     parsed_formula: &ParsedFormula,
     var_types: &[VarType],
     effects: &[EffectSize],
@@ -736,10 +750,9 @@ fn var_type_name(vt: &VarType) -> &str {
 }
 
 /// Apply the GUI's outcome-level structural knobs onto the builder spec.
-/// `None` keeps the builder defaults (unpinned normal residual, lp-driven
-/// scenario heteroskedasticity). A present `residual_distribution` is an
-/// explicit user choice → pinned (incl. explicit "normal" — neutral keys on
-/// unpinned-default, not on the value).
+/// `None` keeps the builder defaults (normal residual, lp-driven scenario
+/// heteroskedasticity). A present `residual_distribution` sets the residual
+/// distribution.
 fn apply_outcome_options(
     builder_spec: &mut BuilderLinearSpec,
     options: Option<&OutcomeOptions>,
@@ -749,7 +762,6 @@ fn apply_outcome_options(
     if let Some(dist) = &o.residual_distribution {
         builder_spec.residual = ResidualSpec {
             distribution: dist.clone(),
-            pinned: true,
         };
     }
     let driver_var_index = match &o.heteroskedasticity_driver {
@@ -1171,38 +1183,8 @@ mod tests {
         };
         apply_outcome_options(&mut builder_spec, Some(&opts), &var_types).expect("apply ok");
         assert_eq!(builder_spec.residual.distribution, "high_kurtosis");
-        assert!(builder_spec.residual.pinned, "explicit choice must pin");
         // x is formula position 1 but non-factor position 0.
         assert_eq!(builder_spec.heteroskedasticity.driver_var_index, Some(0));
-    }
-
-    // An explicit "normal" is a pin, not a neutral value — it must land on
-    // the builder spec as pinned (scenarios leave it alone).
-    #[test]
-    fn explicit_normal_residual_is_pinned() {
-        let var_types = [VarType::Numeric {
-            name: "x".into(),
-            pinned: false,
-            distribution: NumericDistribution::Normal,
-        }];
-        let mut builder_spec = project_to_builder_spec(
-            &pf(vec!["x"], vec![]),
-            &var_types,
-            &[],
-            &None,
-            CorrectionMethod::None,
-            &TestSelection::All,
-            0.05,
-            None,
-        )
-        .expect("project ok");
-        let opts = OutcomeOptions {
-            residual_distribution: Some("normal".into()),
-            ..Default::default()
-        };
-        apply_outcome_options(&mut builder_spec, Some(&opts), &var_types).expect("apply ok");
-        assert_eq!(builder_spec.residual.distribution, "normal");
-        assert!(builder_spec.residual.pinned);
     }
 
     #[test]
@@ -1262,10 +1244,6 @@ mod tests {
         .expect("apply ok");
         assert_eq!(builder_spec.heteroskedasticity.driver_var_index, None);
         assert_eq!(builder_spec.residual.distribution, "normal");
-        assert!(
-            !builder_spec.residual.pinned,
-            "absent dist must stay unpinned"
-        );
     }
 
     // ── Upload class-conflict guard ────────────────────────────────────────
@@ -1500,9 +1478,6 @@ mod tests {
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
             new_distributions: vec![],
-            residual_change_prob: 0.0,
-            residual_dists: vec![],
-            residual_df: 0.0,
             sampled_factor_proportions: false,
             truth_start: false,
             random_effect_dist: 0,
@@ -2083,6 +2058,60 @@ mod tests {
         assert_eq!(logit_contracts[0].outcome.link, None);
     }
 
+    // ── Probit link: the baseline intercept is Φ⁻¹(p), not logit(p) ──────────
+
+    #[test]
+    fn assemble_probit_intercept_is_normal_quantile_of_baseline() {
+        let p = 0.3_f64;
+        let expected = engine_core::critvals::norm_ppf(p);
+
+        let mut mixed = mixed_fixture();
+        mixed.outcome = MixedOutcome::Binary {
+            baseline_probability: p,
+            link: BinaryLink::Probit,
+        };
+        let (contracts, _, _) = assemble_mixed(&mixed).expect("probit mixed assembles ok");
+        assert!(
+            (contracts[0].outcome.intercept - expected).abs() < 1e-12,
+            "clustered probit intercept = Φ⁻¹(p)"
+        );
+
+        let logit = LogitSpec {
+            parsed_formula: pf(vec!["x1"], vec![]),
+            var_types: vec![VarType::Numeric {
+                name: "x1".into(),
+                distribution: NumericDistribution::Normal,
+                pinned: false,
+            }],
+            effects: vec![EffectSize {
+                name: "x1".into(),
+                value: 0.2,
+            }],
+            correlations: None,
+            alpha: 0.05,
+            target_power: 0.8,
+            n_sims: 100,
+            seed: 2137,
+            tests: TestSelection::All,
+            correction: CorrectionMethod::None,
+            wald_se: Default::default(),
+            scenarios: vec![],
+            csv: None,
+            report_overall: false,
+            contrasts: vec![],
+            baseline_probability: p,
+            link: BinaryLink::Probit,
+            test_formula: None,
+            outcome_options: None,
+            agq: 1,
+        };
+        let (contracts, _, _) = assemble_logit(&logit).expect("probit GLM assembles ok");
+        assert!(
+            (contracts[0].outcome.intercept - expected).abs() < 1e-12,
+            "unclustered probit intercept = Φ⁻¹(p)"
+        );
+    }
+
     // ── MixedOutcome::Poisson: raw τ² passes straight through, no ICC conversion ──
 
     #[test]
@@ -2139,6 +2168,8 @@ mod tests {
             wald_se: Default::default(),
             scenarios: vec![],
             csv: None,
+            report_overall: false,
+            contrasts: vec![],
             baseline_rate: 5.0,
             test_formula: None,
             outcome_options: None,

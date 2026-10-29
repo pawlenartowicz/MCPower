@@ -55,7 +55,6 @@ fn factor_contract(probs: [f64; 2]) -> SimulationContract {
         coefficients: vec![0.0, 0.5],
         residual: ResidualSpec {
             distribution: ResidualDist::Normal,
-            pinned: false,
         },
         link: None,
         heteroskedasticity_driver: None,

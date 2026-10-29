@@ -1,6 +1,6 @@
 //! Serde-deserializable input types for the spec-builder (LinearSpec, PredictorSpec, ScenarioInput, etc.); no validation logic here.
 //!
-//! `ScenarioInput.new_distributions` and `residual_dists` arrive as integer codes pre-encoded by the host; no name→code translation here.
+//! `ScenarioInput.new_distributions` arrives as integer codes pre-encoded by the host; no name→code translation here.
 //! `LinearSpec.predictors` order drives factor-expansion order — see `variables.rs` (column-ordering invariant home).
 
 use serde::{Deserialize, Serialize};
@@ -187,25 +187,20 @@ pub struct HeteroskedasticityInput {
     pub driver_var_index: Option<u32>,
 }
 
-/// Residual error-term distribution, and whether the user pinned it.
+/// Residual error-term distribution.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResidualSpec {
     /// Canonical name: "normal", "right_skewed", "left_skewed",
-    /// "high_kurtosis", or "uniform" (the `RESIDUAL_CODES` table). No df —
-    /// `high_kurtosis` takes its df from the active scenario's `residual_df`.
+    /// "high_kurtosis", or "uniform" (the `RESIDUAL_CODES` table). No df field:
+    /// the non-normal shapes draw at a fixed df of 10 in the engine.
     pub distribution: String,
-    /// `true` = the user explicitly chose the distribution (incl. explicit
-    /// "normal") — scenario residual swaps leave it alone.
-    #[serde(default)]
-    pub pinned: bool,
 }
 
 impl Default for ResidualSpec {
     fn default() -> Self {
         Self {
             distribution: "normal".into(),
-            pinned: false,
         }
     }
 }
@@ -250,10 +245,9 @@ pub struct UploadInput {
 }
 
 /// Mirrors Python's `build_scenario_dict` output (spec/spec_builder.py), which has
-/// already encoded the two distribution lists to integer codes via the engine's
-/// `DIST_CODES` (for `new_distributions`) and `RESIDUAL_CODES`
-/// (for `residual_dists`) tables. The builder copies these integers straight into
-/// `ScenarioPerturbations` — no name → code translation happens in Rust.
+/// already encoded the one distribution list, `new_distributions`, to integer
+/// codes via the engine's `DIST_CODES` table. The builder copies these integers
+/// straight into `ScenarioPerturbations`; no name → code translation happens in Rust.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioInput {
@@ -268,12 +262,6 @@ pub struct ScenarioInput {
     pub distribution_change_prob: f64,
     /// Candidate predictor-distribution integer codes for the swap (host-encoded).
     pub new_distributions: Vec<i32>,
-    /// Probability the residual distribution is swapped to a `residual_dists` draw; 0.0 = off.
-    pub residual_change_prob: f64,
-    /// Candidate residual-distribution integer codes (host-encoded).
-    pub residual_dists: Vec<i32>,
-    /// Degrees of freedom for heavy-tailed (`high_kurtosis`) residual draws.
-    pub residual_df: f64,
     /// Factor-proportion sampling (scenario knob); `false` (exact) when absent.
     #[serde(default)]
     pub sampled_factor_proportions: bool,
@@ -283,7 +271,7 @@ pub struct ScenarioInput {
     pub truth_start: bool,
     /// Random-effect distribution code (RE_DIST_CODES space): 0=normal,
     /// 1=heavy_tailed (t kernel). The RE knob keeps its own
-    /// normal/heavy_tailed vocabulary — it is NOT the residual-pool space.
+    /// normal/heavy_tailed vocabulary; it is NOT the `RESIDUAL_CODES` space.
     /// Default 0 (normal/Gaussian REs).
     #[serde(default)]
     pub random_effect_dist: i32,
@@ -308,10 +296,7 @@ mod tests {
             "heteroskedasticity_ratio": 1.0,
             "correlation_noise_sd": 0.0,
             "distribution_change_prob": 0.0,
-            "new_distributions": [],
-            "residual_change_prob": 0.0,
-            "residual_dists": [],
-            "residual_df": 0.0
+            "new_distributions": []
         }"#;
         let s: ScenarioInput = serde_json::from_str(json).unwrap();
         assert!(!s.sampled_factor_proportions);
@@ -380,5 +365,32 @@ mod tests {
         let nested = base("", r#"{"distribution": "normal", "df": 0.0}"#);
         let err = serde_json::from_str::<LinearSpec>(&nested).unwrap_err();
         assert!(err.to_string().contains("unknown field `df`"), "{err}");
+    }
+
+    #[test]
+    fn scenario_input_rejects_removed_residual_swap_keys() {
+        let minimal = r#""name":"s","heterogeneity":0.0,"heteroskedasticity_ratio":1.0,"correlation_noise_sd":0.0,"distribution_change_prob":0.0,"new_distributions":[]"#;
+        serde_json::from_str::<ScenarioInput>(&format!("{{{minimal}}}"))
+            .expect("the minimal scenario payload must parse");
+        for (key, value) in [
+            ("residual_change_prob", "0.5"),
+            ("residual_dists", "[4]"),
+            ("residual_df", "8.0"),
+        ] {
+            let json = format!(r#"{{{minimal},"{key}":{value}}}"#);
+            let err = serde_json::from_str::<ScenarioInput>(&json).unwrap_err();
+            assert!(
+                err.to_string().contains(&format!("unknown field `{key}`")),
+                "{key}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn residual_spec_rejects_pinned_key() {
+        let err =
+            serde_json::from_str::<ResidualSpec>(r#"{"distribution":"normal","pinned":true}"#)
+                .unwrap_err();
+        assert!(err.to_string().contains("unknown field `pinned`"), "{err}");
     }
 }

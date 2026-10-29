@@ -4,6 +4,7 @@ import { sharedPrefs } from '$lib/stores/shared-prefs.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
 import { runStore } from '$lib/stores/run.svelte';
 import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
+import { powerNToObservations } from '$lib/domain/unit-label';
 import { openExternal, DOCS_BASE_URL } from '$lib/content/render-doc';
 import { SIMULATION } from '$lib/configs/app-config';
 import { SELECTABLE_FAMILIES } from '$lib/domain/family';
@@ -40,7 +41,7 @@ async function startFindPowerFromShortcut() {
     familyStore.active, cfg, familyStore.regressionOutcome,
   );
   if (!spec || errors.length > 0) { console.warn(errors[0] ?? 'cannot run yet'); return; }
-  await runStore.startFindPower(spec, cfg.findPower.n);
+  await runStore.startFindPower(spec, powerNToObservations(spec, cfg.findPower.n));
 }
 
 async function startFindSampleSizeFromShortcut() {

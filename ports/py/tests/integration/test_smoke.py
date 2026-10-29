@@ -16,6 +16,10 @@ PyO3-only behaviours: thread-pool guard and progress callback semantics.
 from __future__ import annotations
 
 import json
+import signal
+import subprocess
+import sys
+import time
 
 import pytest
 
@@ -121,6 +125,47 @@ def test_e4_progress_callback_exception_cancels():
     # KeyboardInterrupt at the boundary.
     with pytest.raises(KeyboardInterrupt):
         find_power(_ols_scenarios_bytes(), 100, 1000, _BASE_SEED, boom)
+
+
+_SIGINT_CHILD = """
+import signal, sys
+# A shell starts background jobs with SIGINT ignored, and Python then installs
+# no handler; restore the interactive default so the test does not depend on
+# how pytest was launched.
+signal.signal(signal.SIGINT, signal.default_int_handler)
+from mcpower import MCPower, _engine
+_engine.set_n_threads(2)
+m = MCPower("y = x1 + x2 + x3").set_effects("x1=0.1, x2=0.2, x3=0.1")
+print("start", flush=True)
+try:
+    # ~100 s of work: only a working Ctrl-C ends it inside the timeout below.
+    m.find_power(2000, n_sims=2_000_000, progress_callback=sys.argv[1] == "on",
+                 verbose=False)
+    print("finished", flush=True)
+except KeyboardInterrupt:
+    print("interrupted", flush=True)
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT delivery")
+@pytest.mark.parametrize("progress", ["off", "on"])
+def test_sigint_stops_a_running_find_power(progress):
+    """Ctrl-C mid-run raises KeyboardInterrupt promptly, with or without a
+    progress callback (the engine runs off the main thread, where CPython
+    never delivers signals)."""
+    p = subprocess.Popen([sys.executable, "-c", _SIGINT_CHILD, progress],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        assert p.stdout.readline().strip() == "start"
+        time.sleep(1.0)
+        p.send_signal(signal.SIGINT)
+        sent = time.monotonic()
+        out, _ = p.communicate(timeout=20)
+        elapsed = time.monotonic() - sent
+    finally:
+        p.kill()
+    assert out.strip() == "interrupted"
+    assert elapsed < 5.0
 
 
 # ---------------------------------------------------------------------------

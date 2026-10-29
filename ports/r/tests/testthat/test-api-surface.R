@@ -197,8 +197,7 @@ test_that("build_contract_from_spec returns names + raw contract bytes", {
   # Known-good LinearSpec JSON matching the new wire contract:
   # - heterogeneity removed (scenario-only)
   # - heteroskedasticity: driver_var_index only (no ratio)
-  # - residual: distribution + optional pinned (no df)
-  # - residual_dists: [4,2] (high_kurtosis=4, right_skewed=2, matching configs/scenarios.json defaults)
+  # - residual: distribution only (no df)
   spec_json <- paste0(
     '{"formula":"y ~ x1",',
     '"predictors":[{"name":"x1","kind":"normal"}],',
@@ -214,8 +213,7 @@ test_that("build_contract_from_spec returns names + raw contract bytes", {
     '"max_failed_fraction":1.0,',
     '"scenarios":[{"name":"optimistic","heterogeneity":0.0,"heteroskedasticity_ratio":1.0,',
     '"correlation_noise_sd":0.0,"distribution_change_prob":0.0,',
-    '"new_distributions":[2,3,5],"residual_change_prob":0.0,',
-    '"residual_dists":[4,2],"residual_df":10.0}]}'
+    '"new_distributions":[2,3,5]}]}'
   )
 
   out <- mcpower:::build_contract_from_spec(spec_json, "continuous", "canonical", "ols", 0.0, "[]")
@@ -252,13 +250,10 @@ test_that("to_linear_spec_json emits the new wire shape for OLS y ~ x1", {
                test_formula = NULL)
   j <- jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null", digits = NA)
   reparsed <- jsonlite::fromJSON(j, simplifyVector = FALSE)
-  # Scenario integer code lists survive as numbers (not strings).
-  # residual_dists default = [4,2] (high_kurtosis=4, right_skewed=2).
+  # The scenario integer code list survives as numbers (not strings).
   expect_equal(reparsed$scenarios[[1]]$new_distributions, list(2L, 3L, 5L))
-  expect_equal(reparsed$scenarios[[1]]$residual_dists, list(4L, 2L))
-  expect_equal(reparsed$scenarios[[1]]$residual_df, 10)
   expect_equal(reparsed$effects[[1]]$size, 0.5)
-  # residual block: distribution only (no df); pinned absent when FALSE.
+  # residual block: distribution only (no df).
   expect_equal(reparsed$residual$distribution, "normal")
   expect_null(reparsed$residual[["df"]])
   expect_equal(reparsed$predictors[[1]], list(name = "x1", kind = "normal"))
@@ -347,14 +342,6 @@ test_that(".scenario_dict encodes default scenarios with integer code lists", {
   s <- mcpower:::.scenario_dict("optimistic")
   expect_equal(s$name, "optimistic")
   expect_equal(as.integer(s$new_distributions), c(2L, 3L, 5L))
-  # residual_dists default = [high_kurtosis=4, right_skewed=2] per configs/scenarios.json.
-  expect_equal(as.integer(s$residual_dists), c(4L, 2L))
-  expect_equal(s$residual_df, 10)
-  # All five canonical residual names are valid in scenario pools.
-  expect_no_error(mcpower:::.encode_residual_list(c("left_skewed"), "optimistic"))
-  expect_no_error(mcpower:::.encode_residual_list(c("high_kurtosis"), "optimistic"))
-  # Unknown names still error.
-  expect_error(mcpower:::.encode_residual_list(c("zzz"), "optimistic"))
 })
 
 test_that(".scenario_dict carries sampled_factor_proportions default and override", {
@@ -448,17 +435,11 @@ test_that("MCPower set_residual_distribution validates and stores; all five cano
   m <- MCPower$new("y ~ x1")$set_residual_distribution("high_kurtosis")
   s <- m$summary()
   expect_equal(s$residual_distribution, "high_kurtosis")
-  expect_true(s$residual_pinned)
   # left_skewed is now also valid (no longer blocked).
   expect_no_error(MCPower$new("y ~ x1")$set_residual_distribution("left_skewed"))
   expect_no_error(MCPower$new("y ~ x1")$set_residual_distribution("uniform"))
   # Unknown names still error.
   expect_error(MCPower$new("y ~ x1")$set_residual_distribution("zzz"))
-  # Setting "normal" explicitly marks as pinned.
-  m2 <- MCPower$new("y ~ x1")$set_residual_distribution("normal")
-  expect_true(m2$summary()$residual_pinned)
-  # Default (unset) is not pinned.
-  expect_false(MCPower$new("y ~ x1")$summary()$residual_pinned)
 })
 
 test_that("MCPower set_baseline_probability computes intercept = logit(p) (APIC-41)", {
@@ -487,6 +468,27 @@ test_that("MCPower set_heteroskedasticity_driver builds the engine spec; bad var
   expect_error(MCPower$new("y ~ x1")$set_heteroskedasticity_driver("zzz"))
 })
 
+# The driver index counts non-factor predictors, so a declared factor ahead of
+# the driver must not shift it, either on first setup (types apply lazily) or
+# after upload_data rebuilds the registry from the bare formula.
+test_that("heteroskedasticity driver index skips declared factors", {
+  m <- MCPower$new("y ~ g + x + z")
+  m$set_variable_type("g=(factor,3)")
+  m$set_heteroskedasticity_driver("z")
+  priv <- m$.__enclos_env__$private
+  priv$apply()
+  expect_equal(priv$heteroskedasticity$driver_var_index, 1L)
+  m$upload_data(data.frame(x = as.numeric(1:30)), verbose = FALSE)
+  m$set_heteroskedasticity_driver("z")
+  priv$apply()
+  expect_equal(priv$heteroskedasticity$driver_var_index, 1L)
+
+  m <- MCPower$new("y ~ g + x")
+  m$set_variable_type("g=(factor,3)")
+  m$set_heteroskedasticity_driver("g")
+  expect_error(m$.__enclos_env__$private$apply(), "must be a non-factor")
+})
+
 # The driver only matters when the active scenario sets lambda > 1 ("realistic"
 # is 2.0). With driver = NULL the variance follows the linear predictor, which
 # for y ~ x1 + x2 with only x1 active equals x1; so driver "x2" is the case
@@ -505,8 +507,11 @@ test_that("set_heteroskedasticity_driver moves OLS results when lambda > 1", {
 })
 
 test_that("set_heteroskedasticity_driver moves LME results when lambda > 1", {
+  # x1 stays below saturation so its power can register the driver change; at
+  # x1 = 0.5 both runs sit at power 1 and only x2's null rejection count is left
+  # to differ, which can tie by chance.
   make <- function() MCPower$new("y ~ x1 + x2 + (1|g)", family = "lme")$
-    set_effects("x1=0.5, x2=0.0")$
+    set_effects("x1=0.25, x2=0.0")$
     set_cluster("g", ICC = 0.1, n_clusters = 20)$
     set_simulations(300)
   expect_false(identical(.het_powers(make(), NULL), .het_powers(make(), "x2")))
@@ -523,9 +528,8 @@ test_that("set_heteroskedasticity_driver leaves logit results unchanged when lam
 test_that("summary returns the documented keys", {
   m <- MCPower$new("y ~ x1")$set_effects("x1=0.5")
   s <- m$summary()
-  # residual_df removed (df is scenario-only); residual_pinned added.
   expect_setequal(names(s), c("formula","family","outcome_kind","estimator","effects",
-    "n_simulations","alpha","power_target","residual_distribution","residual_pinned","scenarios"))
+    "n_simulations","alpha","power_target","residual_distribution","scenarios"))
 })
 
 # ── upload_data / get_effects_from_data tests (E2) ───────────────────────────

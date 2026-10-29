@@ -790,41 +790,6 @@ scen_px_t3 <- list(
   n = 4000L, K = 200L, seed = 37000
 )
 
-# Re (preset pool): swap frequency ≈ qᵣ; picks uniform over {high_kurtosis,
-# right_skewed}; recovered df ≈ scenario residual_df via the shape laws
-# (skew = sqrt(8/df), excess kurtosis = 6/(df-4)). df = 10 keeps the kurtosis
-# estimator's CLT valid (t(10) has finite 8th moment).
-scen_re <- list(
-  label = "scen_re", knob = "residual_change_prob",
-  formula = "y ~ x1", family = "ols",
-  effects = "x1=0.25",
-  scenario_configs = list(t_re = list(
-    residual_change_prob = 0.5, residual_df = 10
-  )),
-  scenario = "t_re",
-  n = 4000L, K = 400L, seed = 38000
-)
-
-# Re (pinned residual, no swap): set_residual_distribution("high_kurtosis")
-# PINS the residual in the new API — the engine only swaps an unpinned
-# default-normal residual, so residual_change_prob = 1.0 + residual_dists are
-# inert here. LAW CHANGED under pin rule: this case no longer tests replacement
-# (swap from one non-default to another); it now exercises a pinned high_kurtosis
-# residual held fixed across scenarios. The scenario df knob (residual_df = 6) is
-# still present in the config but does not fire. Re-freeze goldens after rebuilding.
-scen_re_replace <- list(
-  label = "scen_re_replace", knob = "residual_change_prob",
-  formula = "y ~ x1", family = "ols",
-  effects = "x1=0.25",
-  residual = list(name = "high_kurtosis"),
-  scenario_configs = list(t_re1 = list(
-    residual_change_prob = 1.0, residual_dists = list("right_skewed"),
-    residual_df = 6
-  )),
-  scenario = "t_re1",
-  n = 4000L, K = 200L, seed = 39000
-)
-
 # Fa: factor-proportion sampling. FALSE (optimistic default): counts are a pure
 # function of (n, p) — identical across draws, each within ~1 of n·p. TRUE:
 # count_g ~ Binomial(n, p_g), variance n·p(1-p).
@@ -929,21 +894,27 @@ scen_b2 <- list(
   n = 4000L, K = 200L, seed = 45000
 )
 
-# B3: Hs×Re preservation. Forced residual swap (qᵣ = 1, single-candidate pool)
-# under λ = 4: the log-e² slope ≈ ln(λ)/4 is shape-blind, so the ±2σ ratio
-# survives a t or chi² residual (tails amplified multiplicatively).
-scen_b3 <- list(
-  label = "scen_b3", knob = "B3",
+# B3: Hs×Re preservation. The residual is set with set_residual_distribution
+# (t(10) in scen_b3_t, chi²(10) in scen_b3_chi), not swapped, under λ = 4: the
+# log-e² slope ≈ ln(λ)/4 is shape-blind, so the ±2σ ratio survives a t or chi²
+# residual (tails amplified multiplicatively).
+scen_b3_t <- list(
+  label = "scen_b3_t", knob = "B3",
   formula = "y ~ x1", family = "ols",
   effects = "x1=0.25",
-  scenario_configs = list(
-    b3_t   = list(heteroskedasticity_ratio = 4.0, residual_change_prob = 1.0,
-                  residual_dists = list("high_kurtosis"), residual_df = 10),
-    b3_chi = list(heteroskedasticity_ratio = 4.0, residual_change_prob = 1.0,
-                  residual_dists = list("right_skewed"), residual_df = 10)
-  ),
-  scenarios = c("b3_t", "b3_chi"),
+  residual = list(name = "high_kurtosis"),
+  scenario_configs = list(b3_t = list(heteroskedasticity_ratio = 4.0)),
+  scenarios = "b3_t",
   n = 4000L, K = 200L, seed = 46000
+)
+scen_b3_chi <- list(
+  label = "scen_b3_chi", knob = "B3",
+  formula = "y ~ x1", family = "ols",
+  effects = "x1=0.25",
+  residual = list(name = "right_skewed"),
+  scenario_configs = list(b3_chi = list(heteroskedasticity_ratio = 4.0)),
+  scenarios = "b3_chi",
+  n = 4000L, K = 200L, seed = 46200
 )
 
 # B4: Co×Px NORTA. Forced swap (q = 1, single-candidate pool) on a ρ = 0.5
@@ -989,41 +960,34 @@ scen_b5 <- list(
 
 # -- Family gating ----------------------------------------------------------------
 
-# GLM λ/residual inertness: paired bit-identity. apply_hsk requires a
-# continuous outcome and consumes no RNG, so a λ toggle is an exact no-op
-# under logit; the residual swap consumes only scenario-stream draws AFTER
-# every other consumer, so outcomes stay bit-identical too.
+# GLM λ inertness: paired bit-identity. apply_hsk requires a continuous
+# outcome and consumes no RNG, so a λ toggle is an exact no-op under logit and
+# the outcomes stay bit-identical.
 scen_fg_glm_ident <- list(
   label = "scen_fg_glm_ident", knob = "family_gating",
   formula = "y ~ x1 + x2", family = "logit",
   effects = "x1=0.5, x2=0.3", baseline_probability = 0.4,
   scenario_configs = list(
-    glm_l4   = list(heteroskedasticity_ratio = 4.0),
-    glm_l4re = list(heteroskedasticity_ratio = 4.0, residual_change_prob = 1.0,
-                    residual_dists = list("high_kurtosis"), residual_df = 10)
+    glm_l4 = list(heteroskedasticity_ratio = 4.0)
   ),
-  # pair 1: optimistic vs λ=4 (λ inert); pair 2: λ=4 vs λ=4 + forced residual
-  # swap (residual inert; both sides on the scenario path).
-  pairs = list(c("optimistic", "glm_l4"), c("glm_l4", "glm_l4re")),
+  # optimistic vs λ=4 (λ inert).
+  pairs = list(c("optimistic", "glm_l4")),
   n = 2000L, K = 20L, seed = 49000
 )
 
-# Probit / Poisson λ + residual-swap inertness — same family-gating premise as
-# scen_fg_glm_ident but for the new links. apply_hsk requires a continuous
+# Probit / Poisson λ inertness: the same family-gating premise as
+# scen_fg_glm_ident, for the other links. apply_hsk requires a continuous
 # Gaussian outcome and consumes no RNG, so a λ toggle is an exact no-op under
-# probit (binary) and Poisson (count); the residual swap consumes only
-# scenario-stream draws AFTER every other consumer, so outcomes stay
-# bit-identical too. Both pairs verified bit-identical in-harness (run_fg_ident).
+# probit (binary) and Poisson (count). Verified bit-identical in-harness
+# (run_fg_ident).
 scen_fg_probit_ident <- list(
   label = "scen_fg_probit_ident", knob = "family_gating",
   formula = "y ~ x1 + x2", family = "probit",
   effects = "x1=0.5, x2=0.3", baseline_probability = 0.4,
   scenario_configs = list(
-    g_l4   = list(heteroskedasticity_ratio = 4.0),
-    g_l4re = list(heteroskedasticity_ratio = 4.0, residual_change_prob = 1.0,
-                  residual_dists = list("high_kurtosis"), residual_df = 10)
+    g_l4 = list(heteroskedasticity_ratio = 4.0)
   ),
-  pairs = list(c("optimistic", "g_l4"), c("g_l4", "g_l4re")),
+  pairs = list(c("optimistic", "g_l4")),
   n = 2000L, K = 20L, seed = 62000
 )
 scen_fg_poisson_ident <- list(
@@ -1031,11 +995,9 @@ scen_fg_poisson_ident <- list(
   formula = "y ~ x1 + x2", family = "poisson",
   effects = "x1=0.5, x2=0.3", baseline_rate = 2.0,
   scenario_configs = list(
-    g_l4   = list(heteroskedasticity_ratio = 4.0),
-    g_l4re = list(heteroskedasticity_ratio = 4.0, residual_change_prob = 1.0,
-                  residual_dists = list("high_kurtosis"), residual_df = 10)
+    g_l4 = list(heteroskedasticity_ratio = 4.0)
   ),
-  pairs = list(c("optimistic", "g_l4"), c("g_l4", "g_l4re")),
+  pairs = list(c("optimistic", "g_l4")),
   n = 2000L, K = 20L, seed = 63000
 )
 
@@ -1070,10 +1032,10 @@ scen_re_multi <- list(
 
 SCENARIO_CASES <- list(
   scen_he, scen_hs, scen_co_low, scen_co_high, scen_co_psd,
-  scen_px, scen_px_t3, scen_re, scen_re_replace,
+  scen_px, scen_px_t3,
   scen_fa_ols, scen_fa_mle,
   scen_he_probit, scen_he_poisson,
-  scen_b0, scen_b1_ols, scen_b1_glm, scen_b2, scen_b3, scen_b4, scen_b5,
+  scen_b0, scen_b1_ols, scen_b1_glm, scen_b2, scen_b3_t, scen_b3_chi, scen_b4, scen_b5,
   scen_fg_glm_ident, scen_fg_glm_flip,
   scen_fg_probit_ident, scen_fg_poisson_ident,
   scen_re_multi

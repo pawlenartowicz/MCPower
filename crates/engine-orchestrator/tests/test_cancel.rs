@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use engine_contract::fixtures::example1_simple_ols;
-use engine_orchestrator::{CancellationToken, OrchestratorError};
+use engine_orchestrator::{CancellationToken, OrchestratorError, ProgressEvent, ProgressSink};
 
 #[test]
 fn cancel_is_visible_to_clones() {
@@ -36,28 +36,56 @@ fn cancel_terminates_within_reasonable_time() {
     let res = engine_orchestrator::find_power(&[c], 100, 100_000, 2137, None, &cancel);
     let elapsed = t0.elapsed();
 
-    // Cancellation surfaces as either OrchestratorError::Cancelled (cancel fired
-    // between scenarios) or OrchestratorError::Engine(EngineError::Cancelled)
-    // (cancel fired mid-batch via the progress sink). Both are valid; any other
-    // error variant is a bug.
-    let is_cancel_err = match &res {
-        Err(OrchestratorError::Cancelled { scenario_idx, .. }) => {
-            // Single-scenario fixture: the only in-flight scenario must be idx 0.
-            assert_eq!(
-                *scenario_idx, 0,
-                "single-scenario cancel: scenario_idx must be 0, got {scenario_idx}"
-            );
-            true
-        }
-        Err(OrchestratorError::Engine(e)) => {
-            matches!(e, engine_core::EngineError::Cancelled)
-        }
-        _ => false,
-    };
-    assert!(is_cancel_err, "expected a cancellation error, got {res:?}");
+    match &res {
+        // Single-scenario fixture: the only in-flight scenario must be idx 0.
+        Err(OrchestratorError::Cancelled { scenario_idx, .. }) => assert_eq!(*scenario_idx, 0),
+        other => panic!("expected OrchestratorError::Cancelled, got {other:?}"),
+    }
     // OLS sim ~1ms; allow 250ms slack for CI noise.
     assert!(
         elapsed < Duration::from_millis(250),
         "cancel latency {elapsed:?} too high",
+    );
+}
+
+/// Sink that cancels the run on its first `SimsCompleted` tick, so the cancel
+/// lands inside the engine batch rather than between scenarios.
+struct CancelOnFirstTick {
+    cancel: CancellationToken,
+    saw_cancelled: bool,
+}
+
+impl ProgressSink for CancelOnFirstTick {
+    fn on_event(&mut self, event: ProgressEvent) {
+        match event {
+            ProgressEvent::SimsCompleted { .. } => self.cancel.cancel(),
+            ProgressEvent::Cancelled => self.saw_cancelled = true,
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn mid_run_cancel_emits_cancelled_event_and_error() {
+    let c = example1_simple_ols();
+    let cancel = CancellationToken::new();
+    let mut sink = CancelOnFirstTick {
+        cancel: cancel.clone(),
+        saw_cancelled: false,
+    };
+    let res = engine_orchestrator::find_power(&[c], 100, 100_000, 2137, Some(&mut sink), &cancel);
+    assert!(
+        matches!(
+            res,
+            Err(OrchestratorError::Cancelled {
+                scenario_idx: 0,
+                n: Some(100)
+            })
+        ),
+        "expected OrchestratorError::Cancelled, got {res:?}"
+    );
+    assert!(
+        sink.saw_cancelled,
+        "sink never received ProgressEvent::Cancelled"
     );
 }

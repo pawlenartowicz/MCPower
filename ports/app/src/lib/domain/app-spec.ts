@@ -57,9 +57,8 @@ export type VarType =
  *  Magnitudes (λ, heterogeneity) are scenario-only and absent here.
  *  Omit the whole object when both fields are absent (neutral default). */
 export interface OutcomeOptions {
-    /** Canonical residual distribution name. Absent/null = unpinned default
-     *  (normal; scenarios may swap it). Present = pinned — an explicit "normal"
-     *  must be sent (neutral keys on unpinned-default, not on the value). */
+    /** Canonical residual distribution name. Absent/null = normal. The shape is
+     *  the same in every scenario. */
     residual_distribution?: string | null;
     /** Driver predictor name for heteroskedasticity (non-factor).
      *  Absent/null = linear predictor Xβ drives the variance; ratio λ from scenario. */
@@ -101,10 +100,10 @@ export type TestSelection =
 
 /**
  * Mirrors `engine_spec_builder::input::ScenarioInput` (the projected wire shape
- * Python's `build_scenario_dict` (spec/spec_builder.py) produces). The two distribution lists are already
- * integer-encoded (`new_distributions` via the engine's `DIST_CODES`,
- * `residual_dists` via `RESIDUAL_CODES`, both in engine-spec-builder's
- * `project_contract.rs`). RE-perturbation fields are carried flat on the wire:
+ * Python's `build_scenario_dict` (spec/spec_builder.py) produces). The one
+ * distribution list, `new_distributions`, is already integer-encoded via the
+ * engine's `DIST_CODES` (engine-spec-builder's `project_contract.rs`).
+ * RE-perturbation fields are carried flat on the wire:
  * `random_effect_dist`, `random_effect_df`, and `icc_noise_sd` (see below).
  */
 export interface ScenarioWire {
@@ -114,9 +113,6 @@ export interface ScenarioWire {
     correlation_noise_sd: number;
     distribution_change_prob: number;
     new_distributions: number[];
-    residual_change_prob: number;
-    residual_dists: number[];
-    residual_df: number;
     sampled_factor_proportions: boolean;
     /** Truth-seeded fitter start (mixed/clustered designs) vs. cold (blind) start. */
     truth_start: boolean;

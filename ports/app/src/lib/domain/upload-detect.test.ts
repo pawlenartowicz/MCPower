@@ -4,6 +4,7 @@
 // upload-parsers.test.ts.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
+  csvDataFromParsed,
   detectColumnTypes,
   uploadedColumnByName,
   validateUploadRowCount,
@@ -149,5 +150,23 @@ describe('validateUploadRowCount', () => {
         expect(validateUploadRowCount(100_000)).toBeNull();
         expect(validateUploadRowCount(100_001)).toMatch(/browser limit is 100000/);
         expect(validateUploadRowCount(19)).toMatch(/at least 20/); // min still applies on wasm
+    });
+});
+
+describe('csvDataFromParsed missing / non-finite cells', () => {
+    const parse = (cells: string[]) => csvDataFromParsed({ header: ['x'], columns: [cells], nRows: cells.length }, 'strict');
+    const many = (n: number, f: (i: number) => string) => Array.from({ length: n }, (_, i) => f(i));
+
+    it('rejects a blank cell in a continuous column', () => {
+        expect(() => parse(many(30, (i) => (i === 3 ? '' : String(i * 1.5))))).toThrow(/missing values in column: x/);
+    });
+    it('rejects a blank cell in a binary column', () => {
+        expect(() => parse(many(30, (i) => (i === 3 ? ' ' : String(i % 2))))).toThrow(/missing values in column: x/);
+    });
+    it('rejects a missing cell in a factor column', () => {
+        expect(() => parse(many(30, (i) => (i === 3 ? 'NA' : ['a', 'b', 'c'][i % 3]!)))).toThrow(/missing values in column: x/);
+    });
+    it('rejects an Infinity cell', () => {
+        expect(() => parse(many(30, (i) => (i === 3 ? 'Infinity' : String(i * 1.5))))).toThrow(/Inf values in column: x/);
     });
 });

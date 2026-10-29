@@ -44,6 +44,7 @@ function load_cases(path)::Vector{Case}
     defaults = doc["defaults"]
     out = Case[]
     for c in doc["cases"]
+        get(c, "benchmark", true) == false && continue   # agreement-only case, as in cases.py
         fam = String(c["family"])
         d = defaults[Symbol(fam)]
         n = haskey(c, "n") ? c["n"] : d["n"]            # per-case grid override

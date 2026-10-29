@@ -1,6 +1,7 @@
 //! Glue between PyO3 and engine-orchestrator. Owns:
 //!   - contract decode (msgpack Vec<SimulationContract> blob),
-//!   - PyO3 ProgressSink (translates ProgressEvent → progress_callback(int,int)),
+//!   - PyO3 ProgressSink (translates ProgressEvent → progress_callback(int,int))
+//!     and the background-thread runner that feeds it and polls for Ctrl-C,
 //!   - the generic `HostValue` → Python walker that realizes the
 //!     single-sourced result shape (`engine_orchestrator::result_host`).
 //!
@@ -12,9 +13,11 @@ use engine_orchestrator::{
     power_result_to_host, sample_size_result_to_host,
 };
 use pyo3::IntoPyObjectExt;
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::time::Duration;
 
 /// Decode the msgpack `Vec<SimulationContract>` blob produced by
 /// `_engine.build_contract_from_spec`. The Python frontend forwards this
@@ -30,7 +33,8 @@ pub fn decode_contracts(bytes: &[u8]) -> PyResult<Vec<SimulationContract>> {
 }
 
 /// Bridges the orchestrator's structured event stream to the host progress
-/// callable `progress(current: int, total: int) -> bool`.
+/// callable `progress(current: int, total: int) -> bool`. Fed on the calling
+/// (Python) thread by [`run_with_progress`], never on engine workers.
 ///
 /// Translation: `SimsCompleted { completed, total }` is already cumulative
 /// across the whole call (fit-based, denominator = `Started.total_sims`), so
@@ -78,6 +82,92 @@ impl<'cancel> ProgressSink for OrchestratorProgressSink<'cancel> {
             self.cancel.cancel();
         }
     }
+}
+
+/// Off-thread sink: forwards each event to the calling thread, which owns the
+/// Python callback. Runs on engine (rayon) threads, so it touches no Python.
+struct ForwarderSink {
+    tx: Sender<ProgressEvent>,
+}
+
+impl ProgressSink for ForwarderSink {
+    fn on_event(&mut self, event: ProgressEvent) {
+        // A closed receiver means the caller is already tearing the run down.
+        let _ = self.tx.send(event);
+    }
+}
+
+/// Upper bound on how long the calling thread waits between Ctrl-C checks when
+/// no events arrive. Events and engine completion wake it immediately.
+const POLL_INTERVAL_MS: u64 = 50;
+
+/// Run an orchestrator entry with Python progress delivery and Ctrl-C
+/// cancellation, returning whatever `run` produced.
+///
+/// CPython runs signal handlers only on the main thread, and only when Python
+/// code gets to run there, so the engine cannot be left to notice a
+/// `KeyboardInterrupt` on its own (with progress off no Python runs at all).
+/// Instead `run` executes on a scoped background thread while the calling
+/// thread, with the GIL released between polls, waits on the event queue: it
+/// feeds each event to `progress` and calls `check_signals`. A raised signal
+/// flips `cancel`; the engine stops at its next checkpoint and the signal's
+/// exception (normally `KeyboardInterrupt`) is returned in place of the result.
+/// A cancel from the callback returns `KeyboardInterrupt("cancelled")`.
+///
+/// Mirrors engine-r's `run_with_progress` (progress.rs); change together.
+pub fn run_with_progress<F, T>(
+    py: Python<'_>,
+    progress: Option<Py<PyAny>>,
+    cancel: &engine_orchestrator::CancellationToken,
+    run: F,
+) -> PyResult<T>
+where
+    F: FnOnce(&mut dyn ProgressSink, &engine_orchestrator::CancellationToken) -> T + Send,
+    T: Send,
+{
+    let mut sink = OrchestratorProgressSink::new(progress, cancel);
+    let (tx, rx) = mpsc::channel();
+    let mut signal_err: Option<PyErr> = None;
+    // `move` with explicit borrows: the Receiver must move in (it is not Sync).
+    let (sink, signal_err_slot) = (&mut sink, &mut signal_err);
+    let out = py.detach(move || {
+        std::thread::scope(|scope| {
+            let handle = scope.spawn(move || run(&mut ForwarderSink { tx }, cancel));
+            loop {
+                // The engine thread owns the only Sender, so its exit wakes
+                // this wait at once with `Disconnected`.
+                let done = match rx.recv_timeout(Duration::from_millis(POLL_INTERVAL_MS)) {
+                    Ok(event) => {
+                        sink.on_event(event);
+                        while let Ok(event) = rx.try_recv() {
+                            sink.on_event(event);
+                        }
+                        false
+                    }
+                    Err(RecvTimeoutError::Timeout) => false,
+                    Err(RecvTimeoutError::Disconnected) => true,
+                };
+                if signal_err_slot.is_none() {
+                    if let Err(e) = Python::attach(|py| py.check_signals()) {
+                        *signal_err_slot = Some(e);
+                        cancel.cancel();
+                    }
+                }
+                if done {
+                    return handle.join().expect("orchestrator thread panicked");
+                }
+            }
+        })
+    });
+    if let Some(e) = signal_err {
+        return Err(e);
+    }
+    if cancel.is_cancelled() {
+        // The callback runs behind the engine, so its cancel can land after
+        // the engine's last checkpoint; it still cancels the call.
+        return Err(PyKeyboardInterrupt::new_err("cancelled"));
+    }
+    Ok(out)
 }
 
 /// Convert a `ScenarioResult<PowerResult>` into the multi-scenario envelope.

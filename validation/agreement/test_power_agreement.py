@@ -7,7 +7,7 @@ import pytest
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
-from power_agreement import agree_z, summarise  # noqa: E402
+from power_agreement import agree_z, build_points, summarise  # noqa: E402
 
 
 def test_agree_z_known_value():
@@ -20,12 +20,27 @@ def test_agree_z_equal_powers_is_zero():
 
 def test_summarise_counts_flags_and_mean_z():
     pts = [{"case": "c", "family": "ols", "comparator": "loop", "z": z,
-            "mc_power": 0.5, "ref_power": 0.5} for z in (0, 2, -2, 0.5)]
+            "mc_power": 0.5, "ref_power": 0.5, "mc_n_sims": 1000, "ref_n_sims": 1000}
+           for z in (0, 2, -2, 0.5)]
     (row,) = summarise(pts)
     assert row["n_flagged"] == 2
     assert row["expected_flagged"] == pytest.approx(0.4)
     assert row["mean_z"] == pytest.approx(0.125)
     assert row["se_mean_z"] == pytest.approx(0.5)
+    assert row["mean_diff"] == 0
+    assert row["mean_diff_lo"] == pytest.approx(-row["mean_diff_hi"])
+
+
+def test_summary_signed_difference_ci_hand_computed():
+    def rec(method, power, n_sims, n):
+        return {**_rec(method, [power], n_sims, ["a"]), "n": n}
+    doc = {"meta": {}, "records": [
+        rec("mcpower_find_power", 0.55, 10000, 100), rec("loop_best", 0.50, 2000, 100),
+        rec("mcpower_find_power", 0.80, 10000, 200), rec("loop_best", 0.82, 2000, 200)]}
+    (row,) = summarise(build_points(doc))
+    assert row["mean_diff"] == pytest.approx(0.015, abs=1e-12)
+    assert row["mean_diff_lo"] == pytest.approx(-0.000171, abs=1e-6)
+    assert row["mean_diff_hi"] == pytest.approx(0.030171, abs=1e-6)
 
 
 def _rec(method, power, n_sims, targets):

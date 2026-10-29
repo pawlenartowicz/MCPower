@@ -27,6 +27,8 @@ def load_cases(path) -> list[Case]:
     defaults = doc["defaults"]
     out: list[Case] = []
     for c in doc["cases"]:
+        if c.get("benchmark", True) is False:      # agreement-only case (no Python/Julia loop)
+            continue
         d = defaults[c["family"]]
         n = c.get("n", d["n"])                          # per-case grid override
         out.append(

@@ -180,9 +180,6 @@ test_that("random_slopes and n_per_parent are now accepted (gates removed)", {
   expect_no_error(m2$set_cluster("a", n_clusters = 10L))
   expect_no_error(m2$set_cluster("a:b", n_per_parent = 4L))
   expect_equal(m2$.__enclos_env__$private$pending_clusters[["a:b"]]$n_per_parent, 4L)
-  # between_vars is silently ignored (absorbed by `...`) — verified in
-  # test-lme-cluster-level-vars.R; here just confirm no error.
-  expect_no_error(MCPower$new("y ~ x1")$set_cluster("g", between_vars = "x1"))
 })
 
 test_that("logit runtime guards", {
@@ -190,9 +187,38 @@ test_that("logit runtime guards", {
     MCPower$new("y ~ x1", family = "logit")$set_effects("x1=0.5")$find_power(100, progress_callback = FALSE),
     "baseline probability required for family='logit'; call set_baseline_probability(p) before find_power",
     fixed = TRUE)
+  # find_sample_size runs the same guard, not a silent intercept-0 search.
+  expect_error(
+    MCPower$new("y ~ x1", family = "logit")$set_effects("x1=0.5")$
+      find_sample_size(from_size = 50, to_size = 100, by = 50, n_sims = 20L,
+                       verbose = FALSE, progress_callback = FALSE),
+    "baseline probability required for family='logit'", fixed = TRUE)
+  expect_error(
+    MCPower$new("y ~ x1", family = "poisson")$set_effects("x1=0.5")$
+      find_sample_size(from_size = 50, to_size = 100, by = 50, n_sims = 20L,
+                       verbose = FALSE, progress_callback = FALSE),
+    "baseline rate required for family='poisson'", fixed = TRUE)
   # "y ~ 1" is rejected by the Rust parser (as in Python); the intercept-only guard is a dead-code
   # safety net. Verify the parser-level rejection matches both R and Python behaviour.
   expect_error(MCPower$new("y ~ 1", family = "logit"))
+})
+
+test_that("find_power checks observations per cluster at the requested N", {
+  lme <- function() MCPower$new("y ~ x1 + (1|g)", family = "lme")$set_effects("x1=0.5")
+  expect_error(
+    lme()$set_cluster("g", ICC = 0.1, n_clusters = 60)$find_power(120, progress_callback = FALSE),
+    paste0("Insufficient observations per cluster: 2 (sample_size=120, n_clusters=60). ",
+           "Need at least 5 observations per cluster for reliable mixed model estimation. ",
+           "Either increase sample_size to 300 or reduce n_clusters to 24."),
+    fixed = TRUE)
+  expect_warning(
+    lme()$set_cluster("g", ICC = 0.1, n_clusters = 20)$find_power(
+      120, n_sims = 20, verbose = FALSE, progress_callback = FALSE),
+    "Low observations per cluster: 6 (sample_size=120, n_clusters=20)", fixed = TRUE)
+  expect_error(
+    lme()$set_cluster("g", ICC = 0.1, cluster_size = 10)$find_power(15, progress_callback = FALSE),
+    "derived n_clusters=1 is below 5 (sample_size=15, cluster_size=10); increase sample_size",
+    fixed = TRUE)
 })
 
 test_that("logit scenario analysis runs (gate removed)", {
@@ -320,3 +346,19 @@ test_that("scenarios=TRUE with same seed gives identical results across two runs
   }
 })
 
+
+test_that("counts below 1 are an R error, not a session abort", {
+  # A negative count cast straight to usize allocates terabytes and kills R.
+  m <- MCPower$new("y ~ x1")$set_effects("x1=0.3")
+  fp <- function(...) m$find_power(..., verbose = FALSE, progress_callback = FALSE)
+  fss <- function(...) m$find_sample_size(..., verbose = FALSE, progress_callback = FALSE)
+  expect_error(fp(-5, n_sims = 20L), "sample_size must be a positive integer, got -5", fixed = TRUE)
+  expect_error(fp(100, n_sims = -1L), "n_sims must be a positive integer, got -1", fixed = TRUE)
+  expect_error(fp(100, n_sims = 0L), "n_sims must be a positive integer, got 0", fixed = TRUE)
+  expect_error(fss(from_size = -10, to_size = 100, by = 10, n_sims = 20L),
+               "from_size must be a positive integer, got -10", fixed = TRUE)
+  expect_error(fss(from_size = 50, to_size = 100, by = -10, n_sims = 20L),
+               "by must be a positive integer, got -10", fixed = TRUE)
+  expect_error(fss(from_size = 50, to_size = 100, by = 10, n_sims = -3L),
+               "n_sims must be a positive integer, got -3", fixed = TRUE)
+})

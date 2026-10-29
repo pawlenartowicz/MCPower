@@ -61,12 +61,10 @@ def test_f1_model_constructs_spec():
     assert sc["name"] == "optimistic"
     assert sc["heterogeneity"] == 0.0
     assert sc["correlation_noise_sd"] == 0.0
-    # optimistic carries the same distribution lists as other scenarios; what
-    # makes it optimistic is the zero probabilities, not the list contents.
+    # optimistic carries the same distribution list as other scenarios; what
+    # makes it optimistic is the zero probability, not the list contents.
     assert sc["distribution_change_prob"] == 0.0
-    assert sc["residual_change_prob"] == 0.0
     assert isinstance(sc["new_distributions"], list)
-    assert isinstance(sc["residual_dists"], list)
     assert sc["lme"] is None
     # Target terms skip the intercept: marginal terms 1 and 2.
     marginal_terms = [t["term"] for t in spec["test"]["targets"] if t["kind"] == "marginal"]
@@ -76,7 +74,7 @@ def test_f1_model_constructs_spec():
     # heteroskedasticity_driver is a flat field on OutcomeSpec (None = LP-based).
     assert spec["outcome"]["heteroskedasticity_driver"] is None
     assert spec["outcome"]["residual"]["distribution"] == "normal"
-    # No df field on contract ResidualSpec; df lives in the active scenario.
+    # No df field on contract ResidualSpec; non-normal shapes draw at df 10.
 
 
 def test_f1_set_scenario_configs_merges():

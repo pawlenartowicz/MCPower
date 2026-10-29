@@ -106,6 +106,7 @@ def _synthetic_logit():
     meta = {
         "effect_names": ["x1", "g[2]", "g[3]"],
         "effect_sizes": [0.916, 0.405, 1.386],
+        "column_effect_sizes": [0.916, 0.405, 1.386],
         "effect_skeleton": [
             {"kind": "intercept"},
             {"kind": "continuous", "predictor": "x1"},

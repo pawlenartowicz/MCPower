@@ -281,17 +281,27 @@ impl ClusterSpec {
         }
     }
 
-    /// Grid atom for the full grouping structure: the primary regime's atom
-    /// times every extra grouping's block levels. Snapping N to a multiple of
+    /// Grid atom for the full grouping structure. Snapping N to a multiple of
     /// this is what makes every nested grid prefix a balanced design for
-    /// EVERY factor simultaneously (each atom block is one full factorial —
-    /// see `extra_level_of_row`). Coarser than the single-grouping atom by
-    /// design: the documented cost of guaranteed balance and zero
-    /// level-confounding.
+    /// EVERY factor simultaneously (see `extra_level_of_row`).
+    ///
+    /// FixedClusters: the primary atom times every extra grouping's block
+    /// levels, so each atom block is one full factorial. Coarser than the
+    /// single-grouping atom by design: the cost of guaranteed balance and
+    /// zero level-confounding.
+    ///
+    /// FixedSize: just `cluster_size`. Its only legal extra is NestedWithin,
+    /// whose children round-robin inside each parent's contiguous block, and
+    /// `validate()` requires `cluster_size % n_per_parent == 0` — so one
+    /// complete parent already holds every child in equal shares.
     pub fn atom(&self) -> usize {
-        self.extra_groupings
-            .iter()
-            .fold(self.sizing.atom(), |a, g| a * g.relation.block_levels())
+        match self.sizing {
+            ClusterSizing::FixedClusters { .. } => self
+                .extra_groupings
+                .iter()
+                .fold(self.sizing.atom(), |a, g| a * g.relation.block_levels()),
+            ClusterSizing::FixedSize { .. } => self.sizing.atom(),
+        }
     }
 
     /// Number of distinct levels extra grouping `g` has within the first `n`
@@ -397,8 +407,9 @@ impl ClusterSpec {
     /// not aliased; grid Ns are always atom multiples.
     ///
     /// Mirrors: `workspace.rs` builds `extra_grouping_ids` and `data_gen.rs`
-    /// sizes the per-grouping draws from exactly these functions — change
-    /// together.
+    /// sizes the per-grouping draws from exactly these functions, and the
+    /// row-level factor walk in `data_gen.rs` balances over the nested child
+    /// ids it returns; change together.
     pub fn extra_level_of_row(&self, g: usize, i: usize) -> usize {
         let rel = &self.extra_groupings[g].relation;
         match &self.sizing {
@@ -676,7 +687,7 @@ mod tests {
 
         let mut b = ClusterSpec::intercept_only(ClusterSizing::FixedSize { cluster_size: 6 }, 0.25);
         b.extra_groupings.push(nested(3, 0.05));
-        assert_eq!(b.atom(), 18); // primary atom · n_per_parent
+        assert_eq!(b.atom(), 6); // complete parents are already balanced
     }
 
     /// The catastrophic naive case: S == I. Independent `i % S` / `i % I`
@@ -726,15 +737,17 @@ mod tests {
     }
 
     /// Regime B nested: parent = i/cs, within round-robins inside the parent's
-    /// contiguous block; balanced inside every complete parent.
+    /// contiguous block; balanced at every atom multiple, including an odd
+    /// parent count that is not a multiple of `cluster_size · n_per_parent`.
     #[test]
     fn nested_regime_b_layout_and_balance() {
         let mut spec =
             ClusterSpec::intercept_only(ClusterSizing::FixedSize { cluster_size: 6 }, 0.25);
         spec.extra_groupings.push(nested(3, 0.05));
-        assert_eq!(spec.extra_n_levels_at(0, 24), 12); // 4 parents × 3
-        let mut counts = vec![0usize; 12];
-        for i in 0..24 {
+        let n = 5 * spec.atom(); // 5 parents
+        assert_eq!(spec.extra_n_levels_at(0, n), 15); // 5 parents × 3
+        let mut counts = vec![0usize; 15];
+        for i in 0..n {
             let c = spec.extra_level_of_row(0, i);
             assert_eq!(c / 3, i / 6, "child {c} outside parent {}", i / 6);
             counts[c] += 1;

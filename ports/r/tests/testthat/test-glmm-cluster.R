@@ -164,6 +164,19 @@ test_that("no Laplace-bias warning for OLS result", {
   )
 })
 
+# (8b) find_sample_size carries one extras block per grid N; a breach at any N warns
+test_that("Laplace-bias warning reads the per-N extras of a sample-size result", {
+  thr      <- mcpower:::.config()$report$thresholds$glmm_tau_sq_warn
+  min_size <- mcpower:::.config()$limits$recommended_rows_per_cluster
+  raw <- list(estimator_extras = list(
+    list(estimator = "glm", tau_squared_hat_mean = thr - 0.5),
+    list(estimator = "glm", tau_squared_hat_mean = thr + 0.5)))
+  expect_warning(
+    mcpower:::.check_glmm_laplace_bias_warning(raw, min_size - 1L),
+    regexp = "Laplace-approximation bias likely"
+  )
+})
+
 # ---------------------------------------------------------------------------
 # 2.3  GLMM smoke + scenario-knob audit
 # ---------------------------------------------------------------------------

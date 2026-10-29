@@ -186,3 +186,32 @@ def test_set_baseline_probability_last_wins():
     spec_single = single.to_simulation_spec()
 
     assert spec_chain["outcome"]["intercept"] == spec_single["outcome"]["intercept"]
+
+
+# ---------------------------------------------------------------------------
+# Setters after a run: apply expands factors into dummies, so the next apply
+# must replay the pending settings against the formula, not the dummies.
+# ---------------------------------------------------------------------------
+
+
+def test_setter_after_apply_replays_factor_declaration():
+    m = MCPower("y = g + h")
+    m.set_variable_type("g=(factor,3)")
+    m.set_effects("g[2]=0.3, g[3]=0.4, h=0.2")
+    m.to_simulation_spec()
+    m.set_effects("h=0.5")
+    spec = m.to_simulation_spec()
+    assert [next(iter(c)) for c in spec["generation"]["columns"]] == ["Synthetic", "FactorSynthetic"]
+    assert m._registry.effect_names == ["h", "g[2]", "g[3]"]
+    assert spec["outcome"]["coefficients"] == [0.0, 0.5, 0.3, 0.4]
+
+
+def test_upload_after_apply_matches_declared_factor():
+    m = MCPower("y = g + h")
+    m.set_variable_type("g=(factor,3)")
+    m.set_effects("h=0.2")
+    m.to_simulation_spec()
+    m.upload_data({"g": ["a", "b", "c"] * 10}, verbose=False)
+    m.set_effects("g[b]=0.3, g[c]=0.3")
+    cols = m.to_simulation_spec()["generation"]["columns"]
+    assert [next(iter(c)) for c in cols] == ["Synthetic", "FactorFromFrame"]

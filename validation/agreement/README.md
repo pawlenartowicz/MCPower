@@ -8,9 +8,11 @@ pass/fail gate.
 
 ## The cases — `cases.json`
 
-`cases.json` is the single source of cases, read by `harness.R`. Sixteen designs
+`cases.json` is the single source of cases, read by `harness.R`. Seventeen designs
 across four families (`ols`, `logit`, `lme`, `glmm`). `lme_ex2` is a random
 intercept and slope design with a cluster-level binary predictor and 60 clusters.
+`lme_crossed` crosses 20 subjects with 10 items (a second grouping in `crossed`)
+and is agreement-only (`benchmark: false`), so the speed benchmark skips it.
 Each case names its `targets` and the dedicated tool
 that covers it (`tool`), or `null` when none does. The `defaults.agreement` block
 holds the per-grid-point simulation counts.
@@ -30,6 +32,9 @@ the same quantity:
   use Laplace with RX-based standard errors (`wald_se = "rx"`).
 - Mixed fits with every variance component at zero use the single-level
   reference: *t* at *n − (P + 1)* for LMM, Wald *z* for GLMM.
+- LMM with a crossed grouping (`lme_crossed`): lmerTest Satterthwaite *t*, the
+  rule MCPower uses for crossed designs; Wald *z* for a draw whose Satterthwaite df
+  cannot be computed. The single-level rule above does not apply here.
 - A failed fit counts as not significant, and power is divided by all
   simulations. A singular fit is not a failure.
 - Superpower is scored on the pairwise contrast equal to MCPower's dummy
@@ -58,7 +63,7 @@ The snapshot takes `results/*_r.json` and their `<stem>_points.csv` /
 
 `--budget agreement` uses the per-grid-point counts from `cases.json`
 (`defaults.agreement`): MCPower 10,000; loop 2,000; simglm and Superpower 500;
-simr 200. Seed is `2137 + n`. `--scale 0.1` runs a fraction of the simulations
+simr 800. Seed is `2137 + n`. `--scale 0.1` runs a fraction of the simulations
 for a quick preview. Every results JSON is `{meta, records}`, with the mcpower
 version in `meta.packages.mcpower`.
 
@@ -70,7 +75,7 @@ simulations to check the calls, not the numbers.
 ```bash
 Rscript example_upload.R    # uploaded pilot (pilot.csv), strict mode, resampling loop
 Rscript example_misspec.R   # misspecified analysis models, seven cases
-Rscript example_knobs.R     # scenario knobs, seven cases
+Rscript example_knobs.R     # scenario knobs, six cases
 SMOKE=1 Rscript example_upload.R
 ```
 
@@ -93,7 +98,10 @@ file name without extension):
   both powers and sim counts, `z`, `flagged`, mcpower version.
 - `<stem>_summary.csv` — one row per (case, comparator): points, flags, expected
   flags (0.1 × points), mean *z*, SE of the mean (1/sqrt(points)), largest
-  |power difference|.
+  |power difference|, and the mean signed power difference, MCPower minus
+  reference (`mean_diff`), with a 95% interval from the per-point binomial
+  variances (`mean_diff_lo`, `mean_diff_hi`; the squared denominator of *z*,
+  points treated as independent).
 - `<stem>_scatter.png`, `<stem>_curves_<k>.png` — scatter and per-case curves.
 
 Near power 0 or 1 the counts are discrete and *z* shrinks toward 0, so 0.1 ×
@@ -111,7 +119,7 @@ differ, or if any JSON has `meta.n_sims_scale` other than 1.
 
 | file | role |
 |------|------|
-| `cases.json` | the 16 cases + per-family defaults (single source) |
+| `cases.json` | the 17 cases + per-family defaults (single source) |
 | `harness.R` | R harness: runs MCPower, the loops and the tools; CLI |
 | `loops_r.R` | R reference loops (naive + best) |
 | `tools_r.R` | dedicated-tool adapters: simr, Superpower, simglm |

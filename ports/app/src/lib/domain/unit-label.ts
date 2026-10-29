@@ -9,6 +9,8 @@
 // fixed cluster count they plan observations per cluster. The engine searches
 // and reports N either way; the labels below are the host layer over it.
 
+import type { AppSpec } from './app-spec';
+
 /** Wire values of the engine's sample-size unit (`SampleSizeUnit`). */
 export type SampleSizeUnit = 'observations' | 'clusters' | 'cluster_size';
 
@@ -76,6 +78,14 @@ export function unitAxisTitle(unit: SampleSizeUnit, clusterName: string): string
   return noun.charAt(0).toUpperCase() + noun.slice(1);
 }
 
+/** Find power's n, given in the spec's sample-size unit, as the total
+ *  observations the engine takes. The adapter has already dropped a unit that
+ *  does not match `cluster_dim`, so `cluster_dim.value` is the right factor. */
+export function powerNToObservations(spec: AppSpec, n: number): number {
+  if (spec.family !== 'mixed') return n;
+  return boundToObservations(spec.sample_size_unit ?? 'observations', n, spec.cluster_dim.value);
+}
+
 function num(n: number): string {
   return Math.round(n).toLocaleString('en-US');
 }
@@ -83,8 +93,9 @@ function num(n: number): string {
 /**
  * The from/to range restated in the other unit, from the Clusters card's own
  * fixed value (`clusterSize` under a fixed size, `nClusters` under a fixed
- * count). `from`/`to` are in `unit`; `fixed` is that card value. Returns an
- * empty array when there is nothing to restate (no usable fixed value).
+ * count). `from`/`to` are in `unit`; `fixed` is that card value. A single
+ * value (Find power's n) passes `from === to`. Returns an empty array when
+ * there is nothing to restate (no usable fixed value).
  */
 export function unitEchoParts(
   unit: SampleSizeUnit,
@@ -100,15 +111,18 @@ export function unitEchoParts(
   const name: LabelPart = { text: clusterName, mono: true };
   // The multiplying branches are exact, the dividing ones are rounded — hence
   // "=" above and "≈" below.
-  const obs = (b: number) => num(boundToObservations(unit, b, fixed));
+  const range = (f: (b: number) => string) =>
+    from === to ? f(from) : `${f(from)} to ${f(to)}`;
+  const obs = range((b) => num(boundToObservations(unit, b, fixed)));
+  const per = range((b) => num(b / fixed));
   if (unit === 'clusters') {
     // Bounds are clusters → observations, and the fixed size per cluster.
-    return [{ text: `= ${obs(from)} to ${obs(to)} observations, ${num(fixed)} per ` }, name];
+    return [{ text: `= ${obs} observations, ${num(fixed)} per ` }, name];
   }
   if (unit === 'cluster_size') {
     // Bounds are observations per cluster → observations, over the fixed count.
     return [
-      { text: `= ${obs(from)} to ${obs(to)} observations, ${num(fixed)} ` },
+      { text: `= ${obs} observations, ${num(fixed)} ` },
       name,
       { text: ' clusters' },
     ];
@@ -116,13 +130,13 @@ export function unitEchoParts(
   // Bounds are observations → the derived quantity the fixed knob leaves free.
   if (dimKind === 'cluster_size') {
     return [
-      { text: `≈ ${num(from / fixed)} to ${num(to / fixed)} ` },
+      { text: `≈ ${per} ` },
       name,
       { text: ` clusters, ${num(fixed)} observations each` },
     ];
   }
   return [
-    { text: `≈ ${num(from / fixed)} to ${num(to / fixed)} observations per ` },
+    { text: `≈ ${per} observations per ` },
     name,
     { text: `, ${num(fixed)} ` },
     name,

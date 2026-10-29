@@ -49,17 +49,12 @@ pub enum LinkKind {
     Probit,
 }
 
-/// Residual marginal for continuous outcomes. No df field: `HighKurtosis` is
-/// t with the active scenario's `residual_df` (shape is the user's assertion,
-/// severity stays scenario-graded).
+/// Residual marginal for continuous outcomes. No df field: the non-normal
+/// shapes (`HighKurtosis` as Student t, `RightSkewed` / `LeftSkewed` as scaled
+/// chi-square) draw at a fixed df of 10 in the engine, in every scenario.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResidualSpec {
     pub distribution: ResidualDist,
-    /// Explicitly chosen by the user (incl. explicit `normal`) — scenario
-    /// residual swaps leave it alone. Unpinned `Normal` is the only
-    /// swap-eligible state.
-    #[serde(default)]
-    pub pinned: bool,
 }
 
 /// Residual marginal families — the same five parameterless shapes as
@@ -86,7 +81,6 @@ mod tests {
             coefficients: vec![-1.3863, 0.4, 0.2, 0.5],
             residual: ResidualSpec {
                 distribution: ResidualDist::Normal,
-                pinned: true,
             },
             heteroskedasticity_driver: Some(ColumnId(0)),
             link: None,
@@ -108,7 +102,6 @@ mod tests {
                 coefficients: vec![0.5, 0.3],
                 residual: ResidualSpec {
                     distribution: ResidualDist::Normal,
-                    pinned: false,
                 },
                 heteroskedasticity_driver: None,
                 link,
@@ -136,27 +129,10 @@ mod tests {
             coefficients: vec![0.0],
             residual: ResidualSpec {
                 distribution: ResidualDist::Normal,
-                pinned: false,
             },
         })
         .unwrap();
         let back: OutcomeSpec = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(back.link, None);
-    }
-
-    #[test]
-    fn residual_spec_pinned_defaults_false_on_old_payload() {
-        // Pre-pin payloads carry only `distribution`; serde default fills
-        // pinned = false (= swap-eligible when Normal).
-        #[derive(Serialize)]
-        struct OldResidualSpec {
-            distribution: ResidualDist,
-        }
-        let bytes = rmp_serde::to_vec_named(&OldResidualSpec {
-            distribution: ResidualDist::Normal,
-        })
-        .unwrap();
-        let back: ResidualSpec = rmp_serde::from_slice(&bytes).unwrap();
-        assert!(!back.pinned);
     }
 }

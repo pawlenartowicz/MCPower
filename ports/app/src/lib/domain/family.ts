@@ -204,16 +204,12 @@ export interface AdvancedConfig {
 }
 
 /** Model "More options" knobs (UI copy of the wire's OutcomeOptions).
- *  Neutral = unpinned default, NOT a specific value. A pinned explicit normal
- *  must be represented with pinnedResidual=true; the adapter sends it on the wire. */
+ *  Neutral = null residual distribution or 'normal', and an empty driver. */
 export interface OutcomeOptionsConfig {
-  /** Residual distribution shape. Null/absent = unpinned default (normal; scenarios may swap it).
-   *  One of the canonical five: 'normal'|'right_skewed'|'left_skewed'|'high_kurtosis'|'uniform'.
-   *  Only meaningful when pinnedResidual=true. */
+  /** Residual distribution shape. Null/absent = normal. One of the canonical five:
+   *  'normal'|'right_skewed'|'left_skewed'|'high_kurtosis'|'uniform'. The shape is
+   *  the same in every scenario. */
   residualDistribution: ContinuousDistribution | null;
-  /** True = the user explicitly chose a residual distribution (incl. explicit normal) → pinned;
-   *  scenario swaps leave it alone. False = unpinned default (null residualDistribution on wire). */
-  pinnedResidual: boolean;
   /** Driver predictor name for heteroskedasticity. '' = linear predictor Xβ (default).
    *  Variance ratio λ comes from the active scenario. */
   heteroskedasticityDriver: string;
@@ -222,7 +218,6 @@ export interface OutcomeOptionsConfig {
 export function defaultOutcomeOptions(): OutcomeOptionsConfig {
   return {
     residualDistribution: null,
-    pinnedResidual: false,
     heteroskedasticityDriver: '',
   };
 }

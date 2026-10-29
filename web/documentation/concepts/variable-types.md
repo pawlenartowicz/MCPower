@@ -80,21 +80,21 @@ A factor — detected or declared — can have at most 20 levels; a column with 
 
 ## Residual distribution
 
-The **residual distribution** is the shape of the noise term — the unexplained scatter MCPower adds to each simulated outcome around its predicted value. The five choices are the same shapes as for predictors (`normal`, `right_skewed`, `left_skewed`, `high_kurtosis`, `uniform`), and the default is `normal`. Setting it with `set_residual_distribution(name)` pins the shape so scenario swaps leave it alone.
+The **residual distribution** is the shape of the noise term: the unexplained scatter MCPower adds to each simulated outcome around its predicted value. The five choices are the same shapes as for predictors (`normal`, `right_skewed`, `left_skewed`, `high_kurtosis`, `uniform`), and the default is `normal`. Set it with `set_residual_distribution(name)`.
 
 The five valid names:
 
 | Name | Shape |
 |---|---|
 | `normal` | Standard normal (default if unset) |
-| `right_skewed` | Right-skewed (exponential-based) |
-| `left_skewed` | Left-skewed (mirror) |
-| `high_kurtosis` | Heavy-tailed Student t; df comes from the active scenario's `residual_df` (optimistic 10 / realistic 8 / doomer 5) |
+| `right_skewed` | Right-skewed: a scaled χ² with 10 df |
+| `left_skewed` | Left-skewed: the mirror of `right_skewed` |
+| `high_kurtosis` | Heavy-tailed Student t with 10 df |
 | `uniform` | Uniform |
 
-There is no `df=` parameter on `set_residual_distribution`. The df for `high_kurtosis` is always scenario-supplied — set it via `set_scenario_configs({"your_scenario": {"residual_df": 5}})`. Calling `set_residual_distribution` with any name, including `"normal"`, **pins** the residual: scenario residual swaps leave it alone. The unpinned default — not calling `set_residual_distribution` at all — is the only state where swaps can fire.
+There is no `df=` parameter on `set_residual_distribution`. The df of `high_kurtosis`, `right_skewed` and `left_skewed` is 10 in every scenario, and every shape is scaled to unit variance.
 
-The conceptual point is that **type, distribution shape, and residual shape are all part of your design assumptions** — perturbing the unpinned ones is exactly what [[concepts/sensitivity-analysis|sensitivity analysis]] does. For the exact syntax in each port, see the tutorials.
+The conceptual point is that **type, distribution shape, and residual shape are all part of your design assumptions**. The scenarios of [[concepts/sensitivity-analysis|sensitivity analysis]] perturb the predictors you leave at their defaults, while the residual stays as you set it. For the exact syntax in each port, see the tutorials.
 
 ## Residuals and heteroskedasticity
 

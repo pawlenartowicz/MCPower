@@ -217,3 +217,54 @@ test_that("upload_data: 1000001 rows rejects (above max_rows=1000000)", {
   upload_cfg <- mcpower:::.config()$upload
   expect_equal(as.integer(upload_cfg$max_rows), 1000000L)
 })
+
+# ── binary coding, missing cells, column-wise detection ───────────────────
+
+test_that("upload_data: a binary column's two values are coded 0/1 (lower -> 0)", {
+  # The engine reads a binary column's proportion as the share of 1s, so a
+  # -1/1 or 1/2 coding must give the same power as 0/1.
+  set.seed(3)
+  x <- rnorm(200)
+  treat01 <- rep(c(0, 1), times = c(140, 60))
+  run <- function(treat) {
+    m <- MCPower$new("y ~ x + treat")
+    m$upload_data(data.frame(x = x, treat = treat), verbose = FALSE)
+    m$set_effects("x=0.2, treat=0.5")
+    m$find_power(120, n_sims = 200L, seed = 7, verbose = FALSE,
+                 progress_callback = FALSE)$power_uncorrected
+  }
+  p01 <- run(treat01)
+  expect_equal(run(treat01 * 2 - 1), p01)
+  expect_equal(run(treat01 + 1), p01)
+})
+
+test_that("upload_data: NA and Inf cells are rejected with the shared messages", {
+  m <- MCPower$new("y ~ x + z")
+  expect_error(
+    m$upload_data(data.frame(x = c(NA, rnorm(29)), z = rnorm(30)), verbose = FALSE),
+    "Uploaded data contains NaN values in columns: x. Remove or impute missing values before uploading.",
+    fixed = TRUE)
+  expect_error(
+    m$upload_data(data.frame(x = rnorm(30), z = c(Inf, rnorm(29))), verbose = FALSE),
+    "Uploaded data contains Inf values in columns: z. Remove or replace infinite values before uploading.",
+    fixed = TRUE)
+  expect_error(
+    m$upload_data(data.frame(x = rnorm(30), z = c(NA, letters[1:29])), verbose = FALSE),
+    "Uploaded data contains NaN values in columns: z.", fixed = TRUE)
+  expect_error(
+    m$upload_data(data.frame(x = rnorm(30), z = c("", letters[1:29])), verbose = FALSE),
+    "Uploaded data contains NaN values in columns: z.", fixed = TRUE)
+})
+
+test_that("upload_data: column types do not depend on unrelated character columns", {
+  set.seed(1)
+  n <- 200
+  df <- data.frame(x = c(1234.56789, rnorm(n - 1)), treat = rep(c(TRUE, FALSE), n / 2),
+                   g = sample(c("a", "b", "c"), n, TRUE), stringsAsFactors = FALSE)
+  m <- MCPower$new("y ~ x + treat")
+  m$upload_data(df, verbose = FALSE)
+  types <- vapply(m$.__enclos_env__$private$pending_data$columns_typed,
+                  function(e) e$col_type, character(1))
+  expect_equal(types, c("continuous", "binary"))
+  expect_identical(unlist(m$.__enclos_env__$private$pending_data$raw_columns$x)[1], 1234.56789)
+})

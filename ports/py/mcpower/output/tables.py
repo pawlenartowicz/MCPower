@@ -201,9 +201,10 @@ def _row_or_cell(r, target_indices, contrast_pairs, sizes) -> str:
     """OR cell (`exp(β)`) for one ``build_rows`` row, or '' when no single
     configured β applies (omnibus/post-hoc rows; factor headers are spans).
 
-    β is recovered from ``meta['effect_sizes']`` via the row's β-column index:
-    the skeleton carries the intercept at 0 and the n effects at 1..n in the same
-    order as ``effect_sizes``, so skeleton index ``idx`` maps to ``sizes[idx-1]``.
+    β is recovered from ``meta['column_effect_sizes']`` via the row's β-column
+    index: the skeleton carries the intercept at 0 and the n effects at 1..n in
+    the same order as ``column_effect_sizes``, so skeleton index ``idx`` maps to
+    ``sizes[idx-1]``.
     A pairwise contrast's OR is ``exp(β_p − β_n)`` — the odds multiplier between
     its two levels."""
     kind = r.get("kind")
@@ -298,7 +299,7 @@ def main_power_tables(scenarios, meta, *, dec, tdec, target, caption):
     # column beside the always-last Target column. β is the wire truth; OR is a
     # display-only readout. Other families render exactly as before.
     is_logit = meta.get("outcome_kind") == "binary"
-    sizes = meta.get("effect_sizes") or []
+    sizes = meta.get("column_effect_sizes") or []
 
     def or_col(columns):
         """Insert the OR header before the (always-last) Target column."""
@@ -448,6 +449,19 @@ def _render_descriptor(desc: Dict[str, Any], factors: Dict[str, Any]) -> str:
     if kind == "interaction":
         return ":".join(_render_descriptor(c, factors) for c in desc["components"])
     return "(Intercept)"
+
+
+def _descriptor_components(desc: Dict[str, Any], factors: Dict[str, Any]) -> Optional[List[str]]:
+    """Component names of one EffectDescriptor, in the registry's
+    ``effect_components`` form: ``[name]`` for a main effect, one rendered name
+    per component for an interaction, ``None`` for an intercept (including the
+    placeholder a test design leaves in a dropped column's slot)."""
+    kind = desc["kind"]
+    if kind == "interaction":
+        return [_render_descriptor(c, factors) for c in desc["components"]]
+    if kind in ("continuous", "factor_level"):
+        return [_render_descriptor(desc, factors)]
+    return None
 
 
 def _contrast_label(skeleton, factors, p: int, n: int) -> str:

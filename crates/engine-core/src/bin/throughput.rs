@@ -25,7 +25,7 @@
 //! and the Mle (LME/LMM) rows alike — so the scenario-path cost is benched on
 //! every estimator. The presets leave the LME-specific RE knobs (`lme`) None;
 //! only the general perturbations (heterogeneity, heteroskedasticity, distribution
-//! and residual swaps) vary, which all estimators accept (`invariant_13` permits
+//! swaps) vary, which all estimators accept (`invariant_13` permits
 //! `scenario.lme = None` for any estimator) — see `has_on_mode`.
 //!
 //! Specs are FROZEN Rust constructors: a baseline comparison is only valid if
@@ -74,27 +74,21 @@ const BASELINE_REL: &str = "../../benchmarks/results/engine.json";
 // ---------------------------------------------------------------------------
 
 fn preset(name: &str) -> ScenarioPerturbations {
-    let menus = (
-        vec![
-            Distribution::RightSkewed,
-            Distribution::LeftSkewed,
-            Distribution::Uniform,
-        ],
-        vec![ResidualDist::HighKurtosis, ResidualDist::RightSkewed],
-    );
+    let new_distributions = vec![
+        Distribution::RightSkewed,
+        Distribution::LeftSkewed,
+        Distribution::Uniform,
+    ];
     match name {
-        // Zero-perturbation baseline; menus populated (hosts always send them)
-        // but never consulted at zero probability — still the fast path.
+        // Zero-perturbation baseline; menu populated (hosts always send it)
+        // but never consulted at zero probability, so still the fast path.
         "optimistic" => ScenarioPerturbations {
             name: "optimistic".into(),
             heterogeneity: 0.0,
             heteroskedasticity_ratio: 1.0,
             correlation_noise_sd: 0.0,
             distribution_change_prob: 0.0,
-            new_distributions: menus.0,
-            residual_change_prob: 0.0,
-            residual_dists: menus.1,
-            residual_df: 10.0,
+            new_distributions,
             sampled_factor_proportions: false,
             truth_start: true,
             lme: None,
@@ -105,10 +99,7 @@ fn preset(name: &str) -> ScenarioPerturbations {
             heteroskedasticity_ratio: 2.0,
             correlation_noise_sd: 0.15,
             distribution_change_prob: 0.5,
-            new_distributions: menus.0,
-            residual_change_prob: 0.5,
-            residual_dists: menus.1,
-            residual_df: 8.0,
+            new_distributions,
             sampled_factor_proportions: true,
             truth_start: false,
             lme: None,
@@ -119,10 +110,7 @@ fn preset(name: &str) -> ScenarioPerturbations {
             heteroskedasticity_ratio: 4.0,
             correlation_noise_sd: 0.3,
             distribution_change_prob: 0.8,
-            new_distributions: menus.0,
-            residual_change_prob: 0.8,
-            residual_dists: menus.1,
-            residual_df: 5.0,
+            new_distributions,
             sampled_factor_proportions: true,
             truth_start: false,
             lme: None,
@@ -197,7 +185,6 @@ fn base_spec(k: u32) -> SimulationSpec {
         },
         heteroskedasticity_driver: None,
         residual_dist: ResidualDist::Normal,
-        residual_pinned: false,
         outcome_kind: OutcomeKind::Continuous,
         link: None,
         estimator: EstimatorSpec::Ols,
@@ -210,6 +197,7 @@ fn base_spec(k: u32) -> SimulationSpec {
         cluster: None,
         scenario: ScenarioPerturbations::optimistic(),
         t3_table: None,
+        tukey_thresholds: Default::default(),
         het_coeffs: HeteroskedasticityCoeffs::default(),
         report_overall: false,
         factor_min_level_count: 0,

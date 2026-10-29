@@ -48,6 +48,8 @@ A **pairwise contrast** tests whether two specific factor levels differ — grou
 
 You can request contrasts two ways. Name a specific pair — `("treatment[B]", "treatment[A]")` — and MCPower powers just that comparison. Or request **post-hoc** comparisons for a factor, which power *all* pairs of its levels at once (the C(k,2) comparisons among k levels); pair these with the **Tukey HSD** [[concepts/multiple-testing#available-corrections|correction]], which is built for exactly this all-pairs case. Each contrast joins the correction family, so every comparison you add raises the bar on the rest.
 
+Both kinds are available for linear models fitted with OLS only. A logistic, Poisson or mixed-effects analysis that requests a contrast stops with an error.
+
 ## Power, not just p-values
 
 Because a correction shrinks the alpha each test sees, the **corrected power** is what you should size a multi-coefficient study against — not the uncorrected number. MCPower computes both, so you can see exactly how much power a correction costs. The correction is also effectively free at runtime: the adjusted critical values are worked out once, before the simulations run, so comparing corrections doesn't slow anything down.

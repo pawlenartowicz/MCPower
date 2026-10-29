@@ -17,7 +17,10 @@ engine-contract = { path = "../engine-contract" }
 # loop_advanced = the unstable scratch-explicit hot-path surface, outside glmm's
 # semver guarantee, so the version is pinned exactly; any bump can move the GLMM
 # goldens and must be deliberate and reviewed.
-glmm = { version = "=0.6.2", default-features = false, features = ["loop_advanced"] }
+glmm = { version = "=0.7.0", default-features = false, features = ["loop_advanced"] }
+# Studentized-range distribution for the Tukey HSD thresholds (the `dist`
+# feature only; no special-function surface is used here).
+commonstats  = { version = "0.3", default-features = false, features = ["dist"] }
 rayon        = "1.10"
 serde        = { version = "1", features = ["derive"] }
 # Used only by bin/throughput.rs (baseline JSON read/write); already in the

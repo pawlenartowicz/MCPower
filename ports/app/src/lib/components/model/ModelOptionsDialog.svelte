@@ -2,16 +2,13 @@
   // Model "More options" popup — structural outcome-level generation knobs.
   // Magnitudes (λ, heterogeneity, df) live in the per-scenario Scenarios settings.
   //
-  // Four controls:
-  //   1. Residual distribution — absent/null = unpinned default (normal; scenarios
-  //      may swap it). Choosing any of the five explicit options (incl. normal) pins it
-  //      to that shape; the "default" entry restores unpinned-null. A pinned
-  //      "high_kurtosis" still takes its df from the active scenario.
-  //   2. Variable distribution pool — multi-select of distributions scenarios may
-  //      swap any unpinned continuous predictor into; edits all scenarios at once.
-  //   3. Residual distribution pool — same, writes residual_dists on all scenarios.
-  //   4. Heteroskedasticity driver — which predictor (or the linear predictor) drives
+  // Three controls:
+  //   1. Residual distribution: normal by default, or one of the other four shapes,
+  //      the same in every scenario ("high_kurtosis" is Student t with 10 df).
+  //   2. Heteroskedasticity driver: which predictor (or the linear predictor) drives
   //      residual variance; the ratio λ comes from the active scenario.
+  //   3. Variable distribution pool: multi-select of distributions scenarios may
+  //      swap any unpinned continuous predictor into; edits all scenarios at once.
   import { Dialog, DialogContent, DialogTitle } from '$lib/components/ui/dialog';
   import {
     Select,
@@ -24,7 +21,7 @@
   import { parsedFormulaStore } from '$lib/stores/parsed-formula.svelte';
   import { scenariosStore } from '$lib/stores/scenarios.svelte';
   import { defaultOutcomeOptions, type OutcomeOptionsConfig } from '$lib/domain/family';
-  import type { NewDistribution, ResidualDist } from '$lib/configs/scenarios';
+  import type { NewDistribution } from '$lib/configs/scenarios';
   import { configPaneDialogStyle } from './dialog-position.svelte';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
 
@@ -43,35 +40,24 @@
   const o = $derived(cfg.outcomeOptions);
 
   // ---- Residual distribution ----
-  // "UNPINNED" sentinel = the unpinned-default entry in the select.
-  const UNPINNED = '__unpinned__';
-
   const RESIDUALS: Array<{ value: string; label: string; hint?: string }> = [
-    { value: UNPINNED, label: 'default (normal — scenarios may swap it)' },
-    { value: 'normal', label: 'normal (pinned)', hint: 'Prevents scenario swaps.' },
+    { value: 'normal', label: 'normal (default)' },
     { value: 'right_skewed', label: 'right-skewed' },
     { value: 'left_skewed', label: 'left-skewed' },
-    { value: 'high_kurtosis', label: 'heavy tails', hint: 'df comes from the active scenario.' },
+    { value: 'high_kurtosis', label: 'heavy tails', hint: 'Student t with 10 df' },
     { value: 'uniform', label: 'uniform' },
   ];
 
-  // The select value: UNPINNED sentinel when not pinned; else the distribution name.
-  const residualSelectValue = $derived(
-    o?.pinnedResidual ? (o.residualDistribution ?? 'normal') : UNPINNED,
-  );
+  // The select value: the distribution name; null (never chosen) shows as normal.
+  const residualSelectValue = $derived(o?.residualDistribution ?? 'normal');
   const residualLabel = $derived(
     RESIDUALS.find((r) => r.value === residualSelectValue)?.label ?? RESIDUALS[0]!.label,
   );
 
+  // Stores the choice as given: null and 'normal' project the same.
   function setResidualDist(v: string) {
     if (!o) return;
-    if (v === UNPINNED) {
-      o.pinnedResidual = false;
-      o.residualDistribution = null;
-    } else {
-      o.pinnedResidual = true;
-      o.residualDistribution = v as OutcomeOptionsConfig['residualDistribution'];
-    }
+    o.residualDistribution = v as OutcomeOptionsConfig['residualDistribution'];
   }
 
   // ---- Variable distribution pool (new_distributions on all scenarios) ----
@@ -95,29 +81,6 @@
       : [...current, dist];
     for (const s of scenariosStore.scenarios) {
       scenariosStore.update(s.name, { new_distributions: next });
-    }
-  }
-
-  // ---- Residual distribution pool (residual_dists on all scenarios) ----
-  const RESID_DIST_OPTIONS: Array<{ value: ResidualDist; label: string }> = [
-    { value: 'normal', label: 'normal' },
-    { value: 'right_skewed', label: 'right-skewed' },
-    { value: 'left_skewed', label: 'left-skewed' },
-    { value: 'high_kurtosis', label: 'heavy tails' },
-    { value: 'uniform', label: 'uniform' },
-  ];
-
-  const residDistPool = $derived<ResidualDist[]>(
-    (scenariosStore.scenarios[0]?.residual_dists ?? []) as ResidualDist[],
-  );
-
-  function toggleResidDist(dist: ResidualDist) {
-    const current = (scenariosStore.scenarios[0]?.residual_dists ?? []) as ResidualDist[];
-    const next: ResidualDist[] = current.includes(dist)
-      ? current.filter((d) => d !== dist)
-      : [...current, dist];
-    for (const s of scenariosStore.scenarios) {
-      scenariosStore.update(s.name, { residual_dists: next });
     }
   }
 
@@ -145,10 +108,6 @@
             <Label>Residual distribution</Label>
             <InfoIcon tipKey="residualDistribution" />
           </div>
-          <p class="text-xs text-muted-foreground">
-            Default lets scenarios swap the residual shape. Choosing an explicit option pins it.
-            The severity of heavy-tails is still scenario-graded (df from active scenario).
-          </p>
           <Select
             type="single"
             value={residualSelectValue}
@@ -163,28 +122,6 @@
               {/each}
             </SelectContent>
           </Select>
-        </div>
-
-        <div class="space-y-1.5 border-t border-border pt-3">
-          <Label>Allowed residual swap distributions</Label>
-          <p class="text-xs text-muted-foreground">
-            Distributions scenarios may swap the residual into (applies to all scenarios). Ratio λ
-            comes from the active scenario.
-          </p>
-          <div class="flex flex-wrap gap-1.5">
-            {#each RESID_DIST_OPTIONS as opt (opt.value)}
-              {@const active = residDistPool.includes(opt.value)}
-              <button
-                type="button"
-                onclick={() => toggleResidDist(opt.value)}
-                class="rounded border px-2.5 py-1 text-xs transition-colors
-                  {active
-                    ? 'border-primary bg-primary/10 text-foreground'
-                    : 'border-border text-muted-foreground hover:bg-muted/60'}"
-                aria-pressed={active}
-              >{opt.label}</button>
-            {/each}
-          </div>
         </div>
 
         <div class="space-y-1.5 border-t border-border pt-3">

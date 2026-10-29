@@ -99,14 +99,15 @@ struct ScenarioJson {
     /// sample-size grid point; older envelopes omit this field.
     #[serde(default)]
     histogram: Vec<Vec<u64>>,
-    /// find_power only: overall/omnibus test rate at the single N. Absent (or
-    /// `null`) when the family suppressed the overall test → no `overall` bar.
+    /// Overall/omnibus test rate, one entry per N in `sample_sizes`. Absent, or
+    /// `null` entries, when the family suppressed the overall test → no
+    /// `overall` bar (find_power) or curve series (find_sample_size).
     #[serde(default)]
-    overall_power: Option<f64>,
-    /// find_power only: `[lo, hi]` CI for `overall_power`. Absent → the bar falls
+    overall_power: Vec<Option<f64>>,
+    /// `[lo, hi]` CI for `overall_power`, one entry per N. An absent CI falls
     /// back to a zero-width interval at the rate.
     #[serde(default)]
-    overall_ci: Option<Vec<f64>>,
+    overall_ci: Vec<Option<Vec<f64>>>,
     /// find_sample_size only: divisor between total N and the requested unit
     /// (1 = observations, the same value on every scenario — the orchestrator
     /// rejects a mismatch before this envelope is built). Older envelopes omit
@@ -122,6 +123,17 @@ fn parse_contrast_pairs(rows: &[Vec<u32>]) -> Vec<(u32, u32)> {
             _ => None,
         })
         .collect()
+}
+
+/// Overall rate + CI at grid point `i` (see `ScenarioJson::overall_power`).
+fn overall_at(sc: &ScenarioJson, i: usize) -> (Option<f64>, Option<Ci>) {
+    let rate = sc.overall_power.get(i).copied().flatten();
+    let ci = sc
+        .overall_ci
+        .get(i)
+        .and_then(Option::as_ref)
+        .and_then(|v| (v.len() >= 2).then(|| Ci { lo: v[0], hi: v[1] }));
+    (rate, ci)
 }
 
 fn parse_ci_row(row: &[Vec<f64>]) -> Vec<Ci> {
@@ -157,6 +169,7 @@ fn plot_scenario_from_json(sc: &ScenarioJson) -> Result<PlotScenario> {
             } else {
                 Vec::new()
             };
+            let (overall_power, overall_ci) = overall_at(sc, i);
             PlotPoint {
                 n,
                 target_indices: sc.target_indices.clone(),
@@ -164,10 +177,10 @@ fn plot_scenario_from_json(sc: &ScenarioJson) -> Result<PlotScenario> {
                 power: sc.power[i].clone(),
                 ci,
                 histogram,
-                // Per-N overall rates are not surfaced in the R envelope, so the
-                // overall curve series is not emitted on this host.
-                overall_power: None,
-                overall_ci: None,
+                // Drives the extra `"overall"` curve series; `None` at every N
+                // when the family suppressed the overall test.
+                overall_power,
+                overall_ci,
             }
         })
         .collect();
@@ -217,6 +230,7 @@ pub fn power_plot_set_json(
             .first()
             .ok_or_else(|| Error::Other(format!("scenario `{label}`: ci is empty")))?;
         let ci = parse_ci_row(ci_row);
+        let (overall_power, overall_ci) = overall_at(sc, 0);
         out.push(PlotScenario {
             label: label.clone(),
             points: vec![PlotPoint {
@@ -230,11 +244,8 @@ pub fn power_plot_set_json(
                 // power-at-N chart, matching the table. Absent when the family
                 // suppressed it. A present rate with no CI degenerates to a
                 // zero-width interval in the orchestrator.
-                overall_power: sc.overall_power,
-                overall_ci: sc
-                    .overall_ci
-                    .as_ref()
-                    .and_then(|v| (v.len() >= 2).then(|| Ci { lo: v[0], hi: v[1] })),
+                overall_power,
+                overall_ci,
             }],
         });
     }

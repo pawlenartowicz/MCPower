@@ -374,6 +374,27 @@ def test_set_heteroskedasticity_driver_constant_and_bad_var():  # APIC-74
         m.set_heteroskedasticity_driver(var="not_a_var")
 
 
+def test_heteroskedasticity_driver_index_skips_declared_factors():
+    """The driver index counts non-factor predictors, so a declared factor ahead
+    of the driver must not shift it, either on first setup (types apply lazily)
+    or after upload_data rebuilds the registry from the bare formula."""
+    m = MCPower("y = g + x + z")
+    m.set_variable_type("g=(factor,3)")
+    m.set_heteroskedasticity_driver(var="z")
+    m._apply()
+    assert m._heteroskedasticity == {"driver_var_index": 1}
+    m.upload_data({"x": [float(i) for i in range(30)]}, verbose=False)
+    m.set_heteroskedasticity_driver(var="z")
+    m._apply()
+    assert m._heteroskedasticity == {"driver_var_index": 1}
+
+    m = MCPower("y = g + x")
+    m.set_variable_type("g=(factor,3)")
+    m.set_heteroskedasticity_driver(var="g")
+    with pytest.raises(ValueError, match="must be a non-factor"):
+        m._apply()
+
+
 @pytest.mark.parametrize("var, index", [("x1", 0), ("x2", 1)])
 def test_set_heteroskedasticity_driver_honored(var, index):  # APIC-74b, APIC-74c
     """driver_var_index flows through to the encoded spec (catches the v1 bug
@@ -405,7 +426,6 @@ def test_set_max_failed_simulations_range():  # APIC-77
     "key, name, message",
     [
         ("new_distributions", "weird_dist", "unknown distribution name 'weird_dist'"),
-        ("residual_dists", "nonexistent_dist", "unknown residual distribution 'nonexistent_dist'"),
     ],
 )
 def test_unknown_scenario_distribution_rejected_at_spec_build(key, name, message):  # APIC-80
@@ -414,6 +434,35 @@ def test_unknown_scenario_distribution_rejected_at_spec_build(key, name, message
     m.set_scenario_configs({"realistic": {key: [name]}})
     with pytest.raises(ValueError, match=f"scenario 'realistic': {message}"):
         m._to_linear_spec_dict(["realistic"])
+
+
+@pytest.mark.parametrize("key, value", [
+    ("residual_change_prob", 0.5), ("residual_dists", ["high_kurtosis"]), ("residual_df", 8),
+])
+def test_removed_residual_swap_keys_rejected(key, value):
+    with pytest.raises(ValueError, match=f"scenario 'realistic': unknown config key '{key}'"):
+        MCPower("y = x1").set_scenario_configs({"realistic": {key: value}})
+
+
+def test_residual_wire_carries_distribution_only():
+    m = MCPower("y = x1").set_effects("x1=0.5").set_residual_distribution("high_kurtosis")
+    d = m._to_linear_spec_dict(["optimistic", "realistic", "doomer"])
+    assert d["residual"] == {"distribution": "high_kurtosis"}
+    removed = {"residual_change_prob", "residual_dists", "residual_df"}
+    assert all(not (removed & set(sc)) for sc in d["scenarios"])
+
+
+def test_summary_keys():
+    s = MCPower("y = x1").set_effects("x1=0.5").summary()
+    assert set(s) == {"formula", "family", "outcome_kind", "estimator", "effects",
+                      "n_simulations", "alpha", "power_target", "residual_distribution", "scenarios"}
+
+
+def test_residual_choice_runs_under_every_preset():
+    m = MCPower("y = x1").set_effects("x1=0.5").set_residual_distribution("high_kurtosis")
+    r = m.find_power(sample_size=60, n_sims=50, seed=2137, scenarios=True,
+                     progress_callback=False, verbose=False)
+    assert set(r["scenarios"]) == {"optimistic", "realistic", "doomer"}
 
 
 # ---------------------------------------------------------------------------
@@ -509,3 +558,51 @@ def test_find_power_validates_sample_size_before_engine():  # APIC-78
     # sample_size=5 fails _validate_sample_size (< 20) before any engine call.
     with pytest.raises(ValueError):
         m.find_power(sample_size=5, n_sims=10, progress_callback=False)
+
+
+def _factor_sampling_flags(m):
+    """Per-factor ``sampled_proportions`` on the lowered generation columns."""
+    cols = m.to_simulation_spec()["generation"]["columns"]
+    return [next(iter(c.values())).get("sampled_proportions") for c in cols]
+
+
+def _two_factor_model():
+    m = MCPower("y = g + h")
+    m.set_variable_type("g=(factor,0.2,0.3,0.5), h=(factor,3)")
+    m.set_effects("g[2]=0.3, g[3]=0.4, h[2]=0.2, h[3]=0.2")
+    return m
+
+
+def test_set_factor_sampling_modes_reach_contract():
+    assert _factor_sampling_flags(_two_factor_model()) == [None, None]
+    m = _two_factor_model()
+    m.set_factor_sampling("g", "exact").set_factor_sampling("h", "sampled")
+    assert _factor_sampling_flags(m) == [False, True]
+    # None clears the override: the column inherits the scenario again.
+    m = _two_factor_model()
+    m.set_factor_sampling("g", "exact").set_factor_sampling("g", None)
+    assert _factor_sampling_flags(m) == [None, None]
+
+
+def test_set_factor_sampling_survives_upload_reapply():
+    # The upload re-apply rebuilds an uploaded factor from its data; the
+    # override must still reach the data-backed column.
+    m = MCPower("y = breed")
+    m.upload_data({"breed": (["cat", "dog", "bird"] * 10)}, verbose=False)
+    m.set_effects("breed[cat]=0.3, breed[dog]=0.3")
+    m.set_factor_sampling("breed", "sampled")
+    cols = m.to_simulation_spec()["generation"]["columns"]
+    assert [next(iter(c)) for c in cols] == ["FactorFromFrame"]
+    assert _factor_sampling_flags(m) == [True]
+
+
+def test_set_factor_sampling_rejects_bad_mode_and_non_factor():
+    m = MCPower("y = g + x")
+    m.set_variable_type("g=(factor,3)")
+    m.set_effects("g[2]=0.3, g[3]=0.3, x=0.2")
+    for bad in ("Exact", "random", True):
+        with pytest.raises(ValueError, match="'exact', 'sampled' or None"):
+            m.set_factor_sampling("g", bad)
+    m.set_factor_sampling("x", "exact")
+    with pytest.raises(ValueError, match="'x' is not a factor predictor"):
+        m.to_simulation_spec()

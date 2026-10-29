@@ -24,6 +24,7 @@ sample sizes, so it is smooth and the reported N is stable from run to run.
 \item \href{#method-MCPower-set_correlation}{\code{MCPower$set_correlation()}}
 \item \href{#method-MCPower-set_correlations}{\code{MCPower$set_correlations()}}
 \item \href{#method-MCPower-set_variable_type}{\code{MCPower$set_variable_type()}}
+\item \href{#method-MCPower-set_factor_sampling}{\code{MCPower$set_factor_sampling()}}
 \item \href{#method-MCPower-set_residual_distribution}{\code{MCPower$set_residual_distribution()}}
 \item \href{#method-MCPower-set_heteroskedasticity_driver}{\code{MCPower$set_heteroskedasticity_driver()}}
 \item \href{#method-MCPower-set_cluster}{\code{MCPower$set_cluster()}}
@@ -142,6 +143,30 @@ Add a random-intercept grouping factor to the model.}
 \if{html}{\out{<div class="r">}}\preformatted{MCPower$set_variable_type(spec)}\if{html}{\out{</div>}}
 }
 
+}
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-MCPower-set_factor_sampling"></a>}}
+\if{latex}{\out{\hypertarget{method-MCPower-set_factor_sampling}{}}}
+\subsection{Method \code{set_factor_sampling()}}{
+\subsection{Usage}{
+\if{html}{\out{<div class="r">}}\preformatted{MCPower$set_factor_sampling(name, mode)}\if{html}{\out{</div>}}
+}
+
+\subsection{Arguments}{
+\if{html}{\out{<div class="arguments">}}
+\describe{
+\item{\code{name}}{A factor predictor.}
+
+\item{\code{mode}}{\code{"exact"} holds the level counts at their shares in
+every simulation; \code{"sampled"} draws each row's level at random, so
+counts vary between simulations; \code{NULL} removes the override and
+the scenario setting applies again.}
+}
+\if{html}{\out{</div>}}
+}
+\subsection{Returns}{
+The \code{MCPower} object invisibly (for chaining).
+}
 }
 \if{html}{\out{<hr>}}
 \if{html}{\out{<a id="method-MCPower-set_residual_distribution"></a>}}

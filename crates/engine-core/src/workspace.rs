@@ -1,8 +1,9 @@
 //! Per-thread workspace skeleton.
 //!
 //! Holds preallocated buffers reused across sims assigned to a single thread,
-//! including the per-sim scenario design slots (perturbed Σ/L, var types,
-//! residual choice, τ²) that `data_gen::populate_design` overwrites every sim.
+//! including the per-sim design slots that `data_gen::populate_design`
+//! overwrites every sim: the scenario draws (perturbed Σ/L, var types, τ²) and
+//! the residual distribution, copied from the spec.
 
 use crate::spec::{Distribution, ResidualDist};
 use faer::Mat;
@@ -78,7 +79,7 @@ pub struct SimWorkspace {
     /// Cached row-level cell of every row (`fixed_cell_sequences`). The
     /// fixed-allocation walk is identical in every sim of one design, so
     /// `generate_sim_data` builds it once and rebuilds only when the cache
-    /// key (the three `factor_seq_*` fields) changes.
+    /// key (the four `factor_seq_*` fields) changes.
     pub factor_row_seq: Vec<u32>,
     /// Cached cluster-level cell of every cluster step, clusters in
     /// representative-row order; same cache key as `factor_row_seq`.
@@ -88,6 +89,10 @@ pub struct SimWorkspace {
     /// Cache key: the radices the sequences were built from (they also fix
     /// the row/cluster cell split).
     pub factor_seq_radices: Vec<u32>,
+    /// Cache key: the group count the row-level walk balanced over
+    /// (`row_walk_groups`: nested children or primary clusters; 0 for the
+    /// plain walk).
+    pub factor_seq_groups: usize,
     /// Cache key: the max_n the sequences were built for.
     pub factor_seq_n: usize,
     /// Running per-level counts for the current row prefix, factor_proportions
@@ -126,8 +131,6 @@ pub struct SimWorkspace {
     pub var_types_design: Vec<Distribution>,
     /// Current sim's residual distribution.
     pub residual_dist_design: ResidualDist,
-    /// Current sim's residual df.
-    pub residual_df_design: f64,
     /// Current sim's effective cluster variance τ²_eff: `cluster.tau_squared`
     /// plus an optional per-sim ICC jitter (scenario path), clamped ≥ 0. Equals
     /// `cluster.tau_squared` on the optimistic path / no-jitter scenarios. 0.0
@@ -287,16 +290,19 @@ pub struct SimWorkspace {
     /// `n_idx`). Empty for OLS / unclustered GLM. Built at the batch/introspect
     /// construction sites via `mixed_workspace::build_mixed_workspaces` (the ctor
     /// doesn't know the estimator or the grid). Per grid point rather than one at
-    /// `max_n` because `fit_on` pins the primary cluster count at build — see that
-    /// builder's doc for why `FixedSize` designs force it.
+    /// `max_n` because a workspace keeps the ids it was built with and fits
+    /// exactly those rows; see that builder's doc.
     pub mixed: Vec<glmm::loop_advanced::FitWorkspace>,
-    /// RE level ids per grid point, parallel to `mixed` — the `fit_on` companion
-    /// to `(x, y)`. Materialized once at batch entry because `cluster_ids` /
-    /// `extra_grouping_ids` are structural and invariant across sims.
+    /// Raw (declaration-order) RE level ids per grid point, parallel to `mixed`:
+    /// the ids each workspace was built with, kept for the cold reduced fits
+    /// that build a one-shot workspace on the same rows. The hot `fit_on` calls
+    /// do not pass them (the workspace owns its copy). Materialized once at
+    /// batch entry because `cluster_ids` / `extra_grouping_ids` are structural
+    /// and invariant across sims.
     pub mixed_ids: Vec<glmm::GroupIds>,
-    /// The frozen `fit_on` options for `mixed`. `fit_on` asserts nagq /
-    /// weights-presence / offset-presence / parallel_inner match the build, so
-    /// every hot-path call presents exactly this value.
+    /// The frozen `fit_on` options for `mixed`. `fit_on` asserts nagq, the REML
+    /// criterion, parallel_inner and the number of SE columns match the build,
+    /// so every hot-path call presents exactly this value.
     pub mixed_opts: glmm::FitOptions,
     /// Row-major `n × p` f64 design scratch for `fit_on`, capacity
     /// `max_n · n_predictors`. The kernels take row-major `x[i·p + j]` while
@@ -361,6 +367,7 @@ impl SimWorkspace {
             factor_cell_radices: Vec::new(),
             factor_seq_weights: Vec::new(),
             factor_seq_radices: Vec::new(),
+            factor_seq_groups: 0,
             factor_seq_n: usize::MAX,
             factor_prefix_counts: Vec::new(),
             factor_excluded_flags: Vec::new(),
@@ -372,7 +379,6 @@ impl SimWorkspace {
             perturb_noise_buf: vec![0.0; n_non_factor * n_non_factor],
             var_types_design: vec![Distribution::Normal; n_non_factor],
             residual_dist_design: ResidualDist::Normal,
-            residual_df_design: 0.0,
             tau_squared_design: 0.0,
 
             fit_betas: vec![0.0; n_predictors],

@@ -3,8 +3,6 @@
 //! Invariants a maintainer must not break:
 //!  * `run_single_core_*` are the WASM twins of `run_find_*` — any change to one
 //!    (assemble path, parameter handling, output shape) lands in both.
-//!  * `get_effects_from_data` duplicates the `assemble.rs` var_types→`VarKind`
-//!    projection; the two must stay in sync.
 
 use engine_orchestrator::{
     CancellationToken, CurvatureHintParts, OrchestratorError, PowerResult, SampleSizeMethod,
@@ -16,7 +14,7 @@ use engine_orchestrator::{
 use crate::{
     AppSpec,
     app_spec::{ClusterDim, EffectSize, MixedOutcome, MixedSpec, SampleSizeUnit},
-    assemble::{assemble_spec, assemble_spec_with_skeleton},
+    assemble::{assemble_spec, assemble_spec_with_skeleton, project_to_builder_spec},
     error::AdapterError,
     progress::{EmitterSink, ProgressEmitter},
 };
@@ -386,110 +384,22 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
         });
     }
 
-    // Reconstruct the formula string and predictor specs exactly as assemble.rs does.
-    let formula_str = {
-        let outcome = &parsed_formula.outcome;
-        let mut terms: Vec<String> = parsed_formula.predictors.clone();
-        for iterm in &parsed_formula.interaction_terms {
-            terms.push(iterm.join(":"));
-        }
-        if terms.is_empty() {
-            format!("{outcome} ~ 1")
-        } else {
-            format!("{outcome} ~ {}", terms.join(" + "))
-        }
-    };
-
-    let parsed = engine_spec_builder::parse_formula(&formula_str)?;
-
-    // Build PredictorSpec list from the spec's var_types, mirroring assemble.rs logic.
-    let predictors: Result<Vec<engine_spec_builder::PredictorSpec>, AdapterError> = parsed_formula
-        .predictors
-        .iter()
-        .map(|pred_name| {
-            use crate::app_spec::VarType;
-            use engine_spec_builder::VarKind;
-
-            let var_type = var_types.iter().find(|vt| match vt {
-                VarType::Numeric { name, .. }
-                | VarType::Binary { name, .. }
-                | VarType::Factor { name, .. } => name == pred_name,
-            });
-
-            let kind = match var_type {
-                None | Some(VarType::Numeric { .. }) => VarKind::Normal,
-                Some(VarType::Binary {
-                    name,
-                    binary_proportion: p,
-                }) => {
-                    if !(*p >= 0.0 && *p <= 1.0) {
-                        return Err(AdapterError::InvalidProportion {
-                            name: name.clone(),
-                            value: *p,
-                        });
-                    }
-                    VarKind::Binary { proportion: *p }
-                }
-                Some(VarType::Factor {
-                    name,
-                    factor_n_levels,
-                    factor_proportions,
-                    factor_reference,
-                    factor_labels,
-                    ..
-                }) => {
-                    let n = *factor_n_levels as usize;
-                    if factor_proportions.len() != n {
-                        return Err(AdapterError::FactorLevelMismatch {
-                            name: name.clone(),
-                            expected: n,
-                            got: factor_proportions.len(),
-                        });
-                    }
-                    if (*factor_reference as usize) >= n {
-                        return Err(AdapterError::FactorReferenceOutOfRange {
-                            name: name.clone(),
-                            reference: *factor_reference,
-                            n_levels: n,
-                        });
-                    }
-                    // Level names drive the recovered effect names, so they must
-                    // match what the host displays: user labels first, then the
-                    // factor column's labels, then "1".."k" (matching assemble.rs).
-                    let levels: Vec<String> = if factor_labels.len() == n {
-                        factor_labels.clone()
-                    } else if let Some(col) = col_by_name.get(name.as_str()) {
-                        if col.labels.len() == n {
-                            col.labels.clone()
-                        } else {
-                            (1..=*factor_n_levels).map(|i| format!("{i}")).collect()
-                        }
-                    } else {
-                        (1..=*factor_n_levels).map(|i| format!("{i}")).collect()
-                    };
-                    // Honor the chosen reference level (mirrors assemble.rs); the
-                    // recovery design must use the same reference as the power run
-                    // or the recovered β labels are off by the reference shift.
-                    let reference = levels[*factor_reference as usize].clone();
-                    VarKind::Factor {
-                        levels,
-                        proportions: factor_proportions.clone(),
-                        reference,
-                        sampled_proportions: None,
-                    }
-                }
-            };
-
-            Ok(engine_spec_builder::PredictorSpec {
-                name: pred_name.clone(),
-                pinned: false,
-                kind,
-            })
-        })
-        .collect();
-    let predictors = predictors?;
-
-    let table = build_predictor_table(&parsed, &predictors)?;
+    // The run's own projection (formula + var_types → predictors), so the
+    // recovery design names and codes every predictor exactly as the power run
+    // does. Only `formula` and `predictors` are read; the effect, correlation and
+    // test arguments are placeholders.
+    let builder = project_to_builder_spec(
+        parsed_formula,
+        var_types,
+        &[],
+        &None,
+        engine_contract::CorrectionMethod::None,
+        &crate::app_spec::TestSelection::All,
+        0.05,
+        Some(csv),
+    )?;
+    let parsed = engine_spec_builder::parse_formula(&builder.formula)?;
+    let table = build_predictor_table(&parsed, &builder.predictors)?;
 
     // Recovery design, single-sourced in engine-spec-builder: canonical order
     // [Intercept, non-factors, factor dummies, interactions]; py/R bind to the
@@ -605,11 +515,9 @@ pub fn get_effects_from_data(spec: &AppSpec) -> Result<EffectsFromData, AdapterE
         }),
     };
 
-    // `assemble_spec` builds the contract's factor levels as "1".."k"
-    // while `design_flat` above uses real label-based dummies.  This divergence
-    // is safe: `debug_load_data` fits the CALLER-PROVIDED `design_flat` directly
-    // and never rebuilds the design from the contract's dummy declarations — only
-    // `n_levels` / the dummy COUNT matters for the fit, and that agrees.
+    // `debug_load_data` fits the caller-provided `design_flat` directly and never
+    // rebuilds the design from the contract's dummy declarations; the contract
+    // supplies only the estimator and the column layout.
     let contracts = assemble_spec(&zeroed_spec)?;
     let contract = contracts
         .into_iter()

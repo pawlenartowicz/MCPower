@@ -1,11 +1,15 @@
 //! `find_sample_size` — sweep N over a grid per scenario.
 //!
-//! One `engine_core::run_batch` per scenario, all N values in one call
-//! (engine kernel accepts an ascending `sample_sizes` slice).
+//! One `engine_core::run_batch` (or `run_batch_st` for the single-core twin)
+//! per scenario, all N values in one call (engine kernel accepts an ascending
+//! `sample_sizes` slice).
 
 use crate::aggregation::aggregate_batch;
 use crate::cancel::CancellationToken;
-use crate::find_power::{EngineSinkAdapter, factor_preflight_sample_size, lower_contracts};
+use crate::find_power::{
+    EngineSinkAdapter, RunBatch, factor_preflight_sample_size, lower_contracts,
+    small_cluster_glmm_warning,
+};
 use crate::grid::{SampleSizeDerivations, build_grid, derive_sample_size_outputs};
 use crate::progress::{ProgressEvent, ProgressSink};
 use crate::result::{
@@ -125,6 +129,35 @@ pub fn find_sample_size(
     method: SampleSizeMethod,
     unit_divisor: usize,
     base_seed: u64,
+    progress: Option<&mut dyn ProgressSink>,
+    cancel: &CancellationToken,
+) -> Result<ScenarioResult<SampleSizeResult>, OrchestratorError> {
+    find_sample_size_with(
+        engine_core::run_batch,
+        contracts,
+        target_power,
+        bounds,
+        n_sims,
+        method,
+        unit_divisor,
+        base_seed,
+        progress,
+        cancel,
+    )
+}
+
+/// Body of `find_sample_size` / `single_core_find_sample_size`, parameterised
+/// by the batch runner.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn find_sample_size_with(
+    run_batch: RunBatch,
+    contracts: &[SimulationContract],
+    target_power: f64,
+    bounds: (usize, usize),
+    n_sims: usize,
+    method: SampleSizeMethod,
+    unit_divisor: usize,
+    base_seed: u64,
     mut progress: Option<&mut dyn ProgressSink>,
     cancel: &CancellationToken,
 ) -> Result<ScenarioResult<SampleSizeResult>, OrchestratorError> {
@@ -149,7 +182,7 @@ pub fn find_sample_size(
     }
 
     // NOTE: per-scenario dispatch is sequential today; mirrors find_power's
-    // dispatch shape. Do NOT replace the inner per-sim loop in `run_batch`
+    // dispatch shape. Do NOT replace the inner per-sim loop in `engine_core::run_batch`
     // with `par_chunks_mut` chunked dispatch.
     let out = for_each_scenario(
         &scenarios,
@@ -158,6 +191,7 @@ pub fn find_sample_size(
         None,
         |idx, scenario, progress| {
             let (grid_or_trace, d) = run_grid_for_scenario(
+                run_batch,
                 scenario,
                 &grid,
                 n_sims,
@@ -173,6 +207,7 @@ pub fn find_sample_size(
             // grid itself is shared.
             let mut scenario_warnings = grid_warnings.clone();
             scenario_warnings.extend(factor_preflight_sample_size(&scenario.spec, &grid));
+            scenario_warnings.extend(small_cluster_glmm_warning(&scenario.spec, &grid));
             Ok(SampleSizeResult {
                 grid_or_trace,
                 first_achieved: d.first_achieved,
@@ -200,6 +235,7 @@ pub fn find_sample_size(
 
 #[allow(clippy::too_many_arguments)]
 fn run_grid_for_scenario(
+    run_batch: RunBatch,
     scenario: &Scenario,
     grid: &[usize],
     n_sims: usize,
@@ -212,9 +248,6 @@ fn run_grid_for_scenario(
 ) -> Result<(Vec<PowerResult>, SampleSizeDerivations), OrchestratorError> {
     let sample_sizes_u32: Vec<u32> = grid.iter().map(|&n| n as u32).collect();
 
-    // Dispatch twin: `run_grid_for_scenario_st` must mirror the progress
-    // sentinel (`n: 0`), offset, fits_per_sim, and aggregation path — change
-    // together.
     // Move sink into the adapter for the duration of the engine call.
     // Use `n: 0` as sentinel — the engine emits aggregated progress across
     // all N values in this single batch call; we can't disambiguate which N
@@ -224,7 +257,7 @@ fn run_grid_for_scenario(
     let offset = (scenario_idx as u64) * (n_sims as u64) * fits_per_sim;
     let taken: Option<&mut dyn ProgressSink> = progress.take();
     let adapter = EngineSinkAdapter::new(0, offset, fits_per_sim, call_total, taken, cancel);
-    let batch_res = engine_core::run_batch(
+    let batch_res = run_batch(
         &scenario.spec,
         &sample_sizes_u32,
         n_sims as u32,
@@ -254,8 +287,7 @@ fn run_grid_for_scenario(
         }
     }
     // Grid-empirical first-N lookups + model-based crossing fits, all four
-    // from the one shared helper (also used by the single-core twin and the
-    // merge recompute).
+    // from the one shared helper (also used by the merge recompute).
     let derivations = derive_sample_size_outputs(&aggs, grid, target_power, atom);
 
     Ok((aggs, derivations))

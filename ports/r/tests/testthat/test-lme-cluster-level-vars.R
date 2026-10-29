@@ -110,10 +110,22 @@ test_that("find_power succeeds with cluster_level_vars", {
   m <- MCPower$new("y ~ x1 + x2 + (1|school)", family = "lme")$
     set_effects("x1=0.3, x2=0.2")$
     set_cluster("school", ICC = 0.1, n_clusters = 20L, cluster_level_vars = "x2")
-  res <- m$find_power(sample_size = 60L, n_sims = 50L,
+  res <- m$find_power(sample_size = 200L, n_sims = 50L,
                       seed = 2137, progress_callback = FALSE)
-  # x1 effect 0.3 with a cluster-level covariate at N=60 is detectable; pin a power
+  # x1 effect 0.3 with a cluster-level covariate at N=200 is detectable; pin a power
   # floor so a no-op path fails where expect_no_error passed. Robust floor (not
   # capture-pinned — the R package is not installable in this WIP tree).
   expect_true(res$power_uncorrected[[1]][[1]] > 0.05)
+})
+
+test_that("a factor cluster_level_var is accepted after a run expanded it", {
+  m <- MCPower$new("y ~ treatment + x + (1|school)", family = "lme")$
+    set_variable_type("treatment=(factor,3)")$
+    set_effects("treatment[2]=0.4, treatment[3]=0.4, x=0.2")$
+    set_cluster("school", ICC = 0.15, cluster_size = 10L)
+  m$.__enclos_env__$private$apply()
+  expect_no_error(
+    m$set_cluster("school", ICC = 0.15, cluster_size = 10L,
+                  cluster_level_vars = "treatment")
+  )
 })

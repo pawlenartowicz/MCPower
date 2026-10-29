@@ -50,9 +50,9 @@ Per-test power
 ─────────────────────────────────────────────────────────────
 Test                 optimistic   realistic   doomer   Target
 ─────────────────────────────────────────────────────────────
-Overall F                 98.9%       97.6%    94.6%      80%
-treatment                 86.4%       82.2%    76.4%      80%
-age                       95.2%       90.2%    81.4%      80%
+Overall F                 98.9%       97.9%    94.9%      80%
+treatment                 86.4%       82.9%    76.2%      80%
+age                       95.2%       90.6%    82.2%      80%
 ─────────────────────────────────────────────────────────────
 
 Power & 95% CI — optimistic
@@ -69,9 +69,9 @@ Power & 95% CI — realistic
 ───────────────────────────────────────────
 Test                 Power           CI 95%
 ───────────────────────────────────────────
-Overall F            97.6%   [96.8%, 98.3%]
-treatment            82.2%   [80.3%, 84.0%]
-age                  90.2%   [88.7%, 91.6%]
+Overall F            97.9%   [97.0%, 98.5%]
+treatment            82.9%   [81.0%, 84.7%]
+age                  90.6%   [89.0%, 91.9%]
 ───────────────────────────────────────────
 95% CIs are Monte-Carlo (Wilson), n_sims=1600.
 
@@ -79,9 +79,9 @@ Power & 95% CI — doomer
 ───────────────────────────────────────────
 Test                 Power           CI 95%
 ───────────────────────────────────────────
-Overall F            94.6%   [93.3%, 95.6%]
-treatment            76.4%   [74.3%, 78.5%]
-age                  81.4%   [79.4%, 83.2%]
+Overall F            94.9%   [93.8%, 95.9%]
+treatment            76.2%   [74.1%, 78.3%]
+age                  82.2%   [80.2%, 84.0%]
 ───────────────────────────────────────────
 95% CIs are Monte-Carlo (Wilson), n_sims=1600.
 
@@ -98,8 +98,8 @@ Robustness  (Δ power vs baseline: optimistic)
 ─────────────────────────────────────────
 Test                 realistic     doomer
 ─────────────────────────────────────────
-treatment              -4.1 pp    -9.9 pp
-age                    -5.0 pp   -13.9 pp
+treatment              -3.4 pp   -10.1 pp
+age                    -4.7 pp   -13.1 pp
 ─────────────────────────────────────────
 
 Plots: plot(result) to view, plot(result, 'chart.png') to save.
@@ -138,16 +138,22 @@ The available knobs are:
 | `heteroskedasticity_ratio` | Residual-variance ratio λ between high and low predicted values (1.0 = homoskedastic) |
 | `correlation_noise_sd` | Jitter added to the predictor correlation structure |
 | `distribution_change_prob` | Probability that a normal predictor is redrawn from a non-normal distribution |
-| `residual_change_prob` | Probability that the residual distribution is swapped to a non-normal shape |
-| `residual_dists` | Pool of replacement residual shapes: `high_kurtosis` (Student t, df from `residual_df`), `right_skewed`, `left_skewed`, `normal`, `uniform` |
-| `residual_df` | Degrees of freedom for the replacement residual shapes (minimum 3) |
 | `sampled_factor_proportions` | Factor group sizes: fixed at the requested proportions (within one or two observations, the same in every simulation) when `FALSE` (the default), random per-observation assignment when `TRUE` |
 
 Knob names are validated up front: an unknown or misspelled key raises an
-error listing the valid keys, and arming the residual swap with a
-`high_kurtosis` or `right_skewed` pool entry requires `residual_df >= 3`. See
+error listing the valid keys. See
 [[concepts/sensitivity-analysis|Sensitivity analysis]] for every knob's full
 semantics.
+
+`sampled_factor_proportions` applies to every factor at once. To fix one
+factor's group sizes whatever the scenario says, use `set_factor_sampling`. It
+works for declared factors and for factors from uploaded data:
+
+```r
+model$set_factor_sampling("group", "exact")    # exact group sizes in every scenario
+model$set_factor_sampling("group", "sampled")  # random group sizes in every scenario
+model$set_factor_sampling("group", NULL)       # follow the scenario again
+```
 
 After registering configs, pass a character vector of names to `scenarios` to
 choose which ones to run. Names that appear in the vector but have no registered
@@ -185,9 +191,9 @@ Per-test power
 ──────────────────────────────────────────────────────────────────
 Test                 optimistic   realistic   stress_test   Target
 ──────────────────────────────────────────────────────────────────
-Overall F                 98.9%       97.4%         93.0%      80%
-treatment                 86.4%       82.2%         73.5%      80%
-age                       95.2%       90.1%         78.2%      80%
+Overall F                 98.9%       97.8%         93.0%      80%
+treatment                 86.4%       82.9%         73.5%      80%
+age                       95.2%       90.3%         78.2%      80%
 ──────────────────────────────────────────────────────────────────
 
 Power & 95% CI — optimistic
@@ -204,9 +210,9 @@ Power & 95% CI — realistic
 ───────────────────────────────────────────
 Test                 Power           CI 95%
 ───────────────────────────────────────────
-Overall F            97.4%   [96.5%, 98.1%]
-treatment            82.2%   [80.2%, 84.0%]
-age                  90.1%   [88.5%, 91.4%]
+Overall F            97.8%   [96.9%, 98.4%]
+treatment            82.9%   [81.0%, 84.6%]
+age                  90.3%   [88.8%, 91.7%]
 ───────────────────────────────────────────
 95% CIs are Monte-Carlo (Wilson), n_sims=1600.
 
@@ -233,8 +239,8 @@ Robustness  (Δ power vs baseline: optimistic)
 ────────────────────────────────────────────
 Test                 realistic   stress_test
 ────────────────────────────────────────────
-treatment              -4.2 pp      -12.9 pp
-age                    -5.2 pp      -17.0 pp
+treatment              -3.5 pp      -12.9 pp
+age                    -4.9 pp      -17.0 pp
 ────────────────────────────────────────────
 
 Plots: plot(result) to view, plot(result, 'chart.png') to save.

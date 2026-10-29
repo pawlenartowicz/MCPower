@@ -6,7 +6,7 @@
 export type DfMethod = 'asymptotic' | 'between_within';
 
 export const DF_METHOD_LABEL: Record<DfMethod, string> = {
-  between_within: 'Between-within df (default)',
+  between_within: 'Between-within / Satterthwaite df (default)',
   asymptotic: 'Wald z (asymptotic)',
 };
 

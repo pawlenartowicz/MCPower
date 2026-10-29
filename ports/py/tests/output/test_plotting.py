@@ -265,7 +265,7 @@ def test_mimebundle_sample_size_single_scenario_is_curve():
     spec = bundle["application/vnd.vegalite.v5+json"]
     assert isinstance(spec, dict)
     rows = spec["data"]["values"]
-    assert {row["target"] for row in rows} == {"x1", "x2"}
+    assert {row["target"] for row in rows} == {"Overall F", "x1", "x2"}
     assert len({row["n"] for row in rows}) > 1
     assert "legend" in spec["config"]  # light-print theme applied
 
@@ -370,9 +370,21 @@ def test_corrected_uses_corrected_data_values():
     blocks = plotting._plot_blocks(res, res._meta, "find_sample_size", label_map={})
     curve_spec = next(s for k, s in blocks if k == "curve")
     # Curve rows run N-major, target-minor — the same order as the result's
-    # per-N power rows.
-    data_vals = [row["power"] for row in curve_spec["data"]["values"]]
+    # per-N power rows. The overall series has no corrected variant.
+    data_vals = [row["power"] for row in curve_spec["data"]["values"]
+                 if row["target"] != "overall"]
     assert data_vals == [v for row in corr for v in row]
+
+
+def test_sample_size_curve_has_overall_series():
+    """The curve carries the overall (omnibus) test as its own series, one
+    point per grid N, at the result's per-N overall_significant_rate."""
+    res = _ss_result()
+    blocks = plotting._plot_blocks(res, res._meta, "find_sample_size", label_map={})
+    curve_spec = next(s for k, s in blocks if k == "curve")
+    overall = [row for row in curve_spec["data"]["values"] if row["target"] == "overall"]
+    assert [row["n"] for row in overall] == res["sample_sizes"]
+    assert [row["power"] for row in overall] == res["overall_significant_rate"]
 
 
 # ── Target-power line in find_power spec ─────────────────────────────────────

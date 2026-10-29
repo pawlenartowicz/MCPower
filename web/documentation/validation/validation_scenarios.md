@@ -1,6 +1,6 @@
 ---
 title: "MCPower — Validating Scenario Perturbations"
-description: "Validation of MCPower scenario perturbations: 72 gates confirm each disturbance knob injects its documented statistical law across OLS, GLM, and LME designs."
+description: "Validation of MCPower scenario perturbations: 68 gates confirm each disturbance knob injects its documented statistical law across OLS, GLM, and LME designs."
 right_sidebar: body
 ---
 # MCPower — Validating the Scenario Perturbations
@@ -11,10 +11,10 @@ MCPower’s **sensitivity analysis** deliberately stresses a planned
 study: instead of simulating the idealised design you specified, each
 scenario *perturbs* it — slopes wobble between observations, residual
 variance trends with the predictors, correlations differ from the plan,
-predictor and residual distributions get swapped, group allocation
-becomes random. Each perturbation is controlled by a knob in
-`configs/scenarios.json`, and each knob documents a precise statistical
-*law* for the disturbance it injects.
+predictor distributions get swapped, group allocation becomes random.
+Each perturbation is controlled by a knob in `configs/scenarios.json`,
+and each knob documents a precise statistical *law* for the disturbance
+it injects.
 
 This report checks **that every knob generates exactly its documented
 law** — no more, no less. It is the L5 layer of the validation charter:
@@ -38,7 +38,7 @@ in β̂₀ while every effect estimate stays clean.
 
 # Results at a glance
 
-> **80 of 80 gates pass.** Golden reproducibility: all cases reproduce.
+> **68 of 68 gates pass.** Golden reproducibility: all cases reproduce.
 
 | Case             | Verdict  | Golden check |
 |:-----------------|:---------|:-------------|
@@ -50,7 +50,8 @@ in β̂₀ while every effect estimate stays clean.
 | scen_b1_glm      | all PASS | reproduces   |
 | scen_b1_ols      | all PASS | reproduces   |
 | scen_b2          | all PASS | reproduces   |
-| scen_b3          | all PASS | reproduces   |
+| scen_b3_chi      | all PASS | reproduces   |
+| scen_b3_t        | all PASS | reproduces   |
 | scen_b4          | all PASS | reproduces   |
 | scen_b5          | all PASS | reproduces   |
 | scen_co_high     | all PASS | reproduces   |
@@ -65,8 +66,6 @@ in β̂₀ while every effect estimate stays clean.
 | scen_hs          | all PASS | reproduces   |
 | scen_px          | all PASS | reproduces   |
 | scen_px_t3       | all PASS | reproduces   |
-| scen_re          | all PASS | reproduces   |
-| scen_re_replace  | all PASS | reproduces   |
 
 # Tier A — one knob at a time
 
@@ -195,45 +194,15 @@ by construction.
 | t3 mean = 0 | scen_px_t3 | t3 mean = 0 | -0.00194 | 0 | -1.67897 | PASS |
 | t3 var = 1 (table-normalized) | scen_px_t3 | t3 var = 1 (table-normalized) | 0.99882 | 1 | -0.37682 | PASS |
 
-## Residual swaps
-
-With probability q_r the block’s residual distribution is **replaced** —
-distribution *and* df — by a pool pick (t(df)·√((df−2)/df) or
-(χ²(df)−df)/√(2df)). The shape laws (skew = √(8/df), excess kurtosis =
-6/(df−4)) recover the df, proving the scenario’s df is carried, not the
-spec’s.
-
-|  | Case | Gate | Measured | Law | z | Verdict |
-|:---|:---|:---|---:|---:|---:|:---|
-| swap frequency = q_r | scen_re | swap frequency = q_r | 0.51000 | 0.50000 | 0.39958 | PASS |
-| pick share heavy_tailed = 1/2 | scen_re | pick share heavy_tailed = 1/2 | 0.51471 | 0.50000 | 0.42008 | PASS |
-| pick share skewed = 1/2 | scen_re | pick share skewed = 1/2 | 0.48529 | 0.50000 | -0.42008 | PASS |
-| skewed: skew = √(8/df), df = 10 | scen_re | skewed: skew = √(8/df), df = 10 | 0.88878 | 0.89443 | -0.85425 | PASS |
-| heavy: excess kurtosis = 6/(df−4), df = 10 | scen_re | heavy: excess kurtosis = 6/(df−4), df = 10 | 1.04341 | 1.00000 | 1.59313 | PASS |
-| pin holds: residual stays high_kurtosis (right_skewed swap inert) | scen_re_replace | pin holds: residual stays high_kurtosis (right_skewed swap inert) | 0.98000 | 1.00000 | NA | PASS |
-| symmetric: skew = 0 (pinned t(6), not the χ² swap) | scen_re_replace | symmetric: skew = 0 (pinned t(6), not the χ² swap) | -0.01593 | 0.00000 | -0.95569 | PASS |
-| mean = 0 | scen_re_replace | mean = 0 | 0.00140 | 0.00000 | 1.20001 | PASS |
-| var = 1 (t(6) standardized) | scen_re_replace | var = 1 (t(6) standardized) | 0.99766 | 1.00000 | -0.92347 | PASS |
-
-The pinned case (`scen_re_replace`) verifies the swap-eligibility rule:
-it *pins* the spec residual with
-`set_residual_distribution("high_kurtosis")`, then configures a forced
-right_skewed swap (q_r = 1). Because `pick_residual` only swaps an
-**unpinned default-normal** residual, the swap is inert — every draw
-keeps the pinned, symmetric censored-t3 high_kurtosis residual (skew ≈
-0, table-normalised to var 1), never the χ²(6) the config asks for. The
-skew = 0 gate is the tripwire: a fired swap would force skew = √(8/6) ≈
-1.15.
-
 ## Factor-proportion sampling
 
 `sampled_factor_proportions = FALSE` (the optimistic default) assigns
 factor levels by a deterministic largest-remainder walk — counts depend
 only on n and the proportions and are identical across draws. With one
-factor (the case here) each level count is within 1 of n·p; with
-several fixed factors the walk runs over their crossed cells, keeping
-each cell count within about 1 of its target. `TRUE` draws levels per
-row: counts are Binomial(n, p) with variance n·p(1−p).
+factor (the case here) each level count is within 1 of n·p; with several
+fixed factors the walk runs over their crossed cells, keeping each cell
+count within about 1 of its target. `TRUE` draws levels per row: counts
+are Binomial(n, p) with variance n·p(1−p).
 
 |  | Case | Gate | Measured | Law | z | Verdict |
 |:---|:---|:---|---:|---:|---:|:---|
@@ -279,12 +248,12 @@ orchestrator’s call-seed test (power here: 0.948, 0.28).
 | optimistic: β̂\[intercept\] unbiased | scen_b1_ols | optimistic: β̂\[intercept\] unbiased | -0.0025 | 0.0000 | -2.1096 | PASS |
 | optimistic: β̂\[x1\] unbiased | scen_b1_ols | optimistic: β̂\[x1\] unbiased | 0.3994 | 0.4000 | -0.4687 | PASS |
 | optimistic: β̂\[x2\] unbiased | scen_b1_ols | optimistic: β̂\[x2\] unbiased | 0.2499 | 0.2500 | -0.1007 | PASS |
-| realistic: β̂\[intercept\] unbiased | scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0001 | 0.0000 | 0.0560 | PASS |
-| realistic: β̂\[x1\] unbiased | scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3952 | 0.4000 | -1.0430 | PASS |
-| realistic: β̂\[x2\] unbiased | scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2500 | 0.2500 | 0.0007 | PASS |
-| doomer: β̂\[intercept\] unbiased | scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0009 | 0.0000 | 0.7089 | PASS |
-| doomer: β̂\[x1\] unbiased | scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4034 | 0.4000 | 0.3641 | PASS |
-| doomer: β̂\[x2\] unbiased | scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2496 | 0.2500 | -0.0609 | PASS |
+| realistic: β̂\[intercept\] unbiased | scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4182 | PASS |
+| realistic: β̂\[x1\] unbiased | scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3959 | 0.4000 | -0.8746 | PASS |
+| realistic: β̂\[x2\] unbiased | scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2523 | 0.2500 | 0.6737 | PASS |
+| doomer: β̂\[intercept\] unbiased | scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2384 | PASS |
+| doomer: β̂\[x1\] unbiased | scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4298 | PASS |
+| doomer: β̂\[x2\] unbiased | scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0555 | PASS |
 | optimistic: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[intercept\] = per-study pseudo-true | -0.4050 | -0.4055 | 0.1720 | PASS |
 | optimistic: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[x1\] = per-study pseudo-true | 0.5007 | 0.5000 | 0.2342 | PASS |
 | optimistic: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[x2\] = per-study pseudo-true | 0.2988 | 0.3000 | -0.4579 | PASS |
@@ -331,12 +300,13 @@ contamination the naive probe would misread as an He × Hs interaction.
 
 |  | Case | Gate | Measured | Law | z | Verdict |
 |:---|:---|:---|---:|---:|---:|:---|
-| γ = ln(λ)/4 under forced high_kurtosis residual | scen_b3 | γ = ln(λ)/4 under forced high_kurtosis residual | 0.34263 | 0.34657 | -1.62754 | PASS |
-| γ = ln(λ)/4 under forced right_skewed residual | scen_b3 | γ = ln(λ)/4 under forced right_skewed residual | 0.35076 | 0.34657 | 1.69386 | PASS |
+| γ = ln(λ)/4 under a high_kurtosis residual | scen_b3_t | γ = ln(λ)/4 under a high_kurtosis residual | 0.34263 | 0.34657 | -1.62754 | PASS |
+| γ = ln(λ)/4 under a right_skewed residual | scen_b3_chi | γ = ln(λ)/4 under a right_skewed residual | 0.35076 | 0.34657 | 1.69386 | PASS |
 
-Under a forced t(10) or χ²(10) residual the log-e² slope still reads
-ln(λ)/4 — the multiplicative variance trend amplifies the swapped tails
-without bending the ratio.
+The residual is set with `set_residual_distribution`: a *t*(10) in
+`scen_b3_t` and a χ²(10) in `scen_b3_chi`, each under λ = 4. The log-e²
+slope still reads ln(λ)/4: the multiplicative variance trend amplifies
+the heavy or skewed tails without bending the ratio.
 
 ## B4 — Co × Px (NORTA)
 
@@ -388,18 +358,13 @@ Knobs must be live or inert exactly per family.
 |  | Case | Gate | Measured | Law | z | Verdict |
 |:---|:---|:---|---:|---:|---:|:---|
 | bit-identity under logit: optimistic ≡ glm_l4 | fg_glm_ident | bit-identity under logit: optimistic ≡ glm_l4 | 1.00000 | 1 | NA | PASS |
-| bit-identity under logit: glm_l4 ≡ glm_l4re | fg_glm_ident | bit-identity under logit: glm_l4 ≡ glm_l4re | 1.00000 | 1 | NA | PASS |
 | h-toggle flip rate = MC prediction (paired Δ = 0) | fg_glm_flip | h-toggle flip rate = MC prediction (paired Δ = 0) | 0.00234 | 0 | 0.6365 | PASS |
 | bit-identity under probit: optimistic ≡ g_l4 | fg_probit_ident | bit-identity under probit: optimistic ≡ g_l4 | 1.00000 | 1 | NA | PASS |
-| bit-identity under probit: g_l4 ≡ g_l4re | fg_probit_ident | bit-identity under probit: g_l4 ≡ g_l4re | 1.00000 | 1 | NA | PASS |
 | bit-identity under poisson: optimistic ≡ g_l4 | fg_poisson_ident | bit-identity under poisson: optimistic ≡ g_l4 | 1.00000 | 1 | NA | PASS |
-| bit-identity under poisson: g_l4 ≡ g_l4re | fg_poisson_ident | bit-identity under poisson: g_l4 ≡ g_l4re | 1.00000 | 1 | NA | PASS |
 
-- **GLM λ / residual swaps — inert by bit-identity.** `apply_hsk`
-  requires a continuous outcome and consumes no RNG, so a λ toggle is an
-  exact no-op under logit; a forced residual swap only consumes
-  scenario-stream draws after every other consumer, leaving the
-  Bernoulli outcomes bit-identical.
+- **GLM λ: inert by bit-identity.** `apply_hsk` requires a continuous
+  outcome and consumes no RNG, so a λ toggle is an exact no-op under
+  logit, leaving the Bernoulli outcomes bit-identical.
 - **GLM heterogeneity — live, latent.** The per-row log-odds jitter is
   hidden behind a single Bernoulli draw, so the observable is the paired
   h-toggle **flip rate**: X and the uniforms are drawn before the jitter
@@ -408,11 +373,10 @@ Knobs must be live or inert exactly per family.
   rate 0.0827 vs predicted 0.0804. The Jensen mean-rate shift (+0.0051)
   is expected and reported, not gated — median latent-rate invariance is
   unobservable.
-- **Probit / Poisson λ + residual swaps — inert by bit-identity.** Same
-  premise as logit: `apply_hsk` needs a continuous Gaussian outcome and
-  consumes no RNG, so a λ toggle is an exact no-op under probit (binary)
-  and Poisson (count), and a forced residual swap leaves the outcomes
-  bit-identical. Both pairs reproduce bit-for-bit across K draws
+- **Probit / Poisson λ: inert by bit-identity.** Same premise as logit:
+  `apply_hsk` needs a continuous Gaussian outcome and consumes no RNG,
+  so a λ toggle is an exact no-op under probit (binary) and Poisson
+  (count). Both pairs reproduce bit-for-bit across K draws
   (`fg_probit_ident`, `fg_poisson_ident`).
 - **MLE — only `sampled_factor_proportions` is live** (see the Fa
   section above); every other knob is rejected by the engine’s estimator
@@ -443,15 +407,6 @@ Knobs must be live or inert exactly per family.
 | scen_px_t3 | every block swapped (q = 1) | 1.0000 | 1.0000 | NA | PASS |
 | scen_px_t3 | t3 mean = 0 | -0.0019 | 0.0000 | -1.6790 | PASS |
 | scen_px_t3 | t3 var = 1 (table-normalized) | 0.9988 | 1.0000 | -0.3768 | PASS |
-| scen_re | swap frequency = q_r | 0.5100 | 0.5000 | 0.3996 | PASS |
-| scen_re | pick share heavy_tailed = 1/2 | 0.5147 | 0.5000 | 0.4201 | PASS |
-| scen_re | pick share skewed = 1/2 | 0.4853 | 0.5000 | -0.4201 | PASS |
-| scen_re | skewed: skew = √(8/df), df = 10 | 0.8888 | 0.8944 | -0.8543 | PASS |
-| scen_re | heavy: excess kurtosis = 6/(df−4), df = 10 | 1.0434 | 1.0000 | 1.5931 | PASS |
-| scen_re_replace | pin holds: residual stays high_kurtosis (right_skewed swap inert) | 0.9800 | 1.0000 | NA | PASS |
-| scen_re_replace | symmetric: skew = 0 (pinned t(6), not the χ² swap) | -0.0159 | 0.0000 | -0.9557 | PASS |
-| scen_re_replace | mean = 0 | 0.0014 | 0.0000 | 1.2000 | PASS |
-| scen_re_replace | var = 1 (t(6) standardized) | 0.9977 | 1.0000 | -0.9235 | PASS |
 | scen_fa_ols | fixed: counts identical across draws (no RNG) | 1.0000 | 1.0000 | NA | PASS |
 | scen_fa_ols | fixed: max \|count − n·p\| ≤ 1 (largest remainder) | 0.0000 | 1.0000 | NA | PASS |
 | scen_fa_ols | sampled: Var(count) level 1 = n·p(1−p) | 243.7875 | 250.0000 | -0.3935 | PASS |
@@ -471,12 +426,12 @@ Knobs must be live or inert exactly per family.
 | scen_b1_ols | optimistic: β̂\[intercept\] unbiased | -0.0025 | 0.0000 | -2.1096 | PASS |
 | scen_b1_ols | optimistic: β̂\[x1\] unbiased | 0.3994 | 0.4000 | -0.4687 | PASS |
 | scen_b1_ols | optimistic: β̂\[x2\] unbiased | 0.2499 | 0.2500 | -0.1007 | PASS |
-| scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0001 | 0.0000 | 0.0560 | PASS |
-| scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3952 | 0.4000 | -1.0430 | PASS |
-| scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2500 | 0.2500 | 0.0007 | PASS |
-| scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0009 | 0.0000 | 0.7089 | PASS |
-| scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4034 | 0.4000 | 0.3641 | PASS |
-| scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2496 | 0.2500 | -0.0609 | PASS |
+| scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4182 | PASS |
+| scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3959 | 0.4000 | -0.8746 | PASS |
+| scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2523 | 0.2500 | 0.6737 | PASS |
+| scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2384 | PASS |
+| scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4298 | PASS |
+| scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0555 | PASS |
 | scen_b1_glm | optimistic: β̂\[intercept\] = per-study pseudo-true | -0.4050 | -0.4055 | 0.1720 | PASS |
 | scen_b1_glm | optimistic: β̂\[x1\] = per-study pseudo-true | 0.5007 | 0.5000 | 0.2342 | PASS |
 | scen_b1_glm | optimistic: β̂\[x2\] = per-study pseudo-true | 0.2988 | 0.3000 | -0.4579 | PASS |
@@ -488,22 +443,19 @@ Knobs must be live or inert exactly per family.
 | scen_b1_glm | doomer: β̂\[x2\] = per-study pseudo-true | 0.2983 | 0.3002 | -0.2780 | PASS |
 | scen_b2 | x1 jitter slope at λ=1 = h²β₁² | 0.0217 | 0.0256 | -1.7720 | PASS |
 | scen_b2 | x1 jitter slope λ-invariant (paired Δ = 0) | 0.0000 | 0.0000 | 0.0473 | PASS |
-| scen_b3 | γ = ln(λ)/4 under forced high_kurtosis residual | 0.3426 | 0.3466 | -1.6275 | PASS |
-| scen_b3 | γ = ln(λ)/4 under forced right_skewed residual | 0.3508 | 0.3466 | 1.6939 | PASS |
+| scen_b3_t | γ = ln(λ)/4 under a high_kurtosis residual | 0.3426 | 0.3466 | -1.6275 | PASS |
+| scen_b3_chi | γ = ln(λ)/4 under a right_skewed residual | 0.3508 | 0.3466 | 1.6939 | PASS |
 | scen_b4 | right_skewed pair: r = NORTA 0.4541 (latent ρ = 0.50) | 0.4546 | 0.4541 | 0.4146 | PASS |
 | scen_b4 | uniform pair: r = NORTA 0.4826 (latent ρ = 0.50) | 0.4830 | 0.4826 | 0.4445 | PASS |
 | scen_b5 | slope magnitude = γ/σ₀ (stale spec anchor) | 0.6594 | 0.6521 | 1.5985 | PASS |
 | scen_b5 | staleness: lm(λ̂′ ~ λ′ predicted) slope = 1 | 0.9010 | 1.0000 | -0.9599 | PASS |
 | scen_b5 | drift bounded: max λ′ ≤ clamp-range bound | 5.0446 | 5.3938 | NA | PASS |
 | fg_glm_ident | bit-identity under logit: optimistic ≡ glm_l4 | 1.0000 | 1.0000 | NA | PASS |
-| fg_glm_ident | bit-identity under logit: glm_l4 ≡ glm_l4re | 1.0000 | 1.0000 | NA | PASS |
 | fg_glm_flip | h-toggle flip rate = MC prediction (paired Δ = 0) | 0.0023 | 0.0000 | 0.6365 | PASS |
 | fg_probit_ident | bit-identity under probit: optimistic ≡ g_l4 | 1.0000 | 1.0000 | NA | PASS |
-| fg_probit_ident | bit-identity under probit: g_l4 ≡ g_l4re | 1.0000 | 1.0000 | NA | PASS |
 | fg_poisson_ident | bit-identity under poisson: optimistic ≡ g_l4 | 1.0000 | 1.0000 | NA | PASS |
-| fg_poisson_ident | bit-identity under poisson: g_l4 ≡ g_l4re | 1.0000 | 1.0000 | NA | PASS |
 
-> **All 80 gates pass and every case reproduces its golden baseline.**
+> **All 68 gates pass and every case reproduces its golden baseline.**
 > Each scenario knob generates its documented law: the realised slope
 > wobble, variance trend, correlation noise (with its clamp truncation),
 > swap frequencies, pool moments, allocation behaviour, NORTA coupling,
@@ -515,11 +467,10 @@ Knobs must be live or inert exactly per family.
 The uniformity law on a crossed extra beside the primary:
 `random_effect_dist` / `random_effect_df` apply to *every* grouping’s
 draw, and `icc_noise_sd` jitters every grouping’s τ² **independently**.
-Measurement mirrors `scen_re`’s level-mean-variance recovery
-(solver-free); β̂ unbiased is the leak tripwire. The jitter-presence
-check is paired against a no-jitter (`optimistic`) control: the realised
-τ̂² spread under the knob must exceed the control’s Monte-Carlo floor on
-the *extra* grouping too.
+Measurement is a level-mean-variance recovery (solver-free); β̂ unbiased
+is the leak tripwire. The jitter-presence check is paired against a
+no-jitter (`optimistic`) control: the realised τ̂² spread under the knob
+must exceed the control’s Monte-Carlo floor on the *extra* grouping too.
 
 **scen_re_multi**: set == get per grouping, independent jitter present,
 beta unbiased — PASS
@@ -528,13 +479,13 @@ beta unbiased — PASS
 
 | item                     | value                        |
 |:-------------------------|:-----------------------------|
-| Report generated         | 20 October 2026              |
+| Report generated         | 29 October 2026              |
 | R version                | R version 4.5.3 (2026-03-11) |
-| mcpower                  | 1.4.0                        |
+| mcpower                  | 1.5.0                        |
 | Gate band (SE-of-mean z) | 4                            |
 | Golden tolerance         | 1e-09                        |
-| Cases                    | 25                           |
-| Gates                    | 80                           |
+| Cases                    | 24                           |
+| Gates                    | 68                           |
 
 Cases live in `mcpower/validation/formulas.R` (`SCENARIO_CASES`), probes
 in `mcpower/validation/common.R`, gates in

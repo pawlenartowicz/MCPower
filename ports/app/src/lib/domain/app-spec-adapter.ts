@@ -375,10 +375,9 @@ function projectCommon(
  * Project `cfg.outcomeOptions` to the wire, omitting every neutral value so an
  * untouched dialog leaves the wire byte-identical to the pre-knob shape.
  *
- * "Neutral" keys on unpinned-default, NOT on the value: a pinned explicit
- * "normal" MUST be sent (pinnedResidual=true with residualDistribution="normal"
- * serialises as `{ residual_distribution: "normal" }`). Residual + hetero-
- * skedasticity driver only apply to continuous outcomes.
+ * The residual distribution is sent only when it is set and not "normal": null
+ * and "normal" both mean the engine default. Residual + heteroskedasticity
+ * driver only apply to continuous outcomes.
  */
 function projectOutcomeOptions(
   config: FamilyConfig,
@@ -389,9 +388,9 @@ function projectOutcomeOptions(
   if (!o) return undefined;
   const out: OutcomeOptions = {};
   if (continuousOutcome) {
-    // Pinned residual distribution: send even if it's "normal" (explicit choice).
-    if (o.pinnedResidual) {
-      out.residual_distribution = o.residualDistribution ?? 'normal';
+    // Non-normal residual distribution: null and 'normal' are both neutral.
+    if (o.residualDistribution != null && o.residualDistribution !== 'normal') {
+      out.residual_distribution = o.residualDistribution;
     }
     // Heteroskedasticity driver: non-empty = a specific predictor was chosen.
     if (o.heteroskedasticityDriver.trim() !== '') {
@@ -514,6 +513,10 @@ export function familyConfigToAppSpec(
       const spec: AppSpec = {
         family: 'logit',
         ...ok,
+        // The engine rejects contrasts for every estimator but OLS, and
+        // TestChooser hides them here; drop chips left over from a linear
+        // outcome. Same override in the poisson and mixed specs.
+        contrasts: [],
         baseline_probability: p,
         // link omitted for logit (default) — keeps existing logit wires byte-identical.
         ...(outcomeKind === 'probit' ? { link: 'probit' as const } : {}),
@@ -536,6 +539,7 @@ export function familyConfigToAppSpec(
       const spec: AppSpec = {
         family: 'poisson',
         ...ok,
+        contrasts: [], // non-OLS: see the logit spec
         baseline_rate: rate,
         ...agqField,
         ...(outcome_options ? { outcome_options } : {}),
@@ -730,6 +734,7 @@ export function familyConfigToAppSpec(
     const spec: AppSpec = {
       family: 'mixed',
       ...ok,
+      contrasts: [], // non-OLS: see the regression logit spec
       cluster_name,
       icc: cl.icc,
       cluster_dim,
