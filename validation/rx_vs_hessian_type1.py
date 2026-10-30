@@ -1,6 +1,6 @@
 """Type-I error under wald_se="rx" vs "hessian" on the clustered binary GLMM
-path, at the true null (both effects = 0), across cluster counts
-g in {5, 10, 20, 30, 50}. Measures whether the standard-error mode moves the
+path, at the true null (both effects = 0), under Wald z, across cluster
+counts g in {5, 10, 20, 30, 50}. Measures whether the standard-error mode moves the
 rejection rate; the companion study of the reference distribution (Wald z vs
 between-within t) is df_calibration.R.
 
@@ -44,6 +44,8 @@ def run_cell(g: int, arm: str):
         n_sims=N_SIMS,
         seed=SEED,
         wald_se=arm,
+        # Wald z, so the two arms differ only in the standard error.
+        df_method="asymptotic",
         verbose=False,
     )
     elapsed = time.time() - t0

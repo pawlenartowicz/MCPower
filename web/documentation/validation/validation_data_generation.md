@@ -1883,24 +1883,24 @@ draws, vs. what was requested:
 
 | What we check | Requested | Average over draws | Allowed difference | Result |
 |:---|---:|---:|:---|:---|
-| average of x1 | 0.0000 | 0.0017 | within 0.01 | OK |
-| std. deviation of x1 | 1.0000 | 0.9995 | within 0.01 | OK |
-| proportion in level 0 | 0.5000 | 0.5000 | within 0.01 | OK |
-| proportion in level 1 | 0.3000 | 0.3000 | within 0.01 | OK |
-| proportion in level 2 | 0.2000 | 0.2000 | within 0.01 | OK |
-| within-cluster variance | 1.0000 | 1.0000 | within 1% | OK |
-| intra-cluster correlation (ICC) | 0.3000 | 0.2958 | within 0.01 | OK |
-| observed (marginal) ICC vs predicted | 0.3145 | 0.3136 | within 0.01 | OK |
+| average of x1 | 0.000 | 0.0017 | within 0.01 | OK |
+| std. deviation of x1 | 1.000 | 0.9995 | within 0.01 | OK |
+| proportion in level 0 | 0.500 | 0.5000 | within 0.01 | OK |
+| proportion in level 1 | 0.300 | 0.3000 | within 0.01 | OK |
+| proportion in level 2 | 0.200 | 0.2000 | within 0.01 | OK |
+| within-cluster variance | 1.000 | 1.0000 | within 1% | OK |
+| intra-cluster correlation (ICC) | 0.300 | 0.2958 | within 0.01 | OK |
+| observed (marginal) ICC vs predicted | 0.249 | 0.2473 | within 0.01 | OK |
 
 **Coefficient recovery** — an independent R model fitted to each
 generated dataset; the average estimate should land on the true value:
 
 | Term | True value | Recovered (average) | Spread across draws | Std. errors from true | Result |
 |:---|---:|---:|---:|---:|:---|
-| intercept | 0.0 | 0.0063 | 0.1779 | 1.0072 | OK |
-| x1 | 0.4 | 0.3998 | 0.0345 | -0.1763 | OK |
-| g\[2\] | 0.5 | 0.4928 | 0.2888 | -0.7017 | OK |
-| g\[3\] | 0.8 | 0.8117 | 0.3162 | 1.0496 | OK |
+| intercept | 0.0 | 0.0052 | 0.1285 | 1.1354 | OK |
+| x1 | 0.4 | 0.3998 | 0.0346 | -0.1789 | OK |
+| g\[2\] | 0.5 | 0.5014 | 0.0735 | 0.5460 | OK |
+| g\[3\] | 0.8 | 0.8048 | 0.0877 | 1.5317 | OK |
 
 Every coefficient is centred on its true value — the formula holds in
 the generated data.
@@ -1931,9 +1931,9 @@ estimate. File reproduces from seed: **yes**.*
 
 | item | value |
 |:---|:---|
-| Report generated | 23 October 2026 |
+| Report generated | 29 October 2026 |
 | R version | R version 4.5.3 (2026-03-11) |
-| mcpower | 1.4.1 |
+| mcpower | 1.5.0 |
 | lme4 | 2.0.6 |
 | Draws per formula (ordinary / logistic) | 1,600 |
 | Draws per formula (mixed) | 800 |
