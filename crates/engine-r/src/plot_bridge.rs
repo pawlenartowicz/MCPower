@@ -25,6 +25,8 @@ use engine_orchestrator::{
 };
 use extendr_api::error::Result;
 use extendr_api::prelude::*;
+
+use crate::r_error;
 use serde::Deserialize;
 
 // ── Embedded plot themes ───────────────────────────────────────────────────────
@@ -51,7 +53,7 @@ pub fn plot_theme(name: &str) -> Result<String> {
     let m = themes();
     m.get(name)
         .map(|v| v.to_string())
-        .ok_or_else(|| Error::Other(format!("unknown theme {name:?}")))
+        .ok_or_else(|| r_error(format!("unknown theme {name:?}")))
 }
 
 /// The embedded theme names.
@@ -89,10 +91,13 @@ struct ScenarioJson {
     #[serde(default)]
     contrast_pairs: Vec<Vec<u32>>,
     /// Displayed power: list of per-N vectors. The R caller selects corrected
-    /// vs uncorrected before serialising under the neutral key `power`.
-    power: Vec<Vec<f64>>,
-    /// Displayed CI: list of per-N lists of [lo, hi] pairs. Same selection logic.
-    ci: Vec<Vec<Vec<f64>>>,
+    /// vs uncorrected before serialising under the neutral key `power`. A
+    /// `null` entry (an `NA` corrected power the correction does not define)
+    /// reads as NaN, which the emitters leave off the chart.
+    power: Vec<Vec<Option<f64>>>,
+    /// Displayed CI: list of per-N lists of [lo, hi] pairs. Same selection
+    /// logic; `null` bounds read as NaN.
+    ci: Vec<Vec<Vec<Option<f64>>>>,
     /// find_sample_size only: per-N corrected histogram (bucket k = #targets jointly
     /// significant). Always the corrected histogram so the at_least_k/exactly_k
     /// curves match the corrected joint required-N table. One inner Vec<u64> per
@@ -114,6 +119,15 @@ struct ScenarioJson {
     /// this field.
     #[serde(default)]
     unit_divisor: Option<usize>,
+    /// The engine's `corrected_not_applicable` flags for the displayed power
+    /// entries (the same at every N; empty for an uncorrected display). A
+    /// flagged entry is not drawn. Older envelopes omit this field.
+    #[serde(default)]
+    not_applicable: Vec<bool>,
+    /// True when any target is flagged: the corrected joint view is not
+    /// applicable, so no at-least-k / exactly-k block. Older envelopes omit it.
+    #[serde(default)]
+    joint_not_applicable: bool,
 }
 
 fn parse_contrast_pairs(rows: &[Vec<u32>]) -> Vec<(u32, u32)> {
@@ -136,12 +150,18 @@ fn overall_at(sc: &ScenarioJson, i: usize) -> (Option<f64>, Option<Ci>) {
     (rate, ci)
 }
 
-fn parse_ci_row(row: &[Vec<f64>]) -> Vec<Ci> {
+fn parse_ci_row(row: &[Vec<Option<f64>>]) -> Vec<Ci> {
     row.iter()
         .map(|pair| {
-            let lo = pair.first().copied().unwrap_or(0.0);
-            let hi = pair.get(1).copied().unwrap_or(0.0);
-            Ci { lo, hi }
+            let bound = |i: usize| match pair.get(i) {
+                Some(Some(x)) => *x,
+                Some(None) => f64::NAN,
+                None => 0.0,
+            };
+            Ci {
+                lo: bound(0),
+                hi: bound(1),
+            }
         })
         .collect()
 }
@@ -152,7 +172,7 @@ fn plot_scenario_from_json(sc: &ScenarioJson) -> Result<PlotScenario> {
     let label = &sc.label;
     let n_ns = sc.sample_sizes.len();
     if sc.power.len() != n_ns || sc.ci.len() != n_ns {
-        return Err(Error::Other(format!(
+        return Err(r_error(format!(
             "scenario `{label}`: sample_sizes, power, ci must have equal length"
         )));
     }
@@ -174,13 +194,15 @@ fn plot_scenario_from_json(sc: &ScenarioJson) -> Result<PlotScenario> {
                 n,
                 target_indices: sc.target_indices.clone(),
                 contrast_pairs: parse_contrast_pairs(&sc.contrast_pairs),
-                power: sc.power[i].clone(),
+                power: sc.power[i].iter().map(|p| p.unwrap_or(f64::NAN)).collect(),
                 ci,
                 histogram,
                 // Drives the extra `"overall"` curve series; `None` at every N
                 // when the family suppressed the overall test.
                 overall_power,
                 overall_ci,
+                not_applicable: sc.not_applicable.clone(),
+                joint_not_applicable: sc.joint_not_applicable,
             }
         })
         .collect();
@@ -209,9 +231,9 @@ pub fn power_plot_set_json(
     target_power_line: Option<f64>,
 ) -> Result<List> {
     let envelope: EnvelopeJson = serde_json::from_str(envelope_json)
-        .map_err(|e| Error::Other(format!("power_plot_set_json: invalid envelope JSON: {e}")))?;
+        .map_err(|e| r_error(format!("power_plot_set_json: invalid envelope JSON: {e}")))?;
     if envelope.scenarios.is_empty() {
-        return Err(Error::Other("envelope has zero scenarios".into()));
+        return Err(r_error("envelope has zero scenarios"));
     }
     let mut out: Vec<PlotScenario> = Vec::with_capacity(envelope.scenarios.len());
     for sc in &envelope.scenarios {
@@ -219,16 +241,18 @@ pub fn power_plot_set_json(
         let n = *sc
             .sample_sizes
             .first()
-            .ok_or_else(|| Error::Other(format!("scenario `{label}`: sample_sizes is empty")))?;
+            .ok_or_else(|| r_error(format!("scenario `{label}`: sample_sizes is empty")))?;
         let power = sc
             .power
             .first()
-            .ok_or_else(|| Error::Other(format!("scenario `{label}`: power is empty")))?
-            .clone();
+            .ok_or_else(|| r_error(format!("scenario `{label}`: power is empty")))?
+            .iter()
+            .map(|p| p.unwrap_or(f64::NAN))
+            .collect();
         let ci_row = sc
             .ci
             .first()
-            .ok_or_else(|| Error::Other(format!("scenario `{label}`: ci is empty")))?;
+            .ok_or_else(|| r_error(format!("scenario `{label}`: ci is empty")))?;
         let ci = parse_ci_row(ci_row);
         let (overall_power, overall_ci) = overall_at(sc, 0);
         out.push(PlotScenario {
@@ -246,6 +270,8 @@ pub fn power_plot_set_json(
                 // zero-width interval in the orchestrator.
                 overall_power,
                 overall_ci,
+                not_applicable: sc.not_applicable.clone(),
+                joint_not_applicable: sc.joint_not_applicable,
             }],
         });
     }
@@ -260,7 +286,7 @@ pub fn power_plot_set_json(
     let specs: Vec<Robj> = pairs.into_iter().map(|(_, s)| s.into_robj()).collect();
     let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
     List::from_names_and_values(name_refs, specs)
-        .map_err(|e| Error::Other(format!("power_plot_set_json: list construction: {e}")))
+        .map_err(|e| r_error(format!("power_plot_set_json: list construction: {e}")))
 }
 
 // ── sample_size_plot_set_json ──────────────────────────────────────────────────
@@ -281,12 +307,12 @@ pub fn sample_size_plot_set_json(
     target_power_line: Option<f64>,
 ) -> Result<List> {
     let envelope: EnvelopeJson = serde_json::from_str(envelope_json).map_err(|e| {
-        Error::Other(format!(
+        r_error(format!(
             "sample_size_plot_set_json: invalid envelope JSON: {e}"
         ))
     })?;
     if envelope.scenarios.is_empty() {
-        return Err(Error::Other("envelope has zero scenarios".into()));
+        return Err(r_error("envelope has zero scenarios"));
     }
     let mut out: Vec<PlotScenario> = Vec::with_capacity(envelope.scenarios.len());
     let mut x_divisor: usize = 1;
@@ -312,7 +338,7 @@ pub fn sample_size_plot_set_json(
     let specs: Vec<Robj> = pairs.into_iter().map(|(_, s)| s.into_robj()).collect();
     let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
     List::from_names_and_values(name_refs, specs)
-        .map_err(|e| Error::Other(format!("sample_size_plot_set_json: list construction: {e}")))
+        .map_err(|e| r_error(format!("sample_size_plot_set_json: list construction: {e}")))
 }
 
 // ── module registration ────────────────────────────────────────────────────────

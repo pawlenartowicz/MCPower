@@ -51,10 +51,7 @@ def test_probit_cluster_tau_squared_no_pi_sq_factor():
         .set_cluster("group", ICC=icc, n_clusters=20)
     )
     m._apply()
-    # Expected low-obs warning (5 obs/cluster) is incidental here
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        m._validate_lme_runtime(100, ["optimistic"])
+    m._validate_lme_runtime(100, ["optimistic"])
 
     spec = _cluster_spec(m)
     expected = _tau_from_icc_gaussian(icc)
@@ -99,10 +96,7 @@ def test_logit_cluster_icc_zero_tau_zero():
         .set_cluster("group", ICC=0.0, n_clusters=20)
     )
     m._apply()
-    # Expected low-obs warning (5 obs/cluster) is incidental here
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        m._validate_lme_runtime(100, ["optimistic"])
+    m._validate_lme_runtime(100, ["optimistic"])
     spec = _cluster_spec(m)
     assert spec["tau_squared"] == 0.0
 
@@ -210,14 +204,9 @@ def test_find_power_glmm_emits_laplace_warning(monkeypatch):
         MCPower("y ~ x + (1|group)", family="logit")
         .set_effects("x=0.5")
         .set_baseline_probability(0.3)
-        # Reachable warning band: 120//20 = 6 obs/cluster ∈ [reliable=5, recommended=10),
-        # so the validator allows it (with a Low-observations note) while the Laplace
-        # warning stays reachable — below reliable the validator hard-rejects.
         .set_cluster("group", ICC=0.3, n_clusters=20)
     )
 
-    # Record-form capture: the incidental low-observations warning also fires here,
-    # and pytest.warns(match=...) re-emits non-matching warnings into the run summary.
     with pytest.warns(UserWarning) as record:
         m.find_power(120, n_sims=50, verbose=False)
     assert any("Laplace-approximation bias" in str(w.message) for w in record)
@@ -298,7 +287,7 @@ def test_glmm_scenario_re_knob_reaches_engine():
         .set_cluster("group", ICC=0.3, n_clusters=20)
     )
     m.set_scenario_configs({"optimistic": {"icc_noise_sd": 0.05}})
-    # Expected low-obs/Laplace warnings are incidental here (mirrors R's suppressWarnings)
+    # An expected Laplace warning is incidental here (mirrors R's suppressWarnings)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         result = m.find_power(100, n_sims=50, seed=2137, verbose=False)
@@ -324,7 +313,7 @@ def test_glmm_end_to_end_find_power():
         .set_baseline_probability(0.3)
         .set_cluster("group", ICC=0.3, n_clusters=20)
     )
-    # Expected low-obs/Laplace warnings are incidental here (mirrors R's suppressWarnings)
+    # An expected Laplace warning is incidental here (mirrors R's suppressWarnings)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         result = m.find_power(100, n_sims=50, verbose=False)

@@ -11,25 +11,42 @@
 
 # Percentage with `decimals` places, e.g. .fmt_pct(0.925, 1) == "92.5%".
 # Exactly 100% drops the fractional part ("100%" not "100.0%") — mirrors the
-# Python fmt_pct (results.py) so both ports render identically. Vectorised.
+# Python fmt_pct (results.py) so both ports render identically. NA (a corrected
+# power the correction does not define) renders "n/a". Vectorised.
 .fmt_pct <- function(x, decimals) {
   pct <- x * 100
-  ifelse(round(pct, decimals) == 100,
-         "100%",
-         sprintf(paste0("%.", decimals, "f%%"), pct))
+  ifelse(is.na(pct), "n/a",
+         ifelse(round(pct, decimals) == 100,
+                "100%",
+                sprintf(paste0("%.", decimals, "f%%"), pct)))
 }
 
 # CI cell padded so percent signs / decimals stack, e.g. "[99.0%,  100%]".
 # Byte-for-byte identical to the Python fmt_ci (results.py): bounds go through
 # .fmt_pct (100% drops its decimals), so the column reserves two integer digits
-# and a 100% bound takes one leading space, not two. "" when ci is NULL/short/NA.
+# and a 100% bound takes one leading space, not two. "" when ci is NULL/short;
+# "n/a" when a bound is NA (a corrected CI the correction does not define).
 .fmt_ci <- function(ci, decimals) {
   if (is.null(ci) || length(ci) < 2L) return("")
   lo <- ci[[1]]; hi <- ci[[2]]
-  if (is.na(lo) || is.na(hi)) return("")
+  if (is.na(lo) || is.na(hi)) return("n/a")
   w <- 2L + (if (decimals > 0L) 1L + decimals else 0L) + 1L  # 2 int digits + '.dec' + '%'
   sprintf("[%s, %s]", formatC(.fmt_pct(lo, decimals), width = w),
                       formatC(.fmt_pct(hi, decimals), width = w))
+}
+
+# TRUE when any target has no corrected power: the corrected all-targets view
+# (the "First N achieving all targets" footer and header, the joint required-N
+# table) is then not applicable. Mirrors tables.py:any_corrected_not_applicable.
+.any_corrected_not_applicable <- function(inner) {
+  any(as.logical(inner$corrected_not_applicable %||% logical(0)))
+}
+
+# TRUE when the target at 1-based `pos` is flagged corrected_not_applicable
+# (its required-N cells read "n/a"). Mirrors tables.py:corrected_not_applicable.
+.corrected_not_applicable <- function(inner, pos) {
+  flags <- inner$corrected_not_applicable
+  !is.null(flags) && pos <= length(flags) && isTRUE(flags[[pos]])
 }
 
 # Largest N evaluated in a find_sample_size grid (the search ceiling); NULL when
@@ -51,8 +68,10 @@
 # The `fitted` status reads the engine's n_achievable_unit twin; every other
 # status divides the N-valued number directly -- exact by construction (the
 # divisor divides every grid/bound N) and a no-op when unit_divisor == 1.
+# A target flagged in corrected_not_applicable gives ("n/a", NULL).
 # Returns list(display=, numeric=).
 .required_n_headline_for <- function(inner, pos, unit_divisor = 1L) {
+  if (.corrected_not_applicable(inner, pos)) return(list(display = "n/a", numeric = NULL))
   # fitted is string-keyed by 0-based position index (IndexMap in Rust)
   key  <- as.character(pos - 1L)   # pos is 1-based (R); engine key is 0-based
   fa_key <- if (unit_divisor > 1L) "first_achieved_unit" else "first_achieved"
@@ -791,7 +810,9 @@
       numerics <- c(numerics, list(h$numeric))
       if (is.null(h$numeric)) has_not_reached <- TRUE
     }
-    if (!has_not_reached && length(numerics) > 0L && all(!vapply(numerics, is.null, logical(1L)))) {
+    if (.any_corrected_not_applicable(inner)) {
+      footers <- c(footers, "n/a")
+    } else if (!has_not_reached && length(numerics) > 0L && all(!vapply(numerics, is.null, logical(1L)))) {
       footers <- c(footers, as.character(as.integer(max(unlist(numerics)))))
     } else {
       ceil <- .search_ceiling(inner)
@@ -837,7 +858,9 @@
       if (is.null(h$numeric)) has_not_reached <- TRUE
     }
     ceil <- .search_ceiling(inner0)
-    if (!has_not_reached && length(numerics) > 0L && all(!vapply(numerics, is.null, logical(1L)))) {
+    if (.any_corrected_not_applicable(inner0)) {
+      n_label <- "N=n/a"
+    } else if (!has_not_reached && length(numerics) > 0L && all(!vapply(numerics, is.null, logical(1L)))) {
       n_label <- sprintf("N≥%d", as.integer(max(unlist(numerics))))
     } else if (!is.null(ceil)) {
       n_label <- sprintf("N≥%d (not all reached)", ceil)
@@ -1073,6 +1096,9 @@
     for (r in rows) {
       if (identical(r$kind, "factor_header")) { table <- c(table, list(.span_factor_row(r))); next }
       label <- .indent_label(r)
+      if (.corrected_not_applicable(s, r$pos)) {
+        table <- c(table, list(list(kind = "row", cells = c(label, "n/a", "n/a")))); next
+      }
       f <- fitted_map[[as.character(r$pos - 1L)]]
       if (is.null(f)) {
         table <- c(table, list(list(kind = "row",
@@ -1212,10 +1238,15 @@
 # Report._joint_required_n_table — Joint detection → required N (find_sample_size).
 .report_joint_required_n_table <- function(result, meta, cfg) {
   inner0 <- .scenarios(result)[[1]]
-  fja <- inner0$first_joint_achieved
-  if (is.null(fja) || length(fja) == 0L) return("")
   tdec <- cfg$format$target_decimals
   target <- (meta$target_power %||% (.sim_defaults()$target_power * 100)) / 100
+  if (.any_corrected_not_applicable(inner0)) {
+    return(sprintf(paste0("Joint detection → required N (target %s): n/a ",
+                          "(a test has no corrected power under this correction)"),
+                   .fmt_pct(target, tdec)))
+  }
+  fja <- inner0$first_joint_achieved
+  if (is.null(fja) || length(fja) == 0L) return("")
   ceil <- .search_ceiling(inner0)
   fj_map <- inner0$fitted_joint %||% list()
   n_targets <- length(fja)
@@ -1277,7 +1308,7 @@
     pos <- r$pos
     cells <- c(.indent_label(r), vapply(other_names, function(nm) {
       delta <- scen[[nm]][[pkey]][[1]][[pos]] - base_pows[[pos]]
-      sprintf(paste0("%+.", dec, "f pp"), delta * 100)
+      if (is.na(delta)) "n/a" else sprintf(paste0("%+.", dec, "f pp"), delta * 100)
     }, character(1L)))
     table <- c(table, list(list(kind = "row", cells = cells)))
   }

@@ -16,7 +16,7 @@ export const SIMULATION = config.simulation as {
 export const ESTIMATION = config.estimation as unknown as {
   wald_se: 'hessian' | 'rx';
   nagq: number;
-  df_method: 'asymptotic' | 'between_within';
+  df_method: 'auto' | 'between_within' | 'satterthwaite' | 'asymptotic';
 };
 export const BENCHMARKS = config.benchmarks as {
   continuous: number[];
@@ -25,10 +25,12 @@ export const BENCHMARKS = config.benchmarks as {
   odds: number[];
 };
 export const LIMITS = config.limits as unknown as {
+  /** Total observations Find power accepts, [min, max]. */
+  sample_size: [number, number];
   max_alpha: number; icc_stability: [number, number]; baseline_p_warn: [number, number];
   factor_levels: [number, number];
   min_clusters: number; min_rows_per_cluster: number;
-  reliable_rows_per_cluster: number; recommended_rows_per_cluster: number;
+  recommended_rows_per_cluster: number;
 };
 export const UPLOAD = config.upload as {
   max_rows: number;

@@ -1,8 +1,18 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use engine_contract::fixtures::example1_simple_ols;
 use engine_orchestrator::{CancellationToken, OrchestratorError, ProgressEvent, ProgressSink};
+
+/// Held for the whole body of each test that runs a 100,000-sim `find_power`.
+/// Cargo runs one binary's tests in parallel and both runs share the engine's
+/// rayon pool, so without it the latency test also times the other run.
+static ENGINE_RUN: Mutex<()> = Mutex::new(());
+
+/// Takes `ENGINE_RUN`, ignoring poison so one failing test does not fail the other.
+fn serialise() -> std::sync::MutexGuard<'static, ()> {
+    ENGINE_RUN.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[test]
 fn cancel_is_visible_to_clones() {
@@ -22,6 +32,7 @@ fn cancel_is_visible_to_clones() {
 /// the elapsed time must stay below 250ms to accommodate CI noise.
 #[test]
 fn cancel_terminates_within_reasonable_time() {
+    let _serial = serialise();
     let c = example1_simple_ols();
     let cancel = Arc::new(CancellationToken::new());
     let cancel_clone = cancel.clone();
@@ -67,6 +78,7 @@ impl ProgressSink for CancelOnFirstTick {
 
 #[test]
 fn mid_run_cancel_emits_cancelled_event_and_error() {
+    let _serial = serialise();
     let c = example1_simple_ols();
     let cancel = CancellationToken::new();
     let mut sink = CancelOnFirstTick {

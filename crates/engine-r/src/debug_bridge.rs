@@ -17,7 +17,9 @@ use engine_orchestrator::debug::{
 use extendr_api::error::Result;
 use extendr_api::prelude::*;
 
-use crate::orchestrator_bridge::{decode_contracts, power_result_to_list};
+use crate::r_error;
+
+use crate::orchestrator_bridge::{decode_contracts, positive_count, power_result_to_list};
 
 // ── top-level binding ─────────────────────────────────────────────────────────
 
@@ -31,7 +33,8 @@ use crate::orchestrator_bridge::{decode_contracts, power_result_to_list};
 /// * `stage_*`         — booleans controlling which stages to compute.
 ///
 /// Returns a named list with fields `input`, `data`, `dispatch`, `stats`,
-/// `crit`, `power` (each NULL when the stage was not requested or not available).
+/// `crit`, `power` (each NULL when the stage was not requested or not available)
+/// and `warnings` (a character vector, empty when there are none).
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 pub fn debug_report(
@@ -50,7 +53,7 @@ pub fn debug_report(
     let idx = scenario_index as usize;
     let contract = all_contracts
         .get(idx)
-        .ok_or_else(|| Error::Other(format!("scenario_index {idx} out of range")))?;
+        .ok_or_else(|| r_error(format!("scenario_index {idx} out of range")))?;
 
     let mask = StageMask {
         input: stage_input,
@@ -63,11 +66,11 @@ pub fn debug_report(
     let report = engine_orchestrator::debug::debug_report(
         contract,
         seed as u64,
-        n as usize,
-        n_sims as usize,
+        positive_count("debug_n", n)?,
+        positive_count("debug_n_sims", n_sims)?,
         mask,
     )
-    .map_err(|e| Error::Other(format!("{e}")))?;
+    .map_err(r_error)?;
 
     Ok(debug_report_to_list(&report))
 }
@@ -113,7 +116,8 @@ fn debug_report_to_list(r: &DebugReport) -> List {
         dispatch = dispatch_robj,
         stats = stats_robj,
         crit = crit_robj,
-        power = power_robj
+        power = power_robj,
+        warnings = r.warnings.clone()
     )
 }
 
@@ -278,7 +282,7 @@ pub fn debug_load_data(
         "rx" => Some(engine_contract::WaldSe::Rx),
         "hessian" => Some(engine_contract::WaldSe::Hessian),
         other => {
-            return Err(Error::Other(format!(
+            return Err(r_error(format!(
                 "unknown wald_se override {other:?}; expected \"\", \"default\", \"rx\", or \"hessian\""
             )));
         }
@@ -288,16 +292,18 @@ pub fn debug_load_data(
         "" | "default" => None,
         "asymptotic" => Some(engine_contract::DfMethod::Asymptotic),
         "between_within" => Some(engine_contract::DfMethod::BetweenWithin),
+        "satterthwaite" => Some(engine_contract::DfMethod::Satterthwaite),
+        "auto" => Some(engine_contract::DfMethod::Auto),
         other => {
-            return Err(Error::Other(format!(
-                "unknown df_method override {other:?}; expected \"\", \"default\", \"asymptotic\", or \"between_within\""
+            return Err(r_error(format!(
+                "unknown df_method override {other:?}; expected \"\", \"default\", \"auto\", \"asymptotic\", \"between_within\", or \"satterthwaite\""
             )));
         }
     };
     let idx = scenario_index as usize;
     let contract = all_contracts
         .get(idx)
-        .ok_or_else(|| Error::Other(format!("scenario_index {idx} out of range")))?;
+        .ok_or_else(|| r_error(format!("scenario_index {idx} out of range")))?;
 
     let cluster_u32: Option<Vec<u32>> = if cluster_ids.is_empty() {
         None
@@ -316,7 +322,7 @@ pub fn debug_load_data(
         wald_se_override,
         df_method_override,
     )
-    .map_err(|e| Error::Other(format!("{e}")))?;
+    .map_err(r_error)?;
 
     Ok(load_data_result_to_list(&result))
 }

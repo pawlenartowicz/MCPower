@@ -127,8 +127,8 @@ slips under target first.
 scenario name; each inner list is a set of **knobs** to override. The merge has
 two branches: overriding a built-in name (`"optimistic"`, `"realistic"`,
 `"doomer"`) *updates that preset* — knobs you don't set keep their preset
-values — while a brand-new name inherits all optimistic values and applies only
-the overrides you give.
+values — while a brand-new name inherits the optimistic values (except
+`truth_start`, which starts off) and applies only the overrides you give.
 
 The available knobs are:
 
@@ -258,8 +258,9 @@ which pushes both below the 80% target.
 > [!note]
 > A brand-new scenario name (like `stress_test`) inherits the optimistic
 > baseline and applies only the keys you provide — omitted knobs stay at their
-> optimistic defaults. Overriding a built-in name (like `realistic` above)
-> instead updates that preset: omitted knobs keep their *preset* values.
+> optimistic defaults, except `truth_start`, which starts off. Overriding a
+> built-in name (like `realistic` above) instead updates that preset: omitted
+> knobs keep their *preset* values.
 
 ## Reading the output
 

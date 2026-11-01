@@ -60,11 +60,14 @@ MCPowerDebug <- R6::R6Class(
 
     #' Generate the design matrix + outcome for sim-0.
     #'
+    #' A clustered design floors .debug_n to the cluster atom with a warning,
+    #' as find_power does, so the data has the floored N of rows.
+    #'
     #' Returns a list with:
     #' \describe{
-    #'   \item{design}{numeric matrix (nrow = .debug_n, ncol = n_predictors)}
+    #'   \item{design}{numeric matrix (nrow = the floored N, ncol = n_predictors)}
     #'   \item{columns}{character vector of column names}
-    #'   \item{outcome}{numeric vector of length .debug_n}
+    #'   \item{outcome}{numeric vector of length the floored N}
     #'   \item{cluster_ids}{integer vector or NULL}
     #' }
     create_data = function() {
@@ -102,8 +105,9 @@ MCPowerDebug <- R6::R6Class(
     #'   harness to read per-fit rx vs hessian SE on one dataset.
     #' @param df_method Validation-only override of the denominator-df reference
     #'   distribution for this single fit. NULL (default) uses the contract's
-    #'   configured mode; accepts "asymptotic" or "between_within". Used by the
-    #'   GLMM Oracle harness to read a per-fit df_method on one dataset.
+    #'   configured mode; accepts "auto", "between_within", "satterthwaite" or
+    #'   "asymptotic", refused where the design does not support it. Used by the
+    #'   validation harnesses to read a per-fit df_method on one dataset.
     load_data = function(d, wald_se = NULL, nagq = 1L, df_method = NULL) {
       if (!private$applied) private$apply()
       # nagq is baked into the contract (build_contract_bytes -> LinearSpec.nagq);
@@ -212,6 +216,9 @@ MCPowerDebug <- R6::R6Class(
         stage_stats     = isTRUE(stats),
         stage_crit      = isTRUE(crit)
       )
+      # The engine's advisory warnings (the N snap to the cluster atom), as
+      # find_power emits them.
+      for (w in rep$warnings) warning(w, call. = FALSE)
 
       # The bridge hardcodes the power scenario label to "optimistic" (it gets
       # only scenario_index, not the label), so relabel here where

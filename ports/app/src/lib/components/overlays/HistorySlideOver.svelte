@@ -7,6 +7,8 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { historyStore } from '$lib/stores/history.svelte';
   import { runStore } from '$lib/stores/run.svelte';
+  import { findPowerTotalError } from '$lib/domain/app-spec-adapter';
+  import { reportError } from '$lib/errors/report';
   import type { HistoryEntry } from '$lib/persistence/history';
 
   let q = $state('');
@@ -56,6 +58,12 @@
   async function replay(entry: HistoryEntry) {
     uiStore.historyOpen = false;
     if (entry.kind === 'find-power' && entry.sample_size !== undefined) {
+      // An entry from a version with a lower minimum can sit below today's limits.
+      const nError = findPowerTotalError(entry.spec, entry.sample_size);
+      if (nError) {
+        reportError({ severity: 'background', title: "Can't rerun this entry", message: nError });
+        return;
+      }
       await runStore.startFindPower(entry.spec, entry.sample_size);
     } else if (entry.kind === 'find-sample-size' && entry.bounds && entry.method) {
       await runStore.startFindSampleSize(entry.spec, entry.bounds, entry.method);
@@ -76,6 +84,7 @@
     </SheetHeader>
     <div class="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pt-4 pb-4">
       <Input placeholder="Search…" bind:value={q} />
+      <p class="text-xs text-muted-foreground">Runs on uploaded data are not kept in History.</p>
       {#if filtered.length === 0}
         <p class="text-xs text-muted-foreground">No runs yet.</p>
       {/if}

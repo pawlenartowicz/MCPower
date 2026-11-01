@@ -20,7 +20,8 @@ set_n_threads <- function(n) .Call(wrap__set_n_threads, n)
 #' * `stage_*`         — booleans controlling which stages to compute.
 #'
 #' Returns a named list with fields `input`, `data`, `dispatch`, `stats`,
-#' `crit`, `power` (each NULL when the stage was not requested or not available).
+#' `crit`, `power` (each NULL when the stage was not requested or not available)
+#' and `warnings` (a character vector, empty when there are none).
 debug_report <- function(contracts, scenario_index, seed, n, n_sims, stage_input, stage_data, stage_dispatch, stage_stats, stage_crit) .Call(wrap__debug_report, contracts, scenario_index, seed, n, n_sims, stage_input, stage_data, stage_dispatch, stage_stats, stage_crit)
 
 #' Fit a provided dataset with the configured solver (the `data → results`

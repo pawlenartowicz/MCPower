@@ -497,20 +497,24 @@ lmm_multislope <- list(
 # losf 22 — COMPOSITION: (1 + x1 | grp) crossed with (1 | item)
 lmm_slope_crossed <- list(
   label = "lmm_slope_crossed", losf = 22L,
-  # grp ICC .2 (τ₀²=.25) τ₁²=.10 ρ=+0.3 ; item τ²=.16 ; 24 grp × 20, 6 items, n=480
+  # grp ICC .2 (τ₀²=.25) τ₁²=.10 ρ=+0.3 ; item τ²=.16 ; 24 grp × 18, 6 items, n=432 (atom 24 × 6 = 144)
+  # cluster_size = 20L does not size the data here: n_clusters is set, so the
+  # primary is FixedClusters; cluster_size only feeds the host per-cluster check.
   formula = "y ~ x1 + (1|grp)", family = "lme",
   effects = "x1=0.30",
   cluster = list(var = "grp", ICC = 0.2, n_clusters = 24L, cluster_size = 20L),
   slopes = list(list(column = 0L, variance = 0.10, corr_with_intercept = 0.3, corr_with = numeric(0))),
   extra = list(list(var = "item", kind = "crossed", n_clusters = 6L, tau_squared = 0.16)),
   lmer_re = "(1 + x1 | g_primary) + (1 | g_item)",
-  n = 480L, seed = 2303
+  n = 432L, seed = 2303
 )
 
 # losf 28 — EXTRA SLOPES (crossed): (1+x1|grp) + (1+x1|item); slopes on both groupings
 lmm_slope_crossed_extra_slopes <- list(
   label = "lmm_slope_crossed_extra_slopes", losf = 28L,
-  # grp ICC .2 (τ₀²=.25) τ₁²=.10 ρ=+0.3 ; item τ²=.16 τ₁²=.06 ρ=−0.2 ; 24 grp × 20, 6 items, n=480
+  # grp ICC .2 (τ₀²=.25) τ₁²=.10 ρ=+0.3 ; item τ²=.16 τ₁²=.06 ρ=−0.2 ; 24 grp × 18, 6 items, n=432 (atom 24 × 6 = 144)
+  # cluster_size = 20L does not size the data here: n_clusters is set, so the
+  # primary is FixedClusters; cluster_size only feeds the host per-cluster check.
   formula = "y ~ x1 + (1|grp)", family = "lme",
   effects = "x1=0.30",
   cluster = list(var = "grp", ICC = 0.2, n_clusters = 24L, cluster_size = 20L),
@@ -518,7 +522,7 @@ lmm_slope_crossed_extra_slopes <- list(
   extra = list(list(var = "item", kind = "crossed", n_clusters = 6L, tau_squared = 0.16,
                     slopes = list(list(column = 0L, variance = 0.06, corr_with_intercept = -0.2, corr_with = numeric(0))))),
   lmer_re = "(1 + x1 | g_primary) + (1 + x1 | g_item)",
-  n = 480L, seed = 2304
+  n = 432L, seed = 2304
 )
 
 # losf 29 — EXTRA SLOPES (nested): (1+x1|grp) + (1+x1|class); slopes on both groupings
@@ -1091,14 +1095,16 @@ glmm_multislope <- list(
 # losf 26 — composition: (1 + x1 | grp) crossed with (1 | item), logistic
 glmm_slope_crossed <- list(
   label = "glmm_slope_crossed", losf = 26L,
-  # logit(P) = logit(0.3) + 0.5*x1 + (1+x1|grp) + (1|item) ;  ICC 0.2 ;  24 x 20
+  # logit(P) = logit(0.3) + 0.5*x1 + (1+x1|grp) + (1|item) ;  ICC 0.2 ;  24 grp x 18, 6 items, n=432 (atom 24 x 6 = 144)
+  # cluster_size = 20L does not size the data here: n_clusters is set, so the
+  # primary is FixedClusters; cluster_size only feeds the host per-cluster check.
   formula = "y ~ x1 + (1|grp)", family = "logit",
   effects = "x1=0.50", baseline_probability = 0.3,
   cluster = list(var = "grp", ICC = 0.2, n_clusters = 24L, cluster_size = 20L),
   slopes = list(list(column = 0L, variance = 0.10, corr_with_intercept = 0.3, corr_with = numeric(0))),
   extra = list(list(var = "item", kind = "crossed", n_clusters = 6L, tau_squared = 0.16)),
   glmer_re = "(1 + x1 | g_primary) + (1 | g_item)",
-  n = 480L, seed = 2403
+  n = 432L, seed = 2403
 )
 
 # losf 27 — Laplace-bias cell: large τ², tiny clusters (n_j < 5). Cross-checked
@@ -1117,7 +1123,9 @@ glmm_laplace_bias <- list(
 # losf 30 — EXTRA SLOPES (crossed, logit): (1+x1|grp) + (1+x1|item); slopes on both groupings
 glmm_slope_crossed_extra_slopes <- list(
   label = "glmm_slope_crossed_extra_slopes", losf = 30L,
-  # logit(P) = logit(0.3) + 0.5*x1 + (1+x1|grp) + (1+x1|item) ; ICC 0.2 ; 24 grp × 20, 6 items, n=480
+  # logit(P) = logit(0.3) + 0.5*x1 + (1+x1|grp) + (1+x1|item) ; ICC 0.2 ; 24 grp × 18, 6 items, n=432 (atom 24 × 6 = 144)
+  # cluster_size = 20L does not size the data here: n_clusters is set, so the
+  # primary is FixedClusters; cluster_size only feeds the host per-cluster check.
   formula = "y ~ x1 + (1|grp)", family = "logit",
   effects = "x1=0.50", baseline_probability = 0.3,
   cluster = list(var = "grp", ICC = 0.2, n_clusters = 24L, cluster_size = 20L),
@@ -1125,7 +1133,7 @@ glmm_slope_crossed_extra_slopes <- list(
   extra = list(list(var = "item", kind = "crossed", n_clusters = 6L, tau_squared = 0.16,
                     slopes = list(list(column = 0L, variance = 0.06, corr_with_intercept = -0.2, corr_with = numeric(0))))),
   glmer_re = "(1 + x1 | g_primary) + (1 + x1 | g_item)",
-  n = 480L, seed = 2405
+  n = 432L, seed = 2405
 )
 
 # losf 31 — EXTRA SLOPES (nested, logit): (1+x1|grp) + (1+x1|class); slopes on both groupings

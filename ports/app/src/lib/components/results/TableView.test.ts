@@ -45,7 +45,7 @@ function gridPoint(n: number, power: [number, number]): PowerResult {
 
 function makeSampleSizeTab(
   firstAchieved: (number | null)[],
-  fitted?: CrossingFit[],
+  fitted?: (CrossingFit | null)[],
   overall?: { first_overall_achieved?: number | null; fitted_overall?: CrossingFit | null },
 ): RunTab {
   const grid = [
@@ -450,5 +450,62 @@ describe('TableView — find-sample-size unit column', () => {
       (th) => th.textContent?.trim(),
     );
     expect(headers.slice(0, 2)).toEqual(['Effect', 'Required N']);
+  });
+});
+
+describe('TableView — target with no corrected power (Tukey)', () => {
+  // Under Tukey HSD a target outside every factor has no corrected power: the
+  // engine flags it and its corrected rate and CI arrive as null (NaN on the
+  // JSON wire). The table must say "n/a", never a 0.0% stand-in.
+  const tukeySpec = { ...baseSpec, correction: 'tukey_hsd' as const };
+
+  it('find-power: the flagged target reads n/a; the other keeps its corrected value', () => {
+    const result: PowerResult = {
+      n: 80,
+      n_sims: 100,
+      target_indices: [1, 2],
+      power_uncorrected: [0.72, 0.65],
+      power_corrected: [null, 0.55],
+      ci_uncorrected: [{ lo: 0.62, hi: 0.82 }, { lo: 0.55, hi: 0.75 }],
+      ci_corrected: [{ lo: null, hi: null }, { lo: 0.45, hi: 0.65 }],
+      corrected_not_applicable: [true, false],
+      convergence_rate: 1.0,
+      boundary_hit: [],
+      estimator_extras: { estimator: 'ols' },
+    };
+    const tab = {
+      id: 'tukey-tab',
+      label: 'Run 1',
+      kind: 'find-power',
+      subView: 'summary',
+      spec: tukeySpec,
+      sample_size: 80,
+      effect_names: ['a', 'b'],
+      result,
+      scenarios: [['default', result]],
+    } as RunTab;
+    const { getByTestId } = render(TableView, { props: { tab } });
+    expect(bodyRows(getByTestId, 'summary-table')).toEqual([
+      ['a', '80', 'n/a', 'n/a', '80%'],
+      ['b', '80', '55.0%', '[45.0, 65.0]', '80% ✗'],
+    ]);
+  });
+
+  it('find-sample-size: the flagged target has no required N and the all-targets footer is n/a', () => {
+    const tab = makeSampleSizeTab([null, 150], [
+      null,
+      { status: 'fitted', n_star: 148, n_achievable: 150, ci_lo: 140.2, ci_hi: 160.5 },
+    ]);
+    const result = tab.result as SampleSizeResult;
+    for (const pt of result.grid_or_trace) pt.corrected_not_applicable = [true, false];
+    tab.spec = tukeySpec as RunTab['spec'];
+    const { getByTestId, getByText } = render(TableView, { props: { tab } });
+    expect(bodyRows(getByTestId, 'sample-size-table')).toEqual([
+      ['a', 'n/a', 'n/a'],
+      ['b', '150', '[140, 161]'],
+    ]);
+    expect(getByText(/First N achieving all targets/i).querySelector('span')?.textContent).toBe(
+      'n/a',
+    );
   });
 });

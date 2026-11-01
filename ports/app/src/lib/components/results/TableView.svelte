@@ -23,7 +23,6 @@
     if (spec.family === 'mixed' && spec.outcome?.kind === 'binary') return spec.outcome.baseline_probability;
     return null;
   });
-  const pctOrNA = (v: number) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
   const useCorrected = $derived(tab.spec.correction !== 'none');
 
   // Determine estimator string for overall label lookup. For find-sample-size
@@ -93,16 +92,43 @@
   const dec = fmt.power_decimals_short;
   const target = $derived(tab.spec?.target_power ?? 0.8);
 
-  function fmtPct(v: number) {
-    return (v * 100).toFixed(dec) + '%';
+  // The one percent formatter of this view. A missing or non-finite rate
+  // (null on the JSON wire: the engine's NaN for a corrected power the
+  // correction does not define, or an event rate with nothing to average)
+  // renders "n/a".
+  function fmtPct(v: number | null, decimals: number = dec) {
+    return v != null && Number.isFinite(v) ? (v * 100).toFixed(decimals) + '%' : 'n/a';
   }
-  function fmtCi(ci: { lo: number; hi: number }) {
+  function fmtCi(ci: { lo: number | null; hi: number | null }) {
+    if (ci.lo == null || ci.hi == null || !Number.isFinite(ci.lo) || !Number.isFinite(ci.hi)) {
+      return 'n/a';
+    }
     return `[${(ci.lo * 100).toFixed(dec)}, ${(ci.hi * 100).toFixed(dec)}]`;
   }
   // Target column: target power (integer %) + a met/not-met marker, matching the
-  // Python/R short-form `Target` column for cross-port parity.
-  function targetCell(power: number) {
-    return `${(target * 100).toFixed(fmt.target_decimals)}% ${power >= target ? '✓' : '✗'}`;
+  // Python/R short-form `Target` column for cross-port parity. No marker when
+  // the power is not applicable.
+  function targetCell(power: number | null) {
+    const pct = `${(target * 100).toFixed(fmt.target_decimals)}%`;
+    if (power == null || !Number.isFinite(power)) return pct;
+    return `${pct} ${power >= target ? '✓' : '✗'}`;
+  }
+
+  // Under Tukey HSD a target outside every factor has no corrected power: the
+  // engine flags it in `corrected_not_applicable` (and its corrected rate and
+  // CI arrive as null). The flag only matters when the table shows corrected
+  // values; a find-sample-size run reads it off any grid point (the spec's
+  // flags, identical across the grid).
+  function notApplicable(res: PowerResult | undefined, pos: number): boolean {
+    return useCorrected && (res?.corrected_not_applicable?.[pos] ?? false);
+  }
+  function ssrNotApplicable(pos: number): boolean {
+    return ssr?.grid_or_trace[0]?.corrected_not_applicable?.[pos] ?? false;
+  }
+  // The displayed rate at `pos`: null when not applicable, never a 0 stand-in.
+  function displayedPower(res: PowerResult, pos: number): number | null {
+    if (notApplicable(res, pos)) return null;
+    return (useCorrected ? res.power_corrected : res.power_uncorrected)[pos] ?? null;
   }
 
   // ── find-sample-size: per-target marginal required-N (charter-faithful) ────
@@ -114,26 +140,32 @@
   const ceilingN = $derived(ssr ? Math.max(...ssr.grid_or_trace.map((p) => p.n)) : 0);
   // Smallest N on the grid — lower bound for CI display when ci_lo is null.
   const floorN = $derived(ssr ? Math.min(...ssr.grid_or_trace.map((p) => p.n)) : 0);
+  // A target with no corrected power has no required N: "n/a" in every cell.
   function requiredNDisplay(pos: number): string {
-    return requiredNHeadline(ssr?.fitted?.[pos], ssr?.first_achieved[pos] ?? null, ceilingN);
+    if (ssrNotApplicable(pos)) return 'n/a';
+    return requiredNHeadline(ssr?.fitted?.[pos] ?? undefined, ssr?.first_achieved[pos] ?? null, ceilingN);
   }
   // Same cell, counted in the unit the search ran in (divisor 1 = observations,
   // and then the unit column is not shown at all).
   function requiredUnitDisplay(pos: number): string {
+    if (ssrNotApplicable(pos)) return 'n/a';
     return requiredNHeadline(
-      ssr?.fitted?.[pos],
+      ssr?.fitted?.[pos] ?? undefined,
       ssr?.first_achieved[pos] ?? null,
       ceilingN,
       unitDivisor,
     );
   }
   function requiredNCIDisplay(pos: number): string {
-    return requiredNCI(ssr?.fitted?.[pos], floorN, ceilingN);
+    if (ssrNotApplicable(pos)) return 'n/a';
+    return requiredNCI(ssr?.fitted?.[pos] ?? undefined, floorN, ceilingN);
   }
   // First N where ALL targets reach target power: the slowest target's required
   // N, or "≥ ceiling" if any target never reached it within the search bounds.
+  // A target with no corrected power makes it not applicable: "n/a".
   const firstAllAchieved = $derived(() => {
     if (!ssr) return '';
+    if (ssr.first_achieved.some((_, pos) => ssrNotApplicable(pos))) return 'n/a';
     const fa = ssr.first_achieved;
     if (fa.length === 0 || fa.some((n) => n == null)) return `≥ ${ceilingN}`;
     return String(Math.max(...(fa as number[])));
@@ -166,27 +198,26 @@
     return 0;
   });
 
-  // Extract PowerResult arrays from a scenario entry (must be find-power).
-  function scenarioPowerArray(scenarioResult: PowerResult): number[] {
-    return useCorrected ? scenarioResult.power_corrected : scenarioResult.power_uncorrected;
-  }
-
   // Per-row Δ: min over all scenarios of (scenarioPower - baselinePower).
-  // For the baseline scenario itself the diff is 0; for worse scenarios it's negative.
-  function computeDelta(pos: number): number {
+  // For the baseline scenario itself the diff is 0; for worse scenarios it's
+  // negative. null when the row's power is not applicable.
+  function computeDelta(pos: number): number | null {
     const baseEntry = tab.scenarios[baselineIdx()];
     if (!baseEntry) return 0;
-    const basePower = scenarioPowerArray(baseEntry[1] as PowerResult)[pos] ?? 0;
+    const basePower = displayedPower(baseEntry[1] as PowerResult, pos);
+    if (basePower == null) return null;
     let minDiff = 0;
     for (const [, sr] of tab.scenarios) {
-      const sp = scenarioPowerArray(sr as PowerResult)[pos] ?? 0;
+      const sp = displayedPower(sr as PowerResult, pos);
+      if (sp == null) return null;
       const diff = sp - basePower;
       if (diff < minDiff) minDiff = diff;
     }
     return minDiff;
   }
 
-  function fmtDelta(delta: number): string {
+  function fmtDelta(delta: number | null): string {
+    if (delta == null) return 'n/a';
     const pp = (delta * 100).toFixed(fmt.drop_decimals);
     return delta >= 0 ? `+${pp}pp` : `${pp}pp`;
   }
@@ -219,7 +250,7 @@
     {#if r.estimator_extras && (r.estimator_extras as { estimator: string }).estimator === 'glm'}
       {@const fx = r.estimator_extras as Extract<EstimatorExtras, { estimator: 'glm' }>}
       <div class="text-xs text-muted-foreground">
-        {`event rate = ${pctOrNA(fx.baseline_prob_realized)}`}{requestedBaseline != null ? ` · baseline ${pctOrNA(requestedBaseline)}` : ''}
+        {`event rate = ${fmtPct(fx.baseline_prob_realized, 1)}`}{requestedBaseline != null ? ` · baseline ${fmtPct(requestedBaseline, 1)}` : ''}
       </div>
     {/if}
     {#if r.estimator_extras && (r.estimator_extras as { estimator: string }).estimator === 'mle'}
@@ -283,18 +314,18 @@
           {:else if multi}
             {@const pos = row.pos!}
             {@const baseEntry = tab.scenarios[baselineIdx()]}
-            {@const basePower = baseEntry ? scenarioPowerArray(baseEntry[1] as PowerResult)[pos] ?? 0 : 0}
+            {@const basePower = baseEntry ? displayedPower(baseEntry[1] as PowerResult, pos) : 0}
             <tr class="border-b border-border/50 {row.kind === 'factor_level' ? '' : ''}">
               <td class="py-1 {row.kind === 'factor_level' ? 'pl-4' : ''}">{row.label}</td>
               {#each tab.scenarios as [scenLabel, sr] (scenLabel)}
-                {@const sp = scenarioPowerArray(sr as PowerResult)[pos] ?? 0}
+                {@const sp = displayedPower(sr as PowerResult, pos)}
                 <td class="py-1 font-mono">{fmtPct(sp)}</td>
               {/each}
               <td class="py-1 font-mono">{fmtDelta(computeDelta(pos))}</td>
               <td class="py-1 font-mono">{targetCell(basePower)}</td>
             </tr>
           {:else if row.kind === 'factor_level'}
-            {@const power = (useCorrected ? r.power_corrected : r.power_uncorrected)[row.pos!] ?? 0}
+            {@const power = displayedPower(r, row.pos!)}
             {@const ci = (useCorrected ? r.ci_corrected : r.ci_uncorrected)[row.pos!] ?? { lo: 0, hi: 0 }}
             <tr class="border-b border-border/50">
               <td class="py-1 pl-4">{row.label}</td>
@@ -304,7 +335,7 @@
               <td class="py-1 font-mono">{targetCell(power)}</td>
             </tr>
           {:else}
-            {@const power = (useCorrected ? r.power_corrected : r.power_uncorrected)[row.pos!] ?? 0}
+            {@const power = displayedPower(r, row.pos!)}
             {@const ci = (useCorrected ? r.ci_corrected : r.ci_uncorrected)[row.pos!] ?? { lo: 0, hi: 0 }}
             <tr class="border-b border-border/50">
               <td class="py-1">{row.label}</td>

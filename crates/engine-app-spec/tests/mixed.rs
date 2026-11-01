@@ -702,3 +702,18 @@ fn supplied_hints_reach_the_engine() {
         serde_json::to_string(&empty).unwrap()
     );
 }
+
+// test_formula sets fixed effects only: the app passes the override through
+// unchanged, so a random-effect term in it is refused by the shared builder
+// with the message every port shows.
+#[test]
+fn test_formula_with_a_random_effect_term_is_refused() {
+    let mut m = minimal_mixed(ClusterDim::NClusters { value: 20 });
+    m.test_formula = Some("y ~ x + (1|school)".into());
+    let err = assemble_spec(&AppSpec::Mixed(m)).expect_err("random term in test_formula");
+    assert_eq!(
+        err.to_string(),
+        "test_formula sets the fixed effects of the test model only; the test model keeps the \
+         model's random effects. Remove '(1|school)' from test_formula"
+    );
+}

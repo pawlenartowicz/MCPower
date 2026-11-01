@@ -53,4 +53,8 @@ describe('per-family persistence', () => {
     // Families keep separate files: another family's load does not see it.
     expect(await loadFamily('anova')).toBeNull();
   });
+
+  it('a default config stores no df_method', () => {
+    expect('df_method' in defaultFamilyConfig('mixed').advanced).toBe(false);
+  });
 });

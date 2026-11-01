@@ -11,6 +11,7 @@ from .tables import (
     _has_overall_required_n, _overall_label, _overall_label_by_estimator,
     _overall_required_n_headline, _overall_required_n_headline_for,
     _required_n_headline, _required_n_headline_for, _scenarios,
+    NOT_APPLICABLE, any_corrected_not_applicable, corrected_not_applicable,
     _search_ceiling, _text_cfg,
 )
 
@@ -73,7 +74,9 @@ class Report:
                 if num is None:
                     has_not_reached = True
             ceiling = _search_ceiling(scen)
-            if not has_not_reached and numerics and all(n is not None for n in numerics):
+            if any_corrected_not_applicable(scen):
+                n_label = f"N={NOT_APPLICABLE}"
+            elif not has_not_reached and numerics and all(n is not None for n in numerics):
                 n_label = f"N≥{max(numerics)}"  # type: ignore[arg-type]
             elif ceiling is not None:
                 n_label = f"N≥{ceiling} (not all reached)"
@@ -231,6 +234,9 @@ class Report:
                     table.append(("span", f"{r['label']}  (baseline: {r['baseline']})")); continue
                 label = ("  " if r["kind"] == "factor_level" else "") + r["label"]
                 pos = r["pos"]
+                if corrected_not_applicable(scen, pos):
+                    table.append(("row", [label, NOT_APPLICABLE, NOT_APPLICABLE]))
+                    continue
                 f = fitted_map.get(pos)
                 if f is None:
                     # Older payload or target not fit — use first_achieved fallback.
@@ -414,11 +420,14 @@ class Report:
 
     def _joint_required_n_table(self, cfg) -> str:
         scen = _scenarios(self._result)[0][1]
+        target = self._meta.get("target_power", _sim_fallback("target_power"))
+        tdec = cfg["format"]["target_decimals"]
+        if any_corrected_not_applicable(scen):
+            return (f"Joint detection → required N (target {fmt_pct(target, tdec)}): "
+                    f"{NOT_APPLICABLE} (a test has no corrected power under this correction)")
         fja = scen.get("first_joint_achieved", {})
         if not fja:
             return ""
-        target = self._meta.get("target_power", _sim_fallback("target_power"))
-        tdec = cfg["format"]["target_decimals"]
         ceiling = _search_ceiling(scen)
         fitted_joint = scen.get("fitted_joint") or {}
         n_targets = len(fja)
@@ -485,7 +494,8 @@ class Report:
             pos = r["pos"]
             base = scenarios[base_idx][1][pkey][0][pos]
             label = ("  " if r["kind"] == "factor_level" else "") + r["label"]
-            cells = [label] + [f"{(inner[pkey][0][pos] - base) * 100:+.{dec}f} pp"
+            cells = [label] + [NOT_APPLICABLE if math.isnan(inner[pkey][0][pos] - base)
+                               else f"{(inner[pkey][0][pos] - base) * 100:+.{dec}f} pp"
                                for _, inner in other]
             table.append(("row", cells))
         return minimal_table(f"Robustness  (Δ power vs baseline: {names[base_idx]})", columns, table)

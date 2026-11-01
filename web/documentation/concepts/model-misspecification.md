@@ -6,7 +6,7 @@ description: "How fitting the wrong model - omitting real causes or adding null 
 
 The other concepts here are about the **data** you generate — effect sizes, correlations, sample size. This page is about the **model you fit to it**. They are not the same thing: MCPower can generate data from one model and then measure power on a *different* model that you name with `test_formula`. When the model you analyse does not match the truth, the power you get can mislead you badly — sometimes far too low, sometimes spuriously high.
 
-The mechanic — how to pass `test_formula`, and the rule that every term in it must already exist in your generation formula — lives in [[concepts/model-specification#test-formula-misspecification|model specification]]. This page is about *why it matters*.
+The mechanic — how to pass `test_formula`, and the rule that every term in it must already exist in your generation formula — lives in [[concepts/model-specification#test-formula-misspecification|model specification]]. This page is about *why it matters*. In a mixed model, `test_formula` changes only the fixed effects: the random-effect structure stays that of the model, so a variable with a random slope must stay in `test_formula`.
 
 ## One truth, three fits
 

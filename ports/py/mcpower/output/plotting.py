@@ -288,6 +288,7 @@ def _build_envelope(result: Dict[str, Any], meta: Dict[str, Any], kind: str) -> 
 
     scenarios_out = []
     for name, inner in scen_list:
+        flags = list(inner.get("corrected_not_applicable") or [])
         entry: Dict[str, Any] = {
             "label": name,
             "sample_sizes": inner["sample_sizes"],
@@ -303,8 +304,14 @@ def _build_envelope(result: Dict[str, Any], meta: Dict[str, Any], kind: str) -> 
             # test (mixed/GLMM) → nothing drawn.
             "overall_power": inner.get("overall_significant_rate"),
             "overall_ci": inner.get("overall_significant_ci"),
+            # The engine's flags, explicit: a flagged entry of the displayed
+            # corrected power is not drawn, and any flag makes the corrected
+            # joint view (at-least-k / exactly-k) not applicable.
+            "not_applicable": flags if corr else [],
+            "joint_not_applicable": any(flags),
         }
         if kind == "find_sample_size":
+            # None when the corrected joint view is not applicable.
             entry["histogram"] = inner.get("success_count_histogram_corrected", [])
             # Same divisor across every scenario (the orchestrator rejects a
             # mismatch before this dict is built) — the plot bridge reads it

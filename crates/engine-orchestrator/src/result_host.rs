@@ -35,9 +35,14 @@ pub enum HostValue {
     VecF64(Vec<f64>),
     VecU64(Vec<u64>),
     VecStr(Vec<String>),
+    /// Python list of bool; R logical vector.
+    VecBool(Vec<bool>),
     VecCi(Vec<Ci>),
     OptCi(Option<Ci>),
     Str(String),
+    /// An absent value: Python `None`, R `NULL`. Used for a `fitted` entry
+    /// the engine leaves out (`SampleSizeResult.fitted[t] == None`).
+    Null,
     /// Struct-like map with static keys (a result's fields, estimator extras,
     /// a post-hoc block). Order is significant and host-uniform.
     Map(Vec<(&'static str, HostValue)>),
@@ -62,6 +67,9 @@ pub enum HostValue {
 /// canonical host order every port reproduces.
 pub fn power_result_to_host(pr: &PowerResult, label: &str) -> HostValue {
     let n_sims_bh = pr.boundary_hit.len();
+    // A target with no corrected power makes the whole corrected joint view
+    // not applicable: hosts get `None` / `NULL`, not an empty histogram.
+    let joint_na = pr.corrected_not_applicable.iter().any(|&na| na);
     HostValue::Map(vec![
         ("n_sims", HostValue::Usize(pr.n_sims as usize)),
         ("n_sample_sizes", HostValue::Usize(1)),
@@ -83,6 +91,10 @@ pub fn power_result_to_host(pr: &PowerResult, label: &str) -> HostValue {
         (
             "ci_corrected",
             HostValue::Seq(vec![HostValue::VecCi(pr.ci_corrected.clone())]),
+        ),
+        (
+            "corrected_not_applicable",
+            HostValue::VecBool(pr.corrected_not_applicable.clone()),
         ),
         (
             "convergence_rate",
@@ -118,7 +130,11 @@ pub fn power_result_to_host(pr: &PowerResult, label: &str) -> HostValue {
         ),
         (
             "success_count_histogram_corrected",
-            HostValue::VecU64(pr.success_count_histogram_corrected.clone()),
+            if joint_na {
+                HostValue::Null
+            } else {
+                HostValue::VecU64(pr.success_count_histogram_corrected.clone())
+            },
         ),
         ("grid_warnings", HostValue::VecStr(pr.grid_warnings.clone())),
         (
@@ -148,6 +164,13 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
     let in_unit = |n: usize| n / div;
     let first = grid.first();
     let n_sims = first.map(|pr| pr.n_sims as usize).unwrap_or(0);
+    // Any flagged target (the flags are the spec's, so grid point 0 speaks
+    // for all) makes the corrected joint view not applicable: the corrected
+    // histograms, `first_joint_achieved(_unit)` and `fitted_joint` project as
+    // `None` / `NULL`.
+    let joint_na = first
+        .map(|pr| pr.corrected_not_applicable.iter().any(|&na| na))
+        .unwrap_or(false);
     let n_targets = first.map(|pr| pr.target_indices.len()).unwrap_or(0);
     let target_indices: Vec<u64> = first
         .map(|pr| pr.target_indices.iter().map(|&i| i as u64).collect())
@@ -192,6 +215,16 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
                 grid.iter()
                     .map(|pr| HostValue::VecCi(pr.ci_corrected.clone()))
                     .collect(),
+            ),
+        ),
+        // Singular, not per N: the flags come from the spec, so every grid
+        // point carries the same ones.
+        (
+            "corrected_not_applicable",
+            HostValue::VecBool(
+                first
+                    .map(|pr| pr.corrected_not_applicable.clone())
+                    .unwrap_or_default(),
             ),
         ),
         (
@@ -242,11 +275,15 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
         ),
         (
             "success_count_histogram_corrected",
-            HostValue::Seq(
-                grid.iter()
-                    .map(|pr| HostValue::VecU64(pr.success_count_histogram_corrected.clone()))
-                    .collect(),
-            ),
+            if joint_na {
+                HostValue::Null
+            } else {
+                HostValue::Seq(
+                    grid.iter()
+                        .map(|pr| HostValue::VecU64(pr.success_count_histogram_corrected.clone()))
+                        .collect(),
+                )
+            },
         ),
         (
             "grid_warnings",
@@ -270,21 +307,29 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
         ),
         (
             "first_joint_achieved",
-            HostValue::IndexMap(
-                ssr.first_joint_achieved
-                    .iter()
-                    .map(|v| HostValue::OptUsize(*v))
-                    .collect(),
-            ),
+            if joint_na {
+                HostValue::Null
+            } else {
+                HostValue::IndexMap(
+                    ssr.first_joint_achieved
+                        .iter()
+                        .map(|v| HostValue::OptUsize(*v))
+                        .collect(),
+                )
+            },
         ),
         (
             "first_joint_achieved_unit",
-            HostValue::IndexMap(
-                ssr.first_joint_achieved
-                    .iter()
-                    .map(|v| HostValue::OptUsize(v.map(in_unit)))
-                    .collect(),
-            ),
+            if joint_na {
+                HostValue::Null
+            } else {
+                HostValue::IndexMap(
+                    ssr.first_joint_achieved
+                        .iter()
+                        .map(|v| HostValue::OptUsize(v.map(in_unit)))
+                        .collect(),
+                )
+            },
         ),
         (
             "first_overall_achieved",
@@ -325,18 +370,25 @@ pub fn sample_size_result_to_host(ssr: &SampleSizeResult, label: &str) -> HostVa
             HostValue::IndexMap(
                 ssr.fitted
                     .iter()
-                    .map(|cf| crossing_fit_to_host(cf, div))
+                    .map(|cf| match cf {
+                        Some(cf) => crossing_fit_to_host(cf, div),
+                        None => HostValue::Null,
+                    })
                     .collect(),
             ),
         ),
         (
             "fitted_joint",
-            HostValue::IndexMap(
-                ssr.fitted_joint
-                    .iter()
-                    .map(|cf| crossing_fit_to_host(cf, div))
-                    .collect(),
-            ),
+            if joint_na {
+                HostValue::Null
+            } else {
+                HostValue::IndexMap(
+                    ssr.fitted_joint
+                        .iter()
+                        .map(|cf| crossing_fit_to_host(cf, div))
+                        .collect(),
+                )
+            },
         ),
         // Singular overall crossing surfaced as a 0-or-1-element IndexMap (no
         // null/optional-Map HostValue variant): empty `[]` when no overall test
@@ -573,6 +625,7 @@ mod tests {
             power_corrected: vec![0.75, 0.55],
             ci_uncorrected: vec![Ci { lo: 0.7, hi: 0.9 }, Ci { lo: 0.5, hi: 0.7 }],
             ci_corrected: vec![Ci { lo: 0.65, hi: 0.85 }, Ci { lo: 0.45, hi: 0.65 }],
+            corrected_not_applicable: vec![],
             convergence_rate: 1.0,
             boundary_hit: vec![0, 1, 0, 2],
             estimator_extras: EstimatorExtras::Ols {},
@@ -635,6 +688,7 @@ mod tests {
                 "power_corrected",
                 "ci_uncorrected",
                 "ci_corrected",
+                "corrected_not_applicable",
                 "convergence_rate",
                 "scenario",
                 "sample_sizes",
@@ -700,15 +754,15 @@ mod tests {
             first_achieved: vec![Some(100), None],
             first_joint_achieved: vec![Some(50), None],
             fitted: vec![
-                CrossingFit::Fitted {
+                Some(CrossingFit::Fitted {
                     n_star: 84.3,
                     n_achievable: 90,
                     ci_lo: Some(76.2),
                     ci_hi: None,
-                },
-                CrossingFit::NotReached {
+                }),
+                Some(CrossingFit::NotReached {
                     n_approx: Some(330),
-                },
+                }),
             ],
             fitted_joint: vec![
                 CrossingFit::AtOrBelowMin { n_min: 50 },
@@ -755,6 +809,7 @@ mod tests {
                 "power_corrected",
                 "ci_uncorrected",
                 "ci_corrected",
+                "corrected_not_applicable",
                 "convergence_rate",
                 "sample_sizes",
                 "sample_sizes_unit",
@@ -936,6 +991,46 @@ mod tests {
             other => panic!("fitted_overall not IndexMap: {other:?}"),
         }
         assert!(matches!(field(&hv, "cluster_atom"), HostValue::Usize(10)));
+    }
+
+    /// A target with no corrected power: its `fitted` slot projects as an
+    /// explicit `Null` (Python `None`, R `NULL`) and the singular
+    /// `corrected_not_applicable` flags come from the first grid point.
+    #[test]
+    fn sample_size_host_projects_not_applicable_target() {
+        let mut ssr = sample_ssr();
+        ssr.fitted[1] = None;
+        for pr in &mut ssr.grid_or_trace {
+            pr.corrected_not_applicable = vec![false, true];
+        }
+        let hv = sample_size_result_to_host(&ssr, "opt");
+        match field(&hv, "fitted") {
+            HostValue::IndexMap(items) => assert!(matches!(items[1], HostValue::Null)),
+            other => panic!("fitted not IndexMap: {other:?}"),
+        }
+        match field(&hv, "corrected_not_applicable") {
+            HostValue::VecBool(v) => assert_eq!(v, &vec![false, true]),
+            other => panic!("corrected_not_applicable not VecBool: {other:?}"),
+        }
+        // The corrected joint view is not applicable; the uncorrected one stays.
+        for key in [
+            "success_count_histogram_corrected",
+            "first_joint_achieved",
+            "first_joint_achieved_unit",
+            "fitted_joint",
+        ] {
+            assert!(matches!(field(&hv, key), HostValue::Null), "{key}");
+        }
+        assert!(matches!(
+            field(&hv, "success_count_histogram_uncorrected"),
+            HostValue::Seq(_)
+        ));
+        // The find_power projection follows the same rule.
+        let hv = power_result_to_host(&ssr.grid_or_trace[0], "opt");
+        assert!(matches!(
+            field(&hv, "success_count_histogram_corrected"),
+            HostValue::Null
+        ));
     }
 
     /// Divisor 1 (observations): every `*_unit` twin equals its N column, so

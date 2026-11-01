@@ -24,23 +24,27 @@ the same quantity:
 
 - OLS: *t* at the residual df *n − (P + 1)*.
 - Logit GLM: Wald *z*.
-- LMM and GLMM: the Wald statistic against a *t* at the between-within df.
+- LMM without a random slope, and GLMM: the Wald statistic against a *t* at
+  the between-within df.
   A target that varies within clusters: *n − (P + 1) − (g − p_between)*, with
   *g* the number of clusters and *p_between* the cluster-level fixed effects,
   intercept included. A target constant within clusters: *g −* (number of
   cluster-level fixed effects, intercept included). LMM fits use REML; GLMM fits
   use Laplace with RX-based standard errors (`wald_se = "rx"`).
-- Mixed fits with every variance component at zero use the single-level
-  reference: *t* at *n − (P + 1)* for LMM, Wald *z* for GLMM.
-- LMM with a crossed grouping (`lme_crossed`): lmerTest Satterthwaite *t*, the
-  rule MCPower uses for crossed designs; Wald *z* for a draw whose Satterthwaite df
-  cannot be computed. The single-level rule above does not apply here.
+- Between-within fits with every variance component at zero use the
+  single-level reference: *t* at *n − (P + 1)* for LMM, Wald *z* for GLMM.
+- LMM with a random slope (`lme_ex2`) or a crossed grouping (`lme_crossed`):
+  lmerTest Satterthwaite *t* per draw, MCPower's test for these designs under
+  `df_method = "auto"`; Wald *z* for a draw whose Satterthwaite df cannot be
+  computed. The single-level rule above does not apply here.
 - A failed fit counts as not significant, and power is divided by all
   simulations. A singular fit is not a failure.
 - Superpower is scored on the pairwise contrast equal to MCPower's dummy
-  coefficient, not its omnibus *F*. simr stores *z* p-values, so its summary is
-  taken at the alpha that makes *p < alpha* the same event as *|z| >* the *t*
-  critical value.
+  coefficient, not its omnibus *F*. On a between-within case simr runs its *z*
+  test, which stores *z* p-values, so its summary is taken at the alpha that
+  makes *p < alpha* the same event as *|z| >* the *t* critical value. On `lme_ex2`
+  simr runs its lmerTest Satterthwaite *t* test, read at alpha itself; a draw whose
+  Satterthwaite df fail counts as not significant there, not as a Wald *z*.
 
 What still differs by design: simr draws the predictors once and reuses them in
 every simulation, and Superpower allocates exact cell counts. MCPower and the
@@ -78,6 +82,9 @@ Rscript example_misspec.R   # misspecified analysis models, seven cases
 Rscript example_knobs.R     # scenario knobs, six cases
 SMOKE=1 Rscript example_upload.R
 ```
+
+`SKIP_LOOPS=1` runs an example script's MCPower side only, for a run that reuses
+earlier loop records.
 
 ## The agreement statistic
 

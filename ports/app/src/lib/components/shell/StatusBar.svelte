@@ -20,7 +20,7 @@ import { uiStore } from '$lib/stores/ui.svelte';
 import { sharedPrefs } from '$lib/stores/shared-prefs.svelte';
 import { startRun } from '$lib/run/run';
 import { runStore } from '$lib/stores/run.svelte';
-import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
+import { familyConfigToAppSpec, findPowerSampleSizeError } from '$lib/domain/app-spec-adapter';
 import { SELECTABLE_FAMILIES } from '$lib/domain/family';
 import { powerNToObservations, unitNoun } from '$lib/domain/unit-label';
 import { SIMULATION } from '$lib/configs/app-config';
@@ -61,6 +61,13 @@ const wiredDisabled = $derived(
   isWired &&
   (!adaptResult?.spec || (adaptResult?.errors?.length ?? 0) > 0 || runStore.runState === 'running')
 );
+// Find power's n outside the sample-size limits gates Find power only; the
+// message shows under the n input (FindPowerCard).
+const findPowerNError = $derived(
+  adaptResult?.spec
+    ? findPowerSampleSizeError(adaptResult.spec, familyStore.byFamily[familyStore.active].findPower.n)
+    : null,
+);
 // Non-blocking config warnings (e.g. alpha above the usual max, extreme baseline
 // probability). Shown but never gate the run — mirrors the Python/R soft warns.
 const configWarnings = $derived(isWired ? (adaptResult?.warnings ?? []) : []);
@@ -98,7 +105,7 @@ async function onFindPower() {
   sharedPrefs.activePane = 'results';
   if (!isWired) return startRun('find-power');
   const spec = adaptResult?.spec;
-  if (!spec) return;
+  if (!spec || findPowerNError) return;
   const cfg = familyStore.byFamily[familyStore.active];
   await runStore.startFindPower(spec, powerNToObservations(spec, cfg.findPower.n));
 }
@@ -154,7 +161,7 @@ function confirmReset() {
     {#if isRunning}
       <Button variant="destructive" class="h-11 px-5 text-sm" onclick={onCancel}>Cancel</Button>
     {:else}
-      <Button class="h-11 px-5 text-sm" disabled={isWired ? wiredDisabled : nonWiredDisabled} onclick={onFindPower}>
+      <Button class="h-11 px-5 text-sm" disabled={isWired ? wiredDisabled || findPowerNError !== null : nonWiredDisabled} onclick={onFindPower}>
         <Play class="mr-2 h-5 w-5" /> Find power
       </Button>
       <Button class="h-11 px-5 text-sm" disabled={isWired ? wiredDisabled : nonWiredDisabled} onclick={onFindSample}>

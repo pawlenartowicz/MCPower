@@ -29,5 +29,6 @@ debug_report(
 }
 \details{
 Returns a named list with fields \code{input}, \code{data}, \code{dispatch}, \code{stats},
-\code{crit}, \code{power} (each NULL when the stage was not requested or not available).
+\code{crit}, \code{power} (each NULL when the stage was not requested or not available)
+and \code{warnings} (a character vector, empty when there are none).
 }

@@ -124,6 +124,10 @@ pub struct DebugReport {
     /// `crit` stages ran. Lets a host show power next to the chain and makes
     /// the stats→power self-consistency check a direct compare.
     pub power: Option<PowerResult>,
+    /// Advisory warnings, the same text `find_power` gives at this N (today
+    /// only the snap of N down to the cluster atom). Hosts emit each entry.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 /// Stage 0 — validates "the engine understood my inputs."
@@ -331,10 +335,13 @@ mod entry {
 
     /// Run the staged debug pipeline for one contract: lowers it through
     /// `find_power`'s exact path (identical scenario base seed), then
-    /// assembles the report stages requested in `stages`.
+    /// assembles the report stages requested in `stages`. A clustered `n` is
+    /// floored to the cluster atom first, as `find_power` does, and every
+    /// stage uses the floored N; the snap warning goes in `warnings`.
     ///
     /// # Errors
-    /// Contract-lowering failures and engine errors from the single-threaded
+    /// Contract-lowering failures, too few complete clusters at the floored
+    /// N (as in `find_power`), and engine errors from the single-threaded
     /// observer run.
     pub fn debug_report(
         c: &SimulationContract,
@@ -343,6 +350,7 @@ mod entry {
         n_sims: usize,
         stages: StageMask,
     ) -> Result<DebugReport, OrchestratorError> {
+        let (n, snap_warning) = crate::find_power::snap_single_n(std::slice::from_ref(c), n)?;
         // Reuse find_power's EXACT lowering → identical scenario base seed.
         let scenarios = lower_contracts(std::slice::from_ref(c), seed)?;
         let scenario = scenarios
@@ -563,6 +571,7 @@ mod entry {
                 &spec.target_indices,
                 &spec.contrast_pairs,
                 &spec.estimator,
+                &crate::aggregation::corrected_not_applicable(spec),
             );
             // aggregate_batch ships n:0 (filled by caller in find_power.rs); replicate.
             results.into_iter().next().map(|mut pr| {
@@ -580,6 +589,7 @@ mod entry {
             stats,
             crit,
             power,
+            warnings: snap_warning.into_iter().collect(),
         })
     }
 
@@ -820,6 +830,7 @@ mod tests {
                 }],
             }),
             power: None,
+            warnings: vec!["a warning".into()],
         };
 
         let bytes = rmp_serde::to_vec(&report).unwrap();

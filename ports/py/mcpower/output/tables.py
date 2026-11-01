@@ -40,11 +40,17 @@ def unit_display_label(meta: Dict[str, Any]) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+NOT_APPLICABLE = "n/a"
+
+
 def fmt_pct(x: float, decimals: int) -> str:
     """Percentage with `decimals` places, e.g. fmt_pct(0.925, 1) == '92.5%'.
     Exactly 100% drops the fractional part ('100%' not '100.0%') — the trailing
     '.0' carries no information, and omitting it lets the column reserve only two
-    integer digits (a 100% value then takes one leading space, not two)."""
+    integer digits (a 100% value then takes one leading space, not two).
+    NaN (a corrected power the correction does not define) renders 'n/a'."""
+    if math.isnan(x):
+        return NOT_APPLICABLE
     pct = x * 100
     if round(pct, decimals) == 100:
         return "100%"
@@ -64,9 +70,12 @@ def fmt_ci(ci, decimals: int) -> str:
     takes one leading space, not the two a '100.0%' would force. Empty string
     when ``ci`` is falsy.
 
-    ``ci`` is a (lo, hi) pair — positional indexing, NOT dict keys."""
+    ``ci`` is a (lo, hi) pair (positional indexing, NOT dict keys). A NaN
+    bound (a corrected CI the correction does not define) renders 'n/a'."""
     if not ci:
         return ""
+    if math.isnan(ci[0]) or math.isnan(ci[1]):
+        return NOT_APPLICABLE
     w = 2 + (1 + decimals if decimals > 0 else 0) + 1  # 2 int digits + '.dec' + '%'
     return f"[{fmt_pct(ci[0], decimals).rjust(w)}, {fmt_pct(ci[1], decimals).rjust(w)}]"
 
@@ -77,6 +86,22 @@ def _search_ceiling(inner) -> "int | None":
     as '≥ <ceiling>' rather than a bare '—'."""
     ss = inner.get("sample_sizes") or []
     return max(ss) if ss else None
+
+
+def any_corrected_not_applicable(inner) -> bool:
+    """True when any target has no corrected power (`corrected_not_applicable`).
+    The corrected all-targets view (the "First N achieving all targets" footer
+    and header, the joint required-N table) is then not applicable."""
+    return any(inner.get("corrected_not_applicable") or [])
+
+
+def corrected_not_applicable(inner, pos) -> bool:
+    """True when the target at `pos` has no corrected power under the run's
+    correction (Tukey HSD and a target outside every factor): the engine's
+    `corrected_not_applicable` flag. Such a target has no corrected crossing,
+    so its required-N cells read 'n/a' (and the all-targets footer reads 'n/a')."""
+    flags = inner.get("corrected_not_applicable") or []
+    return pos < len(flags) and bool(flags[pos])
 
 
 def _required_n_headline_for(inner, pos, unit_divisor: int) -> Tuple[str, Optional[int]]:
@@ -96,8 +121,12 @@ def _required_n_headline_for(inner, pos, unit_divisor: int) -> Tuple[str, Option
     construction (the divisor divides every grid/bound N, see
     `engine_orchestrator::result_host`), and a no-op when `unit_divisor == 1`.
 
+    A target flagged in `corrected_not_applicable` gives ('n/a', None).
+
     Callers wanting only the display string use fmt_required_n; callers needing
     the numeric (footer max, header N≥) use this directly."""
+    if corrected_not_applicable(inner, pos):
+        return NOT_APPLICABLE, None
     # int keys from the engine; the `fitted` dict is keyed by position int.
     f = (inner.get("fitted") or {}).get(pos)
     key = "first_achieved_unit" if unit_divisor > 1 else "first_achieved"
@@ -911,7 +940,9 @@ def _render_sample_size_short(result: Dict[str, Any], meta: Dict[str, Any], cfg:
             numerics.append(num)
             if num is None:
                 has_not_reached = True
-        if not has_not_reached and numerics and all(n is not None for n in numerics):
+        if any_corrected_not_applicable(inner):
+            footers.append(NOT_APPLICABLE)
+        elif not has_not_reached and numerics and all(n is not None for n in numerics):
             footers.append(str(max(numerics)))  # type: ignore[arg-type]
         else:
             ceiling = _search_ceiling(inner)

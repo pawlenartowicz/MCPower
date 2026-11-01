@@ -44,10 +44,12 @@ build_model <- function(case) {
     cl <- case$cluster
     # cluster_level_vars must reach the engine because reference_df() rebuilds
     # p_between from the SAME declaration on the R side; a case declaring it
-    # here while the engine saw none would put the two df out of step.
+    # here while the engine saw none would put the two df out of step. A case
+    # may list both n_clusters and cluster_size to document its N; set_cluster
+    # takes one, and n_clusters is the one that sizes the data.
     m$set_cluster(cl$var, ICC = cl$ICC,
                   n_clusters = cl$n_clusters %||% NULL,
-                  cluster_size = cl$cluster_size %||% NULL,
+                  cluster_size = if (is.null(cl$n_clusters)) cl$cluster_size,
                   cluster_level_vars = cl$cluster_level_vars %||% NULL)
   }
   m
@@ -69,7 +71,7 @@ build_cross_model <- function(cc) {
     cl <- cc$cluster
     m$set_cluster(cl$var, ICC = cl$ICC,
                   n_clusters = cl$n_clusters %||% NULL,
-                  cluster_size = cl$cluster_size %||% NULL)
+                  cluster_size = if (is.null(cl$n_clusters)) cl$cluster_size)
   }
   m
 }
@@ -287,8 +289,12 @@ parse_factor_props <- function(case) {
 # betas + SEs aligned to the design columns. design already carries the intercept
 # as its first all-ones column, so all fits are through the origin on the matrix
 # (matching MCPower's own test definition: OLS marginal t, GLM Wald z, LME REML
-# via lmer referred to a t on the R-computed between-within df — NOT lmerTest
-# Satterthwaite).
+# via lmer referred to a t on the R-computed between-within df). The LME arm
+# fits a random intercept only: it serves the single-grouping intercept-only
+# cases, where df_method = "auto" is the between-within test. The L3 slope and
+# crossed/nested LME cases, which "auto" tests at lmerTest Satterthwaite df, go
+# through check_extras_golden(), which gates beta, statistic and variance
+# components, not the df.
 fit_sota <- function(family, design, outcome, cluster_ids = NULL) {
   if (family == "lme") {
     df <- as.data.frame(design)
@@ -412,6 +418,8 @@ cluster_level_flags <- function(case, columns) {
 # z. `collapsed` is read off the fit's variance components (mcpower_side()), not
 # off the df the engine reports. OLS is the residual-df t; an unclustered GLM,
 # and any design the between-within partition is not defined for, is the Wald z.
+# An LME with a random slope (Satterthwaite df under "auto") is out of scope:
+# no case that reaches compare_sides() has one.
 reference_df <- function(case, saved, collapsed = FALSE) {
   cols     <- saved$columns
   df_resid <- saved$n - saved$n_predictors

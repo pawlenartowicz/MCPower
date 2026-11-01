@@ -57,21 +57,21 @@ describe('ClusterEditor — obs/cluster warning', () => {
 
   it('warns from the Find-power n when it is the smaller case, and says so', async () => {
     const cfg = mixed('n_clusters');
-    cfg.cluster!.nClusters = 30;
-    cfg.findPower.n = 100; // ~3 obs/cluster
+    cfg.cluster!.nClusters = 60;
+    cfg.findPower.n = 100; // ~1 obs/cluster
     cfg.findSampleSize.unit = 'cluster_size'; // bounds are obs per cluster
     cfg.findSampleSize.from = 10; // 10 obs/cluster — fine
     cfg.findSampleSize.to = 50;
     const { getByTestId } = render(ClusterEditor);
     await flush();
-    expect(text(getByTestId('cluster-size-warning'))).toContain('~3 obs/cluster at n=100');
+    expect(text(getByTestId('cluster-size-warning'))).toContain('~1 obs/cluster at n=100');
   });
 
-  it('is silent when both cards clear the recommended threshold', async () => {
+  it('is silent at the floor of 2 per cluster', async () => {
     const cfg = mixed('n_clusters');
-    cfg.cluster!.nClusters = 10;
-    cfg.findPower.n = 200;
-    cfg.findSampleSize.from = 150;
+    cfg.cluster!.nClusters = 50;
+    cfg.findPower.n = 100;
+    cfg.findSampleSize.from = 100;
     const { queryByTestId } = render(ClusterEditor);
     await flush();
     expect(queryByTestId('cluster-size-warning')).toBeNull();
@@ -79,15 +79,24 @@ describe('ClusterEditor — obs/cluster warning', () => {
 
   it('reads the fixed size directly, ignoring both run cards', async () => {
     const cfg = mixed('cluster_size');
-    cfg.cluster!.clusterSize = 3;
+    cfg.cluster!.clusterSize = 1;
     cfg.findPower.n = 100000;
     cfg.findSampleSize.from = 100000;
     const { getByTestId } = render(ClusterEditor);
     await flush();
     const warning = text(getByTestId('cluster-size-warning'));
-    expect(warning).toContain('~3 obs/cluster —');
+    expect(warning).toContain('~1 obs/cluster —');
     expect(warning).not.toContain('at n=');
     expect(warning).not.toContain('sample-size search');
+  });
+
+  it('raises the floor by one for each random slope', async () => {
+    const cfg = mixed('cluster_size');
+    cfg.formula = 'y ~ x + (1 + x|school)';
+    cfg.cluster!.clusterSize = 2;
+    const { getByTestId } = render(ClusterEditor);
+    await flush();
+    expect(text(getByTestId('cluster-size-warning'))).toContain('engine hard minimum of 3');
   });
 });
 

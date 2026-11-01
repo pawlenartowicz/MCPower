@@ -29,7 +29,7 @@ model with a random intercept per patient:
   recruited, the open question is how often to bring them back — search that
   directly with
   `find_sample_size(target_test="phase", unit="cluster_size", from_size=5, to_size=25, by=1)`.
-  The from/to range now reads as visits per patient (the engine needs at least 5),
+  The from/to range now reads as visits per patient,
   each step of 1 is 40 more measurements, and the result reports the total N
   behind it. `phase` varies *within* a patient, so extra visits genuinely sharpen
   it — that is not true of a predictor fixed per patient.

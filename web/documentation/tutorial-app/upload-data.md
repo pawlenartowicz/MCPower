@@ -43,3 +43,5 @@ With a file loaded, a **Fit from data** button appears in the Predictors section
 ## Run, and clear
 
 Run **Find power** or **Find sample size** as usual — the uploaded data is included automatically. After a Strict run, the Summary pane reports the bootstrap reuse fraction (and the high-reuse warning when it applies). The **Clear** link next to the filename removes the data and restores the file picker.
+
+Runs on uploaded data are not kept in **History**: each entry would hold a copy of the whole file. To repeat such a run, load the file again and run it.

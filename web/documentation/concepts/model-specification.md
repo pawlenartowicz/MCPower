@@ -59,7 +59,7 @@ The syntax also extends to random slopes `(1 + x|school)` and nested groupings `
 
 A test formula lets you **fit a different model than the one that generated the data** — the data come from your full model, but power is measured on a smaller analysis model you name separately. Use it to study the power cost of misspecifying your analysis: dropping a covariate, ignoring an interaction, or otherwise testing a leaner model than the truth.
 
-Pass it as `test_formula` on `find_power` / `find_sample_size`. Every term in the test formula must already exist in the model formula (give an omitted-but-real predictor an effect of `0` so it shapes the data but you can still drop it from the fit).
+Pass it as `test_formula` on `find_power` / `find_sample_size`. Every term in the test formula must already exist in the model formula (give an omitted-but-real predictor an effect of `0` so it shapes the data but you can still drop it from the fit). The test formula names fixed effects only: a mixed model keeps its random effects, so a predictor with a random slope must stay in the test formula, and a random-effect term such as `(1|school)` in the test formula is an error.
 
 ```python
 # data generated from y = treatment + covariate + treatment:covariate,

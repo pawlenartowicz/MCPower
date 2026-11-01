@@ -4,12 +4,27 @@
 #   * family=     — the data-generating process (outcome kind + clustering).
 #   * estimator=  — the model fitted to each simulated dataset.
 
+# One finite whole number that fits an R integer: a double such as 20 counts, as
+# does 300.00000000000006 from seq() arithmetic (callers round it); 20.5, NA,
+# NaN, Inf and vectors do not. A caller with its own upper limit widens `limit`.
+.is_whole <- function(x, limit = .Machine$integer.max) {
+  is.numeric(x) && length(x) == 1L && is.finite(x) && abs(x) <= limit &&
+    abs(x - round(x)) <= sqrt(.Machine$double.eps) * max(1, abs(x))
+}
+
+# How a rejected scalar argument reads in a message: its value, or the length
+# of a vector given where one value is expected.
+.got <- function(x) {
+  if (length(x) != 1L) sprintf("a vector of length %d", length(x))
+  else format(x, scientific = FALSE)
+}
+
 #' MCPower — Monte Carlo power analysis (R6 class)
 #'
-#' Mirrors the Python `MCPower` API: a formula plus chained `set_*` setters,
-#' then `find_power()` / `find_sample_size()`.
+#' @description Mirrors the Python `MCPower` API: a formula plus chained
+#' `set_*` setters, then `find_power()` / `find_sample_size()`.
 #'
-#' `find_sample_size()`'s power-vs-N curve uses common random numbers across
+#' @details `find_sample_size()`'s power-vs-N curve uses common random numbers across
 #' sample sizes, so it is smooth and the reported N is stable from run to run.
 #'
 #' @export
@@ -256,10 +271,10 @@ MCPower <- R6::R6Class(
       invisible(self)
     },
 
-    #' Set how one factor's level shares are realised in each simulation.
-    #'
-    #' Overrides the scenario-wide \code{sampled_factor_proportions} for this
-    #' factor only. Works for declared and uploaded factors.
+    #' @description Set how one factor's level shares are realised in each
+    #'   simulation. Overrides the scenario-wide
+    #'   \code{sampled_factor_proportions} for this factor only. Works for
+    #'   declared and uploaded factors.
     #'
     #' @param name A factor predictor.
     #' @param mode \code{"exact"} holds the level counts at their shares in
@@ -324,7 +339,7 @@ MCPower <- R6::R6Class(
       invisible(self)
     },
 
-    #' Add a random-intercept grouping factor to the model.
+    #' @description Add a random-intercept grouping factor to the model.
     #'
     #' @param grouping_var Name of the grouping variable (must appear in the
     #'   formula as a random-effect term, e.g. \code{(1|school)}).
@@ -336,8 +351,9 @@ MCPower <- R6::R6Class(
     #' @param random_slopes Optional list of random-slope specs, one per slope.
     #'   Each element: \code{list(predictor = "x1", variance = 0.05,
     #'   corr_with_intercept = 0.3, corr_with = c(...))}. \code{corr_with} is
-    #'   the vector of correlations with each earlier slope in the same call
-    #'   (\code{numeric(0)} for the first slope); defaults to \code{numeric(0)}.
+    #'   the vector of correlations with each earlier slope in the same call,
+    #'   one value per earlier slope (\code{numeric(0)} for the first slope);
+    #'   when omitted, every one of those correlations is 0.
     #' @param cluster_level_vars Character vector of predictor names whose values
     #'   are constant within a cluster (cluster-level covariates). Must all be
     #'   modeled predictors. Default \code{NULL} (no cluster-level covariates).
@@ -354,7 +370,7 @@ MCPower <- R6::R6Class(
                            cluster_size = NULL,
                            random_slopes = NULL,
                            cluster_level_vars = NULL, n_per_parent = NULL,
-                           tau_squared = NULL, ...) {
+                           tau_squared = NULL) {
       # ICC is the CONDITIONAL (residual) ICC tau^2/(tau^2+sigma^2): the
       # within-cluster correlation after the predictors are accounted for. The
       # random intercept is sized tau^2 = ICC/(1-ICC). The raw outcome's marginal
@@ -376,15 +392,34 @@ MCPower <- R6::R6Class(
               i, sQuote(sl$predictor)
             ), call. = FALSE)
           }
-          if (!is.numeric(sl$variance) || sl$variance <= 0) {
-            stop(sprintf("random_slopes[[%d]]$variance must be a positive number", i),
-                 call. = FALSE)
+          v <- sl$variance
+          if (!is.numeric(v) || length(v) != 1L || !is.finite(v) || v <= 0) {
+            stop(sprintf(
+              "random_slopes[[%d]]$variance must be a finite positive number, got %s",
+              i, .got(v)), call. = FALSE)
           }
           corr <- sl$corr_with_intercept %||% 0.0
-          if (!is.numeric(corr) || corr < -1 || corr > 1) {
+          if (!is.numeric(corr) || length(corr) != 1L || !is.finite(corr) ||
+              corr < -1 || corr > 1) {
             stop(sprintf(
               "random_slopes[[%d]]$corr_with_intercept must be in [-1, 1]", i
             ), call. = FALSE)
+          }
+          # [["corr_with"]] (exact match): `$corr_with` would partial-match
+          # corr_with_intercept when corr_with is absent.
+          cw <- sl[["corr_with"]]
+          if (!is.null(cw)) {
+            if (length(cw) != i - 1L) {
+              stop(sprintf(paste0(
+                "random_slopes[[%d]]$corr_with gives %d value(s); it needs %d, one ",
+                "correlation with each earlier slope in random_slopes"),
+                i, length(cw), i - 1L), call. = FALSE)
+            }
+            if (!is.numeric(cw) || any(!is.finite(cw)) || any(cw < -1 | cw > 1)) {
+              stop(sprintf(
+                "random_slopes[[%d]]$corr_with values must be finite and in [-1, 1]", i
+              ), call. = FALSE)
+            }
           }
         }
       }
@@ -435,8 +470,8 @@ MCPower <- R6::R6Class(
         }
         if (is.null(tau_squared)) tau_squared <- 0.0
         if (!is.numeric(tau_squared) || length(tau_squared) != 1L ||
-            is.na(tau_squared) || tau_squared < 0) {
-          stop(sprintf("tau_squared must be a non-negative number, got %s",
+            !is.finite(tau_squared) || tau_squared < 0) {
+          stop(sprintf("tau_squared must be a finite non-negative number, got %s",
                        format(tau_squared)), call. = FALSE)
         }
       } else if (!is.null(tau_squared)) {
@@ -457,7 +492,13 @@ MCPower <- R6::R6Class(
       }
 
       if (is.null(ICC)) ICC <- 0.0
-      icc_val <- as.numeric(ICC)
+      # validators.py _validate_cluster_config wording.
+      if (!is.numeric(ICC)) stop("ICC must be a number", call. = FALSE)
+      if (length(ICC) != 1L || !is.finite(ICC)) {
+        stop(sprintf("ICC must be a finite number, got %s", .got(ICC)),
+             call. = FALSE)
+      }
+      icc_val <- ICC
       # Hard range: ICC must be in [0, 1).
       if (icc_val < 0 || icc_val >= 1) {
         stop(sprintf(
@@ -490,40 +531,38 @@ MCPower <- R6::R6Class(
         }
       }
       if (!is.null(n_per_parent)) {
-        if (!is.numeric(n_per_parent) || length(n_per_parent) != 1L ||
-            is.na(n_per_parent) || n_per_parent != round(n_per_parent) ||
-            n_per_parent < 2) {
+        if (!.is_whole(n_per_parent) || n_per_parent < 2) {
           stop(sprintf("n_per_parent must be an integer >= 2, got %s",
-                       format(n_per_parent)), call. = FALSE)
+                       .got(n_per_parent)), call. = FALSE)
         }
       } else if (!grouping_var %in% private$nested_child_vars() &&
                  is.null(n_clusters) && is.null(cluster_size)) {
         stop("Must specify either n_clusters or cluster_size", call. = FALSE)
+      } else if (!is.null(n_clusters) && !is.null(cluster_size)) {
+        stop("Specify either n_clusters OR cluster_size, not both", call. = FALSE)
       }
       # n_clusters must be at least 2 when provided.
-      if (!is.null(n_clusters) && as.integer(n_clusters) < 2L) {
-        stop(sprintf(
-          "n_clusters must be an integer >= 2, got %d",
-          as.integer(n_clusters)
-        ), call. = FALSE)
+      if (!is.null(n_clusters) && (!.is_whole(n_clusters) || n_clusters < 2)) {
+        stop(sprintf("n_clusters must be an integer >= 2, got %s", .got(n_clusters)),
+             call. = FALSE)
       }
-      # cluster_size must be at least reliable_rows_per_cluster when provided.
+      # cluster_size must be at least min_rows_per_cluster when provided.
       if (!is.null(cluster_size)) {
-        reliable <- as.integer(lims$reliable_rows_per_cluster)
-        if (as.integer(cluster_size) < reliable) {
+        min_rows <- as.integer(lims$min_rows_per_cluster)
+        if (!.is_whole(cluster_size) || cluster_size < min_rows) {
           stop(sprintf(
-            "cluster_size must be an integer >= %d for reliable mixed model estimation. Got %d.",
-            reliable, as.integer(cluster_size)
+            "cluster_size must be an integer >= %d. Got %s.",
+            min_rows, .got(cluster_size)
           ), call. = FALSE)
         }
       }
       private$pending_clusters[[grouping_var]] <- list(
-        n_clusters   = n_clusters,
-        cluster_size = cluster_size,
+        n_clusters   = if (!is.null(n_clusters)) round(n_clusters),
+        cluster_size = if (!is.null(cluster_size)) round(cluster_size),
         icc          = as.numeric(ICC),
         # Poisson raw τ² (Decision 8); NULL for ICC-sized families.
         tau_squared  = if (!is.null(tau_squared)) as.numeric(tau_squared) else NULL,
-        n_per_parent = n_per_parent,   # NULL for crossed, or a nested child taking the config default
+        n_per_parent = if (!is.null(n_per_parent)) round(n_per_parent),   # NULL for crossed, or a nested child taking the config default
         raw_slopes   = if (!is.null(random_slopes) && length(random_slopes) > 0L)
                          random_slopes else NULL,
         # Cluster-level covariate names for THIS grouping var. Stored per group
@@ -953,6 +992,28 @@ MCPower <- R6::R6Class(
         call. = FALSE)
     },
 
+    #' @description Merge custom scenario configurations on top of the
+    #'   defaults. Scenarios are the named settings bundles of the sensitivity
+    #'   analysis, run via \code{scenarios =} on \code{find_power} and
+    #'   \code{find_sample_size}. A preset name (\code{optimistic},
+    #'   \code{realistic}, \code{doomer}) updates that preset; a new name
+    #'   inherits every key from \code{optimistic}, except \code{truth_start},
+    #'   which starts \code{FALSE}, and then applies the overrides.
+    #' @param configs Named list mapping a scenario name to a list of knob
+    #'   overrides. Valid knob names, exactly these ten keys:
+    #'   \code{heterogeneity}, \code{heteroskedasticity_ratio},
+    #'   \code{correlation_noise_sd}, \code{distribution_change_prob},
+    #'   \code{new_distributions}, \code{sampled_factor_proportions},
+    #'   \code{random_effect_dist}, \code{random_effect_df},
+    #'   \code{icc_noise_sd}, \code{truth_start}; an unknown key is an error.
+    #'   \code{truth_start} is a logical and the one key that does not perturb
+    #'   the data: \code{TRUE} seeds a mixed-model fit at the true random-effect
+    #'   structure ("estimation is well-behaved"); \code{FALSE} starts it blind.
+    #'   It is \code{TRUE} in \code{optimistic} and \code{FALSE} in
+    #'   \code{realistic} and \code{doomer}, and a new custom scenario starts
+    #'   with it \code{FALSE} unless you set it. OLS and unclustered binary or
+    #'   count fits ignore it.
+    #' @return The \code{MCPower} object invisibly (for chaining).
     set_scenario_configs = function(configs) {
       if (!is.list(configs)) stop("configs must be a named list")
       # All scenario knob keys are now live; unknown keys still error (typo guard).
@@ -993,6 +1054,17 @@ MCPower <- R6::R6Class(
     # Analysis entry points (model.py).
     # ------------------------------------------------------------------
 
+    #' @param correction Multiple-comparison correction: \code{NULL} or
+    #'   \code{"none"}, \code{"bonferroni"}, \code{"holm"}, \code{"bh"} (alias
+    #'   \code{"fdr"}), or \code{"tukey"}, case-insensitive. \code{"tukey"}
+    #'   corrects factor levels and post-hoc contrasts only: a target outside
+    #'   every factor (a continuous or binary predictor, an interaction) has no
+    #'   Tukey-corrected power, so its \code{power_corrected} and
+    #'   \code{ci_corrected} entries are \code{NA},
+    #'   \code{corrected_not_applicable} is \code{TRUE} at its position, and
+    #'   the printed tables show \code{n/a}. With such a target the corrected
+    #'   joint view is not applicable as a whole:
+    #'   \code{success_count_histogram_corrected} is \code{NULL}.
     #' @param agq Adaptive Gauss-Hermite quadrature node count for a clustered
     #'   binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
     #'   default). An odd value in \code{3..=25} opts into AGQ, but only when
@@ -1000,19 +1072,36 @@ MCPower <- R6::R6Class(
     #'   factor and at most 3 random effects per group) -- an ineligible or
     #'   even/out-of-range value warns and runs at Laplace instead. No-op for
     #'   OLS/LMM.
-    #' @param df_method Reference distribution for mixed-model fixed-effect
-    #'   tests: \code{"between_within"} (default) tests each fixed effect
-    #'   against a t with between-within denominator degrees of freedom --
-    #'   between-cluster df if the predictor is cluster-level, within-cluster
-    #'   df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-    #'   for OLS and unclustered GLM. With crossed or nested extra groupings
-    #'   an LME is tested at each fit's Satterthwaite df instead, and a GLMM
-    #'   against a Wald z. Cluster-level predictors must be
-    #'   declared with \code{cluster_level_vars} (see \code{set_cluster}) for
-    #'   the between df to apply. A fit whose random-effect variances all
-    #'   collapse to zero (a singular fit) is tested against the residual df
-    #'   \code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
-    #'   reference -- the same switch a Satterthwaite reference makes there.
+    #' @param test_formula Optional formula string for a test model that differs
+    #'   from the model that generates the data (e.g. \code{"y ~ x1"} to
+    #'   leave out \code{x2}). It sets the test model's fixed effects only:
+    #'   the test model keeps the model's random effects, and a random-effect
+    #'   term in \code{test_formula} is an error.
+    #' @param df_method Test for mixed-model fixed effects (ignored for OLS
+    #'   and unclustered GLM). \code{"auto"} (default) picks one per design:
+    #'   between-within df for a single-grouping linear mixed model without a
+    #'   random slope and for any single-grouping binary or count mixed model;
+    #'   Satterthwaite df, computed for each fit as lmerTest does, for every
+    #'   other linear mixed model (a random slope, or crossed or nested
+    #'   groupings); Wald z for a binary or count model with crossed or nested
+    #'   groupings. \code{"between_within"} tests each fixed effect against a
+    #'   t with between-within denominator df (between-cluster df if the
+    #'   predictor is cluster-level, within-cluster df otherwise) and needs a
+    #'   single grouping factor; \code{"satterthwaite"} uses each fit's
+    #'   Satterthwaite df on any linear mixed model and is not defined for a
+    #'   binary or count model; \code{"asymptotic"} tests against a Wald z. A
+    #'   named method the design does not support is an error. A fit whose
+    #'   Satterthwaite df cannot be computed is tested against a Wald z.
+    #'   Cluster-level predictors must be declared with
+    #'   \code{cluster_level_vars} (see \code{set_cluster}) for the between df
+    #'   to apply. Under between-within df, a fit whose random-effect variances
+    #'   all collapse to zero (a singular fit) is tested against the residual
+    #'   df \code{N - p} (LME) or Wald z (GLMM), the collapsed model's own
+    #'   reference; Satterthwaite df reach the residual df there on their own.
+    #' @param sample_size Total number of observations: one whole number (a
+    #'   double such as \code{200} is accepted) between 20 and 100,000, and at
+    #'   least 15 plus the number of design columns. A clustered design floors
+    #'   it to a multiple of the cluster atom, with a warning.
     find_power = function(sample_size, target_test = NULL, correction = NULL,
                           wald_se = NULL, agq = NULL, test_formula = NULL,
                           n_sims = NULL,
@@ -1020,6 +1109,9 @@ MCPower <- R6::R6Class(
                           verbose = TRUE, df_method = NULL) {
       if (!private$applied) private$apply()
 
+      # validators.py _validate_sample_size + _validate_sample_size_for_model,
+      # first as in model.py find_power.
+      sample_size <- private$validate_sample_size(sample_size)
       # Validate correction (raises on unknown names).
       private$validate_correction_arg(correction)
       # Resolve wald_se / agq / df_method against config; warn-and-strip ineligible agq.
@@ -1052,8 +1144,9 @@ MCPower <- R6::R6Class(
         !identical(wire_targets_for_d4, "overall")
       if (identical(correction_wire, "tukey_hsd") && has_named_beta_targets) {
         warning(paste0(
-          "Tukey HSD applies only to post-hoc contrast families; the marginal ",
-          "coefficient test(s) you requested are reported uncorrected."),
+          "Tukey HSD corrects factor-level contrasts only: factor levels get ",
+          "Tukey-corrected power, and continuous, binary and interaction targets ",
+          "report corrected power as n/a."),
           call. = FALSE)
       }
 
@@ -1112,6 +1205,15 @@ MCPower <- R6::R6Class(
       result
     },
 
+    #' @param correction Multiple-comparison correction, as in
+    #'   \code{find_power}. Under \code{"tukey"} a target outside every factor
+    #'   has no corrected power, so it has no required N: its
+    #'   \code{first_achieved} entry is \code{NA}, its \code{fitted} entry is
+    #'   \code{NULL}, and the printed tables show \code{n/a}. The corrected
+    #'   joint view is then not applicable as a whole:
+    #'   \code{first_joint_achieved}, \code{first_joint_achieved_unit},
+    #'   \code{fitted_joint} and \code{success_count_histogram_corrected} are
+    #'   \code{NULL}, and "First N achieving all targets" reads \code{n/a}.
     #' @param agq Adaptive Gauss-Hermite quadrature node count for a clustered
     #'   binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
     #'   default). An odd value in \code{3..=25} opts into AGQ, but only when
@@ -1140,19 +1242,32 @@ MCPower <- R6::R6Class(
     #'   than requested -- e.g. 20 subjects crossed with 12 items: a requested
     #'   step of 1 trial per subject snaps to 12 trials (the atom is 240
     #'   observations / 20 subjects).
-    #' @param df_method Reference distribution for mixed-model fixed-effect
-    #'   tests: \code{"between_within"} (default) tests each fixed effect
-    #'   against a t with between-within denominator degrees of freedom --
-    #'   between-cluster df if the predictor is cluster-level, within-cluster
-    #'   df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-    #'   for OLS and unclustered GLM. With crossed or nested extra groupings
-    #'   an LME is tested at each fit's Satterthwaite df instead, and a GLMM
-    #'   against a Wald z. Cluster-level predictors must be
-    #'   declared with \code{cluster_level_vars} (see \code{set_cluster}) for
-    #'   the between df to apply. A fit whose random-effect variances all
-    #'   collapse to zero (a singular fit) is tested against the residual df
-    #'   \code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
-    #'   reference -- the same switch a Satterthwaite reference makes there.
+    #' @param test_formula Optional formula string for a test model that differs
+    #'   from the model that generates the data (e.g. \code{"y ~ x1"} to
+    #'   leave out \code{x2}). It sets the test model's fixed effects only:
+    #'   the test model keeps the model's random effects, and a random-effect
+    #'   term in \code{test_formula} is an error.
+    #' @param df_method Test for mixed-model fixed effects (ignored for OLS
+    #'   and unclustered GLM). \code{"auto"} (default) picks one per design:
+    #'   between-within df for a single-grouping linear mixed model without a
+    #'   random slope and for any single-grouping binary or count mixed model;
+    #'   Satterthwaite df, computed for each fit as lmerTest does, for every
+    #'   other linear mixed model (a random slope, or crossed or nested
+    #'   groupings); Wald z for a binary or count model with crossed or nested
+    #'   groupings. \code{"between_within"} tests each fixed effect against a
+    #'   t with between-within denominator df (between-cluster df if the
+    #'   predictor is cluster-level, within-cluster df otherwise) and needs a
+    #'   single grouping factor; \code{"satterthwaite"} uses each fit's
+    #'   Satterthwaite df on any linear mixed model and is not defined for a
+    #'   binary or count model; \code{"asymptotic"} tests against a Wald z. A
+    #'   named method the design does not support is an error. A fit whose
+    #'   Satterthwaite df cannot be computed is tested against a Wald z.
+    #'   Cluster-level predictors must be declared with
+    #'   \code{cluster_level_vars} (see \code{set_cluster}) for the between df
+    #'   to apply. Under between-within df, a fit whose random-effect variances
+    #'   all collapse to zero (a singular fit) is tested against the residual
+    #'   df \code{N - p} (LME) or Wald z (GLMM), the collapsed model's own
+    #'   reference; Satterthwaite df reach the residual df there on their own.
     find_sample_size = function(target_test = NULL, correction = NULL,
                                 wald_se = NULL, agq = NULL, test_formula = NULL,
                                 target_power = NULL,
@@ -1166,6 +1281,10 @@ MCPower <- R6::R6Class(
       if (is.null(from_size)) from_size <- .ssb$from
       if (is.null(to_size))   to_size   <- .ssb$to
       if (is.null(by))        by        <- .ssb$by   # "auto"
+      range <- private$validate_sample_size_range(from_size, to_size, by)
+      from_size <- range$from_size
+      to_size   <- range$to_size
+      by        <- range$by
 
       # Validate correction (raises on unknown names).
       private$validate_correction_arg(correction)
@@ -1197,8 +1316,9 @@ MCPower <- R6::R6Class(
         !identical(wire_targets_for_d4, "overall")
       if (identical(correction_wire, "tukey_hsd") && has_named_beta_targets) {
         warning(paste0(
-          "Tukey HSD applies only to post-hoc contrast families; the marginal ",
-          "coefficient test(s) you requested are reported uncorrected."),
+          "Tukey HSD corrects factor-level contrasts only: factor levels get ",
+          "Tukey-corrected power, and continuous, binary and interaction targets ",
+          "report corrected power as n/a."),
           call. = FALSE)
       }
 
@@ -1586,7 +1706,18 @@ MCPower <- R6::R6Class(
             "terms and family is not 'lme'; add '(1|group)' to the formula or ",
             "use family='lme'"), call. = FALSE)
         }
-        if (!clustered) return(invisible(NULL))
+        if (!clustered) {
+          # A random-effect term with no set_cluster would run the model
+          # unclustered, dropping every random effect without notice.
+          if (length(parsed_grouping_vars) > 0L) {
+            stop(sprintf(paste0(
+              "the random-effect term on '%s' has no set_cluster call; every ",
+              "grouping variable in the formula must be configured before ",
+              "find_power"),
+              parsed_grouping_vars[[1]]), call. = FALSE)
+          }
+          return(invisible(NULL))
+        }
       }
       if (length(parsed_grouping_vars) == 0L) {
         stop(paste0(
@@ -1602,68 +1733,155 @@ MCPower <- R6::R6Class(
       for (g in parsed_grouping_vars) {
         if (!g %in% names(private$pending_clusters)) {
           stop(sprintf(paste0(
-            "random effect '(1|%s)' has no set_cluster call; every grouping ",
-            "variable in the formula must be configured before find_power"), g),
+            "the random-effect term on '%s' has no set_cluster call; every ",
+            "grouping variable in the formula must be configured before ",
+            "find_power"), g),
             call. = FALSE)
+        }
+      }
+      private$check_slopes_match_formula()
+      invisible(NULL)
+    },
+
+    # model.py _check_slopes_match_formula: refuse a random slope that only one
+    # of the formula and set_cluster declares. The formula's (1 + x|g) term
+    # names the slope and set_cluster(random_slopes = ...) sizes it; a slope
+    # given in one place only would otherwise be dropped (formula only) or added
+    # (set_cluster only) without notice. The formula cannot write a slope on
+    # either grouping of a nested (1|A/B) term, so there set_cluster is the only
+    # route and its slopes are not checked against the formula. Message text
+    # changes all ports together.
+    check_slopes_match_formula = function() {
+      formula_slopes <- list()
+      nested <- character(0)
+      for (re in private$registry$`_random_effects_parsed`) {
+        formula_slopes[[re$grouping_var]] <- unlist(re$slope_vars)
+        if (!is.null(re$parent_var)) nested <- c(nested, re$grouping_var, re$parent_var)
+      }
+      for (g in names(private$pending_clusters)) {
+        in_formula <- as.character(formula_slopes[[g]])
+        configured <- vapply(private$pending_clusters[[g]]$raw_slopes %||% list(),
+                             function(sl) sl$predictor, character(1))
+        for (v in setdiff(in_formula, configured)) {
+          stop(sprintf(paste0(
+            "the formula gives '%s' a random slope on '%s', but ",
+            "set_cluster('%s', ...) does not configure it; add ",
+            "list(predictor = \"%s\", variance = <variance>) to random_slopes ",
+            "in that set_cluster call"), g, v, g, v), call. = FALSE)
+        }
+        if (g %in% nested) next
+        for (v in setdiff(configured, in_formula)) {
+          stop(sprintf(paste0(
+            "set_cluster('%s', ...) gives '%s' a random slope, but the formula ",
+            "has no random slope on '%s' for '%s'; write '(1 + %s|%s)' in the ",
+            "formula"), g, v, v, g, v, g), call. = FALSE)
         }
       }
       invisible(NULL)
     },
 
-    # model.py _validate_lme_runtime (sample-size part) + validators.py
-    # _validate_cluster_sample_size: observations per cluster of the primary
-    # grouping at the requested N. Errors below reliable_rows_per_cluster, warns
-    # below recommended_rows_per_cluster. find_power only: find_sample_size
-    # sweeps N, so there is no single N to check. Message text changes all
-    # ports together.
+    # validators.py _validate_sample_size + _validate_sample_size_for_model:
+    # one whole number inside config limits.sample_size, and at least
+    # limits.sample_size_base plus the number of design columns (Green's rule).
+    # Message text changes all ports together. Deliberate port difference: R
+    # accepts a whole double (200, or 300.00000000000006 from seq() arithmetic,
+    # rounded), so the "must be an integer" tail names the value or class
+    # ("got 150.5", "got character") where Python names the type ("got float").
+    # Returns the N as an integer.
+    validate_sample_size = function(sample_size) {
+      fail <- function(msg) stop(paste0("Validation failed:\n• ", msg), call. = FALSE)
+      if (!.is_whole(sample_size, limit = Inf)) {
+        got <- if (!is.numeric(sample_size)) class(sample_size)[1L] else .got(sample_size)
+        fail(sprintf("sample_size must be an integer, got %s", got))
+      }
+      sample_size <- round(sample_size)
+      lim <- .config()$limits$sample_size
+      if (sample_size < lim[[1L]]) {
+        fail(sprintf("sample_size must be at least %d, got %s",
+                     as.integer(lim[[1L]]), .got(sample_size)))
+      }
+      if (sample_size > lim[[2L]]) {
+        fail(sprintf(paste0(
+          "sample_size too large (%s). Maximum recommended: %s. We cannot ",
+          "guarantee stability for such small p-values."),
+          format(sample_size, big.mark = ",", scientific = FALSE),
+          format(lim[[2L]], big.mark = ",", scientific = FALSE)))
+      }
+      n_variables <- length(private$registry$effect_names)
+      base <- as.integer(.config()$limits$sample_size_base)
+      min_required <- base + n_variables
+      if (sample_size < min_required) {
+        fail(sprintf(paste0(
+          "sample_size (%d) is too small for a model with %d variables. ",
+          "Minimum required: %d (%d + %d variables)."),
+          as.integer(sample_size), n_variables, min_required, base, n_variables))
+      }
+      invisible(as.integer(sample_size))
+    },
+
+    # validators.py _validate_sample_size_range; message text changes all ports
+    # together. Same whole-double allowance as validate_sample_size. `by` also
+    # takes "auto". Returns the three values with whole doubles rounded.
+    validate_sample_size_range = function(from_size, to_size, by) {
+      fail <- function(msgs) {
+        stop(paste0("Validation failed:\n", paste0("• ", msgs, collapse = "\n")),
+             call. = FALSE)
+      }
+      positive_whole <- function(x) .is_whole(x) && x > 0
+      auto <- identical(by, "auto")
+      errors <- character(0)
+      if (!positive_whole(from_size)) {
+        errors <- c(errors, sprintf("from_size must be a positive integer, got %s", .got(from_size)))
+      }
+      if (!positive_whole(to_size)) {
+        errors <- c(errors, sprintf("to_size must be a positive integer, got %s", .got(to_size)))
+      }
+      if (!auto && !positive_whole(by)) {
+        errors <- c(errors, sprintf('by must be a positive integer or "auto", got %s', .got(by)))
+      }
+      if (length(errors) > 0L) fail(errors)
+
+      from_size <- round(from_size)
+      to_size <- round(to_size)
+      if (!auto) by <- round(by)
+      if (from_size >= to_size) {
+        errors <- c(errors, sprintf("from_size (%s) must be less than to_size (%s)",
+                                    .got(from_size), .got(to_size)))
+      }
+      if (!auto && by > to_size - from_size) {
+        errors <- c(errors, sprintf(
+          "Step size 'by' (%s) is larger than range (%s). This will only test one sample size.",
+          .got(by), .got(to_size - from_size)))
+      }
+      if (length(errors) > 0L) fail(errors)
+      if (!auto) {
+        n_tests <- (to_size - from_size) %/% by + 1
+        if (n_tests > 100) {
+          warning(sprintf(
+            "Large number of sample sizes to test (%s). This may take significant time.",
+            .got(n_tests)), call. = FALSE)
+        }
+      }
+      list(from_size = from_size, to_size = to_size, by = by)
+    },
+
+    # model.py _validate_lme_runtime (sample-size part): the number of clusters
+    # a given cluster_size implies at the requested N. The engine refuses too few
+    # observations per cluster. find_power only: find_sample_size sweeps N, so
+    # there is no single N to check. Message text changes all ports together.
     validate_cluster_sample_size = function(sample_size) {
       if (length(private$pending_clusters) == 0L) return(invisible(NULL))
-      # A bad sample_size is left to the engine's positive_count error.
-      if (!is.numeric(sample_size) || length(sample_size) != 1L ||
-          is.na(sample_size) || sample_size < 1) return(invisible(NULL))
       primary <- private$pending_clusters[[1L]]
-      n_clusters <- primary$n_clusters
       cluster_size <- primary$cluster_size
-      if (is.null(n_clusters) && is.null(cluster_size)) return(invisible(NULL))
+      if (!is.null(primary$n_clusters) || is.null(cluster_size)) return(invisible(NULL))
       sample_size <- as.integer(sample_size)
-      lims <- .config()$limits
-      reliable <- as.integer(lims$reliable_rows_per_cluster)
-      recommended <- as.integer(lims$recommended_rows_per_cluster)
-      effective <- if (!is.null(cluster_size)) {
-        as.integer(cluster_size)
-      } else {
-        sample_size %/% as.integer(n_clusters)
-      }
-      nc_text <- if (is.null(n_clusters)) "None" else as.character(as.integer(n_clusters))
-      if (effective < reliable) {
-        hint <- if (!is.null(n_clusters)) {
-          sprintf(" Either increase sample_size to %d or reduce n_clusters to %d.",
-                  as.integer(n_clusters) * reliable, sample_size %/% reliable)
-        } else {
-          sprintf(" Increase cluster_size to at least %d.", reliable)
-        }
+      derived <- sample_size %/% as.integer(cluster_size)
+      min_clusters <- as.integer(.config()$limits$min_clusters)
+      if (derived < min_clusters) {
         stop(sprintf(paste0(
-          "Insufficient observations per cluster: %d (sample_size=%d, ",
-          "n_clusters=%s). Need at least %d observations per cluster for reliable ",
-          "mixed model estimation.%s"),
-          effective, sample_size, nc_text, reliable, hint), call. = FALSE)
-      }
-      if (effective < recommended) {
-        warning(sprintf(paste0(
-          "Low observations per cluster: %d (sample_size=%d, n_clusters=%s). ",
-          "Recommended: at least %d observations per cluster. Small cluster sizes ",
-          "may cause convergence issues or biased variance estimates."),
-          effective, sample_size, nc_text, recommended), call. = FALSE)
-      }
-      if (is.null(n_clusters)) {
-        derived <- sample_size %/% as.integer(cluster_size)
-        min_clusters <- as.integer(lims$min_clusters)
-        if (derived < min_clusters) {
-          stop(sprintf(paste0(
-            "derived n_clusters=%d is below %d (sample_size=%d, cluster_size=%d); ",
-            "increase sample_size"), derived, min_clusters, sample_size, as.integer(cluster_size)),
-            call. = FALSE)
-        }
+          "derived n_clusters=%d is below %d (sample_size=%d, cluster_size=%d); ",
+          "increase sample_size"), derived, min_clusters, sample_size, as.integer(cluster_size)),
+          call. = FALSE)
       }
       invisible(NULL)
     },
@@ -1909,9 +2127,9 @@ MCPower <- R6::R6Class(
       # Resolve raw_slopes predictor names to 0-based generation column
       # indices (mirrors Python's slope-resolution path). Column index for a
       # simple main effect = eff$column_index (singular scalar; column_indices,
-      # plural, is interaction-only and integer(0) for a main effect). corr_with
-      # defaults to numeric(0) for the first slope; each subsequent slope's
-      # corr_with has length = position-1.
+      # plural, is interaction-only and integer(0) for a main effect). A missing
+      # corr_with is position-1 zeros (numeric(0) for the first slope), as
+      # Python and the app send.
       resolved_clusters <- private$pending_clusters
       for (gv in names(resolved_clusters)) {
         raw_slp <- resolved_clusters[[gv]]$raw_slopes
@@ -1926,7 +2144,7 @@ MCPower <- R6::R6Class(
             # [["corr_with"]] (exact match) — `$corr_with` would PARTIAL-match
             # the sibling `corr_with_intercept` key when corr_with is absent,
             # wrongly giving the first slope a length-1 corr_with.
-            corr_w  <- sl[["corr_with"]] %||% numeric(0)
+            corr_w  <- sl[["corr_with"]] %||% rep(0, i - 1L)
             list(
               column              = as.integer(col_idx),
               variance            = as.numeric(sl$variance),
@@ -1955,9 +2173,8 @@ MCPower <- R6::R6Class(
 # Build the canonical Laplace-approximation bias message for one GLMM scenario's
 # estimator_extras, or NULL when it does not apply. Reads both thresholds from
 # .config() — not hardcoded. Fires when the GLM τ̂² exceeds glmm_tau_sq_warn AND
-# min_cluster_size < recommended_rows_per_cluster (the validator already rejects
-# configs below `reliable`, so the reachable band is [reliable, recommended):
-# allowed but Laplace-risky). Mirrors the Python port's _glmm_laplace_bias_warning
+# min_cluster_size < recommended_rows_per_cluster. Mirrors the Python port's
+# _glmm_laplace_bias_warning
 # (model.py) — message text + firing rule change all ports together. Shared by the
 # transient fit-time warn (.check_glmm_laplace_bias_warning) and the persistent
 # report line (.diagnostic_warnings) so the two never diverge.

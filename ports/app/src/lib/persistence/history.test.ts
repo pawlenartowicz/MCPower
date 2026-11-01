@@ -25,7 +25,8 @@ function entry(id: string): HistoryEntry {
     ts: Date.now(),
     family: 'linear',
     kind: 'find-power',
-    spec: {} as any,
+    // Real specs carry `csv: null` when nothing is uploaded.
+    spec: { csv: null } as any,
     sample_size: 80,
     effect_names: [],
     result: {} as any,
@@ -39,6 +40,30 @@ describe('history persistence', () => {
     mockStore.set.mockReset();
     mockStore.save.mockReset();
     resetHistoryCache();
+  });
+
+  const upload = (id: string) =>
+    ({ ...entry(id), spec: { family: 'linear', csv: { mode: 'none', n_rows: 50, columns: [] } } as any }) as HistoryEntry;
+  const stored = (entries: HistoryEntry[]) =>
+    mockStore.get.mockImplementation(async (k: string) => (k === 'entries' ? entries : undefined));
+
+  it('a push without uploaded data appends', async () => {
+    stored([entry('a')]);
+    const out = await pushHistoryEntry(entry('b'));
+    expect(out.map((e) => e.id)).toEqual(['b', 'a']);
+    expect(mockStore.set).toHaveBeenCalledWith(
+      'entries',
+      expect.arrayContaining([expect.objectContaining({ id: 'b' })]),
+    );
+  });
+
+  // An upload run's spec carries the whole dataset; History does not keep it.
+  it('a push of a run on uploaded data leaves History unchanged', async () => {
+    stored([entry('a'), entry('b')]);
+    const out = await pushHistoryEntry(upload('u'));
+    expect(out.map((e) => e.id)).toEqual(['b', 'a']);
+    expect(mockStore.set).not.toHaveBeenCalled();
+    expect(mockStore.save).not.toHaveBeenCalled();
   });
 
   it('loadHistory returns empty when nothing stored', async () => {

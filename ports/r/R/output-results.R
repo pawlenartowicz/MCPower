@@ -54,9 +54,39 @@
 .unwrap_scenario_result <- function(raw, names) {
   if (length(names) == 1L) {
     inner <- raw$scenarios[[names[[1L]]]]
-    return(.add_boundary_hit_rates(inner))
+    return(.add_boundary_hit_rates(.na_not_applicable(inner)))
   }
-  .add_boundary_hit_rates(raw)
+  .add_boundary_hit_rates(.na_not_applicable(raw))
+}
+
+#' Turn the engine's NaN into NA for corrected entries the correction does
+#' not define.
+#'
+#' Under Tukey HSD a target outside every factor has no corrected power: the
+#' engine flags it in \code{corrected_not_applicable} and returns NaN for its
+#' \code{power_corrected} entry and both \code{ci_corrected} bounds, at every
+#' sample size. R reports a missing value as \code{NA}.
+#'
+#' @param result A result list from find_power or find_sample_size, or a
+#'   multi-scenario envelope.
+#' @return The same list with those entries set to \code{NA_real_}.
+#' @keywords internal
+.na_not_applicable <- function(result) {
+  if ("scenarios" %in% names(result)) {
+    result$scenarios <- lapply(result$scenarios, .na_not_applicable)
+    return(result)
+  }
+  na <- which(as.logical(result[["corrected_not_applicable"]] %||% logical(0)))
+  if (length(na) == 0L) return(result)
+  result$power_corrected <- lapply(result$power_corrected, function(v) {
+    v[na] <- NA_real_
+    v
+  })
+  result$ci_corrected <- lapply(result$ci_corrected, function(row) {
+    for (t in na) row[[t]] <- c(NA_real_, NA_real_)
+    row
+  })
+  result
 }
 
 #' Check that the worst-case failure rate across all sample-size points does not

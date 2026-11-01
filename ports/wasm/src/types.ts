@@ -5,7 +5,7 @@ export type ProgressEvent =
   | { kind: 'started'; total_sims: number; total_scenarios: number; total_grid_points: number }
   | { kind: 'scenario_started'; label: string; idx: number; total: number }
   | { kind: 'sims_completed'; n: number; completed: number; total: number }
-  | { kind: 'n_point_completed'; n: number; power_uncorrected: number[]; power_corrected: number[] }
+  | { kind: 'n_point_completed'; n: number; power_uncorrected: number[]; power_corrected: (number | null)[] }
   | { kind: 'scenario_completed'; label: string; idx: number }
   | { kind: 'cancelled' }
   | { kind: 'completed' };

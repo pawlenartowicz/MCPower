@@ -4,10 +4,11 @@
 # per-file sha256 and the JSON meta.packages / lang_version).
 #
 # Copied: every results/*_r.json here and the <stem>_points.csv /
-# <stem>_summary.csv beside it; validation/data/{df_calibration,l3_maxima,
-# data_generation_recovery}.csv; benchmarks/results/{py,py_1t,r,r_1t,jl}.json
-# when present. Smoke outputs (agreement_smoke*, lme_ex2_smoke*) never match
-# *_r.json, and plots are not copied.
+# <stem>_summary.csv beside it; validation/data/{df_calibration,
+# df_calibration_slopes,l3_maxima,data_generation_recovery}.csv;
+# benchmarks/results/{py,py_1t,py_6p,r,r_1t,jl}.json when present. Smoke outputs
+# (agreement_smoke*, lme_ex2_smoke*) never match *_r.json, and plots are not
+# copied.
 #
 # Refuses — non-zero exit, nothing written — when the target exists, when the
 # files carrying meta.packages.mcpower disagree on the version, or when a JSON's
@@ -54,11 +55,11 @@ for json in "$here"/results/*_r.json; do
     files+=("$csv")
   done
 done
-for f in df_calibration.csv l3_maxima.csv data_generation_recovery.csv; do
+for f in df_calibration.csv df_calibration_slopes.csv l3_maxima.csv data_generation_recovery.csv; do
   [[ -f $validation/data/$f ]] || die "missing $validation/data/$f"
   files+=("$validation/data/$f")
 done
-for f in py py_1t r r_1t jl; do
+for f in py py_1t py_6p r r_1t jl; do
   [[ -f $repo/benchmarks/results/$f.json ]] && files+=("$repo/benchmarks/results/$f.json")
 done
 

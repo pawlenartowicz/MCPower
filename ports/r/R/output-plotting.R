@@ -175,6 +175,7 @@ NULL
 
   scen <- .scenarios(result)
   scenarios_list <- lapply(scen, function(inner) {
+    flags <- as.logical(inner$corrected_not_applicable %||% logical(0))
     # ci: list of per-N items, each a list of c(lo,hi) pairs.
     ci_rows <- lapply(inner[[ckey]], function(row) {
       lapply(row, function(pair) as.numeric(pair)[1:2])
@@ -187,7 +188,12 @@ NULL
       target_indices = I(as.integer(inner$target_indices)),
       contrast_pairs = lapply(inner$contrast_pairs %||% list(), function(p) I(as.integer(p))),
       power          = power_rows,
-      ci             = ci_rows
+      ci             = ci_rows,
+      # The engine's flags, explicit: a flagged entry of the displayed
+      # corrected power is not drawn, and any flag makes the corrected joint
+      # view (at-least-k / exactly-k) not applicable.
+      not_applicable       = I(if (corr) flags else logical(0)),
+      joint_not_applicable = any(flags)
     )
     # The overall/omnibus test is a first-class result: one more bar (last) on
     # the power-at-N chart and one more curve series, matching the table. The
@@ -224,9 +230,12 @@ NULL
     scenarios_list[[i]]$label <- scen_names[[i]]
   }
 
+  # na = "null": a corrected power or CI the correction does not define is NA
+  # here; jsonlite would write it as the string "NA". The engine reads null as
+  # NaN and leaves the point off the chart.
   jsonlite::toJSON(
     list(scenarios = unname(scenarios_list)),
-    auto_unbox = TRUE, null = "null"
+    auto_unbox = TRUE, null = "null", na = "null"
   )
 }
 

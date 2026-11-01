@@ -1,6 +1,7 @@
 // TypeScript mirror of the Rust engine_app_spec::AppSpec wire shape; must stay serde-compatible with the Rust type.
 // INVARIANT: field names and union tags (family/kind/status/estimator) must match the Rust serde shape (snake_case) exactly.
 import type { SampleSizeUnit } from './unit-label';
+import type { DfMethod } from './df-method-options';
 
 export type CorrectionMethod = 'none' | 'bonferroni' | 'holm' | 'benjamini_hochberg' | 'tukey_hsd';
 
@@ -205,12 +206,13 @@ export interface MixedSpec extends LinearSpec {
     cluster_name: string;
     icc: number;
     cluster_dim: ClusterDim;
-    /** Reference distribution for the fixed-effect Wald tests. Optional — mirrors
-     *  the Rust `#[serde(default)]` (omitted ⇒ engine default `between_within`).
-     *  `'between_within'` gives the between-cluster df to the predictors named in
-     *  `cluster_level_vars` and the within-cluster df to the rest; `'asymptotic'`
-     *  is the Wald-z opt-in. */
-    df_method?: 'asymptotic' | 'between_within';
+    /** Test for the fixed effects. Optional; mirrors the Rust
+     *  `#[serde(default)]` (omitted ⇒ engine default `auto`, which picks the test
+     *  per design). `'between_within'` gives the between-cluster df to the
+     *  predictors named in `cluster_level_vars` and the within-cluster df to the
+     *  rest (single grouping only); `'satterthwaite'` is per-fit Satterthwaite df
+     *  (linear mixed model only); `'asymptotic'` is the Wald z. */
+    df_method?: DfMethod;
     /** Predictor names constant within cluster (cluster-level covariates). Default []. */
     cluster_level_vars?: string[];
     /** Extra grouping factors (crossed / nested) after the primary. Default []. */

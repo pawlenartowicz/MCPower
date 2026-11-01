@@ -14,10 +14,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Confidence-interval bounds — a named pair, not a tuple, so hosts
-/// serialize `{lo, hi}` keys. Wilson proportion bounds: both in `[0, 1]`.
+/// serialize `{lo, hi}` keys. Wilson proportion bounds: both in `[0, 1]`,
+/// or both NaN for a corrected CI the correction does not define (see
+/// `PowerResult.corrected_not_applicable`); a JSON `null` reads back as NaN.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Ci {
+    #[serde(deserialize_with = "nan_tolerant")]
     pub lo: f64,
+    #[serde(deserialize_with = "nan_tolerant")]
     pub hi: f64,
 }
 
@@ -66,9 +70,21 @@ pub struct PowerResult {
     #[serde(default)]
     pub contrast_pairs: Vec<(u32, u32)>,
     pub power_uncorrected: Vec<f64>,
+    /// NaN where `corrected_not_applicable` is true; a JSON `null` reads back
+    /// as NaN.
+    #[serde(deserialize_with = "nan_tolerant_vec")]
     pub power_corrected: Vec<f64>,
     pub ci_uncorrected: Vec<Ci>,
     pub ci_corrected: Vec<Ci>,
+    /// One flag per power-vector entry (marginals then contrasts): true where
+    /// the target lies outside the correction's family, so it has no
+    /// corrected power. Only Tukey HSD has such targets: every target that is
+    /// not a factor level (the intercept, a continuous or binary predictor, an
+    /// interaction) is flagged. Where true, `power_corrected` and both bounds
+    /// of `ci_corrected` are NaN and `success_counts_corrected` is 0. Empty
+    /// under every other correction. Additive (serde default).
+    #[serde(default)]
+    pub corrected_not_applicable: Vec<bool>,
     pub convergence_rate: f64,
     /// Per-simulation boundary_hit values for this sample size. Length == n_sims.
     /// 0 = no boundary, 1 = τ̂≈0 (OLS fallback), 2 = Brent failed.
@@ -112,6 +128,9 @@ pub struct PowerResult {
     /// uncorrected threshold). Merged by elementwise sum.
     #[serde(default)]
     pub success_count_histogram_uncorrected: Vec<u64>,
+    /// Empty when any target is flagged in `corrected_not_applicable`: such a
+    /// target never rejects, so the corrected joint view is not applicable
+    /// (hosts show it as n/a; the Python and R dicts carry `None` / `NULL`).
     #[serde(default)]
     pub success_count_histogram_corrected: Vec<u64>,
     /// Pre-run advisory warnings for this scenario's result: cluster snap
@@ -178,6 +197,18 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(Option::<f64>::deserialize(d)?.unwrap_or(f64::NAN))
+}
+
+/// `nan_tolerant` for every element of a `Vec<f64>` (`power_corrected`
+/// carries NaN for a target outside the correction's family).
+fn nan_tolerant_vec<'de, D>(d: D) -> Result<Vec<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Vec::<Option<f64>>::deserialize(d)?
+        .into_iter()
+        .map(|x| x.unwrap_or(f64::NAN))
+        .collect())
 }
 
 /// Per-estimator numerics surfaced by aggregation. Tagged enum so JSON envelope
@@ -479,15 +510,18 @@ pub struct SampleSizeResult {
     /// Per-N evaluated, in grid order.
     pub grid_or_trace: Vec<PowerResult>,
     /// Smallest N at which target `t` independently meets `target_power`,
-    /// or `None` if never achieved. One entry per power-vector slot —
-    /// marginals first, then contrast pairs (`len() == target_indices.len()
-    /// + contrast_pairs.len()` of the grid points).
+    /// or `None` if never achieved or if the target has no corrected power
+    /// (`PowerResult.corrected_not_applicable`). One entry per power-vector
+    /// slot: marginals first, then contrast pairs (`len() ==
+    /// target_indices.len() + contrast_pairs.len()` of the grid points).
     pub first_achieved: Vec<Option<usize>>,
     /// Smallest N at which *at least k* tests are jointly significant with
     /// probability >= `target_power`, derived from the per-N **corrected**
     /// success-count histogram. `len() == n_targets + Σ(post-hoc contrasts)`
     /// (== `success_count_histogram` length − 1); index `j` is k = j+1
     /// (`[0]` = ">=1 test", last = "all tests"). `None` = never reached.
+    /// Empty when the grid points flag any target `corrected_not_applicable`
+    /// (no corrected histogram, so the corrected joint view is not applicable).
     /// Additive contract field (serde default) — minor version bump.
     #[serde(default)]
     pub first_joint_achieved: Vec<Option<usize>>,
@@ -495,11 +529,15 @@ pub struct SampleSizeResult {
     /// (same length and marginals-then-contrasts order). Empty in older
     /// payloads — hosts then fall back to `first_achieved`, the same path
     /// `NonMonotone` uses. Additive (serde default) — minor version bump.
+    /// `None`, like that target's `first_achieved`, for a target the grid
+    /// points flag in `PowerResult.corrected_not_applicable`: it has no
+    /// corrected power, so no corrected crossing.
     #[serde(default)]
-    pub fitted: Vec<CrossingFit>,
+    pub fitted: Vec<Option<CrossingFit>>,
     /// Model-based crossing for the joint P(>=k) curves, parallel to
     /// `first_joint_achieved` (index `j` is k = j+1). Empty when histograms
-    /// are absent, mirroring `first_joint_achieved`. Additive (serde default).
+    /// are absent (including a flagged target), mirroring
+    /// `first_joint_achieved`. Additive (serde default).
     #[serde(default)]
     pub fitted_joint: Vec<CrossingFit>,
     /// Grid-empirical first N at which the overall/omnibus test reaches
@@ -648,7 +686,7 @@ pub enum OrchestratorError {
     )]
     MixedClusterAtoms { a: usize, b: usize },
     #[error(
-        "FixedSize cluster regime needs cluster_size >= {min} (no within-cluster information below that); got {got}"
+        "a cluster needs at least {min} observations to separate its random effects from the residual; got {got}"
     )]
     ClusterSizeTooSmall { got: usize, min: usize },
     #[error(
@@ -716,6 +754,7 @@ mod result_counter_tests {
             power_corrected: vec![0.75, 0.55],
             ci_uncorrected: vec![Ci { lo: 0.7, hi: 0.9 }, Ci { lo: 0.5, hi: 0.7 }],
             ci_corrected: vec![Ci { lo: 0.65, hi: 0.85 }, Ci { lo: 0.45, hi: 0.65 }],
+            corrected_not_applicable: vec![],
             convergence_rate: 1.0,
             boundary_hit: vec![0u8; 200],
             estimator_extras: EstimatorExtras::Ols {},
@@ -739,6 +778,28 @@ mod result_counter_tests {
         let json = serde_json::to_string(&pr).unwrap();
         let back: PowerResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back, pr);
+    }
+
+    #[test]
+    fn not_applicable_corrected_entries_survive_a_json_roundtrip() {
+        // serde_json writes NaN as `null`; the WASM merge and plot paths read
+        // worker results back from JSON, so a flagged target's NaN corrected
+        // power and CI must come back as NaN, not fail to parse.
+        let legacy = r#"{
+            "n": 100, "n_sims": 200, "target_indices": [1, 2],
+            "power_uncorrected": [0.8, 0.6], "power_corrected": [null, 0.55],
+            "ci_uncorrected": [{"lo":0.7,"hi":0.9}, {"lo":0.5,"hi":0.7}],
+            "ci_corrected": [{"lo":null,"hi":null}, {"lo":0.45,"hi":0.65}],
+            "corrected_not_applicable": [true, false],
+            "convergence_rate": 1.0, "boundary_hit": [],
+            "estimator_extras": {"estimator":"ols"}
+        }"#;
+        let pr: PowerResult = serde_json::from_str(legacy).unwrap();
+        assert!(pr.power_corrected[0].is_nan());
+        assert_eq!(pr.power_corrected[1], 0.55);
+        assert!(pr.ci_corrected[0].lo.is_nan() && pr.ci_corrected[0].hi.is_nan());
+        assert_eq!(pr.ci_corrected[1], Ci { lo: 0.45, hi: 0.65 });
+        assert_eq!(pr.corrected_not_applicable, vec![true, false]);
     }
 
     #[test]
@@ -883,16 +944,17 @@ mod result_counter_tests {
     fn sample_size_result_roundtrips_fit_fields() {
         let ssr = SampleSizeResult {
             grid_or_trace: vec![],
-            first_achieved: vec![Some(90), None],
+            first_achieved: vec![Some(90), None, None],
             first_joint_achieved: vec![Some(120), None],
             fitted: vec![
-                CrossingFit::Fitted {
+                Some(CrossingFit::Fitted {
                     n_star: 84.3,
                     n_achievable: 90,
                     ci_lo: Some(76.2),
                     ci_hi: Some(95.8),
-                },
-                CrossingFit::NotReached { n_approx: None },
+                }),
+                Some(CrossingFit::NotReached { n_approx: None }),
+                None,
             ],
             fitted_joint: vec![
                 CrossingFit::Fitted {

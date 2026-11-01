@@ -300,8 +300,9 @@ pub fn generate_sim_data(
     // cache key is everything the sequences depend on: the cell weights,
     // the radices (which also fix the row/cluster cell split), the row-walk
     // group count and max_n. A workspace reused for another design
-    // rebuilds it. The row-to-group map behind that count is fixed by the
-    // cluster layout, which a workspace keeps from construction.
+    // rebuilds it. The row-to-group map behind that count, and the rows'
+    // crossed levels, are fixed by the cluster layout, which a workspace
+    // keeps from construction.
     let split = fixed_cell_weights(
         spec,
         &mut ws.factor_cell_weights,
@@ -1153,10 +1154,16 @@ fn cluster_rep_row(sizing: &ClusterSizing, i: usize) -> usize {
 /// 3. Else 0: `FixedSize` clusters are contiguous row blocks, which the plain
 ///    walk already balances, and one cluster needs nothing extra.
 ///
-/// Crossed groupings never steer the walk: one walk cannot balance two
-/// crossed partitions at once, and with the primary balanced each crossed
-/// level already receives every factor level (a counterbalanced design).
-/// `row_walk_group` maps rows to these groups; change the two together.
+/// Crossed groupings are not these groups. A group's j-th row meets crossed
+/// level j % L (the stride chain of `extra_level_of_row`), so balancing the
+/// groups alone does not balance the crossed levels: each group's walk
+/// alternates a 50/50 factor along its visits with a phase set by the
+/// rotation, an even number of groups cancels the phases across groups, and
+/// an odd number leaves one over, tying the factor to item parity. The walk
+/// therefore takes the row's crossed level (`crossed_walk_level`) as a second
+/// partition that breaks the ties the group keys leave; see
+/// `walk_cells_by_cluster`. `row_walk_group` maps rows to these groups;
+/// change the two together.
 fn row_walk_groups(spec: &SimulationSpec, n: usize) -> usize {
     let Some(c) = spec.cluster.as_ref() else {
         return 0;
@@ -1192,13 +1199,39 @@ fn row_walk_group(c: &ClusterSpec, nested: Option<usize>, i: usize) -> usize {
     }
 }
 
+/// Number of combined crossed levels the row walk's second partition has
+/// (`crossed_walk_level`), 0 without a `Crossed` grouping.
+fn crossed_walk_levels(c: &ClusterSpec) -> usize {
+    c.extra_groupings
+        .iter()
+        .filter(|g| matches!(g.relation, GroupingRelation::Crossed { .. }))
+        .map(|g| g.relation.block_levels())
+        .reduce(|a, b| a * b)
+        .unwrap_or(0)
+}
+
+/// Row `i`'s combined crossed level, below `crossed_walk_levels(c)`: each
+/// `Crossed` grouping's level from `extra_level_of_row`, in mixed radix over
+/// the crossed groupings in declaration order (first least significant).
+fn crossed_walk_level(c: &ClusterSpec, i: usize) -> usize {
+    let (mut level, mut radix) = (0usize, 1usize);
+    for (g, eg) in c.extra_groupings.iter().enumerate() {
+        if matches!(eg.relation, GroupingRelation::Crossed { .. }) {
+            level += c.extra_level_of_row(g, i) * radix;
+            radix *= eg.relation.block_levels();
+        }
+    }
+    level
+}
+
 /// Run the fixed-allocation walks for n steps. `row_seq[i]` is row i's
 /// row-level cell; `cl_seq[c]` is the cluster-level cell of the c-th cluster,
 /// clusters taken in representative-row order. n steps cover every cluster
 /// of an n-row design under either sizing, so the sequences depend only on
 /// the weights, the radices, `row_groups` (`row_walk_groups`: when > 0 the
 /// row walk balances each group, rows mapped by `row_walk_group` over
-/// `cluster`, which is then `Some`) and n. A group with no cells gets an
+/// `cluster`, which is then `Some`, and breaks ties by the crossed levels of
+/// `crossed_walk_level`, if any) and n. A group with no cells gets an
 /// empty sequence. `weights`, `radices` and `(row_cells, cl_cells)` come from
 /// `fixed_cell_weights`; `counts` is scratch.
 #[expect(
@@ -1227,11 +1260,15 @@ fn fixed_cell_sequences(
     let (row_counts, cl_counts) = counts.split_at_mut(row_cells);
     if let Some(c) = cluster.filter(|_| row_cells > 0 && row_groups > 0) {
         let nested = nested_grouping(c);
+        let crossed_of = |i| crossed_walk_level(c, i);
+        let crossed_levels = crossed_walk_levels(c);
         walk_cells_by_cluster(
             &weights[..row_cells],
             &radices[..sep],
             row_groups,
             |i| row_walk_group(c, nested, i),
+            (crossed_levels > 0)
+                .then_some((crossed_levels, &crossed_of as &dyn Fn(usize) -> usize)),
             n,
             row_counts,
             row_seq,
@@ -1320,13 +1357,28 @@ fn walk_cells(weights: &[f64], radices: &[u32], n: usize, counts: &mut [u32], se
 /// The remaining choice goes to the cell whose levels are furthest behind
 /// their within-cluster marginal targets, Σ_f (n_c·p_f − m_{c,f}) with n_c
 /// the cluster's rows so far (for one factor: the cell's within-cluster
-/// deficit), then the cell's own within-cluster deficit, then the plain
+/// deficit), then, when `crossed_grouping` is set, the same score over the row's
+/// crossed-grouping level, Σ_f (n_x·p_f − m_{x,f}) with n_x that level's
+/// rows so far, then the cell's own within-cluster deficit, then the plain
 /// walk's keys (D_g, then the global marginal score). Exact ties left over
 /// (equal proportions) rotate with the cluster, lowest (g − c) mod cells
 /// first: with as many clusters as cells, a lowest-index tie-break makes the
 /// early clusters take the cells the later ones need, while the rotation
 /// gives a Latin-square order. A cluster with no rows yet has zero
 /// within-cluster keys, so the global keys alone decide.
+///
+/// `crossed_grouping` is `(levels, level_of)` for a design with a crossed grouping
+/// (`crossed_walk_levels`, `crossed_walk_level`), else `None`. A group's
+/// visits meet the crossed levels in turn, so the group keys alone tie the
+/// factor to the crossed level whenever the group count is odd and the
+/// crossed count even (see `row_walk_groups`); the crossed key spends the
+/// ties the group keys leave on the crossed level, so the group balance
+/// comes first. Without a crossed grouping the key is not computed and the
+/// sequence is unchanged. Over S in {3, 4, 5, 7} groups, 2 to 4 crossed
+/// levels and 0, 2 or 3 nested children at N = 3 atoms, a 50/50 factor then
+/// keeps each crossed level within 1 row of half its rows and an equal
+/// three-level factor within 2 rows of a third (before, both gaps grew with
+/// N); a skewed factor whose group keys never tie gains little.
 ///
 /// Over a sweep of 1–3 factors, skewed and equal proportions and 2–30
 /// clusters, cell over-counts stay under 1 and shortfalls under 1.5 (the
@@ -1337,16 +1389,23 @@ fn walk_cells(weights: &[f64], radices: &[u32], n: usize, counts: &mut [u32], se
 /// within a few rows for skewed many-level factors and crossings, where the
 /// plain walk can leave a level out of a cluster entirely. Consumes no RNG
 /// and is prefix-stable, like `walk_cells`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "walk inputs, the two row partitions, and caller-owned scratch and output buffers"
+)]
 fn walk_cells_by_cluster(
     weights: &[f64],
     radices: &[u32],
     groups: usize,
     group_of: impl Fn(usize) -> usize,
+    crossed_grouping: Option<(usize, &dyn Fn(usize) -> usize)>,
     n: usize,
     counts: &mut [u32],
     seq: &mut Vec<u32>,
 ) {
     let n_cells = weights.len();
+    // Crossed factors (more than one factor in the cell walk), not crossed
+    // groupings; those come in through `crossed_grouping`.
     let crossed = radices.len() > 1;
     let n_marg: usize = radices.iter().map(|&k| k as usize).sum();
     let mut marg_p = vec![0.0f64; n_marg];
@@ -1364,6 +1423,11 @@ fn walk_cells_by_cluster(
     let mut cl_cell = vec![0u32; slots * n_cells];
     let mut marg_def = vec![0.0f64; n_marg];
     let mut cl_def = vec![0.0f64; n_marg];
+    // The crossed partition's counters, empty without a crossed grouping.
+    let x_slots = crossed_grouping.map_or(0, |(levels, _)| levels);
+    let mut x_rows = vec![0u32; x_slots];
+    let mut x_marg = vec![0u32; x_slots * n_marg];
+    let mut x_def = vec![0.0f64; if x_slots > 0 { n_marg } else { 0 }];
     for i in 0..n {
         let c = group_of(i);
         let t = (i + 1) as f64;
@@ -1371,6 +1435,13 @@ fn walk_cells_by_cluster(
         for k in 0..n_marg {
             marg_def[k] = marg_p[k] * t - marg_c[k] as f64;
             cl_def[k] = marg_p[k] * n_c - cl_marg[c * n_marg + k] as f64;
+        }
+        let x = crossed_grouping.map(|(_, level_of)| level_of(i));
+        if let Some(x) = x {
+            let n_x = x_rows[x] as f64;
+            for k in 0..n_marg {
+                x_def[k] = marg_p[k] * n_x - x_marg[x * n_marg + k] as f64;
+            }
         }
         let forced = weights
             .iter()
@@ -1386,16 +1457,18 @@ fn walk_cells_by_cluster(
         } else {
             // Lexicographic key, larger wins: [all levels below marginal
             // target, marginal urgency, within-cluster marginal deficit,
-            // within-cluster cell deficit, D_g, global marginal score,
-            // −rotation].
+            // within-crossed-level marginal deficit (0 without a crossed
+            // grouping), within-cluster cell deficit, D_g, global marginal
+            // score, −rotation].
             let mut best = usize::MAX;
-            let mut best_key = [f64::NEG_INFINITY; 7];
+            let mut best_key = [f64::NEG_INFINITY; 8];
             for g in 0..n_cells {
                 let d = weights[g] * t - counts[g] as f64;
                 if d <= 0.0 {
                     continue;
                 }
                 let (mut below, mut urgent, mut cl_score, mut score) = (true, 0.0, 0.0, 0.0);
+                let mut x_score = 0.0;
                 for k in cell_levels(g, radices) {
                     below &= marg_def[k] > 0.0;
                     if marg_def[k] >= 1.0 {
@@ -1403,6 +1476,9 @@ fn walk_cells_by_cluster(
                     }
                     cl_score += cl_def[k];
                     score += marg_def[k];
+                    if x.is_some() {
+                        x_score += x_def[k];
+                    }
                 }
                 let cl_cell_def = weights[g] * n_c - cl_cell[c * n_cells + g] as f64;
                 let rotation = (g + n_cells - c % n_cells) % n_cells;
@@ -1410,6 +1486,7 @@ fn walk_cells_by_cluster(
                     f64::from(u8::from(below)),
                     urgent,
                     cl_score,
+                    x_score,
                     cl_cell_def,
                     d,
                     if crossed { score } else { 0.0 },
@@ -1430,6 +1507,12 @@ fn walk_cells_by_cluster(
         }
         cl_cell[c * n_cells + cell] += 1;
         cl_rows[c] += 1;
+        if let Some(x) = x {
+            for k in cell_levels(cell, radices) {
+                x_marg[x * n_marg + k] += 1;
+            }
+            x_rows[x] += 1;
+        }
         seq.push(cell as u32);
     }
 }
@@ -2479,6 +2562,229 @@ mod tests {
         );
     }
 
+    /// Generate one row-level exact factor with `props` over `atoms` atoms of
+    /// a design with S = `s` primary clusters, one crossed grouping per entry
+    /// of `l` (its level count, in declaration order) and, if `nested` is
+    /// `Some((np, nested_first))`, a nested child grouping of np children per
+    /// cluster, declared before the crossed ones when `nested_first`. Asserts
+    /// that the preflight replay (`fixed_allocation_counts`) equals the
+    /// generated counts at several prefixes, and returns the largest
+    /// |count − rows·p| at N over every combination of crossed levels and
+    /// over the levels of every crossed grouping (per combination it spans),
+    /// and over every prefix of every walk group (nested children if any,
+    /// else primary clusters).
+    fn crossed_design_balance(
+        s: u32,
+        l: &[u32],
+        nested: Option<(u32, bool)>,
+        props: &[f64],
+        atoms: usize,
+    ) -> (f64, f64) {
+        use engine_contract::{GroupingRelation, GroupingSpec};
+        let k = props.len();
+        let mut spec = ols_spec_2x(k as u32 - 1, vec![k as i32], props.to_vec());
+        spec.estimator = EstimatorSpec::Mle;
+        let sizing = crate::spec::ClusterSizing::FixedClusters { n_clusters: s };
+        let mut cluster = crate::spec::ClusterSpec::intercept_only(sizing, 0.2);
+        cluster.extra_groupings = l
+            .iter()
+            .map(|&n_clusters| GroupingSpec {
+                relation: GroupingRelation::Crossed { n_clusters },
+                tau_squared: 0.1,
+                slopes: vec![],
+            })
+            .collect();
+        if let Some((np, nested_first)) = nested {
+            let child = GroupingSpec {
+                relation: GroupingRelation::NestedWithin { n_per_parent: np },
+                tau_squared: 0.1,
+                slopes: vec![],
+            };
+            cluster
+                .extra_groupings
+                .insert(if nested_first { 0 } else { l.len() }, child);
+        }
+        let x_gs: Vec<usize> = (0..cluster.extra_groupings.len())
+            .filter(|&g| {
+                matches!(
+                    cluster.extra_groupings[g].relation,
+                    GroupingRelation::Crossed { .. }
+                )
+            })
+            .collect();
+        let child_g = nested_grouping(&cluster);
+        spec.cluster = Some(cluster.clone());
+        let n = atoms * cluster.atom();
+        let mut ws = SimWorkspace::new(n, 3 + k - 1, 2, 1, Some(&cluster));
+        generate_sim_data(&spec, 0, 42, &mut ws).unwrap();
+        let level = |i: usize| (1..k).find(|&j| ws.x_full[(i, 2 + j)] == 1.0).unwrap_or(0);
+        let n_groups = child_g.map_or(s as usize, |g| cluster.extra_n_levels_at(g, n));
+        // One block of counters per crossed grouping, then one per combination
+        // of crossed levels (first grouping least significant).
+        let n_combined: usize = l.iter().map(|&c| c as usize).product();
+        let mut x_counts = vec![vec![0u32; k]; l.iter().sum::<u32>() as usize + n_combined];
+        let mut g_counts = vec![vec![0u32; k]; n_groups];
+        let mut worst_group = 0.0f64;
+        for i in 0..n {
+            let lv = level(i);
+            let (mut off, mut combined, mut radix) = (0usize, 0usize, 1usize);
+            for (&g, &c) in x_gs.iter().zip(l) {
+                let x = cluster.extra_level_of_row(g, i);
+                x_counts[off + x][lv] += 1;
+                combined += x * radix;
+                off += c as usize;
+                radix *= c as usize;
+            }
+            x_counts[off + combined][lv] += 1;
+            let g = child_g.map_or(i % s as usize, |g| cluster.extra_level_of_row(g, i));
+            g_counts[g][lv] += 1;
+            let rows: u32 = g_counts[g].iter().sum();
+            for (j, &m) in g_counts[g].iter().enumerate() {
+                worst_group = worst_group.max((m as f64 - rows as f64 * props[j]).abs());
+            }
+        }
+        // A crossed grouping's level spans n_combined / L_g combinations, each
+        // off by its own rounding, so its deviation is taken per combination.
+        let mut worst_crossed = 0.0f64;
+        let spans = l
+            .iter()
+            .flat_map(|&c| std::iter::repeat_n((n_combined / c as usize) as f64, c as usize))
+            .chain(std::iter::repeat_n(1.0, n_combined));
+        for (c, span) in x_counts.iter().zip(spans) {
+            let rows: u32 = c.iter().sum();
+            for (j, &m) in c.iter().enumerate() {
+                let dev = (m as f64 - rows as f64 * props[j]).abs() / span;
+                worst_crossed = worst_crossed.max(dev);
+            }
+        }
+        for m in [1, 7, n / 2, n] {
+            let realized = realized_level_counts(&spec, &ws, m);
+            let pre = fixed_allocation_counts(&spec, m);
+            assert_eq!(
+                pre[0].as_ref(),
+                Some(&realized[0]),
+                "S={s} L={l:?} {nested:?} N={m}"
+            );
+        }
+        (worst_crossed, worst_group)
+    }
+
+    #[test]
+    fn exact_factor_varies_within_crossed_levels() {
+        // A group's j-th row meets crossed level j % L, so a walk balanced per
+        // group alone gives a 50/50 factor 40% of one item's rows and 60% of
+        // the other's with 5 subjects and 2 items (any odd number of groups
+        // with an even crossed count). At N = 3 atoms each crossed level now
+        // holds half its rows to within 1, and every group keeps the bound of
+        // the walk without the crossed key: 0.5 at every prefix, 1 when the
+        // nested grouping is declared after the crossed one (each child then
+        // takes L consecutive visits of its cluster).
+        for s in [3u32, 4, 5, 7] {
+            for l in [2u32, 3, 4] {
+                for nested in [
+                    None,
+                    Some((2, true)),
+                    Some((3, true)),
+                    Some((2, false)),
+                    Some((3, false)),
+                ] {
+                    let (crossed, group) = crossed_design_balance(s, &[l], nested, &[0.5, 0.5], 3);
+                    assert!(
+                        crossed <= 1.0,
+                        "S={s} L={l} {nested:?}: crossed-level deviation {crossed}"
+                    );
+                    let bound = if matches!(nested, Some((_, false))) {
+                        1.0
+                    } else {
+                        0.5
+                    };
+                    assert!(
+                        group <= bound,
+                        "S={s} L={l} {nested:?}: within-group deviation {group} > {bound}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exact_factor_varies_within_two_crossed_groupings() {
+        // Two crossed groupings over 5 subjects (2 and 3 levels, declared in
+        // either order): the walk's crossed partition is their combined level
+        // in mixed radix, so every combination of their levels holds half its
+        // rows of a 50/50 factor to within 1 (a grouping's level, spanning
+        // several combinations, within 1 per combination), at N = 3 and 10
+        // atoms, with and without a nested child, and the subjects keep their
+        // bound. Combining the levels by their sum instead merges combinations
+        // and leaves 3 levels then 2 off by 5 at 10 atoms.
+        for l in [[2u32, 3], [3, 2]] {
+            for nested in [None, Some((2, true))] {
+                for atoms in [3, 10] {
+                    let (crossed, group) =
+                        crossed_design_balance(5, &l, nested, &[0.5, 0.5], atoms);
+                    assert!(
+                        crossed <= 1.0,
+                        "L={l:?} {nested:?} atoms={atoms}: crossed-level deviation {crossed}"
+                    );
+                    assert!(
+                        group <= 0.5,
+                        "L={l:?} {nested:?} atoms={atoms}: within-group deviation {group}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn skewed_and_three_level_exact_factors_vary_within_crossed_levels() {
+        // N = 10 atoms. A 70/30 factor over 7 subjects and 4 items: each item
+        // within 1 row of 30% (the walk without the crossed key: 3 rows off).
+        // An equal three-level factor over 5 subjects and 3 items: each item
+        // within 1 row of a third (without the key: 13.3 rows off, growing
+        // with N). The three-level factor pays one row of within-cluster
+        // balance at some prefixes (4/3; without the key 2/3).
+        let (crossed, group) = crossed_design_balance(7, &[4], None, &[0.7, 0.3], 10);
+        assert!(
+            crossed <= 1.0 + 1e-9,
+            "70/30: crossed-level deviation {crossed}"
+        );
+        assert!(
+            group <= 0.9 + 1e-9,
+            "70/30: within-cluster deviation {group}"
+        );
+        let third = 1.0 / 3.0;
+        let (crossed, group) = crossed_design_balance(5, &[3], None, &[third; 3], 10);
+        assert!(
+            crossed <= 1.0,
+            "three levels: crossed-level deviation {crossed}"
+        );
+        assert!(
+            group <= 4.0 / 3.0 + 1e-9,
+            "three levels: within-cluster deviation {group}"
+        );
+    }
+
+    #[test]
+    fn crossed_key_leaves_designs_without_crossed_grouping_unchanged() {
+        // Without a crossed grouping the walk computes no crossed key, so its
+        // sequence is the one the walk gave before the key existed (pinned
+        // from that build): a 0.2/0.3/0.5 factor over 6 clusters, rows 0..30.
+        use crate::spec::ClusterSizing;
+        let spec = ols_spec_2x(2, vec![3], vec![0.2, 0.3, 0.5]);
+        let sizing = ClusterSizing::FixedClusters { n_clusters: 6 };
+        let (_, ws) = clustered_design(spec, sizing, vec![], 30);
+        let levels: Vec<usize> = (0..30)
+            .map(|i| (1..3).find(|&l| ws.x_full[(i, 2 + l)] == 1.0).unwrap_or(0))
+            .collect();
+        assert_eq!(
+            levels,
+            [
+                2, 1, 0, 2, 1, 2, 1, 2, 2, 0, 2, 1, 0, 2, 1, 2, 0, 2, 2, 1, 2, 1, 2, 0, 1, 2, 1, 2,
+                2, 0
+            ]
+        );
+    }
+
     #[test]
     fn cluster_aware_walk_keeps_global_bounds() {
         // The cluster-aware row walk keeps the plain walk's global bounds at
@@ -2534,6 +2840,7 @@ mod tests {
                         &radices,
                         groups,
                         |i| i % groups,
+                        None,
                         n,
                         &mut counts,
                         &mut seq,

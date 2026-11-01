@@ -126,6 +126,7 @@ fn plot_point_from_power_dict(d: &Bound<'_, PyDict>) -> PyResult<PlotPoint> {
     // `None`) whenever the family suppressed the overall test (mixed/GLMM) or an
     // older caller didn't supply it; then no `overall` bar is drawn.
     let (overall_power, overall_ci) = optional_overall(d)?;
+    let (not_applicable, joint_not_applicable) = not_applicable_of(d)?;
     Ok(PlotPoint {
         n,
         target_indices,
@@ -135,6 +136,8 @@ fn plot_point_from_power_dict(d: &Bound<'_, PyDict>) -> PyResult<PlotPoint> {
         histogram: vec![],
         overall_power,
         overall_ci,
+        not_applicable,
+        joint_not_applicable,
     })
 }
 
@@ -163,6 +166,22 @@ fn optional_overall(d: &Bound<'_, PyDict>) -> PyResult<(Option<f64>, Option<Ci>)
         _ => Ci { lo: rate, hi: rate },
     };
     Ok((Some(rate), Some(ci)))
+}
+
+/// Optional `not_applicable` (list of bool, one per displayed power entry,
+/// the same at every N) and `joint_not_applicable` (bool) keys: the engine's
+/// `corrected_not_applicable` flags as the Python caller selected them.
+/// Absent or `None` → nothing flagged (older callers, uncorrected display).
+fn not_applicable_of(d: &Bound<'_, PyDict>) -> PyResult<(Vec<bool>, bool)> {
+    let flags: Vec<bool> = match d.get_item("not_applicable")? {
+        Some(obj) if !obj.is_none() => obj.extract()?,
+        _ => Vec::new(),
+    };
+    let joint: bool = match d.get_item("joint_not_applicable")? {
+        Some(obj) if !obj.is_none() => obj.extract()?,
+        _ => false,
+    };
+    Ok((flags, joint))
 }
 
 /// Optional `contrast_pairs` key: list of `[positive, negative]` β-column
@@ -214,10 +233,13 @@ fn plot_scenario_from_sample_size_dict(
     // corrected so the at_least_k / exactly_k curves match the corrected required-N
     // table). Python caller must supply `success_count_histogram_corrected` under
     // this key regardless of which correction is active.
+    // `None` when the corrected joint view is not applicable (a target has no
+    // corrected power): no histogram at any N.
     let hist_rows: Vec<Vec<u64>> = match d.get_item("histogram")? {
-        Some(obj) => obj.extract()?,
-        None => vec![Vec::new(); sample_sizes.len()],
+        Some(obj) if !obj.is_none() => obj.extract()?,
+        _ => vec![Vec::new(); sample_sizes.len()],
     };
+    let (not_applicable, joint_not_applicable) = not_applicable_of(d)?;
     if hist_rows.len() != sample_sizes.len() {
         return Err(PyValueError::new_err("histogram must have one row per N"));
     }
@@ -266,6 +288,8 @@ fn plot_scenario_from_sample_size_dict(
                     histogram,
                     overall_power,
                     overall_ci,
+                    not_applicable: not_applicable.clone(),
+                    joint_not_applicable,
                 }
             },
         )

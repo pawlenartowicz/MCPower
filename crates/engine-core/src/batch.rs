@@ -33,10 +33,11 @@ use crate::critvals::{
 use crate::data_gen::generate_sim_data;
 use crate::posthoc::evaluate_posthoc;
 use crate::spec::{
-    BatchResult, CorrectionMethod, DfMethod, EngineError, EstimatorSpec, OutcomeKind,
-    PosthocBlockShape, ProgressSink, ResultShape, SimulationSpec,
+    BatchResult, CorrectionMethod, EngineError, EstimatorSpec, OutcomeKind, PosthocBlockShape,
+    ProgressSink, ResultShape, SimulationSpec,
 };
 use crate::workspace::{ReducedCritEntry, SimWorkspace};
+use engine_contract::MixedTest;
 use glmm::loop_advanced::{OlsScratch, OlsSuffStats, fit_suff_stats_t_sq, ols_contrast_t_sq};
 
 /// Process-wide BOBYQA objective-eval counters — bench diagnostics only
@@ -1316,7 +1317,7 @@ fn run_one_sim(
                             &mut ws.reduced_crit_cache,
                             n,
                             p_red as u32,
-                            reduced_p_between(spec, &excl_kept_cols),
+                            reduced_p_between(spec, &excl_kept_cols)?,
                             spec,
                         )?;
                         (&e.crit, 0, &e.posthoc_corr_row)
@@ -1514,7 +1515,8 @@ fn run_one_sim(
             // Brent path is gone (Brent → BOBYQA; a deliberate numeric move on the
             // scalar-intercept case, handled in a later verification task).
             let cluster = spec.cluster.as_ref().expect("Mle requires ClusterSpec");
-            let satterthwaite = crate::critvals::uses_satterthwaite(spec);
+            let satterthwaite =
+                crate::critvals::mixed_test(spec)? == Some(MixedTest::Satterthwaite);
             // Grid-sequential warm-start: no carry into the first grid point of this
             // sim. Reset per sim so nothing crosses sims (work-stolen order is
             // non-deterministic — the carry is safe only walked in ascending N by the
@@ -1608,17 +1610,16 @@ fn run_one_sim(
                         //
                         // Grid-sequential warm start: after the first converged grid
                         // point, override θ with the carried θ̂ (same population θ, so
-                        // θ̂(N_{k-1}) is near-optimal for N_k). fit_on→fit_lmm threads
-                        // the FULL θ̂ vech, each component clamped to THETA_TRUTH_FLOOR
-                        // = 0.01 (lmm.rs) — the diagonal Cholesky entries warm-start
-                        // faithfully; off-diagonal entries are floored at 0.01, so a
-                        // negative/sub-floor correlation start cannot be expressed
-                        // (NOT diagonal-only, and NOT cold-at-0 for off-diagonals).
+                        // θ̂(N_{k-1}) is near-optimal for N_k). The fit threads the FULL
+                        // θ̂ vech as its start: the diagonal Cholesky entries are clamped
+                        // to THETA_TRUTH_FLOOR = 0.01 (glmm's lmm/mod.rs), the
+                        // off-diagonal entries pass through verbatim, so a negative
+                        // correlation start is kept (the floor is diagonal-only).
                         // β stays as this site builds it (LMM ignores it anyway).
                         let theta = if ws.has_prev {
                             ws.theta_carry.clone()
                         } else {
-                            crate::mixed_workspace::truth_theta(cluster, true)
+                            crate::mixed_workspace::truth_theta(cluster)
                         };
                         let start = (ws.has_prev || spec.scenario.truth_start)
                             .then(|| glmm::StartValues::new(spec.effect_sizes.clone(), theta));
@@ -1661,33 +1662,26 @@ fn run_one_sim(
                                 red_x[i * p_red + rj] = ws.x_full_f64[(i, cj as usize)];
                             }
                         }
-                        // Strip every random slope (primary + extras) so q_g = 1
-                        // everywhere: a random slope may reference a fixed column the
-                        // reduced design no longer carries, and the reduced columns
-                        // don't map to the full-design slope cols.
-                        // Slopes are stripped anyway (see below), so the design-column
-                        // args are irrelevant here — pass empty.
-                        let mut model = crate::mixed_workspace::cluster_to_model_spec(
+                        // The full random-effect structure, each slope remapped to
+                        // its position among the kept columns (the contract keeps
+                        // every slope variable in the test design, and exclusion
+                        // never drops a continuous column).
+                        let (slopes, extra_slopes) =
+                            crate::mixed_workspace::slope_cols_in(spec, &excl_kept_cols);
+                        let model = crate::mixed_workspace::cluster_to_model_spec(
                             cluster,
                             glmm::Family::Gaussian,
-                            &[],
-                            &[],
+                            &slopes,
+                            &extra_slopes,
                         );
-                        if let Some(re) = model.re.as_mut() {
-                            re.slopes.clear();
-                            for g in &mut re.extra_groupings {
-                                g.slopes.clear();
-                            }
-                        }
                         // Its OWN FitOptions: SEs for the reduced target set
                         // (differs from the hot workspace's frozen opts). wald_se is
                         // inert for a Gaussian LMM; mirror the batch opts anyway.
                         let opts_red =
                             crate::mixed_workspace::fit_options(spec, excl_targets.clone());
-                        // The exclusion fit drops all random slopes, so its θ warm
-                        // start must too: `include_slopes = false` yields one intercept
-                        // scalar τ per grouping. β is ignored by the LMM arm.
-                        let theta = crate::mixed_workspace::truth_theta(cluster, false);
+                        // Same RE structure as the full fit, so the same θ truth
+                        // start. β is ignored by the LMM arm.
+                        let theta = crate::mixed_workspace::truth_theta(cluster);
                         let beta: Vec<f64> = excl_kept_cols
                             .iter()
                             .map(|&cj| spec.effect_sizes[cj as usize])
@@ -1735,8 +1729,8 @@ fn run_one_sim(
                 }
 
                 // Grid-sequential warm-start update — HOT path only (the reduced/
-                // exclusion cold fit strips slopes → a different n_theta, so its θ̂
-                // must never seed the full-RE next point). A diverged θ̂ is noise —
+                // exclusion cold fit has a different fixed design, so its θ̂ does
+                // not seed the next point's full fit). A diverged θ̂ is noise —
                 // keep the last good carry. A Sparse-routed `Prebuilt` view exposes
                 // no θ̂ (`view.theta()` is `&[]`); skip so the carry keeps its last
                 // good value rather than being cleared to empty.
@@ -1749,7 +1743,8 @@ fn run_one_sim(
                     }
                 }
 
-                // Satterthwaite df of this draw's targets (`uses_satterthwaite`).
+                // Satterthwaite df of this draw's targets, when the run's test is
+                // `MixedTest::Satterthwaite` (`critvals::mixed_test`).
                 // glmm's pass needs the view dropped and leaves the kernel's factor
                 // and σ̂² off θ̂, so every read off the fit happens above. A draw
                 // whose pass fails, or that gets a non-finite or non-positive df on
@@ -1794,22 +1789,17 @@ fn run_one_sim(
                 // A collapsed fit (every variance component pinned at zero) is
                 // decided against the collapsed twin of whichever table applies —
                 // see `fit_collapsed` / `build_crit_tables`. Mirrors the GLMM arm,
-                // change together. The cold reduced fit strips every random slope
-                // (above), so the fitted model has one intercept component per
-                // grouping — size the pinned mask from that, not the spec.
-                let n_components = if needs_reduced_fit {
-                    1 + cluster.extra_groupings.len()
-                } else {
-                    cluster.n_variance_components()
-                };
-                let collapsed = converged && fit_collapsed(n_components, diag.pinned_components);
+                // change together. The cold reduced fit keeps the full random-effect
+                // structure, so the spec's component count is the fitted one.
+                let collapsed = converged
+                    && fit_collapsed(cluster.n_variance_components(), diag.pinned_components);
                 let (crit_src, crit_idx): (&CritValueTable, usize) =
                     if needs_reduced_fit && crit.has_df() {
                         let e = reduced_crit_entry(
                             &mut ws.reduced_crit_cache,
                             n,
                             p_red as u32,
-                            reduced_p_between(spec, &excl_kept_cols),
+                            reduced_p_between(spec, &excl_kept_cols)?,
                             spec,
                         )?;
                         let t = match (&e.crit_boundary, collapsed) {
@@ -2091,16 +2081,17 @@ fn run_one_sim(
                     // Grid-sequential warm start: after the first converged grid
                     // point of this sim, seed θ from the carried θ̂ (same population
                     // θ). Safe on both the full and test_formula-reduced GLMM fits —
-                    // the RE design Z stays full under test_formula (only fixed
-                    // columns shrink), so n_theta is invariant across a sim's grid,
-                    // and test_reduces is spec-constant so no point mixes shapes.
-                    // fit_on→fit_glmm threads the FULL θ̂ vech, each component clamped
-                    // to THETA_TRUTH_FLOOR = 0.01 (glmm/mod.rs) — diagonals warm-start
-                    // faithfully, off-diagonals are floored at 0.01 (not zeroed).
+                    // the reduced fit keeps every random effect (its slopes remapped
+                    // to their reduced columns), so n_theta is invariant across a
+                    // sim's grid, and test_reduces is spec-constant so no point
+                    // mixes shapes.
+                    // The fit threads the FULL θ̂ vech as its start: diagonals are
+                    // clamped to THETA_TRUTH_FLOOR = 0.01 (glmm's glmm/mod.rs),
+                    // off-diagonals pass through verbatim (the floor is diagonal-only).
                     let start_theta = if ws.has_prev {
                         ws.theta_carry.clone()
                     } else if spec.scenario.truth_start {
-                        crate::mixed_workspace::truth_theta(cluster, true)
+                        crate::mixed_workspace::truth_theta(cluster)
                     } else {
                         Vec::new()
                     };
@@ -2183,8 +2174,9 @@ fn run_one_sim(
                     //
                     // Collapsed fit ⇒ the collapsed twin, as in the LME arm — for a
                     // GLMM that twin is the asymptotic (Wald z) table. The reduced
-                    // GLMM fit reuses the full RE workspace (slopes intact), so the
-                    // spec's component count is the fitted one.
+                    // GLMM fit keeps every random effect (slopes remapped to their
+                    // reduced columns), so the spec's component count is the fitted
+                    // one.
                     let collapsed = converged
                         && fit_collapsed(cluster.n_variance_components(), diag.pinned_components);
                     let (crit_src, crit_idx): (&CritValueTable, usize) =
@@ -2193,7 +2185,7 @@ fn run_one_sim(
                                 &mut ws.reduced_crit_cache,
                                 n,
                                 p_fit as u32,
-                                reduced_p_between(spec, &spec.fit_columns),
+                                reduced_p_between(spec, &spec.fit_columns)?,
                                 spec,
                             )?;
                             let t = match (&e.crit_boundary, collapsed) {
@@ -2581,7 +2573,7 @@ fn run_one_sim(
                             &mut ws.reduced_crit_cache,
                             n,
                             fit_final_p_red as u32,
-                            reduced_p_between(spec, &excl_kept_cols),
+                            reduced_p_between(spec, &excl_kept_cols)?,
                             spec,
                         )?
                         .crit
@@ -2728,8 +2720,10 @@ fn tukey_k_for_kernel_col(col: u32, n_non_factor: u32, factor_n_levels: &[i32]) 
 /// to) for `CritValueTable::build_with_tukey_k`; empty unless the spec uses
 /// `TukeyHsd`. Target order matches the per-N correction row: marginals first
 /// (in `target_indices` order), then contrasts (in `contrast_pairs` order).
-/// Shared by the hot-path tables and the debug-mode tables in introspect.rs.
-pub(crate) fn tukey_k_per_target(spec: &SimulationSpec) -> Vec<f64> {
+/// Shared by the hot-path tables, the debug-mode tables in introspect.rs, and
+/// the orchestrator's aggregation, which flags a NaN `k` (a target outside
+/// every factor) as having no Tukey-corrected power.
+pub fn tukey_k_per_target(spec: &SimulationSpec) -> Vec<f64> {
     if spec.correction_method != CorrectionMethod::TukeyHsd {
         return Vec::new();
     }
@@ -2852,7 +2846,7 @@ fn plan_tukey_thresholds(
         return Ok(TukeyThresholds::default());
     }
     let ks = tukey_k_per_target(spec);
-    let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between);
+    let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between)?;
     let mut rows =
         crate::critvals::target_df_rows(sample_sizes, n_predictors, ks.len(), bw.as_ref())?;
     if let Some(b) = &bw {
@@ -2885,7 +2879,7 @@ fn plan_tukey_thresholds(
     Ok(TukeyThresholds::plan(
         &families,
         n_max as f64 - 1.0,
-        crate::critvals::uses_satterthwaite(spec),
+        crate::critvals::mixed_test(spec)? == Some(MixedTest::Satterthwaite),
     ))
 }
 
@@ -2921,7 +2915,7 @@ fn build_crit_tables(
         k_per_target: &tukey_k_per_target,
         thresholds: &spec.tukey_thresholds,
     });
-    let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between);
+    let bw = BetweenWithinDf::resolve(spec, sample_sizes, p_between)?;
     let crit = CritValueTable::build_with_tukey_k(
         &spec.crit_values,
         sample_sizes,
@@ -3003,8 +2997,8 @@ fn gather_targets(
 /// decided against the collapsed crit table (`build_crit_tables`). False for
 /// a partial pin (an intercept variance alive with a slope variance at zero
 /// is still a mixed model). `n_components` counts the diagonal components of
-/// the model that was FITTED — the LME cold reduced fit strips every random
-/// slope, so its count is not the spec's `n_variance_components()`.
+/// the model that was FITTED (`ClusterSpec::n_variance_components()`; reduced
+/// fits keep the full random-effect structure).
 pub(crate) fn fit_collapsed(n_components: usize, pinned: u64) -> bool {
     let k = n_components;
     if k == 0 || k >= 64 {
@@ -3018,16 +3012,18 @@ pub(crate) fn fit_collapsed(n_components: usize, pinned: u64) -> bool {
 // Exclusion helpers
 // ---------------------------------------------------------------------------
 
-/// `p_between` for a reduced round's kept columns, or `0` when the
-/// between-within denominator df is not selected — the table then depends on
-/// `p_red` alone, so the cache key needs no scan and the reduced rounds of an
-/// asymptotic spec pay nothing.
-fn reduced_p_between(spec: &SimulationSpec, kept: &[u32]) -> u32 {
-    if spec.df_method == DfMethod::BetweenWithin {
-        crate::critvals::between_column_count(spec, Some(kept))
-    } else {
-        0
-    }
+/// `p_between` for a reduced round's kept columns, or `0` when the run's test
+/// is not between-within: the table then depends on `p_red` alone, so the
+/// cache key needs no scan and the reduced rounds of any other test pay
+/// nothing.
+fn reduced_p_between(spec: &SimulationSpec, kept: &[u32]) -> Result<u32, EngineError> {
+    Ok(
+        if crate::critvals::mixed_test(spec)? == Some(MixedTest::BetweenWithin) {
+            crate::critvals::between_column_count(spec, Some(kept))
+        } else {
+            0
+        },
+    )
 }
 
 /// Look up (or build and memoize) the reduced-model crit entry for a
@@ -3232,8 +3228,8 @@ fn included_factor_with_smallest_min_count(
 mod tests {
     use super::*;
     use crate::spec::{
-        CorrectionMethod, CritValues, Distribution, EstimatorSpec, OutcomeKind, ResidualDist,
-        ScenarioPerturbations, SimulationSpec,
+        CorrectionMethod, CritValues, DfMethod, Distribution, EstimatorSpec, OutcomeKind,
+        ResidualDist, ScenarioPerturbations, SimulationSpec,
     };
 
     fn minimal_spec() -> SimulationSpec {
@@ -3649,12 +3645,12 @@ mod tests {
     }
 
     /// `y ~ x1 + x2 + (1 | g) + (1 | h)` with `h` crossed with `g` (6 × 4
-    /// levels), `x1` cluster-level and `x2` within-cluster, under the
-    /// between-within reference — a design the between/within split does not
-    /// cover, so its targets are tested at each draw's Satterthwaite df.
+    /// levels), `x1` cluster-level and `x2` within-cluster, under `auto`: a
+    /// design the between/within split does not cover, so its targets are
+    /// tested at each draw's Satterthwaite df.
     fn crossed_lme_spec() -> SimulationSpec {
         let mut spec = minimal_lme_spec();
-        spec.df_method = DfMethod::BetweenWithin;
+        spec.df_method = DfMethod::Auto;
         spec.n_non_factor = 2;
         spec.correlation = vec![1.0, 0.0, 0.0, 1.0];
         spec.var_types = vec![Distribution::Normal; 2];
@@ -3705,24 +3701,28 @@ mod tests {
             .unwrap()
     }
 
-    /// A crossed Gaussian LMM under the between-within reference decides every
-    /// draw at that draw's own Satterthwaite df: each target's uncorrected flag
-    /// is `p ≤ α` with `p` the t tail at the df the provided-data fit of the
-    /// same draw reports, and the Holm flags are R's `p.adjust(p, "holm")`
-    /// decisions on those p-values. The run must also contain draws where the
-    /// asymptotic Wald z decides otherwise, or the check would not discriminate.
-    fn assert_each_draw_at_satterthwaite_df(spec: &SimulationSpec) {
+    /// A Gaussian LMM tested at Satterthwaite df decides every draw at that
+    /// draw's own df: each target's uncorrected flag is `p ≤ α` with `p` the t
+    /// tail at the df the provided-data fit of the same draw reports, and the
+    /// corrected flags (Holm or BH) are R's `p.adjust(p, method)` decisions on
+    /// those p-values. The run must also contain draws where the asymptotic
+    /// Wald z decides otherwise, or the check would not discriminate. Returns
+    /// how many converged draws gave their targets different df.
+    fn assert_each_draw_at_satterthwaite_df(spec: &SimulationSpec) -> usize {
         let m = spec.target_indices.len();
         let (n, n_sims, seed) = (96usize, 32u32, 2137u64);
         let (batch, stat_sq) = run_batch_st_capture(spec, &[n as u32], n_sims, seed).unwrap();
         let z = crate::critvals::norm_ppf(0.975);
-        let (mut converged, mut differs_from_z) = (0, 0);
+        let (mut converged, mut differs_from_z, mut df_differ) = (0, 0, 0);
         for sim in 0..n_sims as usize {
             if batch.converged[sim] == 0 {
                 continue;
             }
             converged += 1;
             let r = refit_draw(spec, sim as u64, n, seed);
+            if r.df_per_target.windows(2).any(|w| w[0] != w[1]) {
+                df_differ += 1;
+            }
             assert_eq!(
                 r.df_per_target.len(),
                 m,
@@ -3747,12 +3747,13 @@ mod tests {
                     differs_from_z += 1;
                 }
             }
-            let mut holm = vec![0u8; m];
-            crate::correction::apply_correction_p(CorrectionMethod::Holm, &p, 0.05, &mut holm);
+            let mut adjusted = vec![0u8; m];
+            crate::correction::apply_correction_p(spec.correction_method, &p, 0.05, &mut adjusted);
             assert_eq!(
                 &batch.corrected[sim * m..(sim + 1) * m],
-                &holm[..],
-                "sim {sim}: Holm"
+                &adjusted[..],
+                "sim {sim}: {:?}",
+                spec.correction_method
             );
         }
         assert!(
@@ -3763,11 +3764,127 @@ mod tests {
             differs_from_z >= 2,
             "Satterthwaite and Wald z must disagree on some draws"
         );
+        df_differ
     }
 
     #[test]
     fn crossed_lme_decides_each_draw_at_its_satterthwaite_df() {
         assert_each_draw_at_satterthwaite_df(&crossed_lme_spec());
+    }
+
+    /// `y ~ x1 + x2 + (1 + x1 | g)`, 8 clusters, `x1` within-cluster with a
+    /// random slope and `x2` cluster-level, targets both, under `auto`: a
+    /// single-grouping LMM with a primary slope, so each draw is tested at its
+    /// Satterthwaite df. `x1`'s df rests on the clusters through its slope and
+    /// `x2`'s on the cluster-level split, so the two targets' df differ.
+    fn slope_lme_spec() -> SimulationSpec {
+        let mut spec = crossed_lme_spec();
+        spec.between_var_indices = vec![2];
+        spec.effect_sizes = vec![0.0, 0.3, 0.5];
+        let cluster = spec.cluster.as_mut().unwrap();
+        cluster.sizing = crate::spec::ClusterSizing::FixedClusters { n_clusters: 8 };
+        cluster.extra_groupings.clear();
+        cluster.slopes = vec![engine_contract::SlopeTerm {
+            column: engine_contract::ColumnId(0),
+            variance: 0.1,
+            corr_with_intercept: 0.2,
+            corr_with: vec![],
+        }];
+        spec.cluster_slope_design_cols = vec![1];
+        spec
+    }
+
+    /// The slope design under `auto` decides each draw at its Satterthwaite
+    /// df, with Holm and BH taken as `p.adjust` on per-target p-values whose
+    /// df differ, and on two `test_formula` reduced fits: one that drops `x2`
+    /// after the slope column (the slope stays on fitted column 1), and one
+    /// with the slope on `x2` that drops `x1` before it, so the slope moves
+    /// from design column 2 to fitted column 1.
+    #[test]
+    fn slope_lme_decides_each_draw_at_its_satterthwaite_df() {
+        assert_eq!(
+            crate::critvals::mixed_test(&slope_lme_spec()).unwrap(),
+            Some(MixedTest::Satterthwaite)
+        );
+        for correction in [CorrectionMethod::Holm, CorrectionMethod::BenjaminiHochberg] {
+            let mut spec = slope_lme_spec();
+            spec.correction_method = correction;
+            let df_differ = assert_each_draw_at_satterthwaite_df(&spec);
+            assert!(
+                df_differ >= 28,
+                "{correction:?}: the targets' df must differ, got {df_differ} draws"
+            );
+        }
+        let mut reduced = slope_lme_spec();
+        reduced.target_indices = vec![1];
+        reduced.fit_columns = vec![0, 1];
+        assert_each_draw_at_satterthwaite_df(&reduced);
+
+        let mut shifted = slope_lme_spec();
+        shifted.between_var_indices = vec![1];
+        shifted.effect_sizes = vec![0.0, 0.5, 0.3];
+        shifted.cluster.as_mut().unwrap().slopes[0].column = engine_contract::ColumnId(1);
+        shifted.cluster_slope_design_cols = vec![2];
+        shifted.target_indices = vec![2];
+        shifted.fit_columns = vec![0, 2];
+        assert_each_draw_at_satterthwaite_df(&shifted);
+    }
+
+    /// Named `satterthwaite` on a single-grouping intercept-only LMM, which
+    /// `auto` would test at between-within df, runs per-draw Satterthwaite.
+    #[test]
+    fn named_satterthwaite_runs_on_intercept_only_lmm() {
+        let mut spec = crossed_lme_spec();
+        spec.cluster.as_mut().unwrap().extra_groupings.clear();
+        spec.df_method = DfMethod::Satterthwaite;
+        assert_each_draw_at_satterthwaite_df(&spec);
+    }
+
+    /// Named `between_within` on the slope design keeps the between-within
+    /// table: every converged draw is `t² > crit` at its target's between or
+    /// within df (`x1` within: 96 − 3 − (8 − 2) = 87; `x2` between: 8 − 2 = 6),
+    /// or the residual df 93 on a collapsed fit. `auto` on the same draws must
+    /// decide some of them differently.
+    #[test]
+    fn named_between_within_on_slope_lmm_keeps_the_table() {
+        let mut bw = slope_lme_spec();
+        bw.df_method = DfMethod::BetweenWithin;
+        let (n, n_sims, seed) = (96u32, 48u32, 2137u64);
+        let (batch, stat_sq) = run_batch_st_capture(&bw, &[n], n_sims, seed).unwrap();
+        let auto = run_batch_st(&slope_lme_spec(), &[n], n_sims, seed, None).unwrap();
+        let crit = |df: f64| {
+            let t = crate::critvals::t_ppf(0.975, df);
+            t * t
+        };
+        let collapsed_crit = crit(93.0);
+        let live_crit = [crit(87.0), crit(6.0)];
+        let mut converged = 0;
+        for sim in 0..n_sims as usize {
+            if batch.converged[sim] == 0 {
+                continue;
+            }
+            converged += 1;
+            let collapsed = fit_collapsed(2, batch.pinned_components[sim]);
+            for j in 0..2 {
+                let c = if collapsed {
+                    collapsed_crit
+                } else {
+                    live_crit[j]
+                };
+                let t_sq = stat_sq[sim * 2 + j];
+                assert_eq!(
+                    batch.uncorrected[sim * 2 + j],
+                    u8::from(t_sq > c),
+                    "sim {sim} target {j}: t² {t_sq} vs {c}"
+                );
+            }
+        }
+        assert!(converged >= 40, "got {converged} converged fits");
+        assert_eq!(batch.converged, auto.converged, "same fits");
+        assert_ne!(
+            batch.uncorrected, auto.uncorrected,
+            "auto must test the slope design differently"
+        );
     }
 
     /// The same on the `test_formula` reduced fit, whose one-shot workspace
@@ -3792,7 +3909,7 @@ mod tests {
     #[test]
     fn crossed_lme_tukey_decides_each_draw_at_its_satterthwaite_df() {
         let mut spec = lme_factor_spec(0.3, 0.45, vec![0.5, 0.5], 0);
-        spec.df_method = DfMethod::BetweenWithin;
+        spec.df_method = DfMethod::Auto;
         spec.correction_method = CorrectionMethod::TukeyHsd;
         spec.cluster = crossed_lme_spec().cluster;
         let (n, n_sims, seed) = (96usize, 48u32, 2137u64);
@@ -4724,6 +4841,130 @@ mod tests {
             p_red - p_full > 0.25,
             "reduced power must jump vs full: {p_red} vs {p_full}"
         );
+    }
+
+    /// `n_nf` independent standard-normal predictors with `effect_sizes`
+    /// (intercept first), a random intercept (τ² = `tau_squared`) and ONE random
+    /// slope (variance 0.5) on generation column `slope_gen_col`, i.e. design
+    /// column `slope_gen_col + 1`. The fixed-effect and random parts the
+    /// reduced-fit slope tests compare.
+    fn one_slope_spec(
+        n_nf: u32,
+        effect_sizes: Vec<f64>,
+        slope_gen_col: u32,
+        n_clusters: u32,
+        tau_squared: f64,
+    ) -> SimulationSpec {
+        let k = n_nf as usize;
+        let mut s = minimal_lme_spec();
+        s.n_non_factor = n_nf;
+        s.correlation = (0..k * k)
+            .map(|i| if i % (k + 1) == 0 { 1.0 } else { 0.0 })
+            .collect();
+        s.var_types = vec![Distribution::Normal; k];
+        s.var_params = vec![0.0; k];
+        s.effect_sizes = effect_sizes;
+        s.cluster = Some(crate::spec::ClusterSpec {
+            sizing: crate::spec::ClusterSizing::FixedClusters { n_clusters },
+            tau_squared,
+            slopes: vec![engine_contract::SlopeTerm {
+                column: engine_contract::ColumnId(slope_gen_col),
+                variance: 0.5,
+                corr_with_intercept: 0.0,
+                corr_with: vec![],
+            }],
+            extra_groupings: vec![],
+        });
+        s.cluster_slope_design_cols = vec![slope_gen_col + 1];
+        s
+    }
+
+    /// A `test_formula` that drops a null predictor must still fit the random
+    /// slope: `y ~ x1 + x2 + (1 + x1 | g)` with β₂ = 0 tested as `y ~ x1 + (1 + x1 | g)`
+    /// has the power of the model generated without x2. Fitting the reduced
+    /// model without the slope leaves the slope variance in the residual and
+    /// inflates x1's power by about 0.5.
+    #[test]
+    fn test_formula_reduced_lmm_keeps_random_slope() {
+        // `Auto` tests the slope LMM at Satterthwaite df; named `BetweenWithin`
+        // takes the reduced crit-table path instead. Both must keep the slope.
+        for df_method in [DfMethod::Auto, DfMethod::BetweenWithin] {
+            let mut reduced = one_slope_spec(2, vec![0.0, 0.3, 0.0], 0, 20, 0.25);
+            reduced.target_indices = vec![1];
+            reduced.fit_columns = vec![0, 1]; // drop x2 (col 2)
+            reduced.df_method = df_method;
+            let mut reference = one_slope_spec(1, vec![0.0, 0.3], 0, 20, 0.25);
+            reference.target_indices = vec![1];
+            reference.df_method = df_method;
+
+            let p_red = power_single_target(&reduced, 200, 600, 2137);
+            let p_ref = power_single_target(&reference, 200, 600, 2137);
+            assert!(
+                (p_red - p_ref).abs() < 0.08,
+                "{df_method:?}: reduced fit {p_red} vs the model without x2 {p_ref}"
+            );
+        }
+    }
+
+    /// A `test_formula` that drops a column BEFORE the slope column must move the
+    /// slope with it: `y ~ x1 + x2 + x3 + (1 + x2 | g)` with β₁ = 0 tested as
+    /// `y ~ x2 + x3` has the power of the model generated without x1. Leaving the
+    /// slope at its full-design column puts it on x3, which drops x2's slope
+    /// variance from its SE.
+    #[test]
+    fn test_formula_reduced_glmm_slope_on_shifted_column() {
+        let glmm = |mut s: SimulationSpec| {
+            s.estimator = EstimatorSpec::Glm;
+            s.outcome_kind = OutcomeKind::Binary;
+            s
+        };
+        let mut reduced = glmm(one_slope_spec(3, vec![0.0, 0.0, 0.4, 0.3], 1, 15, 0.37));
+        reduced.target_indices = vec![2];
+        reduced.fit_columns = vec![0, 2, 3]; // drop x1 (col 1)
+        let mut reference = glmm(one_slope_spec(2, vec![0.0, 0.4, 0.3], 0, 15, 0.37));
+        reference.target_indices = vec![1];
+
+        let p_red = power_single_target(&reduced, 300, 300, 2137);
+        let p_ref = power_single_target(&reference, 300, 300, 2137);
+        assert!(
+            (p_red - p_ref).abs() < 0.08,
+            "reduced fit {p_red} vs the model without x1 {p_ref}"
+        );
+    }
+
+    /// Sparse-factor exclusion refits without the factor's dummies, and that
+    /// refit must keep the random slope: `y ~ x1 + f + (1 + x1 | g)` with a null
+    /// 3-level factor whose two minority levels are always excluded has the
+    /// power of the model generated without f.
+    #[test]
+    fn factor_exclusion_lmm_keeps_random_slope() {
+        // Under `Auto` (Satterthwaite) and named `BetweenWithin` alike.
+        for df_method in [DfMethod::Auto, DfMethod::BetweenWithin] {
+            let mut excluded = one_slope_spec(1, vec![0.0, 0.3, 0.0, 0.0], 0, 20, 0.25);
+            excluded.n_factor_dummies = 2;
+            excluded.factor_n_levels = vec![3];
+            excluded.factor_proportions = vec![0.96, 0.02, 0.02];
+            excluded.factor_min_level_count = 10;
+            excluded.target_indices = vec![1];
+            excluded.df_method = df_method;
+            let mut reference = one_slope_spec(1, vec![0.0, 0.3], 0, 20, 0.25);
+            reference.target_indices = vec![1];
+            reference.df_method = df_method;
+
+            let n_sims = 600;
+            let r = run_batch(&excluded, &[200], n_sims, 2137, None).unwrap();
+            assert!(
+                r.factor_excluded.iter().all(|&c| c == 1),
+                "the minority levels (about 4 rows each) must be excluded in every sim"
+            );
+            let p_excl =
+                r.uncorrected.iter().map(|&v| v as usize).sum::<usize>() as f64 / n_sims as f64;
+            let p_ref = power_single_target(&reference, 200, n_sims, 2137);
+            assert!(
+                (p_excl - p_ref).abs() < 0.08,
+                "{df_method:?}: exclusion refit {p_excl} vs the model without f {p_ref}"
+            );
+        }
     }
 
     /// Hand-built x_full dummy block: 6 rows, 3 dummy columns (cols 2,3,4).

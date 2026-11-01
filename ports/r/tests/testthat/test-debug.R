@@ -126,7 +126,7 @@ test_that("MCPowerDebug$load_data round-trips a logistic dataset", {
 
 test_that("MCPowerDebug$load_data round-trips a clustered (LME) dataset", {
   m <- MCPowerDebug$new("y ~ x1 + (1|grp)", family = "lme")$set_effects("x1=0.5")
-  m$set_cluster("grp", ICC = 0.1, n_clusters = 20L, cluster_size = 20L)
+  m$set_cluster("grp", ICC = 0.1, n_clusters = 20L)
   m$.debug_n <- 400L; m$.debug_n_sims <- 1L; m$.debug_seed <- 2137
   d <- m$create_data()
 
@@ -139,8 +139,9 @@ test_that("MCPowerDebug$load_data round-trips a clustered (LME) dataset", {
   for (tg in res$targets) {
     expect_true(tg$se > 0)
     expect_true(is.finite(tg$statistic))
-    # Default df_method is between_within, so a mixed fit reports a t with a
-    # denominator df; x1 varies inside clusters, so the df is N - g - 1.
+    # Default df_method is auto, which on this single-grouping intercept-only
+    # fit is between-within, so a mixed fit reports a t with a denominator df;
+    # x1 varies inside clusters, so the df is N - g - 1.
     expect_equal(tg$statistic_kind, "t")
     expect_equal(tg$df[[1]], 400 - 20 - 1)
   }
@@ -412,7 +413,41 @@ test_that("get_effects_from_data emits no ICC line for non-clustered OLS", {
   expect_false(grepl("Estimated baseline probability", joined))
 })
 
+test_that("get_effects_from_data on data with one group stops with the cluster-count rule", {
+  # The upload path pins n_clusters to the data's distinct groups, so one
+  # group reaches the engine's rule, which names n_clusters and the data.
+  set.seed(3)
+  x <- rnorm(60)
+  m <- MCPower$new("y ~ x + (1|group)", family = "lme")
+  m$set_cluster("group", ICC = 0.2, n_clusters = 4L)
+  m$upload_data(data.frame(y = 0.4 * x + rnorm(60), x = x, group = 0L),
+                mode = "partial", verbose = FALSE)
+  expect_error(m$get_effects_from_data("y", verbose = FALSE),
+               "^n_clusters must be an integer >= 2, got 1")
+})
+
 test_that("get_effects_from_data raises without uploaded data", {
   m <- MCPower$new("y ~ x1")
   expect_error(m$get_effects_from_data("y"), regexp = "upload_data")
+})
+
+test_that("create_data floors debug_n to the cluster atom with find_power's warning", {
+  m <- MCPowerDebug$new("y ~ x + (1|g)", family = "lme", debug_n = 105L)$
+    set_effects("x=0.3")$set_cluster("g", ICC = 0.2, cluster_size = 10L)
+  expect_warning(d <- m$create_data(),
+                 "sample_size 105 not a multiple of the cluster atom 10; using 100", fixed = TRUE)
+  expect_equal(nrow(d$design), 100L)
+})
+
+test_that("debug counts below 1 are an R error, not a session abort", {
+  # A negative count cast straight to usize allocates terabytes and kills R.
+  debug <- function(...) {
+    m <- MCPowerDebug$new("y ~ x", ...)
+    m$set_effects("x=0.3")
+    m$raw_statistics()
+  }
+  expect_error(debug(debug_n = 50L, debug_n_sims = -3L),
+               "debug_n_sims must be a positive integer, got -3", fixed = TRUE)
+  expect_error(debug(debug_n = -5L, debug_n_sims = 10L),
+               "debug_n must be a positive integer, got -5", fixed = TRUE)
 })

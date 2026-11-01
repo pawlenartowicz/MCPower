@@ -25,6 +25,8 @@ fn point(n: usize, targets: &[usize], p: &[f64], ci: &[(f64, f64)]) -> PlotPoint
         histogram: vec![],
         overall_power: None,
         overall_ci: None,
+        not_applicable: vec![],
+        joint_not_applicable: false,
     }
 }
 
@@ -110,6 +112,8 @@ fn point_h(n: usize, targets: &[usize], hist: &[u64]) -> PlotPoint {
         histogram: hist.to_vec(),
         overall_power: None,
         overall_ci: None,
+        not_applicable: vec![],
+        joint_not_applicable: false,
     }
 }
 

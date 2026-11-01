@@ -39,6 +39,7 @@ describes the same simulated run.
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_correlation"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_correlation'><code>mcpower::MCPower$set_correlation()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_correlations"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_correlations'><code>mcpower::MCPower$set_correlations()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_effects"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_effects'><code>mcpower::MCPower$set_effects()</code></a></span></li>
+<li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_factor_sampling"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_factor_sampling'><code>mcpower::MCPower$set_factor_sampling()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_heteroskedasticity_driver"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_heteroskedasticity_driver'><code>mcpower::MCPower$set_heteroskedasticity_driver()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_max_failed_simulations"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_max_failed_simulations'><code>mcpower::MCPower$set_max_failed_simulations()</code></a></span></li>
 <li><span class="pkg-link" data-pkg="mcpower" data-topic="MCPower" data-id="set_parallel"><a href='../../mcpower/html/MCPower.html#method-MCPower-set_parallel'><code>mcpower::MCPower$set_parallel()</code></a></span></li>
@@ -84,11 +85,14 @@ describes the same simulated run.
 \item{\code{debug_n_sims}}{Number of simulations for all debug calls (default 200).
 Generate the design matrix + outcome for sim-0.
 
+A clustered design floors .debug_n to the cluster atom with a warning,
+as find_power does, so the data has the floored N of rows.
+
 Returns a list with:
 \describe{
-\item{design}{numeric matrix (nrow = .debug_n, ncol = n_predictors)}
+\item{design}{numeric matrix (nrow = the floored N, ncol = n_predictors)}
 \item{columns}{character vector of column names}
-\item{outcome}{numeric vector of length .debug_n}
+\item{outcome}{numeric vector of length the floored N}
 \item{cluster_ids}{integer vector or NULL}
 }
 Fit a provided dataset with the configured solver (the data -> results
@@ -138,8 +142,9 @@ harness to read per-fit rx vs hessian SE on one dataset.}
 
 \item{\code{df_method}}{Validation-only override of the denominator-df reference
 distribution for this single fit. NULL (default) uses the contract's
-configured mode; accepts "asymptotic" or "between_within". Used by the
-GLMM Oracle harness to read a per-fit df_method on one dataset.
+configured mode; accepts "auto", "between_within", "satterthwaite" or
+"asymptotic", refused where the design does not support it. Used by the
+validation harnesses to read a per-fit df_method on one dataset.
 Debug-only: attach extra grouping factors (crossed / nested random
 intercepts) to the pending cluster spec, in the contract's serde JSON
 shape, e.g.

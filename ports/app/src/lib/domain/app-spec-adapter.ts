@@ -27,7 +27,8 @@ import type {
   TestSelection as WireTestSelection,
 } from './app-spec';
 import { correlatableVariables } from './correlations';
-import { derivedUnit, type SampleSizeUnit } from './unit-label';
+import { derivedUnit, powerNToObservations, unitNoun, type SampleSizeUnit } from './unit-label';
+import { dfMethodError } from './df-method-options';
 import { expandInteraction, expandMainEffect, factorLevels } from './effect-names';
 import { projectScenario } from './scenario-projection';
 import {
@@ -460,6 +461,47 @@ function projectAnova(config: FamilyConfig): AdaptResult {
   return { spec, errors, warnings };
 }
 
+/** Find power's limits on total observations: config `limits.sample_size`,
+ *  with the lower limit raised to the smallest design the sample-size search
+ *  takes: `limits.min_clusters` clusters under a fixed cluster size, and
+ *  `limits.min_rows_per_cluster` rows per cluster, plus one per primary random
+ *  slope, under a fixed cluster count. Mirrors `resolve_cluster_grid_params` in
+ *  engine-orchestrator — change together. */
+export function findPowerLimits(spec: AppSpec | null): [number, number] {
+  const [lo, hi] = LIMITS.sample_size;
+  if (spec?.family !== 'mixed') return [lo, hi];
+  const { kind, value } = spec.cluster_dim;
+  const min =
+    kind === 'cluster_size'
+      ? LIMITS.min_clusters
+      : LIMITS.min_rows_per_cluster + (spec.slopes?.length ?? 0);
+  return [Math.max(lo, min * value), hi];
+}
+
+/** Find power's n, given in the spec's sample-size unit, refused unless it is
+ *  a whole number whose total observations (`powerNToObservations`) lie inside
+ *  `findPowerLimits`. The message names the field and the total it gives. Null
+ *  when the run may start. */
+export function findPowerSampleSizeError(spec: AppSpec, n: number): string | null {
+  if (!Number.isInteger(n)) return `n must be a whole number, got ${n}`;
+  const total = powerNToObservations(spec, n);
+  const [lo, hi] = findPowerLimits(spec);
+  if (total >= lo && total <= hi) return null;
+  const fmt = (v: number) => v.toLocaleString('en-US');
+  const unit = spec.family === 'mixed' ? (spec.sample_size_unit ?? 'observations') : 'observations';
+  const noun = unit === 'observations' ? '' : ` ${unitNoun(unit, (spec as MixedSpec).cluster_name)}`;
+  return `n = ${fmt(n)}${noun} gives ${fmt(total)} observations; Find power needs ${fmt(lo)} to ${fmt(hi)} observations`;
+}
+
+/** `findPowerSampleSizeError` for a value that is already total observations,
+ *  as a History entry's `sample_size` is. */
+export function findPowerTotalError(spec: AppSpec, total: number): string | null {
+  return findPowerSampleSizeError(
+    spec.family === 'mixed' ? { ...spec, sample_size_unit: 'observations' } : spec,
+    total,
+  );
+}
+
 /** Push a soft warning if a (valid, in-(0,1)) baseline probability is outside
  *  the `baseline_p_warn` band — mirrors the Python/R hosts. The hard (0,1)
  *  reject stays at each call site; this is non-blocking. */
@@ -717,6 +759,16 @@ export function familyConfigToAppSpec(
     }
 
     const outcome_options = projectOutcomeOptions(config, mixedKind === 'linear', errors);
+    // Absent df_method = the shared default. A stored value the design does not
+    // admit (a between-within picked before the formula became crossed) is
+    // refused here in the app's words; the engine refuses it too.
+    const df_method = config.advanced.df_method ?? ESTIMATION.df_method;
+    const dfMethodProblem = dfMethodError(
+      df_method,
+      mixedKind === 'linear',
+      extra_groupings.length === 0,
+    );
+    if (dfMethodProblem) errors.push(dfMethodProblem);
     // AGQ is a GLMM knob; on the wire only when >1 AND the outcome is actually a
     // GLMM (binary/probit/poisson). Gaussian LME never sets it — gating on
     // outcome kind (not just agq > 1) matters because `agq` is persisted
@@ -738,9 +790,8 @@ export function familyConfigToAppSpec(
       cluster_name,
       icc: cl.icc,
       cluster_dim,
-      // Config state persisted before the knob existed has no df_method; fall
-      // back to the shared default rather than putting `undefined` on the wire.
-      df_method: config.advanced.df_method ?? ESTIMATION.df_method,
+      // The default stays off the wire (Rust `#[serde(default)]`, skip-if-default).
+      ...(df_method !== ESTIMATION.df_method ? { df_method } : {}),
       cluster_level_vars: cl.clusterLevelVars ?? [],
       extra_groupings,
       slopes,

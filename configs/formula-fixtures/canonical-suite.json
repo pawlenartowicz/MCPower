@@ -50,6 +50,13 @@
     { "id": "err_duplicate_group", "formula": "y ~ x + (1|g) + (1|g)", "error": "duplicate grouping variable" },
     { "id": "err_term_removal", "formula": "y ~ x1 - x2", "error": "term removal" },
     { "id": "err_intercept_suppression_zero", "formula": "y ~ x + (0+x|g)", "error": "intercept suppression" },
-    { "id": "err_intercept_suppression_minus_one", "formula": "y ~ x + (-1+x|g)", "error": "intercept suppression" }
+    { "id": "err_intercept_suppression_minus_one", "formula": "y ~ x + (-1+x|g)", "error": "intercept suppression" },
+    { "id": "err_nested_colon_form", "formula": "y ~ x + (1|school:classroom)", "error": "'(1|school:classroom)' is not supported; write '(1|school/classroom)'" },
+    { "id": "err_nested_slope_explicit", "formula": "y ~ x + (1 + x|school/classroom)", "error": "random slopes in a nested term ('(1 + x|school/classroom)') are not supported in the formula" },
+    { "id": "err_unsupported_random_effect_term", "formula": "y ~ x + (a|b|c)", "error": "unsupported random-effect term '(a|b|c)'" },
+    { "id": "err_two_nested_terms", "formula": "y ~ x + (1|a/b) + (1|c/d)", "error": "only one nested term is supported per model" },
+    { "id": "err_grouping_name_with_dot", "formula": "y ~ x + (1|school.id)", "error": "the grouping name 'school.id' in '(1|school.id)' is not supported; a grouping name takes ASCII letters" },
+    { "id": "err_three_level_nested", "formula": "y ~ x + (1|a/b/c)", "error": "unsupported random-effect term '(1|a/b/c)'" },
+    { "id": "err_three_level_colon_grouping", "formula": "y ~ x + (1|a:b:c)", "error": "unsupported random-effect term '(1|a:b:c)'" }
   ]
 }

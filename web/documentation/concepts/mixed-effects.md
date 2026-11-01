@@ -101,7 +101,7 @@ The choice matters most for cluster-level predictors (see [Cluster-level predict
 | Recommendation | Rationale |
 |---|---|
 | 10–20 clusters minimum | Below 10, random-effect estimation is unstable. |
-| ≥ 5 observations per cluster | Enforced; warning below 10. |
+| At least 2 observations per cluster, plus 1 for each random slope on the primary grouping | Enforced. |
 
 > [!note] What actually drives power
 > When treatment is assigned at the individual level within clusters, ICC and cluster allocation have only a minor effect on fixed-effect power — power depends mostly on total $n$.
@@ -182,6 +182,8 @@ model$set_cluster("school:classroom", ICC = 0.10, n_per_parent = 4)
 
 Total N must be an exact multiple of the atom (primary clusters × extra-grouping levels for crossed, or primary clusters × nested-children for nested; with a `cluster_size` primary, just the cluster size). Each grouping's ICC sizes its own between-level variance component, independently of the others.
 
+A nested intercept is written `(1|school/classroom)`, which gives `school` and `classroom` within `school` a random intercept each. The equivalent lme4 spelling `(1|school) + (1|school:classroom)`, or `(1|school:classroom)` alone, is not supported and is refused with a message that points to the slash form. A random slope inside a nested term, such as `(1 + x|school/classroom)`, is refused too; write `(1|school/classroom)` and give the slope through `random_slopes` in the nested grouping's `set_cluster` call (see [Random slopes](#random-slopes)).
+
 ## Random slopes
 
 A random slope `(1 + x|group)` lets the effect of predictor `x` vary across groups. Add the slope term to the formula and name the predictor in `random_slopes`:
@@ -199,7 +201,9 @@ model$set_cluster("school", ICC = 0.20, n_clusters = 30,
                               corr_with_intercept = 0.30)))
 ```
 
-`random_slopes` names the predictor(s) whose effect varies across groups — each must appear in the formula's random-slope term, e.g. `(1 + x|school)`. `slope_variance` is the between-group variance of the slope; `slope_intercept_corr` is the correlation between each group's random intercept and its random slope.
+`random_slopes` names the predictor(s) whose effect varies across groups. Each must appear in the formula's random-slope term, e.g. `(1 + x|school)`, except on a nested grouping `(1|school/classroom)`, where the formula cannot write a slope and `random_slopes` alone sets it. `slope_variance` is the between-group variance of the slope; `slope_intercept_corr` is the correlation between each group's random intercept and its random slope.
+
+The formula and `set_cluster` must name the same slopes: a slope written only in the formula, or only in `random_slopes`, is an error that names the variable. The one exception is a nested grouping `(1|school/classroom)`: the formula cannot write a slope on `school` or on `school:classroom`, so a slope there comes from `random_slopes` in that grouping's `set_cluster` call alone. The uncorrelated syntax `(1 + x || school)` is not supported; write `(1 + x|school)` and set the slope-intercept correlation to 0.
 
 > [!note] Slopes on extra groupings
 > Random slopes compose freely across groupings — each crossed or nested extra
@@ -247,14 +251,20 @@ These controls only affect the **clustered binary/count GLMM**. OLS, Gaussian mi
 
 ### Denominator degrees of freedom
 
-`df_method` selects the reference distribution for fixed-effect tests on any
-mixed model (LME or clustered GLMM): `"between_within"` (default) tests
-against a *t* with between-within denominator degrees of freedom — a
-predictor declared cluster-level (via `set_cluster`'s cluster-level-variables
-argument) gets the between-cluster df, others get the within-cluster df;
-`"asymptotic"` tests against a Wald z. With a crossed or nested extra
-grouping, `"between_within"` uses Satterthwaite degrees of freedom for an LME
-and the Wald z for a GLMM. It has no effect on OLS or unclustered GLM. See
+`df_method` selects the test for fixed effects on any mixed model (LME or
+clustered GLMM). The default `"auto"` picks it from the design: a *t* with
+between-within denominator degrees of freedom for a single grouping factor
+without a random slope and for any single-grouping GLMM (a predictor
+declared cluster-level via `set_cluster`'s cluster-level-variables argument
+gets the between-cluster df, others get the within-cluster df), Satterthwaite
+degrees of freedom (as lmerTest computes them) for an LME with a random slope
+or with a crossed or nested grouping, and the Wald z for a GLMM with a crossed
+or nested grouping. A random slope moves the test to Satterthwaite df because
+the slope variable's effect varies across clusters, so its test rests on the
+number of clusters, not on the within-cluster df. `"between_within"` (single
+grouping only), `"satterthwaite"` (LME only) and `"asymptotic"` (Wald z) name
+one test each; a named test the design does not support stops with an error.
+It has no effect on OLS or unclustered GLM. See
 [[concepts/simulation-settings#denominator-degrees-of-freedom|Denominator
 degrees of freedom]] for the full explanation.
 
@@ -266,13 +276,15 @@ In MCPower's calibration (logit, α = 0.05, 20 observations per cluster), the
 Type I error rate was 7.5–9.6% at 5 clusters, 6.6–6.8% at 10, and about 6% at
 20–30. Within-cluster effects stayed near 5% at every cluster count. Part of
 the power reported for a cluster-level effect is then this excess rejection,
-not real sensitivity.
+not real sensitivity. The Wald z rejects more often still: 14.6–20.3% at 5
+clusters, 10.9–11.2% at 10, and 7.2–8.1% at 20–30 in the same calibration. It is
+the test under `df_method="asymptotic"` and for a design with a crossed or
+nested extra grouping; the calibration did not cover those two designs.
 
 MCPower warns when a clustered binary or count model tests a cluster-level
-effect with fewer than 20 clusters. In a sample-size search, the warning names
-the smallest grid N that reaches 20 clusters. It does not fire under
-`df_method="asymptotic"` or for a design with a crossed or nested extra
-grouping, both of which use the Wald z. When it fires, plan for more clusters
+effect with fewer than 20 clusters, whichever of the two tests it uses, and
+counts the primary clusters. In a sample-size search, the warning names the
+smallest grid N that reaches 20 clusters. When it fires, plan for more clusters
 rather than more observations per cluster.
 
 ## Clustered count (Poisson GLMM) and clustered probit

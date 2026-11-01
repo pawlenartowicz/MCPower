@@ -4,8 +4,8 @@
 \alias{MCPower}
 \title{MCPower — Monte Carlo power analysis (R6 class)}
 \description{
-Mirrors the Python \code{MCPower} API: a formula plus chained \verb{set_*} setters,
-then \code{find_power()} / \code{find_sample_size()}.
+Mirrors the Python \code{MCPower} API: a formula plus chained
+\verb{set_*} setters, then \code{find_power()} / \code{find_sample_size()}.
 }
 \details{
 \code{find_sample_size()}'s power-vs-N curve uses common random numbers across
@@ -57,8 +57,7 @@ sample sizes, so it is smooth and the reported N is stable from run to run.
 
 \item{\code{estimator}}{Override the analysis estimator ("ols"/"glm"/"mle"); NULL derives from family.}
 
-\item{\code{solve_as}}{Synonym for estimator; estimator wins when both are given.
-Add a random-intercept grouping factor to the model.}
+\item{\code{solve_as}}{Synonym for estimator; estimator wins when both are given.}
 }
 \if{html}{\out{</div>}}
 }
@@ -148,6 +147,10 @@ Add a random-intercept grouping factor to the model.}
 \if{html}{\out{<a id="method-MCPower-set_factor_sampling"></a>}}
 \if{latex}{\out{\hypertarget{method-MCPower-set_factor_sampling}{}}}
 \subsection{Method \code{set_factor_sampling()}}{
+Set how one factor's level shares are realised in each
+simulation. Overrides the scenario-wide
+\code{sampled_factor_proportions} for this factor only. Works for
+declared and uploaded factors.
 \subsection{Usage}{
 \if{html}{\out{<div class="r">}}\preformatted{MCPower$set_factor_sampling(name, mode)}\if{html}{\out{</div>}}
 }
@@ -190,6 +193,7 @@ The \code{MCPower} object invisibly (for chaining).
 \if{html}{\out{<a id="method-MCPower-set_cluster"></a>}}
 \if{latex}{\out{\hypertarget{method-MCPower-set_cluster}{}}}
 \subsection{Method \code{set_cluster()}}{
+Add a random-intercept grouping factor to the model.
 \subsection{Usage}{
 \if{html}{\out{<div class="r">}}\preformatted{MCPower$set_cluster(
   grouping_var,
@@ -199,8 +203,7 @@ The \code{MCPower} object invisibly (for chaining).
   random_slopes = NULL,
   cluster_level_vars = NULL,
   n_per_parent = NULL,
-  tau_squared = NULL,
-  ...
+  tau_squared = NULL
 )}\if{html}{\out{</div>}}
 }
 
@@ -221,8 +224,9 @@ cluster-size-only specs.}
 \item{\code{random_slopes}}{Optional list of random-slope specs, one per slope.
 Each element: \code{list(predictor = "x1", variance = 0.05,
   corr_with_intercept = 0.3, corr_with = c(...))}. \code{corr_with} is
-the vector of correlations with each earlier slope in the same call
-(\code{numeric(0)} for the first slope); defaults to \code{numeric(0)}.}
+the vector of correlations with each earlier slope in the same call,
+one value per earlier slope (\code{numeric(0)} for the first slope);
+when omitted, every one of those correlations is 0.}
 
 \item{\code{cluster_level_vars}}{Character vector of predictor names whose values
 are constant within a cluster (cluster-level covariates). Must all be
@@ -293,10 +297,40 @@ The \code{MCPower} object invisibly (for chaining).
 \if{html}{\out{<a id="method-MCPower-set_scenario_configs"></a>}}
 \if{latex}{\out{\hypertarget{method-MCPower-set_scenario_configs}{}}}
 \subsection{Method \code{set_scenario_configs()}}{
+Merge custom scenario configurations on top of the
+defaults. Scenarios are the named settings bundles of the sensitivity
+analysis, run via \code{scenarios =} on \code{find_power} and
+\code{find_sample_size}. A preset name (\code{optimistic},
+\code{realistic}, \code{doomer}) updates that preset; a new name
+inherits every key from \code{optimistic}, except \code{truth_start},
+which starts \code{FALSE}, and then applies the overrides.
 \subsection{Usage}{
 \if{html}{\out{<div class="r">}}\preformatted{MCPower$set_scenario_configs(configs)}\if{html}{\out{</div>}}
 }
 
+\subsection{Arguments}{
+\if{html}{\out{<div class="arguments">}}
+\describe{
+\item{\code{configs}}{Named list mapping a scenario name to a list of knob
+overrides. Valid knob names, exactly these ten keys:
+\code{heterogeneity}, \code{heteroskedasticity_ratio},
+\code{correlation_noise_sd}, \code{distribution_change_prob},
+\code{new_distributions}, \code{sampled_factor_proportions},
+\code{random_effect_dist}, \code{random_effect_df},
+\code{icc_noise_sd}, \code{truth_start}; an unknown key is an error.
+\code{truth_start} is a logical and the one key that does not perturb
+the data: \code{TRUE} seeds a mixed-model fit at the true random-effect
+structure ("estimation is well-behaved"); \code{FALSE} starts it blind.
+It is \code{TRUE} in \code{optimistic} and \code{FALSE} in
+\code{realistic} and \code{doomer}, and a new custom scenario starts
+with it \code{FALSE} unless you set it. OLS and unclustered binary or
+count fits ignore it.}
+}
+\if{html}{\out{</div>}}
+}
+\subsection{Returns}{
+The \code{MCPower} object invisibly (for chaining).
+}
 }
 \if{html}{\out{<hr>}}
 \if{html}{\out{<a id="method-MCPower-find_power"></a>}}
@@ -322,6 +356,23 @@ The \code{MCPower} object invisibly (for chaining).
 \subsection{Arguments}{
 \if{html}{\out{<div class="arguments">}}
 \describe{
+\item{\code{sample_size}}{Total number of observations: one whole number (a
+double such as \code{200} is accepted) between 20 and 100,000, and at
+least 15 plus the number of design columns. A clustered design floors
+it to a multiple of the cluster atom, with a warning.}
+
+\item{\code{correction}}{Multiple-comparison correction: \code{NULL} or
+\code{"none"}, \code{"bonferroni"}, \code{"holm"}, \code{"bh"} (alias
+\code{"fdr"}), or \code{"tukey"}, case-insensitive. \code{"tukey"}
+corrects factor levels and post-hoc contrasts only: a target outside
+every factor (a continuous or binary predictor, an interaction) has no
+Tukey-corrected power, so its \code{power_corrected} and
+\code{ci_corrected} entries are \code{NA},
+\code{corrected_not_applicable} is \code{TRUE} at its position, and
+the printed tables show \code{n/a}. With such a target the corrected
+joint view is not applicable as a whole:
+\code{success_count_histogram_corrected} is \code{NULL}.}
+
 \item{\code{agq}}{Adaptive Gauss-Hermite quadrature node count for a clustered
 binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
 default). An odd value in \code{3..=25} opts into AGQ, but only when
@@ -330,19 +381,33 @@ factor and at most 3 random effects per group) -- an ineligible or
 even/out-of-range value warns and runs at Laplace instead. No-op for
 OLS/LMM.}
 
-\item{\code{df_method}}{Reference distribution for mixed-model fixed-effect
-tests: \code{"between_within"} (default) tests each fixed effect
-against a t with between-within denominator degrees of freedom --
-between-cluster df if the predictor is cluster-level, within-cluster
-df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-for OLS and unclustered GLM. With crossed or nested extra groupings
-an LME is tested at each fit's Satterthwaite df instead, and a GLMM
-against a Wald z. Cluster-level predictors must be
-declared with \code{cluster_level_vars} (see \code{set_cluster}) for
-the between df to apply. A fit whose random-effect variances all
-collapse to zero (a singular fit) is tested against the residual df
-\code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
-reference -- the same switch a Satterthwaite reference makes there.}
+\item{\code{test_formula}}{Optional formula string for a test model that differs
+from the model that generates the data (e.g. \code{"y ~ x1"} to
+leave out \code{x2}). It sets the test model's fixed effects only:
+the test model keeps the model's random effects, and a random-effect
+term in \code{test_formula} is an error.}
+
+\item{\code{df_method}}{Test for mixed-model fixed effects (ignored for OLS
+and unclustered GLM). \code{"auto"} (default) picks one per design:
+between-within df for a single-grouping linear mixed model without a
+random slope and for any single-grouping binary or count mixed model;
+Satterthwaite df, computed for each fit as lmerTest does, for every
+other linear mixed model (a random slope, or crossed or nested
+groupings); Wald z for a binary or count model with crossed or nested
+groupings. \code{"between_within"} tests each fixed effect against a
+t with between-within denominator df (between-cluster df if the
+predictor is cluster-level, within-cluster df otherwise) and needs a
+single grouping factor; \code{"satterthwaite"} uses each fit's
+Satterthwaite df on any linear mixed model and is not defined for a
+binary or count model; \code{"asymptotic"} tests against a Wald z. A
+named method the design does not support is an error. A fit whose
+Satterthwaite df cannot be computed is tested against a Wald z.
+Cluster-level predictors must be declared with
+\code{cluster_level_vars} (see \code{set_cluster}) for the between df
+to apply. Under between-within df, a fit whose random-effect variances
+all collapse to zero (a singular fit) is tested against the residual
+df \code{N - p} (LME) or Wald z (GLMM), the collapsed model's own
+reference; Satterthwaite df reach the residual df there on their own.}
 }
 \if{html}{\out{</div>}}
 }
@@ -376,6 +441,16 @@ reference -- the same switch a Satterthwaite reference makes there.}
 \subsection{Arguments}{
 \if{html}{\out{<div class="arguments">}}
 \describe{
+\item{\code{correction}}{Multiple-comparison correction, as in
+\code{find_power}. Under \code{"tukey"} a target outside every factor
+has no corrected power, so it has no required N: its
+\code{first_achieved} entry is \code{NA}, its \code{fitted} entry is
+\code{NULL}, and the printed tables show \code{n/a}. The corrected
+joint view is then not applicable as a whole:
+\code{first_joint_achieved}, \code{first_joint_achieved_unit},
+\code{fitted_joint} and \code{success_count_histogram_corrected} are
+\code{NULL}, and "First N achieving all targets" reads \code{n/a}.}
+
 \item{\code{agq}}{Adaptive Gauss-Hermite quadrature node count for a clustered
 binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
 default). An odd value in \code{3..=25} opts into AGQ, but only when
@@ -383,6 +458,12 @@ the design is eligible (a Binary or Count GLMM with a single grouping
 factor and at most 3 random effects per group) -- an ineligible or
 even/out-of-range value warns and runs at Laplace instead. No-op for
 OLS/LMM.}
+
+\item{\code{test_formula}}{Optional formula string for a test model that differs
+from the model that generates the data (e.g. \code{"y ~ x1"} to
+leave out \code{x2}). It sets the test model's fixed effects only:
+the test model keeps the model's random effects, and a random-effect
+term in \code{test_formula} is an error.}
 
 \item{\code{unit}}{Expresses \code{from_size}/\code{to_size}/\code{by} and the
 reported sample sizes in something other than total observations N:
@@ -406,19 +487,27 @@ than requested -- e.g. 20 subjects crossed with 12 items: a requested
 step of 1 trial per subject snaps to 12 trials (the atom is 240
 observations / 20 subjects).}
 
-\item{\code{df_method}}{Reference distribution for mixed-model fixed-effect
-tests: \code{"between_within"} (default) tests each fixed effect
-against a t with between-within denominator degrees of freedom --
-between-cluster df if the predictor is cluster-level, within-cluster
-df otherwise; \code{"asymptotic"} tests against a Wald z. Ignored
-for OLS and unclustered GLM. With crossed or nested extra groupings
-an LME is tested at each fit's Satterthwaite df instead, and a GLMM
-against a Wald z. Cluster-level predictors must be
-declared with \code{cluster_level_vars} (see \code{set_cluster}) for
-the between df to apply. A fit whose random-effect variances all
-collapse to zero (a singular fit) is tested against the residual df
-\code{N - p} (LME) or Wald z (GLMM) instead, the collapsed model's own
-reference -- the same switch a Satterthwaite reference makes there.}
+\item{\code{df_method}}{Test for mixed-model fixed effects (ignored for OLS
+and unclustered GLM). \code{"auto"} (default) picks one per design:
+between-within df for a single-grouping linear mixed model without a
+random slope and for any single-grouping binary or count mixed model;
+Satterthwaite df, computed for each fit as lmerTest does, for every
+other linear mixed model (a random slope, or crossed or nested
+groupings); Wald z for a binary or count model with crossed or nested
+groupings. \code{"between_within"} tests each fixed effect against a
+t with between-within denominator df (between-cluster df if the
+predictor is cluster-level, within-cluster df otherwise) and needs a
+single grouping factor; \code{"satterthwaite"} uses each fit's
+Satterthwaite df on any linear mixed model and is not defined for a
+binary or count model; \code{"asymptotic"} tests against a Wald z. A
+named method the design does not support is an error. A fit whose
+Satterthwaite df cannot be computed is tested against a Wald z.
+Cluster-level predictors must be declared with
+\code{cluster_level_vars} (see \code{set_cluster}) for the between df
+to apply. Under between-within df, a fit whose random-effect variances
+all collapse to zero (a singular fit) is tested against the residual
+df \code{N - p} (LME) or Wald z (GLMM), the collapsed model's own
+reference; Satterthwaite df reach the residual df there on their own.}
 }
 \if{html}{\out{</div>}}
 }

@@ -166,7 +166,7 @@ pub struct SimWorkspace {
     /// Length-`P` Satterthwaite df of the last mixed fit, PREDICTOR-indexed as
     /// glmm's `satterthwaite` writes it (NaN off the fitted targets; only the
     /// first `p` slots of a reduced fit are touched). Read only on draws tested
-    /// at Satterthwaite df (`critvals::uses_satterthwaite`).
+    /// at Satterthwaite df (`critvals::mixed_test`).
     pub satt_df: Vec<f64>,
     /// Length-`P` per-target df for those draws, gathered from `satt_df` into
     /// target-rank order like `compact_t_sq_scratch`; NaN at dropped targets.
@@ -459,11 +459,11 @@ impl SimWorkspace {
             mixed_opts: glmm::FitOptions::default(),
             x_rowmajor: vec![0.0f64; max_n * n_predictors],
             // Sized to the hot-path n_theta so the per-fit update is a capacity-
-            // reusing refill (no warm-path realloc). `truth_theta(.., true)` is the
+            // reusing refill (no warm-path realloc). `truth_theta` is the
             // authority on that length (full RE structure, incl. slopes); empty for
             // OLS / unclustered GLM, whose fits expose no θ̂.
             theta_carry: match cluster {
-                Some(c) => vec![0.0; crate::mixed_workspace::truth_theta(c, true).len()],
+                Some(c) => vec![0.0; crate::mixed_workspace::truth_theta(c).len()],
                 None => Vec::new(),
             },
             has_prev: false,

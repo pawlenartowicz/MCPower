@@ -214,3 +214,33 @@ fn invariant_4_data_refit_reproduces_stat_under_hsk() {
         );
     }
 }
+
+/// Under FixedSize, `debug_report` floors N to the cluster atom with
+/// `find_power`'s warning instead of generating a partial eleventh cluster
+/// (which indexed past the sized clusters and panicked).
+#[test]
+fn debug_report_floors_n_to_the_cluster_atom_with_a_warning() {
+    use engine_contract::{ClusterSizing, ClusterSpec};
+    let mut c = common::minimal_ols_contract();
+    c.generation.cluster = Some(ClusterSpec {
+        sizing: ClusterSizing::FixedSize { cluster_size: 10 },
+        tau_squared: 0.3,
+        slopes: vec![],
+        extra_groupings: vec![],
+    });
+    let mask = StageMask {
+        data: true,
+        ..StageMask::none()
+    };
+
+    let off = debug_report(&c, 42, 105, 1, mask).unwrap();
+    assert_eq!(off.data.unwrap().design.nrow, 100);
+    assert_eq!(
+        off.warnings,
+        ["sample_size 105 not a multiple of the cluster atom 10; using 100"]
+    );
+
+    let on = debug_report(&c, 42, 100, 1, mask).unwrap();
+    assert_eq!(on.data.unwrap().design.nrow, 100);
+    assert!(on.warnings.is_empty(), "{:?}", on.warnings);
+}

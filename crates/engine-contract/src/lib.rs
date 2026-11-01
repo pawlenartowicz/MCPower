@@ -27,7 +27,7 @@ pub use contract::{CurvatureHintParts, SimulationContract};
 pub use design::{DesignSpec, DesignTerm};
 pub use distribution::Distribution;
 pub use error::ContractError;
-pub use estimator::{DfMethod, EstimatorSpec, WaldSe};
+pub use estimator::{DfMethod, EstimatorSpec, MixedTest, WaldSe};
 pub use generation::{
     ClusterSizing, ClusterSpec, ColumnSpec, Correlations, GenerationSpec, GroupingRelation,
     GroupingSpec, MAX_EXTRA_GROUPINGS, MAX_PRIMARY_Q, SlopeTerm, SyntheticKind, UploadedFrame,

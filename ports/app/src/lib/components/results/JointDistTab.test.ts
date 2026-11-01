@@ -306,3 +306,22 @@ describe('JointDistTab — fitted_joint crossing fits', () => {
     expect(getAllByText('≥ 100').length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('JointDistTab — corrected joint view not applicable (Tukey)', () => {
+  it('shows n/a instead of the joint required-N table when a target is flagged', () => {
+    const tab = makeSampleSizeTab();
+    const result = tab.result as SampleSizeResult;
+    // The engine leaves the corrected histogram and the joint crossings empty
+    // and flags the target; the tab reads the flag.
+    for (const pt of result.grid_or_trace) {
+      pt.corrected_not_applicable = [true, false];
+      pt.success_count_histogram_corrected = [];
+    }
+    result.first_joint_achieved = [];
+    const { getByTestId } = render(JointDistTab, { props: { tab } });
+    expect(getByTestId('joint-not-applicable').textContent?.trim()).toBe(
+      'Joint detection → required N (target 80%): n/a (a test has no corrected power under this correction)',
+    );
+    expect(getByTestId('joint-dist-tab').querySelector('table')).toBeNull();
+  });
+});

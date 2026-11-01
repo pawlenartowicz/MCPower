@@ -6,7 +6,7 @@ import type { DfMethod } from './df-method-options';
 import AnovaIcon from '$lib/icons/AnovaIcon.svelte';
 import LinearIcon from '$lib/icons/LinearIcon.svelte';
 import MixedIcon from '$lib/icons/MixedIcon.svelte';
-import { ESTIMATION, SIMULATION } from '$lib/configs/app-config';
+import { SIMULATION } from '$lib/configs/app-config';
 import type { SampleSizeUnit } from './unit-label';
 
 /**
@@ -192,9 +192,11 @@ export interface AdvancedConfig {
   correction: 'none' | 'bonferroni' | 'bh' | 'holm' | 'tukey';
   /** Wald SE method for GLMM families (mixed/logit). Engine ignores it for OLS/LME. */
   wald_se: WaldSe;
-  /** Reference distribution for the fixed-effect Wald tests of a mixed model.
-   *  Only the mixed family puts it on the wire; OLS and unclustered GLM ignore it. */
-  df_method: DfMethod;
+  /** Test for the fixed effects of a mixed model. Only the mixed family puts it
+   *  on the wire; OLS and unclustered GLM ignore it. Absent means the shared
+   *  default (`ESTIMATION.df_method`, `auto`): the default is never stored, so a
+   *  saved configuration holds only a test the user picked. */
+  df_method?: DfMethod;
   /** Adaptive Gauss-Hermite quadrature points for a GLMM fit. 1 (default) =
    *  Laplace. The estimation control (Fast/Accurate/AGQ) sets this alongside
    *  `wald_se`; only >1 reaches the wire. */
@@ -258,7 +260,7 @@ const baseAdvanced = (): AdvancedConfig => ({
   // Default flipped hessian→rx at 1.1.0: the fast Schur SE is the default arm of
   // the Fast/Accurate/AGQ estimation control.
   wald_se: 'rx',
-  df_method: ESTIMATION.df_method,
+  // df_method is left out: absent = the shared default (see AdvancedConfig).
   agq: 1,
   maxFailedSimulations: SIMULATION.max_failed_fraction,
   testFormulaOverride: '',

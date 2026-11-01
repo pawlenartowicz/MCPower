@@ -97,7 +97,9 @@ fn add_n_unit_rows(rows: &mut [Value], opts: &PlotOptions) {
 /// One grid point — or the single point of a find_power result — as the plot
 /// emitters consume it. Only the fields the emitters actually read; nothing is
 /// fabricated. `power`/`ci` are empty for the joint-detection curve; `histogram`
-/// (corrected joint-significance buckets) is empty for the power curves.
+/// (corrected joint-significance buckets) is empty for the power curves. The
+/// two not-applicable flags are set by the builder from
+/// `PowerResult.corrected_not_applicable`, never inferred from the values.
 #[derive(Debug, Clone)]
 pub struct PlotPoint {
     pub n: usize,
@@ -115,6 +117,28 @@ pub struct PlotPoint {
     pub overall_power: Option<f64>,
     /// Wilson CI for `overall_power`; `None` whenever `overall_power` is `None`.
     pub overall_ci: Option<Ci>,
+    /// One flag per `power` entry: true where the displayed power is not
+    /// defined (the corrected rate of a target flagged in
+    /// `PowerResult.corrected_not_applicable`). The bars and curves drop it.
+    /// Empty when nothing is flagged or the point carries uncorrected power.
+    pub not_applicable: Vec<bool>,
+    /// True when the corrected joint view is not applicable (any target is
+    /// flagged): the at-least-k and exactly-k blocks are not emitted and the
+    /// joint emitters skip the point. Independent of which power the point
+    /// carries, since the joint curves always read the corrected histogram.
+    pub joint_not_applicable: bool,
+}
+
+impl PlotPoint {
+    /// Whether power entry `i` is drawn (not flagged not applicable).
+    fn drawn(&self, i: usize) -> bool {
+        !self.not_applicable.get(i).copied().unwrap_or(false)
+    }
+
+    /// Number of power entries drawn.
+    fn n_drawn(&self) -> usize {
+        (0..self.power.len()).filter(|&i| self.drawn(i)).count()
+    }
 }
 
 /// One scenario's points as the plot emitters consume them.
@@ -176,6 +200,9 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
             continue;
         };
         for (i, &power) in point.power.iter().enumerate() {
+            if !point.drawn(i) {
+                continue; // not applicable under this correction
+            }
             let ci = &point.ci[i];
             values.push(json!({
                 "scenario": label,
@@ -208,11 +235,12 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
         .and_then(|sc| sc.points.first())
         .map(|p| p.overall_power.is_some())
         .unwrap_or(false);
-    // G = target rows the emitter draws (one bar per target), S = scenarios/row.
+    // G = target rows the emitter draws (one bar per drawn target), S =
+    // scenarios/row.
     let g = scenarios
         .first()
         .and_then(|sc| sc.points.first())
-        .map(|p| p.power.len() + usize::from(has_overall))
+        .map(|p| p.n_drawn() + usize::from(has_overall))
         .unwrap_or(0) as f64;
     let s = if multi { scenarios.len() as f64 } else { 1.0 };
     // Flush within group, ⅔-bar gap between groups; 7-unit floor (the 2-row ×
@@ -345,11 +373,12 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
 pub fn sample_size_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String {
     let multi_scenario = scenarios.len() > 1;
     // Entry count, not `target_indices.len()` — power vectors append contrast
-    // entries past the marginals (see `entry_label`).
+    // entries past the marginals (see `entry_label`). Only drawn entries
+    // count: a not-applicable one is dropped below.
     let n_targets = scenarios
         .first()
         .and_then(|sc| sc.points.first())
-        .map(|p| p.power.len())
+        .map(PlotPoint::n_drawn)
         .unwrap_or(0);
     // The overall test (when present) renders as one extra series. Gate
     // strokeDash on the *rendered* series count, not just `n_targets`: a
@@ -383,6 +412,9 @@ pub fn sample_size_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) ->
         sorted.sort_by_key(|p| p.n);
         for p in &sorted {
             for (t, &power) in p.power.iter().enumerate() {
+                if !p.drawn(t) {
+                    continue; // not applicable under this correction
+                }
                 let ci = &p.ci[t];
                 let target = entry_label(p, t);
                 rows.push(json!({
@@ -518,7 +550,7 @@ pub fn joint_detection_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions
         for point in &sc.points {
             let hist = &point.histogram;
             let n_sims: u64 = hist.iter().sum();
-            if n_sims == 0 {
+            if n_sims == 0 || point.joint_not_applicable {
                 continue;
             }
             for k in 1..=n_targets {
@@ -627,7 +659,7 @@ pub fn exactly_k_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> S
         for point in &sc.points {
             let hist = &point.histogram;
             let n_sims: u64 = hist.iter().sum();
-            if n_sims == 0 {
+            if n_sims == 0 || point.joint_not_applicable {
                 continue;
             }
             for k in 0..=n_targets {
@@ -734,6 +766,12 @@ pub fn sample_size_plot_set(
         .map(|p| p.histogram.len() - 1)
         .unwrap_or(0);
     let multi_scenario = scenarios.len() > 1;
+    // A target with no corrected power makes the corrected joint view not
+    // applicable: no at-least-k / exactly-k block at all.
+    let joint_na = scenarios
+        .iter()
+        .flat_map(|sc| &sc.points)
+        .any(|p| p.joint_not_applicable);
 
     let mut blocks: Vec<(String, String)> = Vec::new();
 
@@ -754,7 +792,7 @@ pub fn sample_size_plot_set(
     }
 
     // Joint/exactly-k blocks only when there are multiple targets.
-    if m >= 2 {
+    if m >= 2 && !joint_na {
         let joint_opts = PlotOptions {
             title: None,
             show_ci: false,
@@ -788,7 +826,38 @@ mod exactly_k_curve_tests {
             histogram: hist,
             overall_power: None,
             overall_ci: None,
+            not_applicable: vec![],
+            joint_not_applicable: false,
         }
+    }
+
+    /// A flagged target makes the corrected joint view not applicable: the
+    /// plot set has no at-least-k / exactly-k block even though the points
+    /// carry a histogram, and the power curve is still emitted.
+    #[test]
+    fn joint_blocks_absent_when_joint_view_not_applicable() {
+        let flagged = |n: usize| PlotPoint {
+            joint_not_applicable: true,
+            ..point(n, vec![10, 30, 60])
+        };
+        let scenarios = vec![PlotScenario {
+            label: "s".to_string(),
+            points: vec![flagged(50), flagged(100)],
+        }];
+        let keys: Vec<String> = sample_size_plot_set(&scenarios, &PlotOptions::default())
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(keys, vec!["curve".to_string()]);
+        // The same points without the flag do get both joint blocks.
+        let plain = vec![PlotScenario {
+            label: "s".to_string(),
+            points: vec![point(50, vec![10, 30, 60]), point(100, vec![10, 30, 60])],
+        }];
+        assert_eq!(
+            sample_size_plot_set(&plain, &PlotOptions::default()).len(),
+            3
+        );
     }
 
     #[test]
@@ -939,7 +1008,31 @@ mod sample_size_curve_tests {
             histogram: vec![],
             overall_power: None,
             overall_ci: None,
+            not_applicable: vec![],
+            joint_not_applicable: false,
         }
+    }
+
+    /// A flagged entry (a target with no corrected power) is left off the
+    /// curve: only the defined target's rows are emitted.
+    #[test]
+    fn curve_drops_not_applicable_points() {
+        let flagged = |n: usize, p: f64| PlotPoint {
+            not_applicable: vec![true, false],
+            ..curve_pt(n, vec![0.3, p])
+        };
+        let scenarios = vec![PlotScenario {
+            label: "s".into(),
+            points: vec![flagged(80, 0.3), flagged(160, 0.6)],
+        }];
+        let v: serde_json::Value =
+            serde_json::from_str(&sample_size_curve_spec(&scenarios, &PlotOptions::default()))
+                .unwrap();
+        let rows = v["data"]["values"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r["target"] == json!("target_2")));
+        // One drawn series: no strokeDash channel.
+        assert!(v["layer"][0]["encoding"]["strokeDash"].is_null());
     }
 
     /// `x_divisor > 1`: x field is `n_unit = n / divisor` with no title (the
@@ -1004,6 +1097,8 @@ mod sample_size_curve_tests {
             histogram: vec![10, 50, 40],
             overall_power: None,
             overall_ci: None,
+            not_applicable: vec![],
+            joint_not_applicable: false,
         };
         let scenarios = vec![PlotScenario {
             label: "s".into(),
@@ -1051,8 +1146,31 @@ mod power_at_n_color_tests {
                 histogram: vec![],
                 overall_power: None,
                 overall_ci: None,
+                not_applicable: vec![],
+                joint_not_applicable: false,
             }],
         }
+    }
+
+    /// A flagged entry draws no bar, and the data-rect height counts only the
+    /// drawn bars.
+    #[test]
+    fn bars_drop_not_applicable_target() {
+        let mut with_na = bars_scenario("s", vec![0.3, 0.4, 0.6]);
+        with_na.points[0].not_applicable = vec![true, false, false];
+        let without = bars_scenario("s", vec![0.4, 0.6]);
+        let v: serde_json::Value =
+            serde_json::from_str(&power_at_n_spec(&[with_na], &PlotOptions::default())).unwrap();
+        let w: serde_json::Value =
+            serde_json::from_str(&power_at_n_spec(&[without], &PlotOptions::default())).unwrap();
+        let targets: Vec<&serde_json::Value> = v["data"]["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| &r["target"])
+            .collect();
+        assert_eq!(targets, vec![&json!("target_2"), &json!("target_3")]);
+        assert_eq!(v["height"], w["height"]);
     }
 
     #[test]
@@ -1117,6 +1235,8 @@ mod power_at_n_color_tests {
                 histogram: vec![],
                 overall_power: None,
                 overall_ci: None,
+                not_applicable: vec![],
+                joint_not_applicable: false,
             }],
         }];
         let vc: serde_json::Value =

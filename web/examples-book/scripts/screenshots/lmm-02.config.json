@@ -5,12 +5,12 @@
     "formula": "pain_score = treatment * week + (1|patient)",
     "variables": [
       { "name": "treatment", "kind": "binary", "binaryProportion": 0.5 },
-      { "name": "week", "kind": "continuous" }
+      { "name": "week", "kind": "binary", "binaryProportion": 0.5 }
     ],
     "effects": [
       { "name": "treatment", "value": 0.2 },
-      { "name": "week", "value": 0.25 },
-      { "name": "treatment:week", "value": 0.25 }
+      { "name": "week", "value": 0.5 },
+      { "name": "treatment:week", "value": 0.5 }
     ],
     "correlations": [],
     "targetPower": 80,
@@ -18,8 +18,8 @@
     "tests": { "kind": "all" },
     "reportOverall": true,
     "contrasts": [],
-    "findPower": { "n": 300 },
-    "findSampleSize": { "from": 30, "to": 200, "by": "auto" },
+    "findPower": { "n": 120 },
+    "findSampleSize": { "from": 120, "to": 480, "by": "auto" },
     "advanced": {
       "simulations": 800,
       "seed": 2137,

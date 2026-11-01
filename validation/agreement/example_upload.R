@@ -8,7 +8,8 @@
 # Loop side: lm() on whole pilot rows resampled with replacement, 2,000 sims.
 # Seed 2137 + n on both sides.
 #
-# Run from any directory:  Rscript example_upload.R   (SMOKE=1 for a 2%-sims call check)
+# Run from any directory:  Rscript example_upload.R   (SMOKE=1 for a 2%-sims call check,
+# SKIP_LOOPS=1 for the MCPower side only)
 # Outputs (results/ beside this file): example_upload_r.json ({meta, records}),
 # example_upload_pilot_quantiles.csv, example_upload_pilot_spearman.csv.
 
@@ -20,6 +21,7 @@ source(file.path(HERE, "harness.R"))   # record, build_meta, scaled_sims; no run
 
 # Read by scaled_sims() and build_meta(). SMOKE=1 checks the calls, not the numbers.
 N_SIMS_SCALE <- if (identical(Sys.getenv("SMOKE"), "1")) 0.02 else 1.0
+SKIP_LOOPS <- identical(Sys.getenv("SKIP_LOOPS"), "1")
 MC_SIMS <- scaled_sims(10000L)
 LOOP_SIMS <- scaled_sims(2000L)
 ALPHA <- 0.05
@@ -140,6 +142,7 @@ for (n in NS) {
                                         seed = seed_for(n), verbose = FALSE,
                                         progress_callback = FALSE))[["elapsed"]]
   add_record("mcpower_find_power", n, MC_SIMS, el, mc_power(res, TARGETS))
+  if (SKIP_LOOPS) next
   el <- system.time(lp <- loop_power(n, LOOP_SIMS, seed_for(n)))[["elapsed"]]
   add_record("loop_best", n, LOOP_SIMS, el, lp)
 }

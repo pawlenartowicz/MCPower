@@ -26,11 +26,14 @@ matrix, outcome, and cluster ids, byte-for-byte), fit them two ways —
 — and compare the fitted fixed-effect coefficients, the test statistics,
 and the decision threshold. The statistic is the **Wald *z*** on the
 fixed effect (`fixef / sqrt(diag(vcov))`), *not* lmerTest’s
-Satterthwaite *t* — MCPower’s own test definition builds that statistic
-and refers it to a between-within *t* by default, and the R side derives
-that same between-within reference independently (see step 2 below).
-Because both fit the identical bytes, sampling noise cancels: any
-difference is a solver discrepancy.
+Satterthwaite *t*. MCPower’s own test definition builds that statistic
+and refers it to the test `df_method` picks: under the default `auto`, a
+between-within *t* for a single grouping without a random slope, and
+Satterthwaite df for a random slope or a crossed or nested grouping. For
+a between-within case the R side derives that same reference
+independently (see step 2 below); the Satterthwaite cases are checked on
+the statistic, not on the df. Because both fit the identical bytes,
+sampling noise cancels: any difference is a solver discrepancy.
 
 The chosen cases sit at ICC 0.1–0.2 with 20–30 clusters, well clear of
 the **τ̂ ≈ 0 boundary**. If a case ever collapsed to that boundary,
@@ -183,16 +186,16 @@ R formula `y ~ x1 + g + (1|grp)` · linear mixed model (random intercept)
 
 | Term | True (formula) | β (R = MCPower) | t / z | crit | df | rel. diff (β, stat) | crit abs. diff | Verdict |
 |:---|---:|---:|---:|---:|:---|:---|:---|:---|
-| intercept | 0.0 | 0.123802 | NA | NA | — | 9.0e-12 | — | PASS |
-| x1 | 0.4 | 0.435261 | 12.890829 | 1.962704 | 867 | 6.9e-11 | 2.0e-13 | PASS |
-| g\[2\] | 0.5 | 0.612951 | 2.210123 | 1.962704 | 867 | 4.3e-09 | 2.0e-13 | PASS |
-| g\[3\] | 0.8 | 1.000041 | 3.147536 | 1.962704 | 867 | 4.3e-09 | 2.0e-13 | PASS |
+| intercept | 0.0 | 0.172590 | NA | NA | — | 7.6e-11 | — | PASS |
+| x1 | 0.4 | 0.434394 | 12.84957 | 1.962704 | 867 | 6.7e-10 | 2.0e-13 | PASS |
+| g\[2\] | 0.5 | 0.524785 | 6.78579 | 1.962704 | 867 | 1.4e-09 | 2.0e-13 | PASS |
+| g\[3\] | 0.8 | 0.888270 | 10.02151 | 1.962704 | 867 | 1.3e-09 | 2.0e-13 | PASS |
 
 | item | value |
 |:---|:---|
-| generated | 2026-10-20 |
+| generated | 2026-10-31 |
 | R | R version 4.5.3 (2026-03-11) |
-| mcpower | 1.4.0 |
+| mcpower | 1.5.0 |
 | MLE solving bands (beta/stat rel · crit abs) | 0.0001 rel / 0.0001 rel / 1e-08 abs |
 
 ## M2 — crossed & nested groupings (general lmm path)
@@ -277,7 +280,7 @@ Wald z on both sides — never lmerTest t.
     ## ───────────────────────────────────
     ## Test                 Power   Target
     ## ───────────────────────────────────
-    ## x1                   94.9%      80%
+    ## x1                   94.4%      80%
     ## ───────────────────────────────────
 
     ## Slope τ²=0: singular_fit_rate = 0.625 (expect high)
@@ -337,13 +340,13 @@ draws)
 (optimizer band: β̂ 2.6e-03, τ̂² 2.9e-03, ρ̂ 6.1e-03) (15/60 glmer-clean
 draws)
 
-**glmm_slope_crossed**: XFAIL — 37 z (SE convention, 9.5% max) + 124
-β̂/τ̂²/ρ̂ (optimizer band: β̂ 3.6e-03, τ̂² 6.6e-03, ρ̂ 8.8e-03) (37/60
+**glmm_slope_crossed**: XFAIL — 38 z (SE convention, 11.5% max) + 133
+β̂/τ̂²/ρ̂ (optimizer band: β̂ 5.0e-03, τ̂² 1.0e-02, ρ̂ 9.1e-03) (38/60
 glmer-clean draws)
 
-**glmm_slope_crossed_extra_slopes**: XFAIL — 14 z (SE convention, 9.4%
-max) + 47 β̂/τ̂²/ρ̂ (optimizer band: β̂ 2.6e-03, τ̂² 4.3e-03, ρ̂ 2.9e-03)
-(14/60 glmer-clean draws)
+**glmm_slope_crossed_extra_slopes**: XFAIL — 9 z (SE convention, 8.4%
+max) + 33 β̂/τ̂²/ρ̂ (optimizer band: β̂ 2.8e-03, τ̂² 4.1e-03, ρ̂ 3.2e-03)
+(9/60 glmer-clean draws)
 
 **glmm_slope_nested_extra_slopes**: XFAIL — 14 z (SE convention, 4.6%
 max) + 33 β̂/τ̂²/ρ̂ (optimizer band: β̂ 1.3e-03, τ̂² 4.3e-03, ρ̂ 1.7e-03)
@@ -370,14 +373,14 @@ residual is reported as a finding, not gated.
 | Cell | clean draws | rx vs vcov(F) mean | rx vs vcov(F) max | hess vs vcov(T) mean | hess vs vcov(T) max |
 |:---|---:|---:|---:|---:|---:|
 | glmm_intercept | 30 | 0.0000981 | 0.0001896 | 0.00540 | 0.00915 |
-| glmm_slope | 22 | 0.0004706 | 0.0010733 | 0.01220 | 0.02050 |
-| glmm_multislope | 11 | 0.0006206 | 0.0019035 | 0.01232 | 0.02584 |
-| glmm_slope_crossed | 17 | 0.0004877 | 0.0013432 | 0.01563 | 0.02685 |
-| glmm_slope_crossed_extra_slopes | 8 | 0.0004834 | 0.0011544 | 0.01100 | 0.01799 |
+| glmm_slope | 22 | 0.0004706 | 0.0010735 | 0.01220 | 0.02050 |
+| glmm_multislope | 11 | 0.0006207 | 0.0019035 | 0.01232 | 0.02584 |
+| glmm_slope_crossed | 22 | 0.0005122 | 0.0014548 | 0.01450 | 0.02434 |
+| glmm_slope_crossed_extra_slopes | 5 | 0.0010074 | 0.0018918 | 0.02169 | 0.04204 |
 | glmm_slope_nested_extra_slopes | 7 | 0.0003096 | 0.0008199 | 0.01082 | 0.01659 |
 | few6_int | 29 | 0.0001968 | 0.0007165 | 0.00942 | 0.04063 |
-| few8_slope | 7 | 0.0010406 | 0.0063645 | 0.01363 | 0.06846 |
-| few10_crossed | 6 | 0.0006337 | 0.0018793 | 0.01464 | 0.04054 |
+| few8_slope | 7 | 0.0010403 | 0.0063642 | 0.01363 | 0.06846 |
+| few10_crossed | 6 | 0.0006339 | 0.0018792 | 0.01464 | 0.04054 |
 | hiICC_int | 29 | 0.0004461 | 0.0013960 | 0.02746 | 0.05822 |
 | smallclust | 26 | 0.0000986 | 0.0008883 | 0.00283 | 0.02885 |
 | boundary | 24 | 0.0003737 | 0.0009031 | 0.01114 | 0.03032 |

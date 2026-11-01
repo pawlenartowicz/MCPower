@@ -78,14 +78,13 @@ def get_re_dist_codes() -> Dict[str, int]:
 def get_cluster_limits() -> Dict[str, Any]:
     """Cluster-related limits.
 
-    Exposes the four `*_per_cluster`/`*_clusters` keys from
+    Exposes the three `*_per_cluster`/`*_clusters` keys from
     `limits` plus `auto_count_default` (from `simulation.cluster_auto_count`)."""
     cfg = get_config()
     lim = cfg["limits"]
     return {
         "min_rows_per_cluster": lim["min_rows_per_cluster"],
         "min_clusters": lim["min_clusters"],
-        "reliable_rows_per_cluster": lim["reliable_rows_per_cluster"],
         "recommended_rows_per_cluster": lim["recommended_rows_per_cluster"],
         "auto_count_default": cfg["simulation"]["cluster_auto_count"],
     }

@@ -10,7 +10,8 @@
 # at its optimistic value. MCPower side: find_power at 10,000 sims per scenario.
 # Loop side: 2,000 sims. Seed 2137 + n on both sides.
 #
-# Run from any directory:  Rscript example_knobs.R   (SMOKE=1 for a 2%-sims call check)
+# Run from any directory:  Rscript example_knobs.R   (SMOKE=1 for a 2%-sims call check,
+# SKIP_LOOPS=1 for the MCPower side only)
 # Output: results/example_knobs_r.json ({meta, records}) beside this file.
 
 HERE <- local({
@@ -21,6 +22,7 @@ source(file.path(HERE, "harness.R"))   # record, build_meta, scaled_sims; no run
 
 # Read by scaled_sims() and build_meta(). SMOKE=1 checks the calls, not the numbers.
 N_SIMS_SCALE <- if (identical(Sys.getenv("SMOKE"), "1")) 0.02 else 1.0
+SKIP_LOOPS <- identical(Sys.getenv("SKIP_LOOPS"), "1")
 MC_SIMS <- scaled_sims(10000L)
 LOOP_SIMS <- scaled_sims(2000L)
 ALPHA <- 0.05
@@ -253,6 +255,7 @@ for (case in CASES) {
                                         seed = seed_for(N), scenarios = case$scenario,
                                         verbose = FALSE, progress_callback = FALSE))[["elapsed"]]
   add_record(case, "mcpower_find_power", MC_SIMS, el, mc_power(res, TARGETS, case$scenario))
+  if (SKIP_LOOPS) next
   el <- system.time(lp <- loop_power(case$knob, LOOP_SIMS, seed_for(N)))[["elapsed"]]
   add_record(case, "loop_best", LOOP_SIMS, el, lp)
 }

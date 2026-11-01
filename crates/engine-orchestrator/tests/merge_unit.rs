@@ -17,6 +17,7 @@ fn ols_pr(n_sims: u64, succ_unc: Vec<u64>, succ_cor: Vec<u64>, conv: u64) -> Pow
         power_corrected: succ_cor.iter().map(|&k| k as f64 / n_sims as f64).collect(),
         ci_uncorrected: vec![Ci { lo: 0.0, hi: 1.0 }; 2],
         ci_corrected: vec![Ci { lo: 0.0, hi: 1.0 }; 2],
+        corrected_not_applicable: vec![],
         convergence_rate: conv as f64 / n_sims as f64,
         boundary_hit: vec![0; n_sims as usize],
         estimator_extras: EstimatorExtras::Ols {},
@@ -288,7 +289,7 @@ fn merge_recomputes_crossing_fit_from_pooled_counts_golden() {
         .map(|pr| pr.success_counts_corrected[0])
         .collect();
     assert_eq!(pooled, vec![60, 75, 85, 95]);
-    match &r.fitted[0] {
+    match r.fitted[0].as_ref().expect("target 0 is fitted") {
         CrossingFit::Fitted {
             n_star,
             n_achievable,
@@ -304,7 +305,10 @@ fn merge_recomputes_crossing_fit_from_pooled_counts_golden() {
     }
     // Target 1 pools to [10, 20, 30, 40] of 100: never reaches 0.8 and the
     // fitted endpoint 0.4 sits under the low-power hint gate ⇒ no hint.
-    assert_eq!(r.fitted[1], CrossingFit::NotReached { n_approx: None });
+    assert_eq!(
+        r.fitted[1],
+        Some(CrossingFit::NotReached { n_approx: None })
+    );
     assert_eq!(r.cluster_atom, 1, "atom carried through merge");
 }
 
@@ -569,6 +573,7 @@ fn merge_rejects_zero_n_sims() {
         power_corrected: vec![0.0],
         ci_uncorrected: vec![Ci { lo: 0.0, hi: 1.0 }],
         ci_corrected: vec![Ci { lo: 0.0, hi: 1.0 }],
+        corrected_not_applicable: vec![],
         convergence_rate: 1.0,
         boundary_hit: vec![],
         estimator_extras: EstimatorExtras::Ols {},
@@ -664,6 +669,7 @@ fn mle_pr(n_sims: u64, singular_count: u64, singular_n: u64) -> PowerResult {
         power_corrected: vec![0.5],
         ci_uncorrected: vec![Ci { lo: 0.0, hi: 1.0 }],
         ci_corrected: vec![Ci { lo: 0.0, hi: 1.0 }],
+        corrected_not_applicable: vec![],
         convergence_rate: singular_n as f64 / n_sims as f64,
         boundary_hit: vec![0; n_sims as usize],
         estimator_extras: EstimatorExtras::Mle {

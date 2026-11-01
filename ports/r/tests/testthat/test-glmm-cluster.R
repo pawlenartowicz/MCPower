@@ -10,7 +10,7 @@ test_that("logit+cluster: tau_squared == icc/(1-icc) * pi^2/3", {
   m <- MCPower$new("y ~ x1 + (1|g)", family = "logit")$
     set_effects("x1=0.3")$
     set_baseline_probability(0.3)$
-    set_cluster("g", ICC = icc, n_clusters = 20L, cluster_size = 10L)
+    set_cluster("g", ICC = icc, n_clusters = 20L)
   enc <- mcpower:::.encode_outcome_and_clusters(
     family            = "logit",
     link              = "canonical",
@@ -28,7 +28,7 @@ test_that("lme+cluster: tau_squared == icc/(1-icc) (no pi^2/3 factor)", {
   icc <- 0.2
   m <- MCPower$new("y ~ x1 + (1|g)", family = "lme")$
     set_effects("x1=0.3")$
-    set_cluster("g", ICC = icc, n_clusters = 20L, cluster_size = 10L)
+    set_cluster("g", ICC = icc, n_clusters = 20L)
   enc <- mcpower:::.encode_outcome_and_clusters(
     family            = "lme",
     link              = "canonical",
@@ -47,7 +47,7 @@ test_that("probit+cluster: tau_squared == icc/(1-icc) (no pi^2/3 factor)", {
   m <- MCPower$new("y ~ x1 + (1|g)", family = "probit")$
     set_effects("x1=0.3")$
     set_baseline_probability(0.3)$
-    set_cluster("g", ICC = icc, n_clusters = 20L, cluster_size = 10L)
+    set_cluster("g", ICC = icc, n_clusters = 20L)
   enc <- mcpower:::.encode_outcome_and_clusters(
     family            = "probit",
     link              = "probit",
@@ -187,7 +187,7 @@ test_that("05a prereq: set_scenario_configs accepts icc_noise_sd on logit+cluste
     MCPower$new("y ~ x1 + (1|g)", family = "logit")$
       set_effects("x1=0.4")$
       set_baseline_probability(0.3)$
-      set_cluster("g", ICC = 0.2, n_clusters = 20L, cluster_size = 10L)$
+      set_cluster("g", ICC = 0.2, n_clusters = 20L)$
       set_scenario_configs(list(optimistic = list(icc_noise_sd = 0.05)))
   )
   expect_equal(m$.__enclos_env__$private$scenario_configs$optimistic$icc_noise_sd, 0.05)
@@ -198,7 +198,7 @@ test_that("find_power on logit+cluster returns estimator_extras with estimator='
   m <- MCPower$new("y ~ x1 + (1|g)", family = "logit")$
     set_effects("x1=0.4")$
     set_baseline_probability(0.3)$
-    set_cluster("g", ICC = 0.2, n_clusters = 20L, cluster_size = 10L)
+    set_cluster("g", ICC = 0.2, n_clusters = 20L)
   result <- m$find_power(sample_size = 100L, n_sims = 50L, seed = 2137,
                          progress_callback = FALSE, verbose = FALSE)
   expect_equal(result$estimator_extras$estimator, "glm")
@@ -209,7 +209,7 @@ test_that("set_scenario_configs(icc_noise_sd) does not error on logit+cluster fi
   m <- MCPower$new("y ~ x1 + (1|g)", family = "logit")$
     set_effects("x1=0.4")$
     set_baseline_probability(0.3)$
-    set_cluster("g", ICC = 0.2, n_clusters = 20L, cluster_size = 10L)$
+    set_cluster("g", ICC = 0.2, n_clusters = 20L)$
     set_scenario_configs(list(optimistic = list(icc_noise_sd = 0.05)))
   result <- m$find_power(sample_size = 100L, n_sims = 50L, seed = 2137,
                          progress_callback = FALSE, verbose = FALSE)

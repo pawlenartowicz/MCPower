@@ -96,7 +96,6 @@ pub struct Limits {
     #[serde(default = "default_glmm_reliable_clusters")]
     pub glmm_reliable_clusters: u32,
     pub min_rows_per_cluster: u32,
-    pub reliable_rows_per_cluster: u32,
     pub recommended_rows_per_cluster: u32,
     /// Minimum observations per factor level for the factor to enter a fit;
     /// 0 disables exclusion. See `SimulationSpec::factor_min_level_count`.
@@ -135,7 +134,7 @@ pub struct ReportThresholds {
     pub factor_exclusion_max: f64,
     /// GLMM Laplace-bias warning trigger: hosts warn when the estimated
     /// random-intercept variance τ̂² exceeds this AND the minimum cluster size is
-    /// below `limits.reliable_rows_per_cluster`. Thresholds + copy are host-owned.
+    /// below `limits.recommended_rows_per_cluster`. Thresholds + copy are host-owned.
     #[serde(default = "default_glmm_tau_sq_warn")]
     pub glmm_tau_sq_warn: f64,
 }

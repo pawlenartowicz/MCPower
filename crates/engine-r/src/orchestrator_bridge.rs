@@ -16,6 +16,8 @@ use engine_orchestrator::{
 use extendr_api::error::Result;
 use extendr_api::prelude::*;
 
+use crate::r_error;
+
 use crate::progress::{orchestrator_err, run_engine, run_with_progress};
 
 // ── Contract decoder ──────────────────────────────────────────────────────────
@@ -27,9 +29,9 @@ use crate::progress::{orchestrator_err, run_engine, run_with_progress};
 /// Exposed as `pub` so `debug_bridge` can reuse it directly.
 pub fn decode_contracts(bytes: &[u8]) -> Result<Vec<SimulationContract>> {
     let v: Vec<SimulationContract> = rmp_serde::from_slice(bytes)
-        .map_err(|e| Error::Other(format!("malformed contracts bytes: {e}")))?;
+        .map_err(|e| r_error(format!("malformed contracts bytes: {e}")))?;
     if v.is_empty() {
-        return Err(Error::Other("contracts list cannot be empty".into()));
+        return Err(r_error("contracts list cannot be empty"));
     }
     Ok(v)
 }
@@ -37,10 +39,10 @@ pub fn decode_contracts(bytes: &[u8]) -> Result<Vec<SimulationContract>> {
 /// Convert an R count argument to `usize`. R integers are signed, and a bare
 /// `as usize` turns a negative value into a huge count whose allocation aborts
 /// the whole R session, so anything below 1 is an R error instead.
-fn positive_count(name: &str, v: i32) -> Result<usize> {
+pub(crate) fn positive_count(name: &str, v: i32) -> Result<usize> {
     match usize::try_from(v) {
         Ok(n) if n >= 1 => Ok(n),
-        _ => Err(Error::Other(format!(
+        _ => Err(r_error(format!(
             "{name} must be a positive integer, got {v}"
         ))),
     }
@@ -190,6 +192,7 @@ fn host_value_to_robj(hv: &HostValue) -> Robj {
         HostValue::VecF64(v) => r!(v.clone()),
         HostValue::VecU64(v) => r!(v.iter().map(|&x| x as i32).collect::<Vec<i32>>()),
         HostValue::VecStr(v) => r!(v.clone()),
+        HostValue::VecBool(v) => r!(v.clone()),
         HostValue::VecCi(cis) => {
             List::from_values(cis.iter().map(|c| r!([c.lo, c.hi]))).into_robj()
         }
@@ -198,6 +201,7 @@ fn host_value_to_robj(hv: &HostValue) -> Robj {
             None => r!(NULL),
         },
         HostValue::Str(s) => r!(s.clone()),
+        HostValue::Null => r!(NULL),
         HostValue::Map(pairs) => {
             let names: Vec<String> = pairs.iter().map(|(k, _)| (*k).to_string()).collect();
             let vals: Vec<Robj> = pairs.iter().map(|(_, v)| host_value_to_robj(v)).collect();
@@ -274,8 +278,7 @@ pub fn find_sample_size(
     let hi = positive_count("to_size", hi)?;
     let n_sims = positive_count("n_sims", n_sims)?;
     let by = by.map(|v| positive_count("by", v)).transpose()?;
-    let method =
-        SampleSizeMethod::from_host_args(method, by, by_kind, mode).map_err(Error::Other)?;
+    let method = SampleSizeMethod::from_host_args(method, by, by_kind, mode).map_err(r_error)?;
 
     // Decode to plain Rust types before the background thread starts — no Robj
     // may cross the thread boundary (`Robj` is `!Send`).

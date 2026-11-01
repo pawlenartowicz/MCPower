@@ -235,3 +235,42 @@ fn sample_size_curve_uses_n_unit_when_the_result_carries_a_divisor() {
     // n / 8 on every row: two targets at n = 80, then two at n = 160.
     assert_eq!(data_column(&curve.spec, "n_unit"), [10.0, 10.0, 20.0, 20.0]);
 }
+
+// ── not-applicable flags reach the plot points ─────────────────────────────
+
+/// A target with no corrected power (flagged `corrected_not_applicable`):
+/// the adapter carries the flag onto the plot points, so the corrected bar
+/// and curve drop that target and the corrected joint blocks are absent. The
+/// flag drives this, not the value: the flagged entry here is a finite 0.3.
+#[test]
+fn flagged_target_drops_from_corrected_plots_and_joint_blocks() {
+    let flag = |mut p: PowerResult| {
+        p.corrected_not_applicable = vec![true, false];
+        p
+    };
+    let power = ScenarioResult {
+        scenarios: vec![(
+            "default".to_string(),
+            flag(power_result(vec![0.7, 0.6], vec![0.3, 0.4])),
+        )],
+    };
+    let PlotSpecs { blocks } = power_plot_specs(&power, 0.8, true);
+    assert_eq!(data_column(&blocks[0].spec, "power"), vec![0.4]);
+    // Uncorrected display: both bars stay.
+    let PlotSpecs { blocks } = power_plot_specs(&power, 0.8, false);
+    assert_eq!(data_column(&blocks[0].spec, "power"), vec![0.7, 0.6]);
+
+    let mut ss = ss_scenarios(&["default"]);
+    for pt in &mut ss.scenarios[0].1.grid_or_trace {
+        pt.corrected_not_applicable = vec![true, false];
+    }
+    // The joint view is corrected whatever the power display, so it is
+    // absent in both.
+    for corrected in [true, false] {
+        let PlotSpecs { blocks } = sample_size_curve_specs(&ss, 0.8, corrected);
+        let keys: Vec<&str> = blocks.iter().map(|b| b.key.as_str()).collect();
+        assert_eq!(keys, vec!["curve"], "corrected = {corrected}");
+    }
+    let PlotSpecs { blocks } = sample_size_curve_specs(&ss, 0.8, true);
+    assert_eq!(data_column(&blocks[0].spec, "power"), vec![0.2, 0.6]);
+}

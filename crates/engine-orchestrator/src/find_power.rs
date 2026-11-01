@@ -3,15 +3,15 @@
 //! Runs one `engine_core::run_batch` per scenario at the requested
 //! `sample_size`, aggregates into `PowerResult`, and emits lifecycle events.
 
-use crate::aggregation::aggregate_batch;
+use crate::aggregation::{aggregate_batch, corrected_not_applicable};
 use crate::cancel::CancellationToken;
 use crate::progress::{ProgressEvent, ProgressSink};
 use crate::result::{OrchestratorError, PowerResult, Scenario, ScenarioResult};
 use crate::scenario_loop::for_each_scenario;
-use engine_contract::{ClusterSizing, EstimatorSpec, SimulationContract};
+use engine_contract::{ClusterSizing, EstimatorSpec, MixedTest, SimulationContract};
 use engine_core::ProgressSink as EngineProgressSink;
 use engine_core::contract_adapter::contract_to_simulation_spec;
-use engine_core::critvals::BetweenWithinDf;
+use engine_core::critvals::{cluster_level_targets, clusters_per_n, mixed_test};
 use engine_core::rng::splitmix64_finalize;
 use engine_core::{BatchResult, EngineError, SimulationSpec};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,10 +20,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// dataset is a valid balanced / complete-cluster design), returning the
 /// snapped N and an optional advisory warning. Unclustered ⇒ unchanged.
 ///
-/// FixedSize also enforces the same `min_clusters` floor as the search path
-/// (`find_power` and `find_sample_size` share this minimum): errors via
-/// `ClusterTooFewAtN` when the snapped N yields fewer than `min_clusters`
-/// complete clusters.
+/// Enforces the same floors as the search path, so `find_power` and
+/// `find_sample_size` accept the same designs: `ClusterTooFewAtN` when FixedSize
+/// yields fewer than `min_clusters` complete clusters at the snapped N, and
+/// `ClusterSizeTooSmall` when a cluster holds fewer rows than
+/// `min_rows_in_cluster` under either regime.
 pub(crate) fn snap_single_n(
     contracts: &[SimulationContract],
     requested: usize,
@@ -32,6 +33,16 @@ pub(crate) fn snap_single_n(
         return Ok((requested, None)); // unclustered
     };
     let sizing = &cluster_spec.sizing;
+    let min_rows = crate::find_sample_size::min_rows_in_cluster(cluster_spec);
+    if let ClusterSizing::FixedSize { cluster_size } = sizing {
+        let cs = *cluster_size as usize;
+        if cs < min_rows {
+            return Err(OrchestratorError::ClusterSizeTooSmall {
+                got: cs,
+                min: min_rows,
+            });
+        }
+    }
     let a = cluster_spec.atom();
     if a <= 1 {
         return Ok((requested, None));
@@ -50,6 +61,15 @@ pub(crate) fn snap_single_n(
                 cluster_size: cs,
                 got,
                 min: min_clusters,
+            });
+        }
+    }
+    if let ClusterSizing::FixedClusters { n_clusters } = sizing {
+        let rows = snapped / (*n_clusters).max(1) as usize;
+        if rows < min_rows {
+            return Err(OrchestratorError::ClusterSizeTooSmall {
+                got: rows,
+                min: min_rows,
             });
         }
     }
@@ -152,35 +172,40 @@ pub(crate) fn factor_preflight_sample_size(spec: &SimulationSpec, grid: &[usize]
 }
 
 /// Pre-run advisory for a clustered binary/count model (GLMM) that tests a
-/// cluster-level effect with few clusters. The between-within t still
-/// over-rejects there for cluster-level targets (logit calibration: 6.6–9.6%
-/// Type I error at α = 0.05 with 5–10 clusters, about 6% at 20–30), while
-/// within-cluster targets stay calibrated, so only cluster-level targets
-/// (marginals, and contrasts whose both sides are cluster-level) count.
+/// cluster-level effect with few clusters. Both of its tests over-reject there
+/// for cluster-level targets (logit calibration, Type I error at α = 0.05: the
+/// between-within t 6.6–9.6% with 5–10 clusters and about 6% at 20–30; the Wald
+/// z 10.9–20.3% with 5–10 clusters and 7.2–8.1% at 20–30), while within-cluster
+/// targets stay calibrated, so only cluster-level targets (marginals, and
+/// contrasts whose both sides are cluster-level) count. Crossed and nested
+/// GLMMs, which use the Wald z, count their primary clusters and were not part
+/// of that calibration.
 /// Contrasts are OLS-only at batch entry today, so for a GLMM only marginals
 /// reach this check.
-/// `BetweenWithinDf::resolve` carries every other condition: it is `None` under
-/// `df_method = asymptotic` and for crossed / nested groupings (Wald z), and
-/// its per-N cluster counts match the generated data. `grid` is ascending; a
-/// single-N power run passes a one-element slice.
+/// A `df_method` the design refuses is reported by the run itself, not here.
+/// `grid` is ascending; a single-N power run passes a one-element slice.
 pub(crate) fn small_cluster_glmm_warning(spec: &SimulationSpec, grid: &[usize]) -> Option<String> {
     if spec.estimator != EstimatorSpec::Glm {
         return None;
     }
-    let sizes: Vec<u32> = grid.iter().map(|&n| n as u32).collect();
-    // p_between only feeds the df values, which this check does not read.
-    let bw = BetweenWithinDf::resolve(spec, &sizes, 0)?;
-    if !bw.between_per_target.iter().any(|&b| b) {
+    let test = match mixed_test(spec).ok().flatten()? {
+        MixedTest::BetweenWithin => "between-within t",
+        MixedTest::WaldZ => "Wald z",
+        MixedTest::Satterthwaite => return None,
+    };
+    if !cluster_level_targets(spec).iter().any(|&b| b) {
         return None;
     }
+    let sizes: Vec<u32> = grid.iter().map(|&n| n as u32).collect();
+    let per_n = clusters_per_n(spec.cluster.as_ref()?, &sizes);
     let min = crate::config().limits.glmm_reliable_clusters as usize;
-    let &g_lo = bw.clusters_per_n.first()?;
+    let &g_lo = per_n.first()?;
     if g_lo >= min {
         return None;
     }
     let reached = grid
         .iter()
-        .zip(&bw.clusters_per_n)
+        .zip(&per_n)
         .find(|&(_, &g)| g >= min)
         .map(|(&n, _)| n);
     let lead = match (grid, reached) {
@@ -189,7 +214,7 @@ pub(crate) fn small_cluster_glmm_warning(spec: &SimulationSpec, grid: &[usize]) 
         (_, None) => format!("fewer than {min} clusters at every grid point"),
     };
     Some(format!(
-        "{lead}: with few clusters the between-within t test of a cluster-level effect \
+        "{lead}: with few clusters the {test} test of a cluster-level effect \
          in a clustered binary/count model rejects more often than alpha, so power for \
          cluster-level effects is overstated; add clusters"
     ))
@@ -425,6 +450,7 @@ pub(crate) fn find_power_with(
                 &scenario.report_target_indices,
                 &scenario.report_contrast_pairs,
                 &scenario.spec.estimator,
+                &corrected_not_applicable(&scenario.spec),
             );
             debug_assert_eq!(aggs.len(), 1);
             let mut pr = aggs.remove(0);
@@ -586,5 +612,41 @@ mod tests {
         let (snapped, warning) = snap_single_n(std::slice::from_ref(&c), 500).unwrap();
         assert_eq!(snapped, 480); // 500 floored to the 240-multiple
         assert!(warning.unwrap().contains("240"));
+    }
+
+    #[test]
+    fn snap_single_n_refuses_fewer_rows_per_cluster_than_the_search_floor() {
+        let count = clustered(ClusterSizing::FixedClusters { n_clusters: 20 }, 0.25);
+        assert!(matches!(
+            snap_single_n(std::slice::from_ref(&count), 20),
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 1, min: 2 })
+        ));
+        assert_eq!(
+            snap_single_n(std::slice::from_ref(&count), 40).unwrap().0,
+            40
+        );
+
+        let size = clustered(ClusterSizing::FixedSize { cluster_size: 1 }, 0.25);
+        assert!(matches!(
+            snap_single_n(std::slice::from_ref(&size), 100),
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 1, min: 2 })
+        ));
+
+        // One random slope raises the floor by one row per cluster.
+        let mut sloped = count.clone();
+        sloped.generation.cluster.as_mut().unwrap().slopes = vec![engine_contract::SlopeTerm {
+            column: engine_contract::ColumnId(0),
+            variance: 0.1,
+            corr_with_intercept: 0.0,
+            corr_with: vec![],
+        }];
+        assert!(matches!(
+            snap_single_n(std::slice::from_ref(&sloped), 40),
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 2, min: 3 })
+        ));
+        assert_eq!(
+            snap_single_n(std::slice::from_ref(&sloped), 60).unwrap().0,
+            60
+        );
     }
 }

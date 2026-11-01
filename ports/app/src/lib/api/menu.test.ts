@@ -12,6 +12,7 @@ vi.mock('$lib/api/engine', () => ({
 // the adapter's async formula-parsing side effects.
 vi.mock('$lib/domain/app-spec-adapter', () => ({
   familyConfigToAppSpec: vi.fn(),
+  findPowerSampleSizeError: vi.fn(() => null),
 }));
 
 // Native export: the save dialog returns a path, the fs plugin receives the file.
@@ -25,7 +26,7 @@ import { uiStore } from '$lib/stores/ui.svelte';
 import { sharedPrefs } from '$lib/stores/shared-prefs.svelte';
 import { runStore } from '$lib/stores/run.svelte';
 import { familyStore } from '$lib/stores/family.svelte';
-import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
+import { familyConfigToAppSpec, findPowerSampleSizeError } from '$lib/domain/app-spec-adapter';
 import { DOCS_BASE_URL } from '$lib/content/render-doc';
 
 describe('routeMenuEvent — fallthrough regression coverage', () => {
@@ -142,6 +143,22 @@ describe('routeMenuEvent — run shortcuts', () => {
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
     familyStore.active = 'regression';
+  });
+
+  it('run.find_power does not run when n is outside the sample-size limits', () => {
+    vi.mocked(familyConfigToAppSpec).mockReturnValueOnce({
+      spec: { family: 'linear' },
+      errors: [],
+      warnings: [],
+    } as any);
+    vi.mocked(findPowerSampleSizeError).mockReturnValueOnce('sample_size must be at least 20, got 10');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = vi.spyOn(runStore, 'startFindPower').mockResolvedValue(undefined);
+    routeMenuEvent('run.find_power');
+    expect(spy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('sample_size must be at least 20, got 10');
+    spy.mockRestore();
+    warn.mockRestore();
   });
 
   it('run.find_power does not run when the adapter returns a spec alongside blocking errors', () => {

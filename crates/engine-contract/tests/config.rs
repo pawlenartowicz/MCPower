@@ -29,7 +29,6 @@ fn workspace_config_json_parses() {
     assert_eq!(cfg.limits.min_rows_per_cluster, 2);
     assert_eq!(cfg.limits.min_clusters, 5);
     assert_eq!(cfg.limits.glmm_reliable_clusters, 20);
-    assert_eq!(cfg.limits.reliable_rows_per_cluster, 5);
     assert_eq!(cfg.limits.recommended_rows_per_cluster, 10);
     assert_eq!(cfg.report.format.power_decimals_short, 1);
     assert_eq!(cfg.report.format.power_decimals_long, 1);

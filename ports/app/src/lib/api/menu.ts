@@ -3,7 +3,7 @@ import { familyStore } from '$lib/stores/family.svelte';
 import { sharedPrefs } from '$lib/stores/shared-prefs.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
 import { runStore } from '$lib/stores/run.svelte';
-import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
+import { familyConfigToAppSpec, findPowerSampleSizeError } from '$lib/domain/app-spec-adapter';
 import { powerNToObservations } from '$lib/domain/unit-label';
 import { openExternal, DOCS_BASE_URL } from '$lib/content/render-doc';
 import { SIMULATION } from '$lib/configs/app-config';
@@ -41,6 +41,8 @@ async function startFindPowerFromShortcut() {
     familyStore.active, cfg, familyStore.regressionOutcome,
   );
   if (!spec || errors.length > 0) { console.warn(errors[0] ?? 'cannot run yet'); return; }
+  const nError = findPowerSampleSizeError(spec, cfg.findPower.n);
+  if (nError) { console.warn(nError); return; }
   await runStore.startFindPower(spec, powerNToObservations(spec, cfg.findPower.n));
 }
 

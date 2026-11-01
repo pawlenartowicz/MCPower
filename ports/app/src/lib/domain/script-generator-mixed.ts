@@ -1,7 +1,7 @@
 // Generates reproducible MCPower snippets for mixed-effects family specs
 // (random intercepts incl. crossed/nested extra groupings, slopes, cluster dim, ICC).
 // Supports Python and R output via the shared Lang abstraction.
-import type { AppGroupingSpec, AppSpec, MixedSpec } from './app-spec';
+import type { AppGroupingSpec, AppSlopeTerm, AppSpec, MixedSpec } from './app-spec';
 import type { ScriptParams, ScriptLanguage } from './script-generator-linear';
 import {
   buildVarTypeString,
@@ -20,24 +20,29 @@ function extraName(g: AppGroupingSpec, idx: number): string {
   return g.cluster_name ?? `g${idx + 2}`;
 }
 
+/** `(1|name)`, or `(1 + x + z|name)` with slopes. */
+function randomTerm(name: string, slopes: AppSlopeTerm[] = []): string {
+  return `(${['1', ...slopes.map((sl) => sl.predictor_name)].join(' + ')}|${name})`;
+}
+
 /** Mixed formula keeps the random-effects terms and uses `~` in both languages.
  *  A nested grouping named `parent:child` (parent === the primary) folds into
- *  a single `(1|parent/child)` term; crossed extras append `(1|name)`. Slopes
- *  don't appear in the formula — the Python API takes them via
- *  `set_cluster(random_slopes=...)`. */
+ *  a single `(1|parent/child)` term, which takes no slope; every other grouping
+ *  writes its slopes into its own term, because both ports refuse a
+ *  `set_cluster` slope the formula does not name. */
 function buildMixedFormula(s: MixedSpec): string {
   const { outcome, predictors, interaction_terms } = s.parsed_formula;
   const parts: string[] = [...predictors];
   for (const terms of interaction_terms) parts.push(terms.join(':'));
 
-  let primaryTerm = `(1|${s.cluster_name})`;
+  let primaryTerm = randomTerm(s.cluster_name, s.slopes);
   const extraTerms: string[] = [];
   (s.extra_groupings ?? []).forEach((g, i) => {
     const name = extraName(g, i);
     if (g.relation.kind === 'nested_within' && name.startsWith(`${s.cluster_name}:`)) {
       primaryTerm = `(1|${s.cluster_name}/${name.slice(s.cluster_name.length + 1)})`;
     } else {
-      extraTerms.push(`(1|${name})`);
+      extraTerms.push(randomTerm(name, g.slopes));
     }
   });
   parts.push(primaryTerm, ...extraTerms);
@@ -60,9 +65,46 @@ function renderList(items: string[], language: ScriptLanguage): string {
   return `[${items.join(', ')}]`;
 }
 
-/** Build the set_cluster call argument string for the primary cluster.
+/** The set_cluster slope arguments of one grouping.
  *  Python uses flat kwargs (random_slopes=list, slope_variance=N, slope_intercept_corr=N).
- *  R wraps each slope in a named list (predictor, variance, corr_with_intercept).
+ *  R wraps each slope in a named list (predictor, variance, corr_with_intercept). */
+function slopeArgs(slopes: AppSlopeTerm[], language: ScriptLanguage): string[] {
+  if (slopes.length === 0) return [];
+  if (language === 'r') {
+    // R: random_slopes = list(list(predictor = "x", variance = V, corr_with_intercept = C), ...)
+    // mirrors R set_cluster validation: sl$predictor, sl$variance, sl$corr_with_intercept
+    const rSlopes = slopes
+      .map(
+        (sl) =>
+          `list(predictor = "${sl.predictor_name}", variance = ${sl.slope_variance}, corr_with_intercept = ${sl.slope_intercept_corr})`,
+      )
+      .join(', ');
+    return [`random_slopes = list(${rSlopes})`];
+  }
+  // Python: random_slopes=["x"], slope_variance=V, slope_intercept_corr=C
+  // Python API shares one (variance, corr) pair for all slopes.
+  const quotedNames = slopes.map((sl) => `"${sl.predictor_name}"`);
+  return [
+    `random_slopes=[${quotedNames.join(', ')}]`,
+    `slope_variance=${slopes[0]!.slope_variance}`,
+    `slope_intercept_corr=${slopes[0]!.slope_intercept_corr}`,
+  ];
+}
+
+/** The comment a Python script needs above a set_cluster call when the app's
+ *  slopes on that grouping do not share one (variance, corr) pair. */
+function slopePairNote(slopes: AppSlopeTerm[], language: ScriptLanguage): string[] {
+  const differ = slopes.some(
+    (sl) =>
+      sl.slope_variance !== slopes[0]!.slope_variance ||
+      sl.slope_intercept_corr !== slopes[0]!.slope_intercept_corr,
+  );
+  return language === 'python' && differ
+    ? ['# note: per-slope variances differ in the app; the Python API shares one pair']
+    : [];
+}
+
+/** Build the set_cluster call argument string for the primary cluster.
  *  cluster_level_vars uses the language list renderer. */
 function buildClusterArgs(
   s: MixedSpec,
@@ -82,29 +124,7 @@ function buildClusterArgs(
   const varKw = poissonOutcome ? 'tau_squared' : 'ICC';
   const iccArg = `${varKw}${sep}${primaryVariance}`;
 
-  const args = [`"${s.cluster_name}"`, dimArg, iccArg];
-
-  const slopes = s.slopes ?? [];
-  if (slopes.length > 0) {
-    const quotedNames = slopes.map((sl) => `"${sl.predictor_name}"`);
-    if (language === 'r') {
-      // R: random_slopes = list(list(predictor = "x", variance = V, corr_with_intercept = C), ...)
-      // mirrors R set_cluster validation: sl$predictor, sl$variance, sl$corr_with_intercept
-      const rSlopes = slopes
-        .map(
-          (sl) =>
-            `list(predictor = "${sl.predictor_name}", variance = ${sl.slope_variance}, corr_with_intercept = ${sl.slope_intercept_corr})`,
-        )
-        .join(', ');
-      args.push(`random_slopes = list(${rSlopes})`);
-    } else {
-      // Python: random_slopes=["x"], slope_variance=V, slope_intercept_corr=C
-      // Python API shares one (variance, corr) pair for all slopes.
-      args.push(`random_slopes=[${quotedNames.join(', ')}]`);
-      args.push(`slope_variance=${slopes[0]!.slope_variance}`);
-      args.push(`slope_intercept_corr=${slopes[0]!.slope_intercept_corr}`);
-    }
-  }
+  const args = [`"${s.cluster_name}"`, dimArg, iccArg, ...slopeArgs(s.slopes ?? [], language)];
 
   const clv = s.cluster_level_vars ?? [];
   if (clv.length > 0) {
@@ -177,18 +197,7 @@ export function generateMixedScript(
   // outcome uses the top-level icc field directly.
   const primaryVariance = s.outcome?.kind === 'poisson' ? s.outcome.tau_squared : s.icc;
   const clusterArgs = buildClusterArgs(s, language, primaryVariance, poissonOutcome);
-  if (
-    language === 'python' &&
-    s.slopes &&
-    s.slopes.length > 1 &&
-    s.slopes.some(
-      (sl) =>
-        sl.slope_variance !== s.slopes![0]!.slope_variance ||
-        sl.slope_intercept_corr !== s.slopes![0]!.slope_intercept_corr,
-    )
-  ) {
-    lines.push('# note: per-slope variances differ in the app; the Python API shares one pair');
-  }
+  lines.push(...slopePairNote(s.slopes ?? [], language));
   lines.push(lang.call('set_cluster', clusterArgs.join(', ')));
 
   // Extra groupings: one set_cluster per grouping
@@ -200,11 +209,18 @@ export function generateMixedScript(
     const variance = poissonOutcome ? g.tau_squared : tauToIcc(g.tau_squared, binaryOutcome && !probit);
     const varKw = poissonOutcome ? 'tau_squared' : 'ICC';
     const sep = language === 'r' ? ' = ' : '=';
-    if (g.relation.kind === 'nested_within') {
-      lines.push(lang.call('set_cluster', `"${name}", n_per_parent${sep}${g.relation.n_per_parent}, ${varKw}${sep}${variance}`));
-    } else {
-      lines.push(lang.call('set_cluster', `"${name}", n_clusters${sep}${g.relation.n_clusters}, ${varKw}${sep}${variance}`));
-    }
+    const dimArg =
+      g.relation.kind === 'nested_within'
+        ? `n_per_parent${sep}${g.relation.n_per_parent}`
+        : `n_clusters${sep}${g.relation.n_clusters}`;
+    const slopes = g.slopes ?? [];
+    lines.push(...slopePairNote(slopes, language));
+    lines.push(
+      lang.call(
+        'set_cluster',
+        [`"${name}"`, dimArg, `${varKw}${sep}${variance}`, ...slopeArgs(slopes, language)].join(', '),
+      ),
+    );
   });
 
   lines.push('');
@@ -223,12 +239,12 @@ export function generateMixedScript(
       ? `unit${language === 'r' ? ' = ' : '='}"${unit}"`
       : undefined;
   // df_method is the mixed denominator-df knob, exposed by both ports on the
-  // find_* calls. Between-within is the port default, so only the asymptotic
-  // opt-in is written out; rendered here like `unit` so the R script keeps R's
-  // spacing around a named argument.
-  const dfMethod = s.df_method ?? 'between_within';
+  // find_* calls. Auto is the port default, so only a named test is written
+  // out; rendered here like `unit` so the R script keeps R's spacing around a
+  // named argument.
+  const dfMethod = s.df_method ?? 'auto';
   const dfMethodArg =
-    dfMethod !== 'between_within'
+    dfMethod !== 'auto'
       ? `df_method${language === 'r' ? ' = ' : '='}"${dfMethod}"`
       : undefined;
   for (const line of buildFindCallLines(

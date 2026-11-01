@@ -163,8 +163,9 @@ pub struct ScenarioPerturbations {
     #[serde(default)]
     pub truth_start: bool,
 
-    /// LME-only knobs. Rejected by the engine if set without `estimator == Mle`.
-    /// Unused for OLS / Logit designs.
+    /// Random-effect knobs (distribution, df, τ² jitter). Valid for any
+    /// clustered design, whatever the estimator; the contract refuses them
+    /// without a cluster (invariant 13).
     pub lme: Option<LmeScenarioPerturbations>,
 }
 

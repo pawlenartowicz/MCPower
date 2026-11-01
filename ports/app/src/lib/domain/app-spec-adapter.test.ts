@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CsvData, UploadMode } from './app-spec';
+import type { AppSpec, CsvData, UploadMode } from './app-spec';
 import type { ScenarioConfig } from '$lib/configs/scenarios';
 
 // uploadStoreMock must be created via vi.hoisted so it is available inside the vi.mock factory
@@ -33,9 +33,14 @@ vi.mock('$lib/stores/upload.svelte', () => ({
 vi.mock('$lib/stores/shared-prefs.svelte', () => ({ sharedPrefs: sharedPrefsMock }));
 vi.mock('$lib/stores/scenarios.svelte', () => ({ scenariosStore: scenariosStoreMock }));
 
-import { familyConfigToAppSpec } from './app-spec-adapter';
+import {
+  familyConfigToAppSpec,
+  findPowerSampleSizeError,
+  findPowerTotalError,
+} from './app-spec-adapter';
 import type { FamilyConfig, OutcomeOptionsConfig } from './family';
 import { defaultFamilyConfig } from './family';
+import { dfMethodOptionsFor } from './df-method-options';
 
 function linearConfig(overrides: Partial<FamilyConfig> = {}): FamilyConfig {
   return { ...defaultFamilyConfig('regression'), ...overrides };
@@ -1426,19 +1431,58 @@ describe('familyConfigToAppSpec — non-finite numeric guards (stale persisted s
 });
 
 describe('df_method adapter', () => {
-  it('defaults to the shared config default and passes asymptotic through for mixed', () => {
+  it('leaves the default off the wire and passes a named test through for mixed', () => {
     const cfg = defaultFamilyConfig('mixed');
     cfg.formula = 'y ~ x + (1|school)';
     cfg.effects = [{ name: 'x', value: 0.5 }];
     const r1 = familyConfigToAppSpec('mixed', cfg);
     expect(r1.errors).toEqual([]);
     if (r1.spec?.family !== 'mixed') throw new Error('expected mixed');
-    expect((r1.spec as any).df_method).toBe('between_within');
+    // Absent on the wire = the engine default (auto), as Rust skip-serializes it.
+    expect(cfg.advanced.df_method).toBeUndefined();
+    expect('df_method' in (r1.spec as object)).toBe(false);
     cfg.advanced.df_method = 'asymptotic';
     const r2 = familyConfigToAppSpec('mixed', cfg);
     expect(r2.errors).toEqual([]);
     if (r2.spec?.family !== 'mixed') throw new Error('expected mixed');
     expect((r2.spec as any).df_method).toBe('asymptotic');
+  });
+
+  // A saved configuration can hold a value the design no longer admits; the
+  // adapter refuses it in the app's words instead of sending it to the engine.
+  it('refuses a stored between-within on a crossed design', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school) + (1|rater)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    cfg.advanced.df_method = 'auto';
+    expect(familyConfigToAppSpec('mixed', cfg).errors).toEqual([]);
+    cfg.advanced.df_method = 'between_within';
+    const { errors } = familyConfigToAppSpec('mixed', cfg);
+    expect(errors.join(' ')).toMatch(/"Between-within df" needs a single grouping factor.*"Automatic \(default\)"/);
+  });
+
+  it('refuses a stored Satterthwaite on a binary mixed model', () => {
+    const cfg = defaultFamilyConfig('mixed');
+    cfg.formula = 'y ~ x + (1|school)';
+    cfg.effects = [{ name: 'x', value: 0.5 }];
+    cfg.cluster = { ...cfg.cluster!, outcomeKind: 'logit', baselineProbability: 0.3 };
+    cfg.advanced.df_method = 'satterthwaite';
+    const { errors } = familyConfigToAppSpec('mixed', cfg);
+    expect(errors.join(' ')).toMatch(/"Satterthwaite df" needs a continuous outcome/);
+  });
+});
+
+describe('dfMethodOptionsFor', () => {
+  it('offers only the values defined on the design', () => {
+    expect(dfMethodOptionsFor(true, true)).toEqual([
+      'auto',
+      'between_within',
+      'satterthwaite',
+      'asymptotic',
+    ]);
+    expect(dfMethodOptionsFor(true, false)).toEqual(['auto', 'satterthwaite', 'asymptotic']);
+    expect(dfMethodOptionsFor(false, true)).toEqual(['auto', 'between_within', 'asymptotic']);
+    expect(dfMethodOptionsFor(false, false)).toEqual(['auto', 'asymptotic']);
   });
 });
 
@@ -1506,5 +1550,102 @@ describe('familyConfigToAppSpec — validation harmonization (soft warns + ICC b
     const r = familyConfigToAppSpec('mixed', mixedWithIcc(0));
     expect(r.errors).toEqual([]);
     expect(r.spec).not.toBeNull();
+  });
+});
+
+// Find power's n against config limits.sample_size [20, 100000], on total
+// observations; the message names n and the total it gives.
+describe('findPowerTotalError', () => {
+  it('reads the value as total observations, whatever unit the spec plans in', () => {
+    const spec = {
+      family: 'mixed',
+      cluster_name: 'school',
+      cluster_dim: { kind: 'cluster_size', value: 30 },
+      sample_size_unit: 'clusters',
+    } as unknown as AppSpec;
+    expect(findPowerTotalError(spec, 60000)).toBeNull();
+    expect(findPowerTotalError(spec, 149)).toBe(
+      'n = 149 gives 149 observations; Find power needs 150 to 100,000 observations',
+    );
+  });
+});
+
+describe('findPowerSampleSizeError', () => {
+  const linear = { family: 'linear' } as unknown as AppSpec;
+  const clusters = {
+    family: 'mixed',
+    cluster_name: 'school',
+    cluster_dim: { kind: 'cluster_size', value: 20 },
+    sample_size_unit: 'clusters',
+  } as unknown as AppSpec;
+
+  it('refuses 10 and 200,000 observations', () => {
+    expect(findPowerSampleSizeError(linear, 10)).toBe(
+      'n = 10 gives 10 observations; Find power needs 20 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(linear, 200000)).toBe(
+      'n = 200,000 gives 200,000 observations; Find power needs 20 to 100,000 observations',
+    );
+  });
+
+  it('accepts 20 and 100,000 observations', () => {
+    expect(findPowerSampleSizeError(linear, 20)).toBeNull();
+    expect(findPowerSampleSizeError(linear, 100000)).toBeNull();
+  });
+
+  it('checks a cluster-number n as the total observations it means', () => {
+    const tooFew = { ...clusters, cluster_dim: { kind: 'cluster_size', value: 3 } } as AppSpec;
+    expect(findPowerSampleSizeError(tooFew, 6)).toBe(
+      'n = 6 school clusters gives 18 observations; Find power needs 20 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(tooFew, 7)).toBeNull();
+  });
+
+  it('holds a fixed cluster size to the minimum cluster count, in either unit', () => {
+    const size30 = { ...clusters, cluster_dim: { kind: 'cluster_size', value: 30 } } as AppSpec;
+    expect(findPowerSampleSizeError(size30, 4)).toBe(
+      'n = 4 school clusters gives 120 observations; Find power needs 150 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(size30, 5)).toBeNull();
+    const observations = { ...size30, sample_size_unit: 'observations' } as AppSpec;
+    expect(findPowerSampleSizeError(observations, 149)).toBe(
+      'n = 149 gives 149 observations; Find power needs 150 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(observations, 150)).toBeNull();
+  });
+
+  it('holds a fixed cluster count to the minimum rows per cluster, in either unit', () => {
+    const count20 = {
+      ...clusters,
+      cluster_dim: { kind: 'n_clusters', value: 20 },
+      sample_size_unit: 'cluster_size',
+    } as AppSpec;
+    expect(findPowerSampleSizeError(count20, 1)).toBe(
+      'n = 1 observations per school gives 20 observations; Find power needs 40 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(count20, 2)).toBeNull();
+    const observations = { ...count20, sample_size_unit: 'observations' } as AppSpec;
+    expect(findPowerSampleSizeError(observations, 39)).toBe(
+      'n = 39 gives 39 observations; Find power needs 40 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(observations, 40)).toBeNull();
+  });
+
+  it('adds one observation per cluster for each random slope on the primary', () => {
+    const sloped = {
+      ...clusters,
+      cluster_dim: { kind: 'n_clusters', value: 20 },
+      sample_size_unit: 'cluster_size',
+      slopes: [{ predictor_name: 'x', slope_variance: 0.1, slope_intercept_corr: 0 }],
+    } as AppSpec;
+    expect(findPowerSampleSizeError(sloped, 2)).toBe(
+      'n = 2 observations per school gives 40 observations; Find power needs 60 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(sloped, 3)).toBeNull();
+  });
+
+  it('refuses an n that is not a whole number, also when its total is', () => {
+    expect(findPowerSampleSizeError(linear, 150.5)).toBe('n must be a whole number, got 150.5');
+    expect(findPowerSampleSizeError(clusters, 2.5)).toBe('n must be a whole number, got 2.5');
   });
 });

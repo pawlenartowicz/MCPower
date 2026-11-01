@@ -39,6 +39,7 @@ impl SimulationContract {
         self.invariant_23_binary_probabilities_in_range()?;
         self.invariant_24_link_matches_kind()?;
         self.invariant_25_nagq_backstop()?;
+        self.invariant_26_df_method_fits_design()?;
         Ok(())
     }
 
@@ -74,8 +75,8 @@ impl SimulationContract {
         self.invariant_21_primary_slope_structure()?;
         self.invariant_22_scenario_perturbations_well_formed()?;
         self.invariant_23_binary_probabilities_in_range()?;
-        // invariant_24_link_matches_kind / invariant_25_nagq_backstop
-        // intentionally omitted (mirrors the invariant_13 omission above):
+        // invariant_24_link_matches_kind / invariant_25_nagq_backstop /
+        // invariant_26_df_method_fits_design intentionally omitted (mirrors the invariant_13 omission above):
         // outcome.kind, outcome.link, and generation.cluster are still
         // placeholders here (Ols/Continuous/no-cluster), while nagq is already
         // set from the LinearSpec — running the backstops now would reject an
@@ -448,22 +449,18 @@ impl SimulationContract {
         Ok(())
     }
 
-    // replaces invariant_13's lme-scenario guard: scenario.lme (the RE perturbation
-    // knobs) is meaningful for the mixed-model estimators that draw random effects —
-    // Gaussian LMM (Mle) and clustered logistic GLMM (Glm + cluster). Reject for plain
-    // Ols / Glm-without-cluster. The variant name LmeScenarioRequiresMle is kept (renaming
-    // an engine-contract error is a wider blast radius than this GLMM relax warrants).
+    // scenario.lme (the random-effect distribution and the τ² jitter) perturbs the
+    // random effects that data generation draws, and data generation draws them for
+    // every clustered design whatever the estimator: an LMM (Mle), a GLMM (Glm + cluster)
+    // or OLS fitted to clustered data. So it is valid for any clustered design and
+    // refused only without a cluster, where there is nothing to perturb. The variant
+    // name LmeScenarioRequiresMle is kept (renaming an engine-contract error is a wider
+    // blast radius than the rule warrants).
     fn invariant_13_lme_scenario_requires_mle(&self) -> Result<(), ContractError> {
-        if self.scenario.lme.is_none() {
-            return Ok(());
+        if self.scenario.lme.is_some() && self.generation.cluster.is_none() {
+            return Err(ContractError::LmeScenarioRequiresMle);
         }
-        let mle = self.estimator == EstimatorSpec::Mle;
-        let glmm = self.estimator == EstimatorSpec::Glm && self.generation.cluster.is_some();
-        if mle || glmm {
-            Ok(())
-        } else {
-            Err(ContractError::LmeScenarioRequiresMle)
-        }
+        Ok(())
     }
 
     fn invariant_14_max_failed_fraction(&self) -> Result<(), ContractError> {
@@ -570,7 +567,9 @@ impl SimulationContract {
     // overflow), and every slope column gets the same structural validation as a
     // primary slope (continuous Direct fixed effect, sane variance/correlation,
     // corr_with lower triangle). The slope↔intercept and slope↔slope correlations
-    // form each factor's own D_g; PSD of D_g is the data-gen layer's concern.
+    // form each factor's own D_g, which needs a non-zero intercept variance and
+    // must be PSD: data-gen's Cholesky clamps a negative pivot to zero, so an
+    // indefinite D_g would draw slopes at variances nobody set.
     fn invariant_19_extra_grouping_slope_structure(&self) -> Result<(), ContractError> {
         let Some(cluster) = &self.generation.cluster else {
             return Ok(());
@@ -583,21 +582,37 @@ impl SimulationContract {
                     max: MAX_EXTRA_Q as u32,
                 });
             }
+            if g.slopes.is_empty() {
+                continue;
+            }
+            if !(g.tau_squared.is_finite() && g.tau_squared > 0.0) {
+                return Err(ContractError::SlopeInterceptVarianceMissing { got: g.tau_squared });
+            }
             self.check_slope_terms(&g.slopes)?;
+            if !g.re_covariance_is_psd() {
+                return Err(ContractError::SlopeCovarianceNotPSD);
+            }
         }
         Ok(())
     }
 
     /// Per-slope structural checks shared by the primary factor (invariant_21)
     /// and the extra groupings (invariant_19): each slope sits on an in-range,
-    /// continuous column that appears as a Direct fixed effect (so x_full carries
-    /// its values, the s-Gram recovery works, and the model matches the lmer
-    /// oracle); finite variance ≥ 0; finite correlations in [-1, 1]; and a
-    /// corr_with lower triangle of length exactly `k` (the slope's own index).
-    /// The error vocabulary is identical for both factors.
+    /// continuous column, once per grouping, that appears as a Direct fixed
+    /// effect in the generation design and, for a mixed-model fit, in the test
+    /// design when one is set (so x_full carries its values, the fitted design
+    /// has the slope column, and the model matches the lmer oracle); finite
+    /// variance ≥ 0; finite correlations in [-1, 1]; and a corr_with lower
+    /// triangle of length exactly `k` (the slope's own index). The error
+    /// vocabulary is identical for both factors.
     fn check_slope_terms(&self, slopes: &[SlopeTerm]) -> Result<(), ContractError> {
         for (k, slope) in slopes.iter().enumerate() {
             let id = slope.column.0;
+            // Two draws on one column would add their variances, and the fitted
+            // random-effect design would hold a duplicate column.
+            if slopes[..k].iter().any(|s| s.column == slope.column) {
+                return Err(ContractError::SlopeColumnRepeated { id });
+            }
             // Range (mirrors invariant_04's continuous range guard).
             if (id as usize) >= self.generation.columns.len() {
                 return Err(ContractError::ColumnIdOutOfRange {
@@ -612,9 +627,20 @@ impl SimulationContract {
                 | ColumnSpec::ResampledBinary { .. } => {}
                 _ => return Err(ContractError::SlopeColumnNotContinuous { id }),
             }
-            // Must appear as a Direct fixed effect (so x_full carries its values,
-            // the s-Gram recovery works, and the model matches the lmer oracle).
-            let has_direct = self.designs_to_check().iter().any(|d| {
+            // Must appear as a Direct fixed effect in the generation design (so
+            // x_full carries its values and the model matches the lmer oracle)
+            // and, for a mixed-model fit, in the test design when one is set. A
+            // fitted random slope reads its column out of the fitted fixed
+            // design, so a test design that drops the slope variable has no
+            // column to put the slope on. A clustered GLM is a GLMM and fits the
+            // slope too; only OLS fits no random effects, so only its test
+            // design may leave the variable out.
+            let designs = if self.estimator == EstimatorSpec::Ols {
+                vec![&self.design_generation]
+            } else {
+                self.designs_to_check()
+            };
+            let has_direct = designs.iter().all(|d| {
                 d.terms
                     .iter()
                     .any(|t| matches!(t, DesignTerm::Direct { column } if column.0 == id))
@@ -700,10 +726,18 @@ impl SimulationContract {
     // nested factor (sibling nested factors would need within-family fill the
     // solver doesn't carry), Regime-B nesting must divide the cluster size,
     // counts must be real groupings (>= 2 levels), variances must be sane.
+    // The primary's own count, when fixed, must be a real grouping too: one
+    // cluster has no between-cluster variance to estimate, whatever the
+    // estimator or the extra groupings.
     fn invariant_20_extra_grouping_structure(&self) -> Result<(), ContractError> {
         let Some(cluster) = &self.generation.cluster else {
             return Ok(());
         };
+        if let ClusterSizing::FixedClusters { n_clusters } = cluster.sizing {
+            if n_clusters < 2 {
+                return Err(ContractError::PrimaryClusterCountTooSmall { got: n_clusters });
+            }
+        }
         if cluster.extra_groupings.len() > MAX_EXTRA_GROUPINGS {
             return Err(ContractError::TooManyExtraGroupings {
                 got: cluster.extra_groupings.len() as u32,
@@ -939,6 +973,18 @@ impl SimulationContract {
             return Err(ContractError::NagqIneligibleShape { got: k });
         }
         Ok(())
+    }
+
+    /// A named `df_method` test must be defined on the design: refuses
+    /// `between_within` on crossed or nested groupings and `satterthwaite` on
+    /// a GLMM ([`crate::DfMethod::resolve`]), so a named test never quietly
+    /// becomes another one.
+    fn invariant_26_df_method_fits_design(&self) -> Result<(), ContractError> {
+        let cluster = self.generation.cluster.as_ref();
+        let primary_slope = cluster.is_some_and(|c| !c.slopes.is_empty());
+        self.df_method
+            .resolve(self.estimator, cluster, primary_slope)
+            .map(|_| ())
     }
 }
 
@@ -1427,10 +1473,16 @@ mod tests {
         use crate::generation::SlopeTerm;
         use crate::ids::ColumnId;
         let mut c = eligible_glmm();
+        // A third continuous fixed effect, so each slope has its own column.
+        c.generation.columns.push(c.generation.columns[1].clone());
+        c.design_generation.terms.push(DesignTerm::Direct {
+            column: ColumnId(2),
+        });
+        c.outcome.coefficients.push(0.2);
         // intercept + 3 slopes = 4 REs > 3. Each slope's `corr_with` lists the
         // correlations with the earlier slopes, so lengths grow 0, 1, 2.
         let cluster = c.generation.cluster.as_mut().unwrap();
-        for (i, col) in [0u32, 1, 0].into_iter().enumerate() {
+        for (i, col) in [0u32, 1, 2].into_iter().enumerate() {
             cluster.slopes.push(SlopeTerm {
                 column: ColumnId(col),
                 variance: 0.2,
@@ -1444,5 +1496,68 @@ mod tests {
             matches!(err, ContractError::NagqIneligibleShape { .. }),
             "got {err:?}"
         );
+    }
+
+    // ---- invariant_26: df_method fits the design ----------------------------
+
+    fn with_crossed_grouping(mut c: SimulationContract) -> SimulationContract {
+        use crate::generation::GroupingSpec;
+        c.generation
+            .cluster
+            .as_mut()
+            .unwrap()
+            .extra_groupings
+            .push(GroupingSpec {
+                relation: GroupingRelation::Crossed { n_clusters: 4 },
+                tau_squared: 0.2,
+                slopes: vec![],
+            });
+        c
+    }
+
+    #[test]
+    fn inv26_between_within_on_crossed_grouping_rejects() {
+        use crate::estimator::DfMethod;
+        for (base, lmm) in [(lme_contract(), true), (eligible_glmm(), false)] {
+            let mut c = with_crossed_grouping(base);
+            c.df_method = DfMethod::Auto;
+            c.validate().expect("auto is defined on a crossed design");
+            c.df_method = DfMethod::BetweenWithin;
+            let err = c.validate().unwrap_err();
+            assert_eq!(
+                err,
+                ContractError::BetweenWithinNeedsSingleGrouping { lmm },
+                "lmm = {lmm}"
+            );
+            assert!(err.to_string().contains("'auto'"), "{err}");
+        }
+    }
+
+    #[test]
+    fn inv26_satterthwaite_on_glmm_rejects() {
+        use crate::estimator::{DfMethod, EstimatorSpec};
+        let mut c = eligible_glmm();
+        c.df_method = DfMethod::Satterthwaite;
+        let err = c.validate().unwrap_err();
+        assert_eq!(err, ContractError::SatterthwaiteNeedsLmm);
+        assert!(err.to_string().contains("'auto'"), "{err}");
+        // The same value is fine on an LMM, and ignored on an unclustered fit.
+        lme_contract_with(DfMethod::Satterthwaite)
+            .validate()
+            .unwrap();
+        let mut ols = example1_simple_ols();
+        ols.df_method = DfMethod::Satterthwaite;
+        ols.validate().unwrap();
+        let mut glm = example1_simple_ols();
+        glm.estimator = EstimatorSpec::Glm;
+        glm.outcome.kind = OutcomeKind::Binary;
+        glm.df_method = DfMethod::Satterthwaite;
+        glm.validate().unwrap();
+    }
+
+    fn lme_contract_with(d: crate::estimator::DfMethod) -> SimulationContract {
+        let mut c = lme_contract();
+        c.df_method = d;
+        c
     }
 }

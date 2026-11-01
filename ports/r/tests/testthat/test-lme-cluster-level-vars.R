@@ -15,15 +15,13 @@ test_that("set_cluster accepts cluster_level_vars without error", {
   expect_equal(m$.__enclos_env__$private$pending_clusters[["school"]]$cluster_level_vars, "x2")
 })
 
-# (b) old name between_vars is no longer a parameter. set_cluster has `...`, so
-# between_vars is silently absorbed and has no effect (it does NOT populate
-# cluster_level_vars). The supported parameter is cluster_level_vars.
-test_that("between_vars is no longer a parameter — silently ignored, no effect", {
+# (b) old name between_vars is no longer a parameter; the supported parameter is
+# cluster_level_vars.
+test_that("between_vars is no longer a parameter", {
   m <- MCPower$new("y ~ x1 + x2 + (1|school)", family = "lme")$
-    set_effects("x1=0.3, x2=0.2")$
-    set_cluster("school", ICC = 0.1, n_clusters = 20L, between_vars = "x2")
-  # cluster_level_vars live per grouping var; between_vars must not populate them.
-  expect_length(m$.__enclos_env__$private$pending_clusters[["school"]]$cluster_level_vars, 0L)
+    set_effects("x1=0.3, x2=0.2")
+  expect_error(m$set_cluster("school", ICC = 0.1, n_clusters = 20L, between_vars = "x2"),
+               "unused argument")
 })
 
 # (c) cluster_level_vars must be a character vector

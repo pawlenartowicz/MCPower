@@ -4,7 +4,7 @@
 //! per scenario, all N values in one call (engine kernel accepts an ascending
 //! `sample_sizes` slice).
 
-use crate::aggregation::aggregate_batch;
+use crate::aggregation::{aggregate_batch, corrected_not_applicable};
 use crate::cancel::CancellationToken;
 use crate::find_power::{
     EngineSinkAdapter, RunBatch, factor_preflight_sample_size, lower_contracts,
@@ -45,20 +45,29 @@ pub(crate) fn shared_primary_cluster(
     Ok(cluster)
 }
 
+/// The fewest rows a primary cluster can hold: `limits.min_rows_per_cluster`,
+/// plus one for each random slope on it. A cluster of `1 + slopes` rows has as
+/// many random effects as observations, so the residual cannot be told from
+/// them (lme4's `check.nobs.vs.nRE`). Binary and count models share the floor.
+pub(crate) fn min_rows_in_cluster(cluster: &ClusterSpec) -> usize {
+    crate::config().limits.min_rows_per_cluster as usize + cluster.slopes.len()
+}
+
 /// Resolve the shared cluster atom + grid floor + pre-grid warnings for a set
 /// of contracts. Returns `(atom, hard_min, warnings)`. `atom == 1, hard_min == 1`
 /// when no cluster is configured. Errors on the cluster guards that must fail
-/// (mixed atoms, FixedSize cluster_size below the floor).
+/// (mixed atoms, FixedSize cluster_size below the floor). The grid floor is
+/// mirrored by `findPowerLimits` in the app's app-spec-adapter.ts — change
+/// together.
 pub(crate) fn resolve_cluster_grid_params(
     contracts: &[SimulationContract],
 ) -> Result<(usize, usize, Vec<String>), OrchestratorError> {
-    let cc = crate::config().limits;
-    let min_rows = cc.min_rows_per_cluster as usize;
-    let min_clusters = cc.min_clusters as usize;
+    let min_clusters = crate::config().limits.min_clusters as usize;
 
     let Some(cluster) = shared_primary_cluster(contracts)? else {
         return Ok((1, 1, Vec::new())); // unclustered
     };
+    let min_rows = min_rows_in_cluster(cluster);
     let sizing = &cluster.sizing;
 
     let mut warnings = Vec::new();
@@ -275,6 +284,7 @@ fn run_grid_for_scenario(
         &scenario.report_target_indices,
         &scenario.report_contrast_pairs,
         &scenario.spec.estimator,
+        &corrected_not_applicable(&scenario.spec),
     );
     for (i, pr) in aggs.iter_mut().enumerate() {
         pr.n = grid[i];
@@ -296,7 +306,7 @@ fn run_grid_for_scenario(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine_contract::{GroupingRelation, GroupingSpec};
+    use engine_contract::{ColumnId, GroupingRelation, GroupingSpec, SlopeTerm};
 
     fn clustered(sizing: ClusterSizing, tau: f64) -> SimulationContract {
         let mut c = engine_contract::fixtures::example1_simple_ols();
@@ -317,5 +327,26 @@ mod tests {
         assert_eq!(atom, 240);
         let min_rows = crate::config().limits.min_rows_per_cluster as usize;
         assert_eq!(hard_min, 20 * min_rows);
+    }
+
+    #[test]
+    fn grid_floor_adds_one_row_per_random_slope() {
+        let mut c = clustered(ClusterSizing::FixedClusters { n_clusters: 20 }, 0.25);
+        c.generation.cluster.as_mut().unwrap().slopes = vec![SlopeTerm {
+            column: ColumnId(0),
+            variance: 0.1,
+            corr_with_intercept: 0.0,
+            corr_with: vec![],
+        }];
+        let (_, hard_min, _) = resolve_cluster_grid_params(std::slice::from_ref(&c)).unwrap();
+        assert_eq!(hard_min, 60);
+
+        let mut sized = c.clone();
+        sized.generation.cluster.as_mut().unwrap().sizing =
+            ClusterSizing::FixedSize { cluster_size: 2 };
+        assert!(matches!(
+            resolve_cluster_grid_params(std::slice::from_ref(&sized)),
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 2, min: 3 })
+        ));
     }
 }

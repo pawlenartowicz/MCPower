@@ -135,8 +135,26 @@ fn power_is_silent_for_within_target_or_enough_clusters() {
     }
 }
 
+/// `glmm` with an extra grouping. A named between-within test is refused on
+/// such a design; `auto` tests it against the Wald z.
+fn glmm_extra_grouping(relation: GroupingRelation) -> SimulationContract {
+    let mut c = glmm(fixed(6), true);
+    c.generation
+        .cluster
+        .as_mut()
+        .unwrap()
+        .extra_groupings
+        .push(GroupingSpec {
+            relation,
+            tau_squared: 0.2,
+            slopes: vec![],
+        });
+    c.df_method = DfMethod::Auto;
+    c
+}
+
 #[test]
-fn power_is_silent_for_lmm_asymptotic_and_crossed_glmm() {
+fn power_is_silent_for_lmm_and_wald_z_within_target() {
     let mut lmm = build_contract(
         &lme_spec(),
         OutcomeKind::Continuous,
@@ -150,30 +168,56 @@ fn power_is_silent_for_lmm_asymptotic_and_crossed_glmm() {
     lmm.df_method = DfMethod::BetweenWithin;
     lmm.generation.cluster_level_columns = vec![ColumnId(0)];
 
-    let mut asymptotic = glmm(fixed(6), true);
-    asymptotic.df_method = DfMethod::Asymptotic;
+    let mut within = glmm(fixed(6), false);
+    within.df_method = DfMethod::Asymptotic;
 
-    let mut crossed = glmm(fixed(6), true);
-    crossed
-        .generation
-        .cluster
-        .as_mut()
-        .unwrap()
-        .extra_groupings
-        .push(GroupingSpec {
-            relation: GroupingRelation::Crossed { n_clusters: 4 },
-            tau_squared: 0.2,
-            slopes: vec![],
-        });
-
-    for (label, c, n) in [
-        ("lmm", lmm, 120),
-        ("asymptotic", asymptotic, 120),
-        ("crossed", crossed, 240),
-    ] {
-        for w in power_warnings(c, n) {
+    for (label, c) in [("lmm", lmm), ("wald z, within-cluster target", within)] {
+        for w in power_warnings(c, 120) {
             assert!(!has_warning(&w), "{label}: got {w:?}");
         }
+    }
+}
+
+#[test]
+fn power_warns_under_wald_z() {
+    const FULL_120: &str = "6 clusters at N=120 (fewer than 20): with few clusters the \
+        Wald z test of a cluster-level effect in a clustered binary/count model \
+        rejects more often than alpha, so power for cluster-level effects is overstated; \
+        add clusters";
+    let mut asymptotic = glmm(fixed(6), true);
+    asymptotic.df_method = DfMethod::Asymptotic;
+    for w in power_warnings(asymptotic, 120) {
+        let msg = w.iter().find(|m| m.contains(MARKER));
+        assert_eq!(msg.map(String::as_str), Some(FULL_120), "got: {w:?}");
+    }
+
+    let crossed = glmm_extra_grouping(GroupingRelation::Crossed { n_clusters: 4 });
+    let nested = glmm_extra_grouping(GroupingRelation::NestedWithin { n_per_parent: 2 });
+    for (label, c, n) in [("crossed", crossed, 240), ("nested", nested, 240)] {
+        for w in power_warnings(c, n) {
+            let msg = w.iter().find(|m| m.contains(MARKER));
+            assert!(
+                msg.is_some_and(
+                    |m| m.starts_with(&format!("6 clusters at N={n}")) && m.contains("Wald z test")
+                ),
+                "{label}: got {w:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn sample_size_warns_under_wald_z() {
+    let crossed = glmm_extra_grouping(GroupingRelation::Crossed { n_clusters: 4 });
+    for w in sample_size_warnings(crossed, (120, 480)) {
+        let msg = w.iter().find(|m| m.contains(MARKER));
+        assert!(
+            msg.is_some_and(
+                |m| m.starts_with("fewer than 20 clusters at every grid point")
+                    && m.contains("Wald z test")
+            ),
+            "got: {w:?}"
+        );
     }
 }
 

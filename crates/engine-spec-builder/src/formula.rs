@@ -6,7 +6,9 @@
 //! intercept-suppressed terms (`(0+…|g)` / `(-1+…|g)`) up front, and an implicit-intercept slope
 //! pass (step 2.5, between explicit slope and plain intercept) treats `(x|g)` as `(1+x|g)`; its
 //! pattern is letter-led so it cannot collide with the digit-led explicit patterns regardless of
-//! order.
+//! order. Nested spellings the parser does not take (the colon form `(1|a:b)`, a slope in a
+//! nested term) are refused in step 0.5, and a term with `|` left after every pattern is refused
+//! in step 4, so neither reaches the fixed-effect parser as a bare syntax error.
 
 use crate::error::SpecError;
 use regex::Regex;
@@ -17,6 +19,8 @@ use std::sync::LazyLock;
 // `extract_random_effects` call — the patterns are constant, and the function is
 // hot under WASM-worker / benchmark load. Match order is documented in step 0–3
 // below; these mirror those steps one-to-one.
+static RE_DOUBLE_BAR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\([^()]*\|\|[^()]*\)").unwrap());
 static RE_SUPPRESS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\((?:0|-1)(?:\+[^|]*)?\|[^)]*\)").unwrap());
 static RE_NESTED: LazyLock<Regex> = LazyLock::new(|| {
@@ -28,6 +32,24 @@ static RE_ISLOPE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\(([_A-Za-z][^|]*?)\|([_A-Za-z][_A-Za-z0-9]*)\)").unwrap());
 static RE_INT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\(1\|([_A-Za-z][_A-Za-z0-9]*)\)").unwrap());
+// Refusal patterns (step 0.5): a nested grouping in its colon spelling
+// `(…|a:b)`, and any left-hand side on the slash spelling `(…|a/b)` (only the
+// plain intercept `(1|a/b)` is supported).
+static RE_COLON_GROUP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\(([^()|]*)\|([_A-Za-z][_A-Za-z0-9]*):([_A-Za-z][_A-Za-z0-9]*)\)").unwrap()
+});
+static RE_NESTED_ANY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\(([^()|]*)\|([_A-Za-z][_A-Za-z0-9]*)/([_A-Za-z][_A-Za-z0-9]*)\)").unwrap()
+});
+// Any parenthesised term with a '|': what is left of one after every pattern
+// has run is an unsupported random-effect term.
+static RE_ANY_TERM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\([^()]*\|[^()]*\)").unwrap());
+
+/// The first random-effect term of a formula, as written (any parenthesised
+/// term containing '|'), or `None` when it has none.
+pub(crate) fn first_random_effect_term(formula: &str) -> Option<&str> {
+    RE_ANY_TERM.find(formula).map(|m| m.as_str())
+}
 
 /// Parsed view of the right-hand side of a formula. The builder consumes this
 /// alongside the user's `predictors` list to produce a `PredictorTable` and an
@@ -90,6 +112,18 @@ pub enum RandomEffect {
 /// - [`SpecError::DuplicateGroupingVar`]: the same grouping variable appears more than once.
 /// - [`SpecError::RandomInterceptSuppressionUnsupported`]: an RE term suppresses the random
 ///   intercept (`(0 + x | g)` / `(-1 + x | g)`); MCPower requires a random intercept with a slope.
+/// - [`SpecError::UncorrelatedRandomEffectsUnsupported`]: an RE term uses the double bar
+///   (`(1 + x || g)`), which MCPower does not parse.
+/// - [`SpecError::NestedColonFormUnsupported`]: a nested intercept in its colon spelling
+///   (`(1|a:b)`); the supported spelling is `(1|a/b)`.
+/// - [`SpecError::NestedSlopeUnsupported`]: a random slope in a nested term (`(1 + x|a/b)`,
+///   `(x|a/b)`, `(1 + x|a:b)`); such a slope is declared through `set_cluster`.
+/// - [`SpecError::MultipleNestedTermsUnsupported`]: more than one nested term
+///   (`(1|a/b) + (1|c/d)`).
+/// - [`SpecError::GroupingNameUnsupported`]: a term whose grouping name is not letters, digits
+///   and `_` (e.g. `(1|school.id)`).
+/// - [`SpecError::RandomEffectTermUnsupported`]: any other parenthesised term with `|` that no
+///   random-effect pattern matches.
 pub fn parse_formula(input: &str) -> Result<ParsedFormula, SpecError> {
     let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
     if cleaned.is_empty() {
@@ -148,9 +182,50 @@ fn extract_random_effects(rhs: &str) -> Result<(Vec<RandomEffect>, String), Spec
     if RE_SUPPRESS.is_match(rhs) {
         return Err(SpecError::RandomInterceptSuppressionUnsupported);
     }
+    // lme4's double bar `(1 + x || g)` (uncorrelated random effects) would
+    // otherwise fall through every pattern below to a bare syntax error. The
+    // same model is a correlated term with the correlation set to 0.
+    if RE_DOUBLE_BAR.is_match(rhs) {
+        return Err(SpecError::UncorrelatedRandomEffectsUnsupported);
+    }
+    // 0.5. Nested spellings MCPower does not parse. The colon form `(1|a:b)`
+    //      (alone or beside `(1|a)`) has its own message pointing at `(1|a/b)`;
+    //      a slope on either nested spelling points at set_cluster, the only
+    //      route to a slope on the nested grouping.
+    for m in RE_COLON_GROUP.captures_iter(rhs) {
+        let (parent, child) = (m[2].to_string(), m[3].to_string());
+        match re_lhs_tokens(&m[1]) {
+            Some(tokens) if tokens.iter().all(|t| *t == "1") => {
+                return Err(SpecError::NestedColonFormUnsupported { parent, child });
+            }
+            Some(tokens) => {
+                return Err(SpecError::NestedSlopeUnsupported {
+                    term: format!("({}|{parent}:{child})", tokens.join(" + ")),
+                    parent,
+                    child,
+                });
+            }
+            None => {}
+        }
+    }
+    for m in RE_NESTED_ANY.captures_iter(rhs) {
+        if let Some(tokens) = re_lhs_tokens(&m[1]) {
+            if tokens.iter().any(|t| *t != "1") {
+                let (parent, child) = (m[2].to_string(), m[3].to_string());
+                return Err(SpecError::NestedSlopeUnsupported {
+                    term: format!("({}|{parent}/{child})", tokens.join(" + ")),
+                    parent,
+                    child,
+                });
+            }
+        }
+    }
 
-    // 1. Nested intercept: (1|A/B) → push pair, replace with empty.
+    // 1. Nested intercept: (1|A/B) → push pair, replace with empty. The engine
+    //    carries one nested grouping, so a second nested term is refused here,
+    //    naming both terms.
     let re_nested = &*RE_NESTED;
+    let mut first_nested: Option<String> = None;
     loop {
         let snapshot = work.clone();
         let Some(m) = re_nested.captures(&snapshot) else {
@@ -158,6 +233,14 @@ fn extract_random_effects(rhs: &str) -> Result<(Vec<RandomEffect>, String), Spec
         };
         let parent_name = m.get(1).unwrap().as_str().to_string();
         let child_name = m.get(2).unwrap().as_str().to_string();
+        let term = format!("(1|{parent_name}/{child_name})");
+        if let Some(first) = first_nested {
+            return Err(SpecError::MultipleNestedTermsUnsupported {
+                first,
+                second: term,
+            });
+        }
+        first_nested = Some(term);
         let joined = format!("{parent_name}:{child_name}");
         for name in [&parent_name, &joined] {
             if !seen.insert(name.clone()) {
@@ -223,8 +306,8 @@ fn extract_random_effects(rhs: &str) -> Result<(Vec<RandomEffect>, String), Spec
     //      caught in step 0). The LHS starts with a letter, so this NEVER overlaps
     //      the digit-led explicit patterns ((1+…|g) / (1|g) / (1|A/B)). A redundant
     //      explicit '1' token (e.g. (x+1|g)) is dropped. Nested groups (A/B) are
-    //      not matched here — same as the explicit slope pattern — so a slope on a
-    //      nested factor falls through to the downstream error.
+    //      not matched here (same as the explicit slope pattern); a slope on a
+    //      nested factor is refused in step 0.5.
     let re_islope = &*RE_ISLOPE;
     loop {
         let snapshot = work.clone();
@@ -268,9 +351,65 @@ fn extract_random_effects(rhs: &str) -> Result<(Vec<RandomEffect>, String), Spec
         work = re_int.replacen(&snapshot, 1, "").into_owned();
     }
 
+    // 4. A term with '|' that no pattern above took would otherwise reach the
+    //    fixed-effect parser as a bare syntax error at position 0.
+    //    A term whose only fault is its grouping name (`(1|school.id)`) says
+    //    so, rather than suggesting the shape the user already wrote.
+    if let Some(m) = RE_ANY_TERM.find(&work) {
+        let term = m.as_str().to_string();
+        if let Some(name) = bad_grouping_name(&term) {
+            return Err(SpecError::GroupingNameUnsupported { term, name });
+        }
+        return Err(SpecError::RandomEffectTermUnsupported { term });
+    }
+    // Extra parentheses hide a term from every pattern: `(1|(g))` keeps its '|',
+    // and `((1|g))` leaves `()` behind once the inner term is taken.
+    if work.contains('(') && (work.contains('|') || (!effects.is_empty() && work.contains("()"))) {
+        return Err(SpecError::RandomEffectTermUnsupported {
+            term: rhs.trim().to_string(),
+        });
+    }
+
     // Clean stray "+" — collapse "++", trim leading/trailing "+".
     let cleaned = clean_residual_plusses(&work);
     Ok((effects, cleaned))
+}
+
+/// The grouping name of a one-bar term `(lhs|name)` whose name is not a valid
+/// grouping (ASCII letters, digits and '_', not starting with a digit,
+/// optionally `a/b`), or `None` when the term has another fault. Deeper
+/// nesting (`a/b/c`) and colon groupings (`a:b:c`) are other faults: their
+/// names may be valid, so they keep the generic unsupported-term message.
+fn bad_grouping_name(term: &str) -> Option<String> {
+    let inner = term.strip_prefix('(')?.strip_suffix(')')?;
+    let (lhs, name) = inner.split_once('|')?;
+    if lhs.is_empty()
+        || name.is_empty()
+        || name.contains('|')
+        || name.contains(':')
+        || name.matches('/').count() > 1
+    {
+        return None;
+    }
+    let valid = |s: &str| {
+        let mut chars = s.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    let ok = match name.split_once('/') {
+        Some((a, b)) => valid(a) && valid(b),
+        None => valid(name),
+    };
+    (!ok).then(|| name.to_string())
+}
+
+/// The '+'-separated tokens of a random-effect term's left-hand side, or
+/// `None` when it has none (left to the unsupported-term refusal).
+fn re_lhs_tokens(lhs: &str) -> Option<Vec<&str>> {
+    let tokens: Vec<&str> = lhs.split('+').filter(|t| !t.is_empty()).collect();
+    (!tokens.is_empty()).then_some(tokens)
 }
 
 fn clean_residual_plusses(s: &str) -> String {
@@ -359,6 +498,14 @@ fn parse_rhs(rhs: &str) -> Result<(Vec<String>, Vec<Term>), SpecError> {
             }
         } else if term.contains(':') {
             let vars = parse_identifier_list(term, &[':'])?;
+            // parse_identifier_list drops empty pieces, so a stray colon
+            // (`x2:`, `:x2`) leaves a single variable.
+            if vars.len() < 2 {
+                return Err(SpecError::FormulaSyntax {
+                    pos: 0,
+                    msg: format!("interaction '{term}' needs at least two variables"),
+                });
+            }
             register_vars(&vars, &mut predictors, &mut seen_pred);
             let key = vars.join(":");
             if seen_term.insert(key) {
@@ -499,6 +646,21 @@ mod tests {
             parse_formula("y ~ x + (1++|g)"),
             Err(SpecError::EmptySlopeTerm { .. })
         ));
+    }
+
+    // lme4's double bar (uncorrelated random effects) gets its own refusal
+    // instead of a syntax error, in both the explicit and implicit forms.
+    #[test]
+    fn double_bar_random_effect_is_refused() {
+        for f in ["y ~ x + (1 + x || g)", "y ~ x + (x || g)"] {
+            assert!(
+                matches!(
+                    parse_formula(f),
+                    Err(SpecError::UncorrelatedRandomEffectsUnsupported)
+                ),
+                "{f}"
+            );
+        }
     }
 
     // (1+1|g) is just a doubly-written random intercept — it must not surface

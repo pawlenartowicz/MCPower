@@ -26,9 +26,9 @@ Each scenario is a named set of knob values:
 | `correlation_noise_sd` | 0 | 0.15 | 0.30 |
 | `distribution_change_prob` | 0 | 0.5 | 0.8 |
 | `sampled_factor_proportions` | false | true | true |
-| `random_effect_dist` (mixed models) | normal | heavy_tailed | heavy_tailed |
-| `random_effect_df` (mixed models) | 5 | 10 | 5 |
-| `icc_noise_sd` (mixed models) | 0 | 0.15 | 0.30 |
+| `random_effect_dist` (clustered models) | normal | heavy_tailed | heavy_tailed |
+| `random_effect_df` (clustered models) | 5 | 10 | 5 |
+| `icc_noise_sd` (clustered models) | 0 | 0.15 | 0.30 |
 
 Every knob is documented in **The knobs** below. The replacement pool (`new_distributions`) is the same in all three presets; it matters when you build your own scenario (see **Custom scenarios**).
 
@@ -147,7 +147,7 @@ With scenarios off, MCPower runs the single merged optimistic scenario — so th
 
 ### Mixed-model knobs
 
-Mixed models add three knobs that stress-test the random-effect structure. `random_effect_dist` swaps the cluster-effect shape from `normal` to `heavy_tailed` (more extreme clusters) or `right_skewed`, with `random_effect_df` controlling the heavy-tailed t's df (5 is heavy, 10 is mild). `icc_noise_sd` jitters the between-cluster variance to probe ICC uncertainty. They apply to LMM and clustered-logistic (GLMM) models and are inert elsewhere.
+Mixed models add three knobs that stress-test the random-effect structure. `random_effect_dist` swaps the cluster-effect shape from `normal` to `heavy_tailed` (more extreme clusters) or `right_skewed`, with `random_effect_df` controlling the heavy-tailed t's df (5 is heavy, 10 is mild). `icc_noise_sd` jitters the between-cluster variance to probe ICC uncertainty. They apply to every clustered model, that is, every model with a random-effect term and its `set_cluster` call: an LMM, a clustered logit, probit, or Poisson model (GLMM), or an OLS model fitted to clustered data. Without a grouping they are inert.
 
 Mixed models support three scenario knobs for stress-testing the random-effect structure:
 
@@ -157,16 +157,10 @@ Mixed models support three scenario knobs for stress-testing the random-effect s
 
 **`icc_noise_sd`**: block-to-block Gaussian jitter on the between-cluster variance. At each design draw the random-intercept variance `τ²` (the ICC→τ² conversion of your specified ICC) is perturbed by a draw from N(0, `icc_noise_sd`²) and clamped at 0. Useful for probing sensitivity to ICC uncertainty, a common issue when the ICC is estimated from a pilot study.
 
-> [!note] `icc_noise_sd` on the logistic path
-> The jitter is applied in raw τ²-space (the random-intercept variance on the scale the link uses — latent log-odds for logistic, identity for Gaussian). Because the latent-scale τ² for a logistic GLMM at the same ICC is ≈3.3× larger than for a Gaussian LMM (the π²/3 latent factor — see the latent-scale ICC convention in the mixed-effects concept), a given `icc_noise_sd` perturbs the GLMM τ² by a *smaller relative amount*. This is intentional: `icc_noise_sd` is a single cross-path knob and its absolute τ²-space magnitude is the controlled quantity. For the same *relative* perturbation on the logistic path, multiply your `icc_noise_sd` by √(π²/3) ≈ 1.81.
+> [!note] `icc_noise_sd` on the GLMM paths
+> The jitter is applied in raw τ²-space, the random-intercept variance on the scale the link uses: latent log-odds for logit, the latent normal scale for probit, the log rate for Poisson, and identity for Gaussian. On the logit path the latent-scale τ² at the same ICC is ≈3.3× larger than for a Gaussian LMM (the π²/3 latent factor; see the latent-scale ICC convention in the mixed-effects concept), so a given `icc_noise_sd` perturbs the logit τ² by a *smaller relative amount*. Probit reads the ICC against a latent residual variance of 1, as the Gaussian path does, so the same `icc_noise_sd` gives the same relative jitter there. Poisson takes `tau_squared` directly, so the jitter acts on the value you pass. This is intentional: `icc_noise_sd` is a single cross-path knob and its absolute τ²-space magnitude is the controlled quantity. For the same *relative* perturbation on the logit path, multiply your `icc_noise_sd` by √(π²/3) ≈ 1.81.
 
-These knobs apply to every grouping in the model (primary plus any crossed/nested extras), on both the Gaussian (LMM) and clustered-logistic (GLMM) mixed-model paths. They are independent of the other knobs (heterogeneity, correlation noise), which target the residual/linear-predictor structure of OLS and non-clustered logistic models.
-
-### Estimation conditions
-
-Fitting a mixed model means searching for the random-effect variances, and where that search starts matters — the optimiser can settle in different places depending on its starting point. The optimistic scenario assumes well-behaved estimation: it seeds the search at the true random-effect structure, as if the fitter already knew where to look. Realistic and doomer start blind, from a neutral guess, the way a real analyst's software does when it has no prior knowledge of the answer.
-
-So the optimistic → realistic gap on a mixed model reflects two things at once, not one. Part of it is the data getting messier (the knobs above). Part of it is the estimation getting harder — the blind search can miss the variance structure that the truth-seeded start would have found. This is deliberate: optimistic is the best case on both fronts, and the drop to realistic shows what you give up when both the data and the fit stop being ideal. It affects mixed models only; OLS and non-clustered logistic fits have a closed-form or single-mode solution, so their start never changes the answer.
+These knobs apply to every grouping in the model (primary plus any crossed/nested extras), whatever the fitted model: LMM, GLMM, or OLS fitted to clustered data. Because they change the data and not the fit, an OLS model on clustered data under realistic or doomer sees perturbed cluster effects too. They are independent of the other knobs (heterogeneity, correlation noise), which perturb the predictors and the effects.
 
 > [!note] Empirical values in research
 > - Thompson et al. (2012) — within-practice ICCs across 61 primary-care practices span 0.007 to 0.265 for different outcomes in the *same* dataset; realistic `icc_noise_sd` 0.15 sits inside that spread, and doomer 0.30 covers its upper (demographic) tail.
@@ -202,23 +196,31 @@ result <- model$find_power(sample_size = 600, target_test = "treatment",
                            scenarios = c("optimistic", "site_stress"))
 ```
 
+### Estimation conditions
+
+Fitting a mixed model means searching for the random-effect variances, and where that search starts matters — the optimiser can settle in different places depending on its starting point. The optimistic scenario assumes well-behaved estimation: it seeds the search at the true random-effect structure, as if the fitter already knew where to look. Realistic and doomer start blind, from a neutral guess, the way a real analyst's software does when it has no prior knowledge of the answer.
+
+So the optimistic → realistic gap on a mixed model reflects two things at once, not one. Part of it is the data getting messier (the knobs above). Part of it is the estimation getting harder — the blind search can miss the variance structure that the truth-seeded start would have found. This is deliberate: optimistic is the best case on both fronts, and the drop to realistic shows what you give up when both the data and the fit stop being ideal. It affects mixed models only; OLS and unclustered binary or count fits have a closed-form or single-mode solution, so their start never changes the answer.
+
 ## Custom scenarios
 
 Scenarios are configured per model with `set_scenario_configs` (see the custom-scenarios tutorial for your port for the exact call). The merge has two branches:
 
 - **Overriding a built-in name** (`optimistic`, `realistic`, `doomer`) **updates that preset.** Knobs you don't set keep their preset values: a custom `realistic` that only raises λ still carries realistic heterogeneity and distribution changes.
-- **A new name inherits the optimistic baseline.** Every knob starts at its optimistic (no-perturbation) value and only your overrides apply. That includes the standard `new_distributions` pool, so setting `distribution_change_prob` without restating the pool works out of the box.
+- **A new name inherits the optimistic baseline.** Every knob starts at its optimistic (no-perturbation) value and only your overrides apply, with one exception: `truth_start` starts off (see below), because it is an estimation assumption and not a perturbation. The inheritance includes the standard `new_distributions` pool, so setting `distribution_change_prob` without restating the pool works out of the box.
 
 After configuring, select scenarios to run by name; names without a custom config run the built-in presets.
 
-**Valid knob names**, exactly these nine keys: `heterogeneity`, `heteroskedasticity_ratio`, `correlation_noise_sd`, `distribution_change_prob`, `new_distributions`, `sampled_factor_proportions`, `random_effect_dist`, `random_effect_df`, `icc_noise_sd`.
+**Valid knob names**, exactly these ten keys: `heterogeneity`, `heteroskedasticity_ratio`, `correlation_noise_sd`, `distribution_change_prob`, `new_distributions`, `sampled_factor_proportions`, `random_effect_dist`, `random_effect_df`, `icc_noise_sd`, `truth_start`.
+
+`truth_start` is a boolean and the one key that does not perturb the data: it is the estimation assumption described under **Estimation conditions** above. `true` seeds a mixed-model fit at the true random-effect structure ("estimation is well-behaved"); `false` starts it blind. It is `true` in `optimistic` and `false` in `realistic` and `doomer`, and a new custom scenario starts with it `false` unless you set it. OLS and unclustered binary or count fits ignore it.
 
 **Valid `new_distributions` entries:** `normal`, `right_skewed`, `left_skewed`, `high_kurtosis`, `uniform`.
 
 Configurations are validated up front, and the errors are loud by design:
 
 - An unknown or misspelled knob raises an error naming the key and listing the valid set. In particular, the key `heteroskedasticity` taught by older versions of these docs is now `heteroskedasticity_ratio` — the old name errors rather than silently doing nothing.
-- The mixed-model keys (`random_effect_dist`, `random_effect_df`, `icc_noise_sd`) take effect only on mixed models — both Gaussian (LMM) and clustered-logistic (GLMM); see **Mixed-model knobs** above. On OLS and non-clustered logistic models they are inert.
+- The mixed-model keys (`random_effect_dist`, `random_effect_df`, `icc_noise_sd`) take effect on every clustered model: LMM, GLMM, or OLS fitted to clustered data; see **Mixed-model knobs** above. On a model without a grouping they are inert.
 - `binary` in `new_distributions` is rejected: a swapped binary column would collapse to a constant.
 
 ## How the knobs interact

@@ -103,10 +103,10 @@ mod tests {
         let mut stripped = Vec::new();
         rmpv::encode::write_value(&mut stripped, &val).unwrap();
         let back: SimulationContract = rmp_serde::from_slice(&stripped).unwrap();
-        // Absent wald_se/nagq/df_method deserialize to their 1.1.0 defaults.
+        // Absent wald_se/nagq/df_method deserialize to their defaults.
         assert_eq!(back.wald_se, WaldSe::Rx);
         assert_eq!(back.nagq, 1);
-        assert_eq!(back.df_method, DfMethod::BetweenWithin);
+        assert_eq!(back.df_method, DfMethod::Auto);
     }
 
     #[test]

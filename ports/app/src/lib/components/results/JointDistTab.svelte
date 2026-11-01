@@ -27,6 +27,10 @@
     tab.kind === 'find-sample-size'
       ? tab.scenarios.map(([label, res]) => {
           const r = res as SampleSizeResult;
+          // A target with no corrected power (Tukey HSD, a target outside every
+          // factor) makes the corrected joint view not applicable: no rows.
+          const notApplicable =
+            r.grid_or_trace[0]?.corrected_not_applicable?.some(Boolean) ?? false;
           // Joint-test count from first_joint_achieved itself (one slot per k):
           // it spans marginals + contrasts, which target_indices alone misses.
           const targetCount = r.first_joint_achieved.length;
@@ -44,7 +48,7 @@
               n: requiredNHeadline(fit, gridN, ceiling),
             };
           });
-          return { label, targetCount, rows };
+          return { label, targetCount, rows, notApplicable };
         })
       : []
   );
@@ -81,6 +85,11 @@
       </figure>
     {/if}
     {#each ssrScenarios as scenario (scenario.label)}
+      {#if scenario.notApplicable}
+        <p class="text-sm text-muted-foreground" data-testid="joint-not-applicable">
+          {#if hasMultipleScenarios}{scenario.label}: {/if}Joint detection → required N (target {targetPct}): n/a (a test has no corrected power under this correction)
+        </p>
+      {:else}
       <table class="w-auto text-sm [&_td]:pr-8 [&_th]:pr-8 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
         <caption class="mb-1 text-left text-sm font-medium text-foreground">
           {#if hasMultipleScenarios}{scenario.label} — {/if}Joint detection → required N (target {targetPct})
@@ -100,6 +109,7 @@
           {/each}
         </tbody>
       </table>
+      {/if}
     {/each}
   {:else}
     {#each powerScenarios as scenario (scenario.label)}

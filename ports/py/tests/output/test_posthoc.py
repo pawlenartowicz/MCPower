@@ -164,3 +164,19 @@ def test_long_form_nests_posthoc():
     assert "low_dose vs placebo" in text
     assert "high_dose vs low_dose" in text
     assert "Post-hoc pairwise contrasts" not in text
+
+
+def test_posthoc_on_mixed_model_is_refused():
+    """A post-hoc request on an LMM stops with the engine's user message,
+    which points at the factor's dummies."""
+    m = MCPower("y = x1 + f + (1|g)", family="lme")
+    m.set_variable_type("f=(factor,3)")
+    m.set_effects("x1=0.3, f[2]=0.2, f[3]=0.4")
+    m.set_cluster("g", ICC=0.2, n_clusters=20)
+    with pytest.raises(ValueError) as exc:
+        m.find_power(400, n_sims=20, target_test="all-contrasts", verbose=False)
+    assert str(exc.value) == (
+        "post-hoc comparisons ('all-contrasts') are available for OLS models only; "
+        "this model is a mixed model. Test the factor's dummies instead, e.g. "
+        "target_test = 'f[2], f[3]'"
+    )

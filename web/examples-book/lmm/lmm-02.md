@@ -4,15 +4,15 @@ description: "Power & sample-size analysis by Monte Carlo simulation for a treat
 ---
 # Two-arm longitudinal pain trial: a treatment-by-week difference-in-differences with a random intercept
 
-You ran a longitudinal pain intervention study: every patient was assessed at
-multiple weekly visits, and each was assigned to either the treatment arm or the
+You ran a pre/post pain intervention study: every patient was assessed twice, at
+baseline and at follow-up, and each was assigned to either the treatment arm or the
 control arm. You want the power to detect that the treatment arm's pain score
-changed *more* over weeks than the control arm did — the difference-in-differences —
+changed *more* from baseline than the control arm did — the difference-in-differences —
 while accounting for the fact that a patient's repeated measurements are correlated.
 
 As an MCPower model this is `pain_score = treatment * week + (1|patient)` with
 `family="lme"`, where `treatment` is a binary arm indicator and `week` is a
-continuous measurement-occasion covariate. The `(1|patient)` random intercept
+binary occasion indicator (baseline vs follow-up). The `(1|patient)` random intercept
 lets each patient have their own baseline pain level. The `*` expands to the
 `treatment` and `week` main effects plus the `treatment:week` interaction; that
 interaction *is* the diff-in-diff, and it is what you read power off.
@@ -22,9 +22,10 @@ mixed-model fit.
 
 ## Variations
 
-- **More than five timepoints.** A finer follow-up schedule simply increases
-  `sample_size` while holding `n_clusters` constant; the observations-per-cluster
-  floor (at least 5) stays relevant — make sure total N / n_clusters ≥ 5.
+- **More than two timepoints.** A finer follow-up schedule simply increases
+  `sample_size` while holding `n_clusters` constant; with several visits, declare
+  `week=normal` so it is a measurement-occasion covariate rather than a two-level
+  indicator.
 - **Stronger or weaker correlation between occasions.** The `ICC` is how much of
   the variance sits between patients; bump it toward `0.70` for tightly tracking
   repeated measures or down toward `0.20` for loosely related ones, and watch how
@@ -33,12 +34,12 @@ mixed-model fit.
   sample size is patients x occasions. Adding patients is usually the more
   efficient lever for the interaction than adding visits per patient.
 - **Search for the N instead of fixing it.** Swap the `find_power` call for
-  `find_sample_size(target_test="treatment:week", from_size=80, to_size=400, by=20)`
+  `find_sample_size(target_test="treatment:week", from_size=120, to_size=480, by=60)`
   to get the smallest N that reaches target power on the diff-in-diff term.
 - **Search for the number of visits instead.** With the 60 patients fixed, ask
   how many weekly assessments each needs:
-  `find_sample_size(target_test="treatment:week", unit="cluster_size", from_size=5, to_size=20, by=1)`.
-  The range reads as visits per patient (5 is the floor), one step is 60 more
+  `find_sample_size(target_test="treatment:week", unit="cluster_size", from_size=2, to_size=20, by=1)`.
+  The range reads as visits per patient (2 is the floor), one step is 60 more
   measurements, and the result reports the total N alongside it. The
   diff-in-diff is a within-patient slope contrast, so it is one of the terms
   that extra visits actually buy.
@@ -73,17 +74,11 @@ mixed-model fit.
 
 <!-- chunk:py:lmm-02 -->
 ```python
-# NOTE: Reframed from a 2-occasion (pre/post) design to a 5-occasion repeated-
-# measures design. The original 60 patients x 2 occasions gave only 2
-# observations per cluster, which the mixed-model validator rejects (it requires
-# at least 5 observations per cluster for reliable estimation). Raising
-# sample_size to 300 yields 5 occasions per patient, clearing the floor, and
-# `week` is now a continuous (normal) measurement-occasion covariate instead of
-# binary.
 from mcpower import MCPower
 
 # Two-arm longitudinal pain trial (difference-in-differences): every patient is
-# assessed repeatedly over weeks, in either the treatment or the control arm.
+# assessed twice, at baseline and at follow-up, in either the treatment or the
+# control arm.
 # Research question: does the treatment reduce pain MORE than control does over
 # time? -> the treatment:week interaction. '*' expands
 # treatment * week to treatment + week + treatment:week, so both main effects
@@ -91,25 +86,25 @@ from mcpower import MCPower
 # (1|patient) random intercept and fits by maximum likelihood (MLE estimator).
 model = MCPower("pain_score = treatment * week + (1|patient)", family="lme")
 
-# treatment is the two arms; week is the continuous measurement occasion.
-model.set_variable_type("treatment=binary, week=normal")
+# treatment is the two arms; week is the occasion (baseline vs follow-up).
+model.set_variable_type("treatment=binary, week=binary")
 
 # Effect sizes on the benchmark scale:
 #   treatment=0.20 (factor)     -> small baseline arm gap (groups nearly balanced).
-#   week=0.25 (continuous)      -> medium overall drift over weeks (both arms move).
-#   treatment:week=0.25         -> medium diff-in-diff: the treatment arm's slope
-#                                  over weeks exceeds the control arm's (the target).
-model.set_effects("treatment=0.20, week=0.25, treatment:week=0.25")
+#   week=0.50 (binary)          -> medium overall change from baseline (both arms move).
+#   treatment:week=0.50         -> medium diff-in-diff: the treatment arm changes more
+#                                  from baseline than the control arm (the target).
+model.set_effects("treatment=0.20, week=0.50, treatment:week=0.50")
 
-# Repeated measures: ICC=0.50 of the variance is between-patient (the
+# Repeated measures: ICC=0.50 of the variance is between-patient (the two
 # occasions per person are strongly correlated) across 60 patients.
 model.set_cluster("patient", ICC=0.50, n_clusters=60)
 
 model.set_simulations(800)
 model.set_seed(2137)
 
-# Power at N=300 (60 patients x 5 occasions) for the diff-in-diff interaction.
-model.find_power(sample_size=300, target_test="treatment:week")
+# Power at N=120 (60 patients x 2 occasions) for the diff-in-diff interaction.
+model.find_power(sample_size=120, target_test="treatment:week")
 ```
 <!-- /chunk:py:lmm-02 -->
 
@@ -119,17 +114,11 @@ model.find_power(sample_size=300, target_test="treatment:week")
 
 <!-- chunk:r:lmm-02 -->
 ```r
-# NOTE: Reframed from a 2-occasion (pre/post) design to a 5-occasion repeated-
-# measures design. The original 60 patients x 2 occasions gave only 2
-# observations per cluster, which the mixed-model validator rejects (it requires
-# at least 5 observations per cluster for reliable estimation). Raising
-# sample_size to 300 yields 5 occasions per patient, clearing the floor, and
-# `week` is now a continuous (normal) measurement-occasion covariate instead of
-# binary.
 suppressMessages(library(mcpower))
 
 # Two-arm longitudinal pain trial (difference-in-differences): every patient is
-# assessed repeatedly over weeks, in either the treatment or the control arm.
+# assessed twice, at baseline and at follow-up, in either the treatment or the
+# control arm.
 # Research question: does the treatment reduce pain MORE than control does over
 # time? -> the treatment:week interaction. '*' expands
 # treatment * week to treatment + week + treatment:week, so both main effects
@@ -137,25 +126,25 @@ suppressMessages(library(mcpower))
 # (1|patient) random intercept and fits by maximum likelihood (MLE estimator).
 model <- MCPower$new("pain_score ~ treatment * week + (1|patient)", family = "lme")
 
-# treatment is the two arms; week is the continuous measurement occasion.
-model$set_variable_type("treatment=binary, week=normal")
+# treatment is the two arms; week is the occasion (baseline vs follow-up).
+model$set_variable_type("treatment=binary, week=binary")
 
 # Effect sizes on the benchmark scale:
 #   treatment=0.20 (factor)     -> small baseline arm gap (groups nearly balanced).
-#   week=0.25 (continuous)      -> medium overall drift over weeks (both arms move).
-#   treatment:week=0.25         -> medium diff-in-diff: the treatment arm's slope
-#                                  over weeks exceeds the control arm's (the target).
-model$set_effects("treatment=0.20, week=0.25, treatment:week=0.25")
+#   week=0.50 (binary)          -> medium overall change from baseline (both arms move).
+#   treatment:week=0.50         -> medium diff-in-diff: the treatment arm changes more
+#                                  from baseline than the control arm (the target).
+model$set_effects("treatment=0.20, week=0.50, treatment:week=0.50")
 
-# Repeated measures: ICC=0.50 of the variance is between-patient (the
+# Repeated measures: ICC=0.50 of the variance is between-patient (the two
 # occasions per person are strongly correlated) across 60 patients.
 model$set_cluster("patient", ICC = 0.50, n_clusters = 60)
 
 model$set_simulations(800)
 model$set_seed(2137)
 
-# Power at N=300 (60 patients x 5 occasions) for the diff-in-diff interaction.
-invisible(model$find_power(sample_size = 300, target_test = "treatment:week"))
+# Power at N=120 (60 patients x 2 occasions) for the diff-in-diff interaction.
+invisible(model$find_power(sample_size = 120, target_test = "treatment:week"))
 ```
 <!-- /chunk:r:lmm-02 -->
 

@@ -188,6 +188,21 @@ test_that("validate_correction_arg accepts tukey without error", {
 # TASK 6.1 — D4 rule: Tukey + marginal beta targets warns, not errors
 # ---------------------------------------------------------------------------
 
+test_that("find_power: a post-hoc request on a mixed model stops with a user message", {
+  m <- MCPower$new("y ~ x1 + f + (1|g)", family = "lme")$
+    set_variable_type("f=(factor,3)")$
+    set_effects("x1=0.3, f[2]=0.2, f[3]=0.4")$
+    set_cluster("g", ICC = 0.2, n_clusters = 20L)
+  expect_error(
+    m$find_power(sample_size = 400L, n_sims = 20L, target_test = "all-contrasts",
+                 verbose = FALSE, progress_callback = FALSE),
+    paste0("post-hoc comparisons ('all-contrasts') are available for OLS models ",
+           "only; this model is a mixed model. Test the factor's dummies ",
+           "instead, e.g. target_test = 'f[2], f[3]'"),
+    fixed = TRUE
+  )
+})
+
 test_that("find_power: tukey + marginal beta targets warns (D4 rule)", {
   m <- .simple_anova_model()
   expect_warning(

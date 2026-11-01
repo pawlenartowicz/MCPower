@@ -21,6 +21,44 @@ def test_test_formula_rejects_unknown_predictor() -> None:
         model.find_power(sample_size=80, test_formula="y = x1 + z")
 
 
+def test_test_formula_refuses_random_effect_term() -> None:
+    """test_formula sets fixed effects only; a random-effect term in it is
+    refused with the engine message, not reported as a missing predictor."""
+    model = MCPower("y = x1 + x2 + (1|g)", family="lme")
+    model.set_effects("x1=0.3, x2=0.3")
+    model.set_cluster("g", ICC=0.2, n_clusters=20)
+    msg = (
+        "test_formula sets the fixed effects of the test model only; the test "
+        "model keeps the model's random effects. Remove '(1|g)' from test_formula"
+    )
+    with pytest.raises(ValueError) as exc:
+        model.find_power(
+            sample_size=200,
+            n_sims=20,
+            test_formula="y = x1 + (1|g)",
+            progress_callback=False,
+            verbose=False,
+        )
+    assert str(exc.value) == msg
+
+
+def test_test_formula_must_keep_random_slope_variable() -> None:
+    """The test model keeps the model's random effects, and a random slope is
+    fitted on its variable's fixed-effect column, so a test_formula that leaves
+    out the slope variable is refused with its name."""
+    model = MCPower("y = x1 + x2 + (1 + x2|g)", family="lme")
+    model.set_effects("x1=0.3, x2=0.3")
+    model.set_cluster("g", ICC=0.2, n_clusters=20, random_slopes=["x2"], slope_variance=0.1)
+    with pytest.raises(ValueError, match="keep 'x2' in test_formula"):
+        model.find_power(
+            sample_size=200,
+            n_sims=20,
+            test_formula="y = x1",
+            progress_callback=False,
+            verbose=False,
+        )
+
+
 def test_test_formula_drops_term_and_changes_test_design() -> None:
     """Generate from x1 + x2 but fit only x1.
 

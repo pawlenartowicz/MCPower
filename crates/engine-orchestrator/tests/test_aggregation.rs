@@ -172,7 +172,7 @@ fn aggregate_batch_builds_joint_histogram_and_overall_ci() {
         /* corrected   */ &[1, 1, 1, 0, 0, 0, 1, 1],
         /* overall      */ &[1, 1, 0, 1],
     );
-    let results = aggregate_batch(&batch, &[0, 1], &[], &EstimatorSpec::Ols);
+    let results = aggregate_batch(&batch, &[0, 1], &[], &EstimatorSpec::Ols, &[]);
     let r = &results[0];
 
     assert_eq!(r.success_count_histogram_uncorrected, vec![1, 1, 2]);
@@ -193,7 +193,7 @@ fn aggregate_batch_overall_ci_none_when_no_overall_test() {
         &[1, 1, 1, 0, 0, 0, 1, 1],
         &[],
     ); // empty overall
-    let r = &aggregate_batch(&batch, &[0, 1], &[], &EstimatorSpec::Ols)[0];
+    let r = &aggregate_batch(&batch, &[0, 1], &[], &EstimatorSpec::Ols, &[])[0];
     assert_eq!(r.overall_significant_ci, None);
 }
 
@@ -211,7 +211,7 @@ fn aggregate_single_n_single_target() {
     let cor = vec![1, 1, 1, 1, 1, 1, 0, 0, 0, 0]; // 6/10
     let conv = vec![1u8; 10];
     let br = make_batch(unc, cor, conv, shape);
-    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Ols);
+    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Ols, &[]);
     assert_eq!(aggs.len(), 1);
     let pr = &aggs[0];
     approx::assert_relative_eq!(pr.power_uncorrected[0], 0.7);
@@ -243,7 +243,7 @@ fn aggregate_multi_n_multi_target_layout() {
     let cor = unc.clone();
     let conv = vec![1u8; 2 * 3];
     let br = make_batch(unc, cor, conv, shape);
-    let aggs = aggregate_batch(&br, &[1, 2], &[], &EstimatorSpec::Ols);
+    let aggs = aggregate_batch(&br, &[1, 2], &[], &EstimatorSpec::Ols, &[]);
     assert_eq!(aggs.len(), 3);
     approx::assert_relative_eq!(aggs[0].power_uncorrected[0], 0.5); // 1/2
     approx::assert_relative_eq!(aggs[0].power_uncorrected[1], 0.0);
@@ -264,7 +264,7 @@ fn aggregate_handles_zero_sims() {
         n_variance_components: 0,
     };
     let br = make_batch(vec![], vec![], vec![], shape);
-    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Ols);
+    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Ols, &[]);
     assert_eq!(aggs.len(), 1);
     approx::assert_relative_eq!(aggs[0].power_uncorrected[0], 0.0);
     approx::assert_relative_eq!(aggs[0].convergence_rate, 1.0);
@@ -285,7 +285,7 @@ fn aggregate_dispatches_glm_extras() {
     // One non-converged sim: the count comes from the converged buffer, not n_sims.
     let conv = vec![1u8, 0, 1, 1];
     let br = make_batch(unc, cor, conv, shape);
-    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Glm);
+    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Glm, &[]);
     assert!(matches!(
         aggs[0].estimator_extras,
         EstimatorExtras::Glm { .. }
@@ -310,7 +310,7 @@ fn aggregate_dispatches_mle_extras() {
     br.boundary_hit = vec![0, 0, 1, 0];
     br.joint_unc = vec![1, 1, 0, 1];
     br.joint_cor = vec![1, 0, 0, 1];
-    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Mle);
+    let aggs = aggregate_batch(&br, &[1], &[], &EstimatorSpec::Mle, &[]);
     match &aggs[0].estimator_extras {
         EstimatorExtras::Mle {
             boundary_hits,
@@ -357,7 +357,7 @@ fn aggregate_batch_populates_success_counts() {
     let cor = vec![1, 0, 0, 0, 1, 0];
     let conv = vec![1u8; 3];
     let br = make_batch(unc, cor, conv, shape);
-    let aggs = aggregate_batch(&br, &[0, 1], &[], &EstimatorSpec::Ols);
+    let aggs = aggregate_batch(&br, &[0, 1], &[], &EstimatorSpec::Ols, &[]);
     assert_eq!(aggs.len(), 1);
     let pr = &aggs[0];
     assert_eq!(pr.success_counts_uncorrected, vec![2u64, 1]);

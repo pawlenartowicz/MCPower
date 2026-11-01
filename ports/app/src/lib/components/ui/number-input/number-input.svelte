@@ -91,7 +91,13 @@
       {max}
       {disabled}
       {value}
-      onchange={(e) => commit(Number((e.currentTarget as HTMLInputElement).value))}
+      onchange={(e) => {
+        const input = e.currentTarget as HTMLInputElement;
+        commit(Number(input.value));
+        // Clamping back to the current value changes no state, so Svelte would
+        // leave the typed text in the box.
+        input.value = String(value);
+      }}
       class={cn(
         'w-full min-w-0 border-0 bg-transparent py-1 text-center text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
         suffix ? (dense ? 'pl-1 pr-4' : 'pl-2 pr-5') : dense ? 'px-1' : 'px-2',

@@ -1706,15 +1706,14 @@ mod tests {
     }
 
     // df_method threads from the AppSpec onto every assembled contract; the
-    // default (BetweenWithin) is what a spec that never touched the knob
-    // carries.
+    // default (Auto) is what a spec that never touched the knob carries.
     #[test]
     fn assemble_mixed_forwards_df_method() {
         let mut spec = mixed_fixture();
         let (default_contracts, _, _) = assemble_mixed(&spec).expect("assemble_mixed ok");
         assert_eq!(
             default_contracts[0].df_method,
-            engine_contract::DfMethod::BetweenWithin
+            engine_contract::DfMethod::Auto
         );
 
         spec.df_method = engine_contract::DfMethod::Asymptotic;

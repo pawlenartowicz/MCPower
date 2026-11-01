@@ -35,7 +35,7 @@ and power is reported for each contrast separately.
 - **Search for the assays per sample instead.** With 40 biological samples on
   the bench, the budget question is how many times to assay each one:
   `find_sample_size(target_test="condition[2], condition[3]", unit="cluster_size", from_size=5, to_size=20, by=1)`.
-  The range reads as measurements per sample (5 is the floor) and each step of 1
+  The range reads as measurements per sample and each step of 1
   adds 40 measurements in total. Condition varies within the sample, so repeating
   the assay sharpens both contrasts.
 - **Same design, other fields:**

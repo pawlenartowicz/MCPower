@@ -67,20 +67,98 @@ pub enum WaldSe {
 }
 
 /// Reference distribution for mixed-model fixed-effect Wald tests. Additive
-/// contract field; no-op for `Ols` and unclustered `Glm`. This default mirrors
-/// `configs/config.json` `estimation.df_method` — the single home for the
-/// cross-port default; change both together.
+/// contract field; no-op for `Ols` and unclustered `Glm`. Each value other
+/// than `Auto` names one test, and a design that test does not cover is
+/// refused by `validate()` rather than tested another way. This default
+/// mirrors `configs/config.json` `estimation.df_method` — the single home for
+/// the cross-port default; change both together.
+///
+/// `Auto` resolves once per batch:
+///
+/// | Fit  | Grouping          | Primary random slope | Test           |
+/// |------|-------------------|----------------------|----------------|
+/// | LMM  | single            | none                 | between-within |
+/// | LMM  | single            | any                  | Satterthwaite  |
+/// | LMM  | crossed or nested | any                  | Satterthwaite  |
+/// | GLMM | single            | any                  | between-within |
+/// | GLMM | crossed or nested | any                  | Wald z         |
+///
+/// A slope counts when it is in the fitted random structure, whatever its
+/// variance. Under any value, a draw whose Satterthwaite pass fails is tested
+/// against Wald z.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DfMethod {
     /// Wald z against the standard normal, applied to every clustered fit
-    /// regardless of estimator — the opt-in.
+    /// regardless of estimator.
     Asymptotic,
     /// Between-within denominator degrees of freedom (SAS `DDFM=BETWITHIN`)
-    /// applied to mixed fits — `Mle`, or `Glm` with a cluster spec — the
-    /// default. Unclustered `Glm` and `Ols` ignore the knob.
-    #[default]
+    /// applied to mixed fits — `Mle`, or `Glm` with a cluster spec. Invalid on
+    /// a crossed or nested design, where the between/within split of the
+    /// residual df is not defined. Unclustered `Glm` and `Ols` ignore the knob.
     BetweenWithin,
+    /// Per-draw Satterthwaite df, as lmerTest computes them, on any Gaussian
+    /// LMM (`Mle`). Invalid on a GLMM, which has no such df.
+    Satterthwaite,
+    /// The per-design choice in the table above; the default.
+    #[default]
+    Auto,
+}
+
+/// The fixed-effect test a mixed fit runs, as [`DfMethod::resolve`] picks it
+/// for one design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixedTest {
+    /// Student t at the between-within denominator df (one table per batch).
+    BetweenWithin,
+    /// Student t at each draw's Satterthwaite df; Wald z on a draw whose df
+    /// pass fails.
+    Satterthwaite,
+    /// Wald z against the standard normal.
+    WaldZ,
+}
+
+impl DfMethod {
+    /// The test this value selects for a fit by `estimator` on a design with
+    /// cluster spec `cluster`. `primary_slope` says whether the primary
+    /// grouping carries a random slope in the fitted structure. `Ok(None)` for
+    /// a fit that is not mixed (`Ols`, or `Glm` without a cluster spec), where
+    /// the value is ignored. A named test the design does not admit is an
+    /// error, never another test: `BetweenWithin` on crossed or nested
+    /// groupings, `Satterthwaite` on a GLMM.
+    pub fn resolve(
+        self,
+        estimator: EstimatorSpec,
+        cluster: Option<&crate::generation::ClusterSpec>,
+        primary_slope: bool,
+    ) -> Result<Option<MixedTest>, crate::error::ContractError> {
+        use crate::error::ContractError;
+        let Some(cluster) = cluster else {
+            return Ok(None);
+        };
+        let lmm = match estimator {
+            EstimatorSpec::Ols => return Ok(None),
+            EstimatorSpec::Mle => true,
+            EstimatorSpec::Glm => false,
+        };
+        let single = cluster.extra_groupings.is_empty();
+        let test = match self {
+            DfMethod::Asymptotic => MixedTest::WaldZ,
+            DfMethod::Auto => match (lmm, single) {
+                (true, true) if !primary_slope => MixedTest::BetweenWithin,
+                (true, _) => MixedTest::Satterthwaite,
+                (false, true) => MixedTest::BetweenWithin,
+                (false, false) => MixedTest::WaldZ,
+            },
+            DfMethod::BetweenWithin if single => MixedTest::BetweenWithin,
+            DfMethod::BetweenWithin => {
+                return Err(ContractError::BetweenWithinNeedsSingleGrouping { lmm });
+            }
+            DfMethod::Satterthwaite if lmm => MixedTest::Satterthwaite,
+            DfMethod::Satterthwaite => return Err(ContractError::SatterthwaiteNeedsLmm),
+        };
+        Ok(Some(test))
+    }
 }
 
 #[cfg(test)]
@@ -110,7 +188,108 @@ mod tests {
             serde_json::to_string(&DfMethod::BetweenWithin).unwrap(),
             "\"between_within\""
         );
-        // default is between-within; mirrors config.json estimation.df_method
-        assert_eq!(DfMethod::default(), DfMethod::BetweenWithin);
+        assert_eq!(
+            serde_json::to_string(&DfMethod::Satterthwaite).unwrap(),
+            "\"satterthwaite\""
+        );
+        assert_eq!(serde_json::to_string(&DfMethod::Auto).unwrap(), "\"auto\"");
+        // default is auto; mirrors config.json estimation.df_method
+        assert_eq!(DfMethod::default(), DfMethod::Auto);
+    }
+
+    fn cluster(extra: bool) -> crate::generation::ClusterSpec {
+        use crate::generation::{ClusterSizing, ClusterSpec, GroupingRelation, GroupingSpec};
+        let mut c =
+            ClusterSpec::intercept_only(ClusterSizing::FixedClusters { n_clusters: 10 }, 0.25);
+        if extra {
+            c.extra_groupings.push(GroupingSpec {
+                relation: GroupingRelation::Crossed { n_clusters: 4 },
+                tau_squared: 0.2,
+                slopes: vec![],
+            });
+        }
+        c
+    }
+
+    /// The `auto` table, one row per (fit, grouping, primary slope) cell.
+    #[test]
+    fn auto_resolves_per_design() {
+        use EstimatorSpec::{Glm, Mle};
+        use MixedTest::{BetweenWithin, Satterthwaite, WaldZ};
+        let single = cluster(false);
+        let crossed = cluster(true);
+        for (estimator, c, slope, want) in [
+            (Mle, &single, false, BetweenWithin),
+            (Mle, &single, true, Satterthwaite),
+            (Mle, &crossed, false, Satterthwaite),
+            (Mle, &crossed, true, Satterthwaite),
+            (Glm, &single, false, BetweenWithin),
+            (Glm, &single, true, BetweenWithin),
+            (Glm, &crossed, false, WaldZ),
+            (Glm, &crossed, true, WaldZ),
+        ] {
+            let got = DfMethod::Auto.resolve(estimator, Some(c), slope).unwrap();
+            assert_eq!(
+                got,
+                Some(want),
+                "{estimator:?}, crossed {}, slope {slope}",
+                !c.extra_groupings.is_empty()
+            );
+        }
+    }
+
+    /// Each named value is one test wherever it is defined, and an error
+    /// where it is not; a fit that is not mixed ignores the value.
+    #[test]
+    fn named_values_run_their_test_or_refuse() {
+        use EstimatorSpec::{Glm, Mle, Ols};
+        let single = cluster(false);
+        let crossed = cluster(true);
+        for slope in [false, true] {
+            for (estimator, c) in [
+                (Mle, &single),
+                (Mle, &crossed),
+                (Glm, &single),
+                (Glm, &crossed),
+            ] {
+                let r = |d: DfMethod| d.resolve(estimator, Some(c), slope);
+                assert_eq!(r(DfMethod::Asymptotic).unwrap(), Some(MixedTest::WaldZ));
+                let single_grouping = c.extra_groupings.is_empty();
+                match r(DfMethod::BetweenWithin) {
+                    Ok(t) => {
+                        assert!(single_grouping);
+                        assert_eq!(t, Some(MixedTest::BetweenWithin));
+                    }
+                    Err(e) => {
+                        assert!(!single_grouping);
+                        assert_eq!(
+                            e,
+                            crate::error::ContractError::BetweenWithinNeedsSingleGrouping {
+                                lmm: estimator == Mle
+                            }
+                        );
+                    }
+                }
+                match r(DfMethod::Satterthwaite) {
+                    Ok(t) => {
+                        assert_eq!(estimator, Mle);
+                        assert_eq!(t, Some(MixedTest::Satterthwaite));
+                    }
+                    Err(e) => {
+                        assert_eq!(estimator, Glm);
+                        assert_eq!(e, crate::error::ContractError::SatterthwaiteNeedsLmm);
+                    }
+                }
+            }
+        }
+        for d in [
+            DfMethod::Auto,
+            DfMethod::BetweenWithin,
+            DfMethod::Satterthwaite,
+            DfMethod::Asymptotic,
+        ] {
+            assert_eq!(d.resolve(Ols, Some(&crossed), true).unwrap(), None);
+            assert_eq!(d.resolve(Glm, None, false).unwrap(), None);
+        }
     }
 }

@@ -219,12 +219,12 @@ fn fitted_shapes_and_in_grid_consistency() {
     assert_eq!(ssr.fitted.len(), ssr.first_achieved.len());
     assert_eq!(ssr.fitted_joint.len(), ssr.first_joint_achieved.len());
     assert!(
-        matches!(ssr.fitted[0], CrossingFit::Fitted { .. }),
+        matches!(ssr.fitted[0], Some(CrossingFit::Fitted { .. })),
         "anti-vacuity: the grid must bracket the crossing, got {:?}",
         ssr.fitted[0]
     );
     assert_eq!(ssr.cluster_atom, 1, "unclustered atom");
-    for cf in ssr.fitted.iter().chain(ssr.fitted_joint.iter()) {
+    for cf in ssr.fitted.iter().flatten().chain(ssr.fitted_joint.iter()) {
         if let CrossingFit::Fitted {
             n_star,
             n_achievable,
@@ -276,7 +276,7 @@ fn merge_of_single_part_reproduces_fit_exactly() {
     // Anti-vacuity: a real interior crossing, so the interpolation and the
     // Wilson-band CI are recomputed (not just the AtOrBelowMin short-cut).
     assert!(
-        matches!(p.fitted[0], CrossingFit::Fitted { .. }),
+        matches!(p.fitted[0], Some(CrossingFit::Fitted { .. })),
         "the grid must bracket the crossing, got {:?}",
         p.fitted[0]
     );

@@ -10,10 +10,10 @@
     "nested_n_per_parent": 2
   },
   "estimation": {
-    "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'rx' (fastmode: rx + Laplace) is the 1.1.0 default; 'hessian' is the accurate/AGQ opt-in. nagq: 1 = Laplace. df_method: 'between_within' (between-within denominator df for mixed fits) is the default; 'asymptotic' opts into the Wald z reference. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq, DfMethod::default) — change together.",
+    "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'rx' (fastmode: rx + Laplace) is the 1.1.0 default; 'hessian' is the accurate/AGQ opt-in. nagq: 1 = Laplace. df_method: 'auto' is the default and picks the test per design (between-within df for a single-grouping LMM without a primary random slope and for any single-grouping GLMM, Satterthwaite df for any other LMM, Wald z for a crossed or nested GLMM); 'between_within', 'satterthwaite' and 'asymptotic' name one test each. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq, DfMethod::default) — change together.",
     "wald_se": "rx",
     "nagq": 1,
-    "df_method": "between_within"
+    "df_method": "auto"
   },
   "benchmarks": {
     "continuous": [0.1, 0.25, 0.4],
@@ -22,6 +22,9 @@
     "odds": [0.405, 0.916, 1.386]
   },
   "limits": {
+    "sample_size": [20, 100000],
+    "_sample_size_base_note": "Green's rule of thumb: N >= sample_size_base + the number of design columns.",
+    "sample_size_base": 15,
     "max_alpha": 0.25,
     "icc_stability": [0.05, 0.95],
     "baseline_p_warn": [0.05, 0.95],
@@ -29,7 +32,6 @@
     "min_clusters": 5,
     "glmm_reliable_clusters": 20,
     "min_rows_per_cluster": 2,
-    "reliable_rows_per_cluster": 5,
     "recommended_rows_per_cluster": 10,
     "factor_min_level_count": 5
   },

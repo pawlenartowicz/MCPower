@@ -45,6 +45,24 @@ fn opts(target_power: f64, x_divisor: usize) -> PlotOptions {
     }
 }
 
+/// Per-entry flags for the displayed power: the engine's
+/// `corrected_not_applicable` when the corrected arrays are shown, none for
+/// the uncorrected ones (always defined).
+fn displayed_not_applicable(pr: &PowerResult, corrected: bool) -> Vec<bool> {
+    if corrected {
+        pr.corrected_not_applicable.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether the corrected joint view (the at-least-k / exactly-k curves,
+/// always built from the corrected histogram) is not applicable: any target
+/// has no corrected power.
+fn joint_not_applicable(pr: &PowerResult) -> bool {
+    pr.corrected_not_applicable.iter().any(|&na| na)
+}
+
 /// One find_power scenario → a single-point `PlotScenario` (power-at-N bar).
 /// `corrected` selects which power/CI arrays are loaded into the plot point.
 fn power_scenario(label: &str, pr: &PowerResult, corrected: bool) -> PlotScenario {
@@ -65,6 +83,8 @@ fn power_scenario(label: &str, pr: &PowerResult, corrected: bool) -> PlotScenari
         // `None` whenever the family suppressed the overall test (mixed/GLMM).
         overall_power: pr.overall_significant_rate,
         overall_ci: pr.overall_significant_ci,
+        not_applicable: displayed_not_applicable(pr, corrected),
+        joint_not_applicable: joint_not_applicable(pr),
     };
     PlotScenario {
         label: label.to_string(),
@@ -97,6 +117,8 @@ fn sample_size_scenario(label: &str, ssr: &SampleSizeResult, corrected: bool) ->
                 // suppressed the overall test (mixed/GLMM), so no series renders.
                 overall_power: pr.overall_significant_rate,
                 overall_ci: pr.overall_significant_ci,
+                not_applicable: displayed_not_applicable(pr, corrected),
+                joint_not_applicable: joint_not_applicable(pr),
                 // Corrected histogram (the power line above stays corrected or
                 // uncorrected per `corrected`): the joint-detection curve reads
                 // `PlotPoint.histogram` and MUST use the corrected counts so

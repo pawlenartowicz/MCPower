@@ -278,13 +278,16 @@ when a design falls outside them.
 
 ### Denominator degrees of freedom
 
-Any mixed model (LME or clustered GLMM) also accepts `df_method`: the default
-`"between_within"` tests each fixed effect against a *t* with between-within
+Any mixed model (LME or clustered GLMM) also accepts `df_method`. The default
+`"auto"` picks the test from the design: a *t* with between-within
 denominator degrees of freedom (between-cluster df for a cluster-level
-predictor, within-cluster df otherwise); with a crossed or nested extra
-grouping it uses Satterthwaite df for an LME and the Wald z for a GLMM.
-`"asymptotic"` opts into the Wald z. The calibration
-of both against lmerTest Satterthwaite is on the
+predictor, within-cluster df otherwise) for a single grouping factor without
+a random slope and for any single-grouping GLMM; Satterthwaite df, as lmerTest
+computes them, for an LME with a random slope or with a crossed or nested
+grouping; the Wald z for a GLMM with a crossed or nested grouping.
+`"between_within"` (single grouping only), `"satterthwaite"` (LME only) and
+`"asymptotic"` (Wald z) name one test each. The calibration against lmerTest
+Satterthwaite is on the
 [[validation/validation_df_calibration|denominator-df calibration page]].
 
 ```r

@@ -218,18 +218,18 @@ def build_linear_spec(
     wald_se_wire = wald_se.lower().replace("-", "_").replace(" ", "_")
 
     # df_method: same normalisation pattern as wald_se (the caller resolves the
-    # `estimation.df_method` default). "between_within" (between-within
-    # denominator df for mixed fits, the default) or "asymptotic" (Wald z) are
-    # the valid wire values; validation already ran in _validate_df_method_arg.
+    # `estimation.df_method` default). "auto" (the default), "between_within",
+    # "satterthwaite" and "asymptotic" are the valid wire values; validation
+    # already ran in _validate_df_method_arg.
     df_method_wire = df_method.lower().replace("-", "_").replace(" ", "_")
 
     # Scenarios — pre-encode through `build_scenario_dict` so the integer
     # code translation matches the existing Python projection exactly.
     scenarios = [build_scenario_dict(name, scenario_configs) for name in scenario_names]
-    # RE knobs (random_effect_dist/df, icc_noise_sd) are LME-only: the
-    # engine contract rejects lme: Some(...) when the estimator is not Mle.
-    # Zero them out for non-LME families so the spec-builder always
-    # produces lme: None at the contract level for those calls.
+    # RE knobs (random_effect_dist/df, icc_noise_sd) perturb the random
+    # effects, so they apply to every clustered model; the engine contract
+    # rejects lme: Some(...) without a cluster. Zero them out for a model
+    # without random effects so the spec-builder produces lme: None there.
     if not registry._random_effects_parsed:
         for sc in scenarios:
             sc["random_effect_dist"] = 0
@@ -286,11 +286,11 @@ def build_linear_spec(
         wire_contrast_pairs = list(user_contrast_pairs)
         wire_report_overall = report_overall
 
-    # Tukey HSD is a family-wide correction for post-hoc contrast families;
-    # applying it to individual β tests is a category error. If the user also
-    # requested explicit marginal β targets (i.e. named effect targets, NOT
-    # the magic ["overall"] family-default shorthand), warn and proceed —
-    # those targets will be reported uncorrected.
+    # Tukey HSD is a family-wide correction for factor-level contrasts. If the
+    # user also requested explicit marginal β targets (named effect targets,
+    # NOT the magic ["overall"] family-default shorthand), warn and proceed:
+    # factor levels get Tukey-corrected power, every other target reports its
+    # corrected power as n/a (the engine flags it `corrected_not_applicable`).
     # The magic ["overall"] default (target_test=None path) is not subject
     # to this warning because it signifies "all betas" without a specific
     # Tukey family intent from the user.
@@ -299,8 +299,9 @@ def build_linear_spec(
     )
     if correction_wire == "tukey_hsd" and _has_named_beta_targets:
         warnings.warn(
-            "Tukey HSD applies only to post-hoc contrast families; the marginal "
-            "coefficient test(s) you requested are reported uncorrected.",
+            "Tukey HSD corrects factor-level contrasts only: factor levels get "
+            "Tukey-corrected power, and continuous, binary and interaction targets "
+            "report corrected power as n/a.",
             UserWarning,
             stacklevel=4,
         )

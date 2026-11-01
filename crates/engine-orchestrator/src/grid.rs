@@ -200,7 +200,8 @@ fn derive_first_achieved(
 pub(crate) struct SampleSizeDerivations {
     pub first_achieved: Vec<Option<usize>>,
     pub first_joint_achieved: Vec<Option<usize>>,
-    pub fitted: Vec<CrossingFit>,
+    /// `None` for a target flagged in `PowerResult.corrected_not_applicable`.
+    pub fitted: Vec<Option<CrossingFit>>,
     pub fitted_joint: Vec<CrossingFit>,
     /// Grid-empirical / model-based crossing for the overall (omnibus) test.
     /// Both `None` when the grid carries no overall test (OLS F / unclustered
@@ -225,13 +226,27 @@ pub(crate) struct SampleSizeDerivations {
 /// (an empty histogram among populated ones), so a merged histogram's row sum
 /// equals the pooled `n_sims`, as it does for fresh `aggregate_batch` output
 /// (rows sum to `n_sims` by invariant).
+///
+/// A target flagged in `corrected_not_applicable` (read off grid point 0;
+/// every point carries the spec's same flags) has no corrected power, so its
+/// `first_achieved` and `fitted` entries are `None`.
 pub(crate) fn derive_sample_size_outputs(
     per_n: &[PowerResult],
     sample_sizes: &[usize],
     target_power: f64,
     atom: usize,
 ) -> SampleSizeDerivations {
-    let first_achieved = derive_first_achieved(per_n, sample_sizes, target_power);
+    let not_applicable: &[bool] = per_n
+        .first()
+        .map(|pr| pr.corrected_not_applicable.as_slice())
+        .unwrap_or(&[]);
+    let is_na = |t: usize| not_applicable.get(t).copied().unwrap_or(false);
+    let first_achieved: Vec<Option<usize>> =
+        derive_first_achieved(per_n, sample_sizes, target_power)
+            .into_iter()
+            .enumerate()
+            .map(|(t, n)| if is_na(t) { None } else { n })
+            .collect();
 
     let n_sims = per_n.first().map(|pr| pr.n_sims).unwrap_or(0);
     // Marginals + contrasts — mirrors derive_first_achieved above.
@@ -239,13 +254,22 @@ pub(crate) fn derive_sample_size_outputs(
         .first()
         .map(|pr| pr.success_counts_corrected.len())
         .unwrap_or(0);
-    let fitted: Vec<CrossingFit> = (0..n_targets)
+    let fitted: Vec<Option<CrossingFit>> = (0..n_targets)
         .map(|t| {
+            if is_na(t) {
+                return None;
+            }
             let counts: Vec<u64> = per_n
                 .iter()
                 .map(|pr| pr.success_counts_corrected[t])
                 .collect();
-            fit_crossing(sample_sizes, &counts, n_sims, target_power, atom)
+            Some(fit_crossing(
+                sample_sizes,
+                &counts,
+                n_sims,
+                target_power,
+                atom,
+            ))
         })
         .collect();
 
@@ -552,6 +576,7 @@ mod overall_derivation_tests {
             power_corrected: vec![0.0],
             ci_uncorrected: vec![Ci { lo: 0.0, hi: 0.0 }],
             ci_corrected: vec![Ci { lo: 0.0, hi: 0.0 }],
+            corrected_not_applicable: vec![],
             convergence_rate: 1.0,
             boundary_hit: vec![],
             estimator_extras: EstimatorExtras::Ols {},

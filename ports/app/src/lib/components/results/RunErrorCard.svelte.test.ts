@@ -50,7 +50,7 @@ describe('RunErrorCard', () => {
   });
 
   it('frames a cluster_setup error with the dedicated lead-in and no redundant Show toggle', () => {
-    const engineMsg = 'FixedSize cluster regime needs cluster_size >= 2; got 1';
+    const engineMsg = 'a cluster needs at least 2 observations to separate its random effects from the residual; got 1';
     runStore.lastError = {
       severity: 'run',
       kind: 'cluster_setup',

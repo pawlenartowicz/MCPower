@@ -132,6 +132,28 @@ def test_set_cluster_rejects_icc_out_of_range():
         m.set_cluster("school", ICC=1.5, n_clusters=10)
 
 
+@pytest.mark.parametrize(
+    "family, kwargs, message",
+    [
+        ("lme", {"ICC": float("nan")}, "ICC must be a finite number, got nan"),
+        ("lme", {"ICC": 0.2, "random_slopes": ["x1"], "slope_variance": float("nan")},
+         "slope_variance must be a finite number, got nan"),
+        ("lme", {"ICC": 0.2, "random_slopes": ["x1"], "slope_variance": float("inf")},
+         "slope_variance must be a finite number, got inf"),
+        ("lme", {"ICC": 0.2, "random_slopes": ["x1"], "slope_intercept_corr": float("nan")},
+         "slope_intercept_corr must be a finite number, got nan"),
+        ("poisson", {"tau_squared": float("inf")},
+         "tau_squared must be a finite non-negative number, got inf"),
+    ],
+)
+def test_set_cluster_names_a_non_finite_number(family, kwargs, message):
+    # A NaN or infinity used to reach the engine as invalid clusters JSON.
+    m = MCPower("y ~ x1 + (1 + x1|school)", family=family)
+    m.set_effects("x1=0.5")
+    with pytest.raises(ValueError, match=message):
+        m.set_cluster("school", n_clusters=10, **kwargs)
+
+
 def test_set_cluster_rejects_unknown_grouping_var():
     m = MCPower("y ~ x1 + (1|school)", family="lme")
     m.set_effects("x1=0.5")
@@ -393,6 +415,49 @@ def test_clusters_json_no_slopes_key_absent():
     assert "slopes" not in specs[0]
 
 
+def test_formula_slope_without_set_cluster_slope_is_refused():
+    """A slope written only in the formula is refused before anything runs,
+    naming the variable and the set_cluster fix, rather than being fitted as a
+    random intercept."""
+    m = MCPower("y = x1 + x2 + (1 + x2|g)", family="lme")
+    m.set_effects("x1=0.3, x2=0.3")
+    m.set_cluster("g", ICC=0.2, n_clusters=20)
+    with pytest.raises(ValueError, match=r"random slope on 'x2'.*add 'x2' to random_slopes"):
+        m.find_power(200, n_sims=20, progress_callback=False, verbose=False)
+
+
+def test_set_cluster_slope_without_formula_slope_is_refused():
+    """The reverse: set_cluster gives x2 a random slope that the formula's
+    '(1|g)' does not declare, so the stated model and the fitted one differ."""
+    m = MCPower("y = x1 + x2 + (1|g)", family="lme")
+    m.set_effects("x1=0.3, x2=0.3")
+    m.set_cluster("g", ICC=0.2, n_clusters=20, random_slopes=["x2"], slope_variance=0.1)
+    with pytest.raises(ValueError, match=r"write '\(1 \+ x2\|g\)' in the formula"):
+        m.find_power(200, n_sims=20, progress_callback=False, verbose=False)
+
+
+def test_nested_child_slope_from_set_cluster_alone_runs():
+    """The formula cannot write a slope on a nested child ('(1 + x|school/classroom)'
+    does not parse), so set_cluster is the only route: a nested-child slope with
+    a plain '(1|school/classroom)' formula runs and reaches the engine."""
+    m = MCPower("y ~ x + (1|school/classroom)", family="lme")
+    m.set_effects("x=0.4")
+    m.set_cluster("school", ICC=0.15, n_clusters=10)
+    m.set_cluster(
+        "school:classroom", ICC=0.10, n_per_parent=3, random_slopes=["x"], slope_variance=0.1
+    )
+    _, _, _, _, clusters_json = m._encode_outcome_and_clusters()
+    assert len(_json.loads(clusters_json)[0]["extra_groupings"][0]["slopes"]) == 1
+    res = m.find_power(300, n_sims=20, seed=2137, progress_callback=False, verbose=False)
+    assert 0.0 <= res["power_uncorrected"][0][0] <= 1.0
+
+
+def test_double_bar_random_effect_is_refused():
+    """lme4's uncorrelated '||' syntax gets its own message, not a syntax error."""
+    with pytest.raises(ValueError, match=r"uncorrelated random effects \('\|\|'\)"):
+        MCPower("y = x1 + (1 + x1 || g)", family="lme")
+
+
 # Engine-required smoke tests — these call find_power end-to-end.
 # Requires: maturin develop --release (Phase 0 engine changes must land first).
 
@@ -531,3 +596,145 @@ def test_extra_grouping_no_slopes_key_absent():
     spec = m._build_cluster_spec_dict()
     extra = spec["extra_groupings"][0]
     assert "slopes" not in extra
+
+
+@pytest.mark.parametrize(
+    "family, formula, setup, message",
+    [
+        ("logit", "y = x + (1 + x|g)", lambda m: m.set_baseline_probability(0.3),
+         r"^the random-effect term on 'g' has no set_cluster call"),
+        ("logit", "y = x + (1|g)", lambda m: m.set_baseline_probability(0.3),
+         r"^the random-effect term on 'g' has no set_cluster call"),
+        ("poisson", "y = x + (1|g)", lambda m: m.set_baseline_rate(1.0),
+         r"^the random-effect term on 'g' has no set_cluster call"),
+        ("lme", "y = x + (1|g)", lambda m: None,
+         r"^family='lme' requires set_cluster\(\.\.\.\) for each random effect"),
+    ],
+)
+def test_random_effect_without_set_cluster_is_refused(family, formula, setup, message):
+    """A random-effect term with no set_cluster call stops the run in every
+    family; a non-lme family used to run unclustered, dropping the random
+    intercept and slope without notice."""
+    m = MCPower(formula, family=family)
+    m.set_effects("x=0.5")
+    setup(m)
+    with pytest.raises(ValueError, match=message):
+        m.find_power(200, n_sims=20, verbose=False)
+
+
+def test_random_effect_without_set_cluster_names_the_nested_grouping():
+    """The refusal names the grouping as the formula declares it, not a
+    rewritten '(1|g)' term."""
+    m = MCPower("y = x + (1|school/class)", family="lme")
+    m.set_effects("x=0.5")
+    m.set_cluster("school", ICC=0.2, n_clusters=20)
+    with pytest.raises(
+        ValueError,
+        match=r"^the random-effect term on 'school:class' has no set_cluster call",
+    ):
+        m.find_power(1200, n_sims=20, verbose=False)
+
+
+def test_non_psd_slope_correlations_are_a_user_error():
+    """One intercept correlation over two uncorrelated slopes is not a valid
+    correlation matrix; the contract rule reaches Python as ValueError with
+    its own message, not as an internal RuntimeError."""
+    m = MCPower("y = x1 + x2 + (1 + x1 + x2|g)", family="lme")
+    m.set_effects("x1=0.3, x2=0.2")
+    m.set_cluster(
+        "g", ICC=0.2, n_clusters=20, random_slopes=["x1", "x2"],
+        slope_variance=0.1, slope_intercept_corr=0.9,
+    )
+    with pytest.raises(ValueError) as exc:
+        m.find_power(400, n_sims=20, verbose=False)
+    assert str(exc.value).startswith(
+        "the random-slope correlations are not a valid correlation matrix"
+    )
+    assert "internal" not in str(exc.value)
+
+
+def test_clustered_ols_runs_with_scenarios():
+    """OLS fitted to clustered data runs the scenario analysis with its
+    random-effect settings: the port hands the engine realistic and doomer
+    scenarios with a nonzero ICC jitter (data generation draws the random
+    effects for it as for a mixed model), the engine accepts them, and power
+    falls from optimistic to realistic to doomer."""
+    m = MCPower("y ~ x + (1|g)")
+    m.set_effects("x=0.3")
+    m.set_cluster("g", ICC=0.2, n_clusters=10)
+    payload = m._to_linear_spec_dict(["realistic", "doomer"])
+    assert all(sc["icc_noise_sd"] > 0 for sc in payload["scenarios"])
+    res = m.find_power(
+        100, n_sims=200, seed=2137, scenarios=True,
+        progress_callback=False, verbose=False,
+    )
+    power = {
+        name: res["scenarios"][name]["power_uncorrected"][0][0]
+        for name in ("optimistic", "realistic", "doomer")
+    }
+    assert power["optimistic"] > power["realistic"] > power["doomer"], power
+
+
+def test_get_effects_from_data_with_one_group_is_a_user_error():
+    """The upload path pins n_clusters to the data's distinct groups, so one
+    group reaches the engine's cluster-count rule as a ValueError with its
+    own message."""
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.default_rng(3)
+    x = rng.normal(size=60)
+    m = MCPower("y ~ x + (1|group)", family="lme")
+    m.set_cluster("group", ICC=0.2, n_clusters=4)
+    m.upload_data(
+        pd.DataFrame({"y": 0.4 * x + rng.normal(size=60), "x": x, "group": 0}),
+        mode="partial", verbose=False,
+    )
+    with pytest.raises(ValueError) as exc:
+        m.get_effects_from_data("y", verbose=False)
+    assert str(exc.value).startswith("n_clusters must be an integer >= 2, got 1")
+
+
+def test_random_slopes_need_a_positive_variance():
+    m = MCPower("y ~ x + (1 + x|g)", family="lme")
+    for kwargs in ({}, {"slope_variance": 0.0}):
+        with pytest.raises(ValueError, match="random_slopes need a slope_variance above 0"):
+            m.set_cluster("g", ICC=0.2, n_clusters=20, random_slopes=["x"], **kwargs)
+
+
+def test_repeated_random_slope_is_refused():
+    m = MCPower("y ~ x + (1 + x + x|g)", family="lme")
+    m.set_effects("x=0.3")
+    m.set_cluster("g", ICC=0.2, n_clusters=20, random_slopes=["x", "x"], slope_variance=0.1)
+    with pytest.raises(ValueError, match="list each slope variable once"):
+        m.find_power(400, n_sims=20, seed=1)
+
+
+def test_crossed_grouping_slopes_need_a_valid_covariance():
+    def model(icc, corr):
+        m = MCPower("y ~ x1 + x2 + (1|subject) + (1 + x1 + x2|item)", family="lme")
+        m.set_effects("x1=0.3, x2=0.3")
+        m.set_cluster("subject", ICC=0.2, n_clusters=20)
+        m.set_cluster("item", ICC=icc, n_clusters=12, random_slopes=["x1", "x2"],
+                      slope_variance=0.1, slope_intercept_corr=corr)
+        return m
+
+    with pytest.raises(ValueError, match="not a valid correlation matrix"):
+        model(0.2, 0.9).find_power(480, n_sims=20, seed=1)
+    with pytest.raises(ValueError, match="random-intercept variance above 0"):
+        model(0.0, 0.3).find_power(480, n_sims=20, seed=1)
+
+
+def test_ols_test_formula_may_drop_a_slope_variable():
+    m = MCPower("y ~ x1 + x2 + (1 + x2|g)", family="ols")
+    m.set_effects("x1=0.3, x2=0.3")
+    m.set_cluster("g", ICC=0.2, n_clusters=20, random_slopes=["x2"], slope_variance=0.1)
+    res = m.find_power(240, n_sims=20, seed=1, test_formula="y ~ x1", target_test="x1")
+    assert len(res["power_uncorrected"][0]) == 1
+
+
+def test_estimator_glm_on_a_continuous_outcome_is_a_user_error():
+    m = MCPower("y ~ x1", family="ols", estimator="glm")
+    m.set_effects("x1=0.3")
+    with pytest.raises(ValueError, match="needs a binary or count outcome"):
+        m.find_power(100, n_sims=20, seed=1)

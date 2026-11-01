@@ -42,7 +42,7 @@ test_that(".scenario_dict realistic emits heavy_tailed code for random_effect_di
 test_that("set_scenario_configs stores icc_noise_sd", {
   m <- MCPower$new("y ~ x1 + (1|g)")$
     set_effects("x1=0.3")$
-    set_cluster("g", ICC = 0.1, n_clusters = 20L, cluster_size = 25L)
+    set_cluster("g", ICC = 0.1, n_clusters = 20L)
   m$set_scenario_configs(list(optimistic = list(icc_noise_sd = 0.05)))
   # Assert the value landed in private$scenario_configs — a silent no-op setter would
   # pass expect_no_error. Also de-duplicates the smoke loop in test-apic-surface.R.
@@ -56,7 +56,7 @@ test_that("set_scenario_configs stores icc_noise_sd", {
 test_that("set_scenario_configs stores random_effect_dist", {
   m <- MCPower$new("y ~ x1 + (1|g)")$
     set_effects("x1=0.3")$
-    set_cluster("g", ICC = 0.1, n_clusters = 20L, cluster_size = 25L)
+    set_cluster("g", ICC = 0.1, n_clusters = 20L)
   m$set_scenario_configs(list(optimistic = list(random_effect_dist = "heavy_tailed")))
   expect_equal(
     m$.__enclos_env__$private$scenario_configs[["optimistic"]][["random_effect_dist"]],
@@ -68,7 +68,7 @@ test_that("set_scenario_configs stores random_effect_dist", {
 test_that("set_scenario_configs stores random_effect_df", {
   m <- MCPower$new("y ~ x1 + (1|g)")$
     set_effects("x1=0.3")$
-    set_cluster("g", ICC = 0.1, n_clusters = 20L, cluster_size = 25L)
+    set_cluster("g", ICC = 0.1, n_clusters = 20L)
   m$set_scenario_configs(list(optimistic = list(random_effect_df = 5.0)))
   expect_equal(
     m$.__enclos_env__$private$scenario_configs[["optimistic"]][["random_effect_df"]],

@@ -60,9 +60,10 @@ pub(crate) fn cluster_to_model_spec(
     primary_slope_cols: &[u32],
     extra_slope_cols: &[Vec<u32>],
 ) -> glmm::ModelSpec {
-    // Empty is the deliberate "slopes are stripped right after" call (batch.rs's
-    // reduced/exclusion fit); anything else must match 1:1 or a grouping would
-    // silently lose its slopes and fit as a second random intercept.
+    // Empty is allowed only for a grouping set without slopes (test specs that
+    // leave the per-extra lists unset); anything else must match 1:1 or a
+    // grouping would silently lose its slopes and fit as a second random
+    // intercept.
     debug_assert!(
         primary_slope_cols.is_empty() || primary_slope_cols.len() == c.slopes.len(),
         "primary_slope_cols must line up 1:1 with ClusterSpec.slopes"
@@ -86,6 +87,28 @@ pub(crate) fn cluster_to_model_spec(
     glmm::ModelSpec::mixed(family, re)
 }
 
+/// The spec's random-slope columns as positions in `kept`, the ascending
+/// full-design columns of a reduced fitted design (`test_formula` and/or
+/// factor exclusion). glmm reads a slope as an index into the FITTED x, so a
+/// reduced fit must name the slope's reduced position, not its full-design
+/// column. The contract keeps every slope variable in every fitted design, and
+/// factor exclusion drops only dummies and their interactions, never a
+/// continuous slope column. Returns `(primary, per-extra-grouping)`, lined up
+/// with `cluster_slope_design_cols` / `extra_slope_cols`.
+pub(crate) fn slope_cols_in(spec: &SimulationSpec, kept: &[u32]) -> (Vec<u32>, Vec<Vec<u32>>) {
+    let pos = |c: &u32| {
+        kept.binary_search(c)
+            .expect("a random-slope column is in every fitted design") as u32
+    };
+    (
+        spec.cluster_slope_design_cols.iter().map(pos).collect(),
+        spec.extra_slope_cols
+            .iter()
+            .map(|g| g.iter().map(pos).collect())
+            .collect(),
+    )
+}
+
 /// The DGP-truth warm-start θ (RE Cholesky parameters) in the kernel's
 /// column-major vech layout — what `glmm::loop_advanced::fit_on`
 /// accepts as `theta_start`. One block per grouping (primary, then extras in
@@ -101,40 +124,28 @@ pub(crate) fn cluster_to_model_spec(
 /// truth asserts well-behaved estimation. The MLE is start-sensitive (BOBYQA can
 /// settle in different local optima), so a truth start and a blind start are not
 /// interchangeable — the caller gates it on the scenario's `truth_start`.
-///
-/// `include_slopes = false` collapses every grouping to intercept-only (`q = 1`,
-/// θ block = `τ`): the reduced-p exclusion fit in batch.rs drops all random
-/// slopes, so its warm start must match that reduced RE structure.
-pub(crate) fn truth_theta(c: &engine_contract::ClusterSpec, include_slopes: bool) -> Vec<f64> {
+pub(crate) fn truth_theta(c: &engine_contract::ClusterSpec) -> Vec<f64> {
     let mut theta = Vec::new();
     let (q, r) = c.re_correlation_matrix();
-    push_grouping_vech(&mut theta, c.tau_squared, &c.slopes, q, &r, include_slopes);
+    push_grouping_vech(&mut theta, c.tau_squared, &c.slopes, q, &r);
     for g in &c.extra_groupings {
         let (qg, rg) = g.re_correlation_matrix();
-        push_grouping_vech(
-            &mut theta,
-            g.tau_squared,
-            &g.slopes,
-            qg,
-            &rg,
-            include_slopes,
-        );
+        push_grouping_vech(&mut theta, g.tau_squared, &g.slopes, qg, &rg);
     }
     theta
 }
 
 /// Append one grouping's θ block (column-major vech of `chol(D)`) to `theta`.
-/// Intercept-only (`include_slopes = false` or no slopes) is the `q = 1` scalar
-/// `τ = √tau_squared`. `r` is the `q×q` row-major RE correlation matrix.
+/// Intercept-only (no slopes) is the `q = 1` scalar `τ = √tau_squared`. `r` is
+/// the `q×q` row-major RE correlation matrix.
 fn push_grouping_vech(
     theta: &mut Vec<f64>,
     tau_squared: f64,
     slopes: &[engine_contract::SlopeTerm],
     q: usize,
     r: &[f64],
-    include_slopes: bool,
 ) {
-    if !include_slopes || slopes.is_empty() {
+    if slopes.is_empty() {
         theta.push(tau_squared.max(0.0).sqrt());
         return;
     }
@@ -217,10 +228,11 @@ pub fn build_mixed_workspaces(
     // `test_formula` reduced fit (GLM only): the FIXED design fits just
     // `spec.fit_columns` (ascending kernel cols, intercept always present), so the
     // β-dimension `p` is the reduced count and the joint [θ|β] BOBYQA plus every
-    // p-sized inference scratch match it. The RE design Z stays FULL — a random
-    // slope may reference a fixed term the test formula drops. Empty / covers-all
-    // ⇒ full. The LMM arm keeps the full width; its reduced/exclusion fits build
-    // their own one-shot workspace on the cold path.
+    // p-sized inference scratch match it. The random slopes move with their
+    // columns: each is remapped to its position in `fit_columns` (the contract
+    // keeps every slope variable in the test design). Empty ⇒ full. The LMM arm
+    // keeps the full width; its reduced/exclusion fits build their own one-shot
+    // workspace on the cold path.
     let p = match spec.estimator {
         engine_contract::EstimatorSpec::Glm
             if !spec.fit_columns.is_empty() && spec.fit_columns.len() < n_predictors =>
@@ -235,12 +247,20 @@ pub fn build_mixed_workspaces(
     // workspace may present its remapped target set of the same length. nagq's
     // eligibility backstop ran in validate().
     let opts = fit_options(spec, spec.target_indices.clone());
-    let model = cluster_to_model_spec(
-        cluster,
-        family,
-        &spec.cluster_slope_design_cols,
-        &spec.extra_slope_cols,
-    );
+    // A covers-all `fit_columns` (the debug path passes the fitted width as
+    // `n_predictors`) maps every slope to itself.
+    let model =
+        if spec.estimator == engine_contract::EstimatorSpec::Glm && !spec.fit_columns.is_empty() {
+            let (primary, extra) = slope_cols_in(spec, &spec.fit_columns);
+            cluster_to_model_spec(cluster, family, &primary, &extra)
+        } else {
+            cluster_to_model_spec(
+                cluster,
+                family,
+                &spec.cluster_slope_design_cols,
+                &spec.extra_slope_cols,
+            )
+        };
     let mut workspaces = Vec::with_capacity(sample_sizes.len());
     let mut ids_per_point = Vec::with_capacity(sample_sizes.len());
     for &n in sample_sizes {
@@ -331,7 +351,7 @@ mod tests {
     }
 
     /// Intercept-only primary + intercept-only extra: one scalar τ = √tau_squared
-    /// per grouping, primary first. No slopes ⇒ `include_slopes` is inert.
+    /// per grouping, primary first.
     #[test]
     fn truth_theta_intercept_only_is_sqrt_tau_per_grouping() {
         let c = engine_contract::ClusterSpec {
@@ -344,9 +364,7 @@ mod tests {
                 slopes: vec![],
             }],
         };
-        approx(&truth_theta(&c, true), &[0.5, 0.3]);
-        // No slopes anywhere, so the include_slopes flag changes nothing.
-        approx(&truth_theta(&c, false), &[0.5, 0.3]);
+        approx(&truth_theta(&c), &[0.5, 0.3]);
     }
 
     /// One random slope: θ is the column-major lower-tri vech of Λ = chol(D).
@@ -366,8 +384,6 @@ mod tests {
             }],
             extra_groupings: vec![],
         };
-        approx(&truth_theta(&c, true), &[2.0, 0.5, 1.0]);
-        // The exclusion fit drops the slope (q = 1): θ collapses to just √τ₀².
-        approx(&truth_theta(&c, false), &[2.0]);
+        approx(&truth_theta(&c), &[2.0, 0.5, 1.0]);
     }
 }

@@ -6,7 +6,7 @@
 //! `find_power(contract, sum(n_sims))` within MC noise — bit-equality is
 //! intentionally not guaranteed because workers walk independent RNG paths.
 
-use crate::aggregation::wilson_ci;
+use crate::aggregation::{mask_not_applicable, wilson_ci};
 use crate::grid::derive_sample_size_outputs;
 use crate::result::{
     ByValue, Ci, EstimatorExtras, OrchestratorError, PosthocPower, PowerResult, SampleSizeMethod,
@@ -82,6 +82,14 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
                 .into(),
         ));
     }
+    // The not-applicable flags come from the spec, so a real part carries
+    // none (any correction but Tukey) or one per power-vector entry.
+    if !head.corrected_not_applicable.is_empty() && head.corrected_not_applicable.len() != n_targets
+    {
+        return Err(OrchestratorError::IncompatibleMerge(
+            "corrected_not_applicable length does not match target_indices + contrast_pairs".into(),
+        ));
+    }
     // The pooling loop reads both factor vectors at the exclusion length, so
     // the head's two must agree (each part is then checked against the head).
     if head.factor_separation_counts.len() != head.factor_exclusion_counts.len() {
@@ -96,6 +104,18 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
     // so reject the mismatch like the sibling success_counts vectors (an all-empty merge
     // stays empty).
     let hist_len = head.success_count_histogram_uncorrected.len();
+    // The corrected histogram has the same length, or none at all when a
+    // target is flagged `corrected_not_applicable` (the corrected joint view
+    // is not applicable then; `aggregate_batch` leaves it empty).
+    let any_not_applicable = head.corrected_not_applicable.iter().any(|&na| na);
+    let hist_cor_len = if any_not_applicable { 0 } else { hist_len };
+    if head.success_count_histogram_corrected.len() != hist_cor_len {
+        return Err(OrchestratorError::IncompatibleMerge(
+            "success_count_histogram_corrected length does not match the \
+             corrected_not_applicable flags"
+                .into(),
+        ));
+    }
     for p in &prs[1..] {
         if p.n != head.n {
             return Err(OrchestratorError::IncompatibleMerge(format!(
@@ -111,6 +131,11 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
         if p.contrast_pairs != head.contrast_pairs {
             return Err(OrchestratorError::IncompatibleMerge(
                 "contrast_pairs mismatch".into(),
+            ));
+        }
+        if p.corrected_not_applicable != head.corrected_not_applicable {
+            return Err(OrchestratorError::IncompatibleMerge(
+                "corrected_not_applicable mismatch across parts".into(),
             ));
         }
         if std::mem::discriminant(&p.estimator_extras)
@@ -143,7 +168,7 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
             ));
         }
         if p.success_count_histogram_uncorrected.len() != hist_len
-            || p.success_count_histogram_corrected.len() != hist_len
+            || p.success_count_histogram_corrected.len() != hist_cor_len
         {
             return Err(OrchestratorError::IncompatibleMerge(
                 "success_count_histogram length mismatch across parts — a part was \
@@ -166,7 +191,7 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
     let mut pooled_n_sims = 0u64;
     let mut pooled_boundary: Vec<u8> = Vec::new();
     let mut pooled_hist_unc = vec![0u64; hist_len];
-    let mut pooled_hist_cor = vec![0u64; hist_len];
+    let mut pooled_hist_cor = vec![0u64; hist_cor_len];
     let mut pooled_excl = vec![0u64; n_factors];
     let mut pooled_sep = vec![0u64; n_factors];
 
@@ -179,9 +204,17 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
         pooled_overall += p.overall_significant_count;
         pooled_n_sims += p.n_sims;
         pooled_boundary.extend_from_slice(&p.boundary_hit);
-        for b in 0..hist_len {
-            pooled_hist_unc[b] += p.success_count_histogram_uncorrected[b];
-            pooled_hist_cor[b] += p.success_count_histogram_corrected[b];
+        for (acc, &k) in pooled_hist_unc
+            .iter_mut()
+            .zip(&p.success_count_histogram_uncorrected)
+        {
+            *acc += k;
+        }
+        for (acc, &k) in pooled_hist_cor
+            .iter_mut()
+            .zip(&p.success_count_histogram_corrected)
+        {
+            *acc += k;
         }
         for f in 0..n_factors {
             pooled_excl[f] += p.factor_exclusion_counts[f];
@@ -196,15 +229,18 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
     }
     let denom = pooled_n_sims as f64;
     let power_unc: Vec<f64> = pooled_unc.iter().map(|&k| k as f64 / denom).collect();
-    let power_cor: Vec<f64> = pooled_cor.iter().map(|&k| k as f64 / denom).collect();
+    let mut power_cor: Vec<f64> = pooled_cor.iter().map(|&k| k as f64 / denom).collect();
     let ci_unc: Vec<Ci> = pooled_unc
         .iter()
         .map(|&k| wilson_ci(k, pooled_n_sims))
         .collect();
-    let ci_cor: Vec<Ci> = pooled_cor
+    let mut ci_cor: Vec<Ci> = pooled_cor
         .iter()
         .map(|&k| wilson_ci(k, pooled_n_sims))
         .collect();
+    // Same rule as `aggregate_batch`: a flagged target's pooled corrected
+    // count is 0, but its rate is not applicable, not 0.0.
+    mask_not_applicable(&mut power_cor, &mut ci_cor, &head.corrected_not_applicable);
 
     let merged_extras = merge_estimator_extras(prs, pooled_n_sims)?;
 
@@ -222,6 +258,7 @@ fn merge_one_power_result(prs: &[&PowerResult]) -> Result<PowerResult, Orchestra
         power_corrected: power_cor,
         ci_uncorrected: ci_unc,
         ci_corrected: ci_cor,
+        corrected_not_applicable: head.corrected_not_applicable.clone(),
         convergence_rate: pooled_conv as f64 / denom,
         boundary_hit: pooled_boundary,
         estimator_extras: merged_extras,
@@ -382,6 +419,13 @@ pub fn merge_sample_size_results(
                     return Err(OrchestratorError::IncompatibleMerge(format!(
                         "grid point {} of scenario {s_idx} has a different target count \
                          than grid point 0",
+                        n_idx + 1
+                    )));
+                }
+                if pr.corrected_not_applicable != first.corrected_not_applicable {
+                    return Err(OrchestratorError::IncompatibleMerge(format!(
+                        "grid point {} of scenario {s_idx} has different \
+                         corrected_not_applicable flags than grid point 0",
                         n_idx + 1
                     )));
                 }

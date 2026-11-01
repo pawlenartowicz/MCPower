@@ -215,6 +215,32 @@ impl GroupingSpec {
     pub fn re_correlation_matrix(&self) -> (usize, Vec<f64>) {
         re_correlation_from_slopes(&self.slopes)
     }
+
+    /// True iff this grouping's `D_g` is PSD; same test as the primary's
+    /// [`ClusterSpec::re_covariance_is_psd`].
+    pub fn re_covariance_is_psd(&self) -> bool {
+        re_covariance_is_psd(self.tau_squared, &self.slopes)
+    }
+}
+
+/// True iff `D = diag(τ)·R·diag(τ)` is PSD (a tolerant Cholesky exists) — the
+/// data-gen draw needs `chol(D)`. `τ₀ = √tau_squared`,
+/// `τ_{k+1} = √slopes[k].variance`. Assumes `corr_with` lengths already
+/// validated (so [`re_correlation_from_slopes`] is well-formed).
+fn re_covariance_is_psd(tau_squared: f64, slopes: &[SlopeTerm]) -> bool {
+    let (q, r) = re_correlation_from_slopes(slopes);
+    let mut tau = Vec::with_capacity(q);
+    tau.push(tau_squared.max(0.0).sqrt());
+    for s in slopes {
+        tau.push(s.variance.max(0.0).sqrt());
+    }
+    let mut d = vec![0.0f64; q * q];
+    for i in 0..q {
+        for j in 0..q {
+            d[i * q + j] = tau[i] * r[i * q + j] * tau[j];
+        }
+    }
+    chol_exists(&d, q)
 }
 
 /// Build the `q×q` RE correlation matrix over `[intercept, slope_0, …]` from a
@@ -357,24 +383,9 @@ impl ClusterSpec {
         re_correlation_from_slopes(&self.slopes)
     }
 
-    /// True iff `D = diag(τ)·R·diag(τ)` is PSD (a tolerant Cholesky exists) —
-    /// the data-gen draw needs `chol(D)`. `τ₀ = √tau_squared`,
-    /// `τ_{k+1} = √slopes[k].variance`. Assumes `corr_with` lengths already
-    /// validated (so `re_correlation_matrix` is well-formed).
+    /// True iff the primary grouping's `D` is PSD.
     pub fn re_covariance_is_psd(&self) -> bool {
-        let (q, r) = self.re_correlation_matrix();
-        let mut tau = Vec::with_capacity(q);
-        tau.push(self.tau_squared.max(0.0).sqrt());
-        for s in &self.slopes {
-            tau.push(s.variance.max(0.0).sqrt());
-        }
-        let mut d = vec![0.0f64; q * q];
-        for i in 0..q {
-            for j in 0..q {
-                d[i * q + j] = tau[i] * r[i * q + j] * tau[j];
-            }
-        }
-        chol_exists(&d, q)
+        re_covariance_is_psd(self.tau_squared, &self.slopes)
     }
 
     /// Level of extra grouping `g` that row `i` belongs to.
@@ -409,7 +420,8 @@ impl ClusterSpec {
     /// Mirrors: `workspace.rs` builds `extra_grouping_ids` and `data_gen.rs`
     /// sizes the per-grouping draws from exactly these functions, and the
     /// row-level factor walk in `data_gen.rs` balances over the nested child
-    /// ids it returns; change together.
+    /// ids it returns and breaks its ties over the crossed levels it returns;
+    /// change together.
     pub fn extra_level_of_row(&self, g: usize, i: usize) -> usize {
         let rel = &self.extra_groupings[g].relation;
         match &self.sizing {

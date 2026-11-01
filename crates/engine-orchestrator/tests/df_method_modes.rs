@@ -1,11 +1,16 @@
-//! `df_method` end-to-end gate: `DfMethod::BetweenWithin` vs `DfMethod::Asymptotic`.
+//! `df_method` end-to-end gate: `BetweenWithin`, `Satterthwaite` and `Auto`
+//! against `Asymptotic`.
 //!
 //! Two levels:
 //! - the debug report surfaces the per-target denominator df and statistic
-//!   kind (`T` vs `Z`) the crit table actually resolved;
+//!   kind (`T` vs `Z`) the crit table actually resolved; a design tested at
+//!   per-draw Satterthwaite df has no df before the fit, so its design-time
+//!   report is `Z` with empty df;
 //! - the entry points (`find_power` / `single_core_find_power`) route the
 //!   wider Student-t/F threshold into the decision, which can only lower
-//!   power relative to the asymptotic Wald-z reference.
+//!   power relative to the asymptotic Wald-z reference, and `Auto` runs the
+//!   between-within test without a random slope and the Satterthwaite test
+//!   with one.
 
 mod common;
 use common::{lme_spec, logit_spec, minimal_ols_contract};
@@ -44,6 +49,20 @@ fn bw_mle_contract() -> SimulationContract {
     .expect("build_contract mle");
     let mut c = contracts.remove(0);
     c.df_method = DfMethod::BetweenWithin;
+    c
+}
+
+/// `bw_mle_contract`'s design with a random slope on `x1` (column 0), under
+/// `df_method` = `d`.
+fn slope_mle_contract(d: DfMethod) -> SimulationContract {
+    let mut c = bw_mle_contract();
+    c.generation.cluster.as_mut().unwrap().slopes = vec![engine_contract::SlopeTerm {
+        column: engine_contract::ColumnId(0),
+        variance: 0.2,
+        corr_with_intercept: 0.0,
+        corr_with: vec![],
+    }];
+    c.df_method = d;
     c
 }
 
@@ -178,6 +197,39 @@ fn debug_report_asymptotic_mixed_reports_z_and_empty_df() {
     }
 }
 
+/// A slope LMM under `auto` (and named `satterthwaite`) is tested at each
+/// draw's Satterthwaite df, which the design-time crit stage cannot know: it
+/// reports the asymptotic stand-in, `Z` with no df, as a crossed design does.
+/// Named `between_within` on the same design keeps its table df.
+#[test]
+fn debug_report_slope_lmm_auto_has_no_design_time_df() {
+    let mask = StageMask {
+        input: false,
+        data: false,
+        dispatch: false,
+        stats: false,
+        crit: true,
+    };
+    for d in [DfMethod::Auto, DfMethod::Satterthwaite] {
+        let report = debug_report(&slope_mle_contract(d), 2137, N, 4, mask).unwrap();
+        let tc = &report.crit.expect("crit").targets[0];
+        assert!(tc.df.is_empty(), "{d:?}: got {:?}", tc.df);
+        assert!(matches!(
+            tc.distribution,
+            engine_orchestrator::debug::StatisticKind::Z
+        ));
+    }
+    let report = debug_report(
+        &slope_mle_contract(DfMethod::BetweenWithin),
+        2137,
+        N,
+        4,
+        mask,
+    )
+    .unwrap();
+    assert_eq!(report.crit.expect("crit").targets[0].df, vec![112.0]);
+}
+
 // ---------------------------------------------------------------------------
 // Deliverable 3 — find_power / single_core_find_power entry points
 // ---------------------------------------------------------------------------
@@ -222,6 +274,45 @@ fn find_power_between_within_never_exceeds_asymptotic_mle() {
         p_bw < p_asymp,
         "between-within power {p_bw} must sit below asymptotic power {p_asymp}"
     );
+}
+
+/// `Auto` without a random slope is the between-within test, bit for bit; the
+/// GLMM's `Auto` is too.
+#[test]
+fn find_power_auto_is_between_within_without_a_slope() {
+    for bw in [bw_mle_contract(), bw_glm_cluster_contract()] {
+        let mut auto = bw.clone();
+        auto.df_method = DfMethod::Auto;
+        assert_eq!(twin_power(&auto), twin_power(&bw), "{:?}", bw.estimator);
+    }
+}
+
+/// With a random slope `Auto` is the Satterthwaite test: equal to named
+/// `satterthwaite`, below `between_within` (6 clusters: the slope variable's
+/// Satterthwaite df follow the clusters, its between-within df is the
+/// within df 112), and no higher than the Wald z. Both dispatch twins agree.
+#[test]
+fn find_power_auto_is_satterthwaite_with_a_slope() {
+    let p_auto = twin_power(&slope_mle_contract(DfMethod::Auto));
+    let p_satt = twin_power(&slope_mle_contract(DfMethod::Satterthwaite));
+    let p_bw = twin_power(&slope_mle_contract(DfMethod::BetweenWithin));
+    let p_z = twin_power(&slope_mle_contract(DfMethod::Asymptotic));
+    assert_eq!(p_auto, p_satt);
+    assert!(
+        p_auto < p_bw && p_bw <= p_z,
+        "auto {p_auto}, between-within {p_bw}, asymptotic {p_z}"
+    );
+}
+
+/// A named test the design does not admit stops the run instead of running
+/// another test.
+#[test]
+fn find_power_refuses_named_test_the_design_does_not_admit() {
+    let cancel = CancellationToken::new();
+    let mut glmm = bw_glm_cluster_contract();
+    glmm.df_method = DfMethod::Satterthwaite;
+    let err = find_power(&[glmm], N, 10, SEED, None, &cancel).unwrap_err();
+    assert!(err.to_string().contains("'satterthwaite'"), "{err}");
 }
 
 /// Clustered-GLM counterpart: t(110) between-within threshold vs Wald z.

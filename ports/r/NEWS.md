@@ -1,11 +1,12 @@
 # mcpower 1.5.0
 
 * `find_power()` and `find_sample_size()` warn when a clustered binary or
-  count model (GLMM) tests a cluster-level effect with fewer than 20 clusters
-  under the default `df_method = "between_within"`: the between-within *t*
-  test then rejects a true null more often than α (7.5–9.6% at 5 clusters in
-  the logit calibration), so part of the reported power is excess Type I
-  error. A sample-size search names the grid N below which the design has
+  count model (GLMM) tests a cluster-level effect with fewer than 20 clusters,
+  under either test these models use: the between-within *t* test then rejects
+  a true null more often than α (7.5–9.6% at 5 clusters in the logit
+  calibration), and the Wald *z* (`df_method = "asymptotic"`, and crossed or
+  nested designs) more so (14.6–20.3%), so part of the reported power is excess
+  Type I error. A sample-size search names the grid N below which the design has
   fewer than 20 clusters, or says that every grid point has fewer.
 * New `set_factor_sampling(name, mode)` sets how one factor's group sizes are
   realised, overriding the scenario-wide `sampled_factor_proportions` for
@@ -13,6 +14,34 @@
   in every simulation, `"sampled"` draws each observation's level at random
   so the sizes vary between simulations, and `NULL` removes the override. It
   works for declared factors and for factors from uploaded data.
+* **Linear mixed models with a random slope are tested at Satterthwaite df
+  by default.** `df_method` gains two values, `"auto"` and
+  `"satterthwaite"`, and `"auto"` is the new default. It picks the test from
+  the design: between-within df for a single grouping factor without a
+  random slope and for any single-grouping binary or count mixed model (both
+  as before); per-fit Satterthwaite df, as lmerTest computes them, for a
+  linear mixed model with a random slope on its single grouping (new) or
+  with crossed or nested groupings (as before); the Wald z for a binary or
+  count model with crossed or nested groupings (as before). Under
+  between-within df a random-slope variable was tested at the within-cluster
+  df however few clusters there were, so with few clusters the test rejected
+  a true null more often than lmerTest's and power was overstated. Every
+  other value names one test: `"between_within"` with crossed or nested
+  groupings and `"satterthwaite"` on a binary or count mixed model are now
+  errors that name `"auto"`. Before, `"between_within"` on a crossed or
+  nested design ran Satterthwaite df (linear) or the Wald z (binary or
+  count) without saying so. Moves results: linear mixed models with a
+  random slope, where power falls most with few clusters. On a single
+  grouping factor `df_method = "between_within"` gives the previous
+  default's results, except for a model with random slopes under a
+  `test_formula` or with an excluded factor level, which now keeps its
+  slopes.
+* A model of any family other than `family = "lme"` (the default `"ols"`, or
+  `"logit"`, `"probit"` or `"poisson"`) whose formula has a random-effect
+  term such as `(1|g)` or `(1 + x|g)` but no `set_cluster()` call is now an
+  error that names the grouping, as it already was for `family = "lme"`.
+  Before, it ran as an unclustered model and dropped the random intercept
+  and slopes without notice.
 * MCPower now builds on version 0.7.0 of its mixed-model fitting library
   (glmm), which fits logistic and Poisson models on nearly or exactly
   collinear designs more robustly. Some fits that used to stop unconverged,
@@ -58,9 +87,9 @@
   a single run. A sample-size search checks the warning about Laplace bias
   with small clusters in binary GLMMs at every grid N.
 * Pairwise contrast targets (such as `"g[2] vs g[3]"`) are tested on OLS
-  models only: regression with a continuous outcome, and ANOVA. On a
-  logistic, Poisson or mixed model a contrast target is now an error
-  ("contrasts are only supported for estimator=Ols"). Before, the run went
+  models only: regression with a continuous outcome, and ANOVA. On a logistic,
+  Poisson or mixed model a contrast target is now an error ("contrasts ('g[2]
+  vs g[3]') are available for OLS models only; ..."). Before, the run went
   ahead and reported 0% power for a contrast it never tested.
 * Exact factor levels (the optimistic default; see `set_factor_sampling()`)
   are balanced jointly. Several factors are assigned over their crossed
@@ -101,12 +130,12 @@
   error. A test interaction the model does not contain is a clear error.
 * When a cluster is given by `cluster_size`, the number of clusters a sample
   size implies must be at least `limits.min_clusters` (5); fewer is an
-  error that names the count. `find_power()` and `find_sample_size()` also
-  check observations per cluster at the requested sample size: fewer than 5
-  (`limits.reliable_rows_per_cluster`) is an error, fewer than 10
-  (`limits.recommended_rows_per_cluster`) a warning. Before, the implied
-  cluster count was not checked, and observations per cluster were checked
-  only for a given `cluster_size`, when the cluster was set.
+  error that names the count. Before, the implied cluster count was not
+  checked.
+* Mixed models accept smaller clusters: 2 observations per cluster, plus 1
+  for each random slope on the primary grouping; fewer is an error. Before,
+  fewer than 5 was refused and fewer than 10 warned, so a pre/post design could
+  not be planned. `limits.reliable_rows_per_cluster` is removed.
 * The model checks the Python package already ran are now errors in R too:
   `family = "lme"` without a random-effect term, or without a `set_cluster()`
   call for every grouping in the formula; `set_cluster()` on a grouping the
@@ -159,6 +188,146 @@
   optimistic results for every model, and unclustered binary and count
   results under every preset, unchanged. Moves results: realistic and
   doomer runs of continuous and clustered models.
+* A mixed model with random slopes keeps its slopes when the fitted model is
+  smaller than the generating one: under a `test_formula` that leaves out
+  some predictors, and when a rare factor level is excluded
+  (`factor_min_level_count`). Before, a linear mixed model was refitted
+  without its random slopes, so the slope variance was ignored and power
+  came out too high (in one example 74% instead of 24%). A binary or count
+  mixed model (GLMM) put the slope on whichever predictor took its place in
+  the smaller model, which gave wrong power, or stopped with an internal
+  error. On a mixed model, a `test_formula` that leaves out a predictor with
+  a random slope is now an error that names it, since the test model keeps
+  the model's random effects. OLS and GLM fit no random effects, so there it
+  may leave one out. Moves results: mixed models with random slopes and a
+  `test_formula` that leaves out a predictor, and linear mixed models with
+  random slopes in which a rare factor level is excluded.
+* A random slope must be declared both in the formula (`(1 + x|g)`) and in
+  `set_cluster(random_slopes = ...)`; a slope in only one of them is an
+  error that names the variable. Before, a slope written only in the
+  formula was silently dropped, so the model was simulated and fitted with
+  a random intercept only and power came out too high, and a slope given
+  only in `set_cluster()` was simulated and fitted although the formula did
+  not show it. The groupings of a nested term `(1|A/B)` are the exception:
+  the formula cannot write a slope on them, so their slopes come from
+  `set_cluster()` alone, as before.
+* The uncorrelated random-effect syntax `(1 + x || g)` is refused with a
+  message that says so and suggests `(1 + x | g)` with a zero
+  slope-intercept correlation. Before, it stopped with a formula syntax
+  error.
+* A random-effect term in `test_formula`, such as `(1|g)`, is an error that
+  says `test_formula` sets the fixed effects of the test model only (the
+  test model keeps the model's random effects). Before, it was dropped
+  without notice, even one naming a grouping the model does not have.
+* A post-hoc request (`target_test = "all-contrasts"`) or a named contrast
+  (`"f[2] vs f[3]"`) on a mixed model or a binary or count model is an error
+  that says post-hoc comparisons are available for OLS models only and
+  suggests testing the factor's dummies instead. Before, a post-hoc request
+  stopped with "internal contract validation failed: posthoc tests require
+  estimator == Ols", and a named contrast ran with 0% power (see above).
+* The colon spelling of a nested intercept, `(1|school:classroom)` (alone or
+  beside `(1|school)`), and a random slope inside a nested term, such as
+  `(1 + x|school/classroom)`, are refused with messages that point to
+  `(1|school/classroom)` and, for the slope, to `set_cluster()`. A grouping
+  name the parser does not take, such as `(1|school.id)`, is refused with a
+  message naming it, and any other random-effect term the parser does not
+  take is refused as an unsupported random-effect term. Before, each stopped
+  with "formula syntax error at position 0".
+* Settings that break a model rule stop with an error in the model's own
+  terms: random-slope correlations (`corr_with_intercept`, `corr_with`) that
+  do not form a valid correlation matrix, a `corr_with` of the wrong length,
+  a random slope with a zero intercept variance, too many random slopes or
+  groupings, a crossed grouping beside a primary grouping sized by
+  `cluster_size`, more than one nested term (such as `(1|a/b) + (1|c/d)`,
+  now refused when the formula is read, naming both terms), and `alpha` or a
+  scenario setting out of range. Before, they stopped with "internal
+  contract validation failed: ..." and the names of internal fields. A
+  nested `n_per_parent` that does not divide `cluster_size` aborted the R
+  session; it is now an error too.
+* An exact factor with equal level shares, such as 50/50 or a third each
+  (exact is the optimistic default, or `set_factor_sampling(..., "exact")`),
+  in a design with a crossed grouping, such as `(1|subject) + (1|item)`, takes
+  its levels in the same shares within every crossed level. Before, the factor
+  could follow the crossed level when the number of primary clusters (or
+  nested groups) was odd: a 50/50 factor over 5 subjects and 2 items put its
+  second level on 40% of one item's rows and 60% of the other's, and an equal
+  three-level factor over 5 subjects and 3 items put its third level on 60% of
+  one item's rows. Moves results: designs with a crossed grouping and an exact
+  row-level factor. Realistic and doomer, which sample factor levels, do not
+  move.
+* A mixed model with a single cluster is an error, "n_clusters must be an
+  integer >= 2, got 1", which also says that uploaded data needs at least 2
+  distinct groups. `set_cluster()` already refused `n_clusters = 1`;
+  `get_effects_from_data()` on data with one group reached the engine,
+  which stopped with a between-within df message or, with
+  `df_method = "asymptotic"`, fitted a model with no between-cluster
+  variance to estimate.
+* An OLS model fitted to clustered data (`(1|g)` with `set_cluster()`,
+  `family = "ols"` or `estimator = "ols"`) runs with `scenarios`. Before, it
+  stopped with "internal contract validation failed: scenario.lme requires
+  estimator == Mle". Its realistic and doomer scenarios perturb the random
+  effects as a mixed model's do.
+* `MCPowerDebug$create_data()` and the other debug stages floor `debug_n`
+  to the cluster atom with the warning `find_power()` gives ("sample_size
+  105 not a multiple of the cluster atom 10; using 100"). Before, a fixed
+  `cluster_size` with an N off the atom stopped with "index out of bounds".
+* `find_power()` checks `sample_size`: one whole number (a double such as
+  `200` is accepted) between 20 and 100,000, and at least 15 plus the number
+  of design columns, with the Python port's messages. Before, it ran
+  `find_power(10)`, `find_power(150.5)` and `find_power(200000)`, and refused
+  `NA` or `c(100, 200)` with messages that did not name `sample_size`.
+* `set_cluster()` with two or more random slopes defaults a missing
+  `corr_with` to zeros, one per earlier slope, as Python and the app do.
+  Before, the second slope needed `corr_with` and `find_power()` stopped
+  with "internal contract validation failed: slope 1 corr_with must list
+  correlations with all earlier slopes; expected 1, got 0". A `corr_with`
+  of the wrong length now stops in `set_cluster()`, naming the slope and
+  the length it needs.
+* An error message that contains '%' (for example a grouping name such as
+  `g%d`) reaches R as written. Before, R read the message as a format
+  string: the text came out garbled, and a '%n' aborted the R session.
+* `set_cluster()` refuses a NaN or infinite `ICC`, `tau_squared`,
+  `n_clusters`, `cluster_size`, `n_per_parent`, or slope `variance`,
+  `corr_with_intercept` or `corr_with` with a message that names it.
+  Before, it stopped with "missing value where TRUE/FALSE needed" or an
+  engine message.
+* Under `correction = "tukey"`, a target outside every factor (a continuous
+  or binary predictor, an interaction) reports its corrected power and CI
+  as `NA`, printed as "n/a", with no point on the corrected chart. Before,
+  it read 0. Its corrected required N is "n/a" too. With such a target, the
+  corrected views over all tests are not applicable as a whole: "First N
+  achieving all targets", the joint required-N table and the at-least-k and
+  exactly-k charts read "n/a" or are left out, and
+  `success_count_histogram_corrected`, `first_joint_achieved`,
+  `first_joint_achieved_unit` and `fitted_joint` are `NULL`. Results carry
+  a new `corrected_not_applicable` flag per target; factor levels and
+  contrasts keep the values they had, and the Tukey warning now says so.
+* A crossed or nested grouping with random slopes follows the primary
+  grouping's rules: correlations that do not form a valid correlation
+  matrix, and a random slope with a zero intercept variance, are errors.
+  Before, both ran without notice: the first drew a slope at a variance
+  other than the one set (4.26 times the set value in one example), and the
+  second ignored the correlation.
+* A variable given two random slopes on one grouping is an error. Before, it
+  ran with twice the slope variance, so power came out too low (in one
+  example 69% instead of 93%).
+* `set_cluster()` refuses an argument it does not know, as Python does.
+  Before, a misspelled `icc = 0.5` was dropped without notice and the model
+  ran without clustering (in one example 99.5% power instead of 38%).
+* `set_cluster()` refuses `n_clusters` together with `cluster_size`, as
+  Python does. Before, the run used `n_clusters` while the check on rows per
+  cluster read `cluster_size`.
+* `set_cluster()` refuses an `n_clusters`, `cluster_size` or `n_per_parent`
+  past R's integer range with a message that names it. Before, a run stopped
+  with "missing value where TRUE/FALSE needed".
+* `find_sample_size()` checks `from_size`, `to_size` and `by` as Python
+  does, with Python's messages. Before, it truncated a fractional value
+  (`by = 2.5` ran as 2) and ran a `by` larger than the range.
+* `MCPowerDebug`: a `debug_n` or `debug_n_sims` below 1 is an error that
+  names it. Before, a negative `debug_n_sims` aborted the R session.
+* `estimator = "glm"` on a continuous outcome and a stray colon in a formula
+  (`y ~ x1 + x2:`) stop with a user error that says what to change. Before,
+  each stopped with "internal contract validation failed: ...".
 
 # mcpower 1.0.0
 

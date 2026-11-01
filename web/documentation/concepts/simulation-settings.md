@@ -41,37 +41,59 @@ The desktop and web app surface both controls as one three-way switch: **Fast** 
 ## Denominator degrees of freedom
 
 For any **mixed-effects model** (LME or clustered GLMM), `df_method` on
-`find_power`/`find_sample_size` selects the reference distribution for each
-fixed-effect test:
+`find_power`/`find_sample_size` selects the test for each fixed effect. Each
+value other than `"auto"` names one test:
 
-- `"between_within"` (the default) — tests each fixed effect against a *t*
-  distribution with between-within denominator degrees of freedom: a
-  predictor declared cluster-level (see
-  [[concepts/mixed-effects|mixed-effects models]]) gets the between-cluster
-  df, others get the within-cluster df. The joint Wald test uses `k·F(k, df)`
-  with the smaller df across the target set. There is no overall (omnibus) F
-  for mixed models under either setting.
-- `"asymptotic"` — tests each fixed effect against a Wald z.
+- `"auto"` (the default): picks the test from the design (table below).
+- `"between_within"`: tests each fixed effect against a *t* distribution
+  with between-within denominator degrees of freedom: a predictor declared
+  cluster-level (see [[concepts/mixed-effects|mixed-effects models]]) gets
+  the between-cluster df, others get the within-cluster df. The joint Wald
+  test uses `k·F(k, df)` with the smaller df across the target set. It needs
+  a single grouping factor: with a crossed or nested grouping the
+  between-within split is not defined, and the run stops with an error.
+- `"satterthwaite"`: tests each fixed effect against a *t* at each simulated
+  fit's Satterthwaite degrees of freedom, as lmerTest computes them. Holm and
+  Benjamini–Hochberg corrections are applied to the per-target p-values, as
+  `p.adjust` would; the joint Wald test uses `k·F(k, df)` with the smallest
+  df among the targets. A binary or count mixed model has no Satterthwaite
+  df, so for a GLMM the run stops with an error.
+- `"asymptotic"`: tests each fixed effect against a Wald z.
+
+What `"auto"` picks:
+
+| Model | Grouping | Random slope on the first grouping | Test |
+|---|---|---|---|
+| LME | single | no | between-within df |
+| LME | single | yes | Satterthwaite df |
+| LME | crossed or nested | either | Satterthwaite df |
+| GLMM | single | either | between-within df |
+| GLMM | crossed or nested | either | Wald z |
+
+A predictor with a random slope varies within clusters, but its effect varies
+across them too, so its test rests on the number of clusters. Between-within
+df give it the within-cluster df however few clusters there are, and the test
+then behaves almost like the Wald z; Satterthwaite df follow the clusters.
+Without a random slope the two agree closely on a single grouping, and
+between-within df cost nothing per fit. A slope counts whatever its variance.
+There is no overall (omnibus) F for mixed models under any setting.
 
 When a simulated fit collapses (every random-effect variance estimated at
 zero, lme4's "singular fit"), the between-within split no longer describes
-the fitted model, so that fit is tested against the collapsed model's own
-reference instead: Student *t* on the residual df N − p for an LME, Wald z
-for a GLMM. For an LME on a balanced design this is also where a Satterthwaite
-reference puts the df of a cluster-level effect, so the two agree there.
+the fitted model, so under between-within df that fit is tested against the
+collapsed model's own reference instead: Student *t* on the residual df
+N − p for an LME, Wald z for a GLMM. Satterthwaite df reach the residual df
+there on their own. A fit whose Satterthwaite df cannot be computed is tested
+against the Wald z.
 
-When the design has a crossed or nested extra grouping, the between-within
-split is not defined, so `df_method="between_within"` tests an LME's fixed
-effects against a *t* at each simulated fit's Satterthwaite degrees of
-freedom (as lmerTest computes them), and a GLMM's against a Wald z. A fit
-whose Satterthwaite pass fails is tested against the Wald z. When the design
-leaves fewer than one between-cluster df (`g − p_between < 1`: at least as
-many cluster-level columns, intercept included, as clusters) or fewer than one
-within-cluster df, the run stops with an error naming the counts; pick
-`df_method="asymptotic"` or add clusters. It has no effect on OLS or unclustered
-GLM, which already use their exact reference distributions. Its calibration
-against lmerTest Satterthwaite is on the
-[[validation/validation_df_calibration|denominator-df calibration page]]. The
-desktop and web app surface it as the **Denominator df** setting on the run
-panel, alongside the estimation-mode switch above, with a per-predictor
-cluster-level toggle.
+Under between-within df, when the design leaves fewer than one between-cluster
+df (`g − p_between < 1`: at least as many cluster-level columns, intercept
+included, as clusters) or fewer than one within-cluster df, the run stops with
+an error naming the counts; pick `df_method="asymptotic"` or add clusters.
+`df_method` has no effect on OLS or unclustered GLM, which already use their
+exact reference distributions. Its calibration against lmerTest Satterthwaite
+is on the [[validation/validation_df_calibration|denominator-df calibration
+page]]. The desktop and web app surface it as the **Denominator df** setting
+on the run panel, alongside the estimation-mode switch above, with a
+per-predictor cluster-level toggle; the setting offers only the tests the
+design supports.

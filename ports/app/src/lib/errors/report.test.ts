@@ -40,14 +40,14 @@ describe('toRunError', () => {
   it('maps a cluster_setup RunError payload to the dedicated card', () => {
     const e = toRunError({
       kind: 'cluster_setup',
-      message: 'FixedSize cluster regime needs cluster_size >= 2; got 1',
+      message: 'a cluster needs at least 2 observations to separate its random effects from the residual; got 1',
     });
     expect(e.severity).toBe('run');
     expect(e.kind).toBe('cluster_setup');
     expect(e.title).toMatch(/cluster/i);
     // the engine's own message (with the fix hint) is surfaced, not buried
-    expect(e.message).toContain('cluster_size');
-    expect(e.detail).toContain('cluster_size');
+    expect(e.message).toContain('at least 2 observations');
+    expect(e.detail).toContain('at least 2 observations');
   });
 
   it('maps a generic RunError payload to the failure card', () => {

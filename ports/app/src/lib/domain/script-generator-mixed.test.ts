@@ -83,9 +83,56 @@ describe('generateScript (mixed)', () => {
       slopes: [{ predictor_name: 'x', slope_variance: 0.05, slope_intercept_corr: -0.1 }],
     } as AppSpec;
     const s = generateScript(spec, 'find-power', { sample_size: 200 });
+    expect(s).toContain('MCPower("y ~ x + (1 + x|school)", family="lme")');
     expect(s).toContain(
       'model.set_cluster("school", n_clusters=20, ICC=0.2, random_slopes=["x"], slope_variance=0.05, slope_intercept_corr=-0.1, cluster_level_vars=["x"])',
     );
+  });
+
+  it('emits a crossed grouping\'s slopes in both its formula term and its set_cluster', () => {
+    const base = mixedSpec({ kind: 'n_clusters', value: 20 });
+    const spec = {
+      ...base,
+      extra_groupings: [
+        {
+          tau_squared: 0.1 / 0.9,
+          relation: { kind: 'crossed', n_clusters: 8 },
+          cluster_name: 'item',
+          slopes: [{ predictor_name: 'x', slope_variance: 0.05, slope_intercept_corr: 0 }],
+        },
+      ],
+    } as AppSpec;
+    const py = generateMixedScript(spec, 'find-power', { sample_size: 200 }, 'python');
+    expect(py).toContain('MCPower("y ~ x + (1|school) + (1 + x|item)", family="lme")');
+    expect(py).toContain(
+      'model.set_cluster("item", n_clusters=8, ICC=0.1, random_slopes=["x"], slope_variance=0.05, slope_intercept_corr=0)',
+    );
+    const r = generateMixedScript(spec, 'find-power', { sample_size: 200 }, 'r');
+    expect(r).toContain('MCPower$new("y ~ x + (1|school) + (1 + x|item)", family = "lme")');
+    expect(r).toContain(
+      'model$set_cluster("item", n_clusters = 8, ICC = 0.1, random_slopes = list(list(predictor = "x", variance = 0.05, corr_with_intercept = 0)))',
+    );
+  });
+
+  it('notes in Python when the slopes of a crossed grouping do not share one pair', () => {
+    const base = mixedSpec({ kind: 'n_clusters', value: 20 });
+    const spec = {
+      ...base,
+      extra_groupings: [
+        {
+          tau_squared: 0.1 / 0.9,
+          relation: { kind: 'crossed', n_clusters: 8 },
+          cluster_name: 'item',
+          slopes: [
+            { predictor_name: 'x', slope_variance: 0.05, slope_intercept_corr: 0 },
+            { predictor_name: 'z', slope_variance: 0.1, slope_intercept_corr: 0 },
+          ],
+        },
+      ],
+    } as AppSpec;
+    const note = '# note: per-slope variances differ in the app';
+    expect(generateMixedScript(spec, 'find-power', { sample_size: 200 }, 'python')).toContain(note);
+    expect(generateMixedScript(spec, 'find-power', { sample_size: 200 }, 'r')).not.toContain(note);
   });
 
   it('passes family="lme" and trims default config', () => {
@@ -173,20 +220,24 @@ describe('generateScript (mixed)', () => {
     expect(hess).toContain('wald_se="hessian"');
   });
 
-  it('emits df_method only for the opt-in (asymptotic), in both languages', () => {
+  it('emits df_method only for a named test, never the default auto, in both languages', () => {
     const base = mixedSpec({ kind: 'n_clusters', value: 20 });
-    const betweenWithin = generateMixedScript(base, 'find-power', { sample_size: 100 });
-    expect(betweenWithin).not.toContain('df_method');
-    const betweenWithinR = generateMixedScript(base, 'find-power', { sample_size: 100 }, 'r');
-    expect(betweenWithinR).not.toContain('df_method');
-    const asym = { ...base, df_method: 'asymptotic' } as AppSpec;
-    expect(generateMixedScript(asym, 'find-power', { sample_size: 100 })).toContain(
-      'df_method="asymptotic"',
-    );
-    // R named arguments carry spaces around `=`, like the `unit` argument.
-    expect(generateMixedScript(asym, 'find-power', { sample_size: 100 }, 'r')).toContain(
-      'df_method = "asymptotic"',
-    );
+    for (const spec of [base, { ...base, df_method: 'auto' } as AppSpec]) {
+      expect(generateMixedScript(spec, 'find-power', { sample_size: 100 })).not.toContain('df_method');
+      expect(generateMixedScript(spec, 'find-power', { sample_size: 100 }, 'r')).not.toContain(
+        'df_method',
+      );
+    }
+    for (const named of ['between_within', 'satterthwaite', 'asymptotic'] as const) {
+      const spec = { ...base, df_method: named } as AppSpec;
+      expect(generateMixedScript(spec, 'find-power', { sample_size: 100 })).toContain(
+        `df_method="${named}"`,
+      );
+      // R named arguments carry spaces around `=`, like the `unit` argument.
+      expect(generateMixedScript(spec, 'find-power', { sample_size: 100 }, 'r')).toContain(
+        `df_method = "${named}"`,
+      );
+    }
   });
 
   it('emits agq only when > 1 (adaptive quadrature opt-in)', () => {

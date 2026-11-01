@@ -206,18 +206,14 @@ test_that("logit runtime guards", {
 test_that("find_power checks observations per cluster at the requested N", {
   lme <- function() MCPower$new("y ~ x1 + (1|g)", family = "lme")$set_effects("x1=0.5")
   expect_error(
-    lme()$set_cluster("g", ICC = 0.1, n_clusters = 60)$find_power(120, progress_callback = FALSE),
-    paste0("Insufficient observations per cluster: 2 (sample_size=120, n_clusters=60). ",
-           "Need at least 5 observations per cluster for reliable mixed model estimation. ",
-           "Either increase sample_size to 300 or reduce n_clusters to 24."),
-    fixed = TRUE)
-  expect_warning(
-    lme()$set_cluster("g", ICC = 0.1, n_clusters = 20)$find_power(
-      120, n_sims = 20, verbose = FALSE, progress_callback = FALSE),
-    "Low observations per cluster: 6 (sample_size=120, n_clusters=20)", fixed = TRUE)
+    lme()$set_cluster("g", ICC = 0.1, n_clusters = 60)$find_power(60, progress_callback = FALSE),
+    "a cluster needs at least 2 observations", fixed = TRUE)
+  expect_no_warning(
+    lme()$set_cluster("g", ICC = 0.1, n_clusters = 60)$find_power(
+      120, n_sims = 20, verbose = FALSE, progress_callback = FALSE))
   expect_error(
-    lme()$set_cluster("g", ICC = 0.1, cluster_size = 10)$find_power(15, progress_callback = FALSE),
-    "derived n_clusters=1 is below 5 (sample_size=15, cluster_size=10); increase sample_size",
+    lme()$set_cluster("g", ICC = 0.1, cluster_size = 10)$find_power(40, progress_callback = FALSE),
+    "derived n_clusters=4 is below 5 (sample_size=40, cluster_size=10); increase sample_size",
     fixed = TRUE)
 })
 
@@ -233,6 +229,29 @@ test_that("logit scenario analysis runs (gate removed)", {
   expect_match(out, "doomer")
 })
 
+test_that("OLS on clustered data runs the scenario analysis", {
+  # Data generation draws the random effects of a clustered OLS model as for
+  # a mixed model, so the port hands the engine realistic and doomer
+  # scenarios with a nonzero ICC jitter, the engine accepts them, and power
+  # falls from optimistic to realistic to doomer.
+  m <- MCPower$new("y ~ x + (1|g)")$set_effects("x=0.3")
+  m$set_cluster("g", ICC = 0.2, n_clusters = 10L)
+  priv <- m$.__enclos_env__$private
+  priv$apply()
+  payload <- mcpower:::.to_linear_spec_list(
+    priv$registry, c("realistic", "doomer"), alpha = 0.05, correction = NULL,
+    target_test = NULL, heteroskedasticity = list(driver_var_index = NULL),
+    residual_name = "normal", max_failed = 1.0, test_formula = NULL,
+    scenario_configs = priv$scenario_configs)
+  expect_true(all(vapply(payload$scenarios, function(sc) sc$icc_noise_sd > 0, NA)))
+  res <- m$find_power(100, n_sims = 200, seed = 2137, scenarios = TRUE,
+                      verbose = FALSE, progress_callback = FALSE)
+  p <- vapply(c("optimistic", "realistic", "doomer"),
+              function(nm) res$scenarios[[nm]]$power_uncorrected[[1]][[1]], 0)
+  expect_gt(p[["optimistic"]], p[["realistic"]])
+  expect_gt(p[["realistic"]], p[["doomer"]])
+})
+
 test_that("tukey is now accepted (guard removed)", {
   # tukey/tukey_hsd is no longer blocked — it routes to the engine's tukey_hsd correction.
   # A model with only continuous predictors (no factor) still runs; the posthoc block is empty.
@@ -242,6 +261,78 @@ test_that("tukey is now accepted (guard removed)", {
   # masked by expect_no_error would slip past.
   expect_false(is.null(res$power_uncorrected))
   expect_true(length(res$power_uncorrected) >= 1L)
+})
+
+test_that("tukey: a non-factor target has NA corrected power and prints n/a", {
+  m <- MCPower$new("y ~ x + f")$set_variable_type("f=(factor,3)")$
+    set_effects("x=0.3, f[2]=0.3, f[3]=0.4")
+  res <- m$find_power(120, correction = "tukey", n_sims = 200, seed = 15,
+                      verbose = FALSE, progress_callback = FALSE)
+  expect_identical(res$corrected_not_applicable, c(TRUE, FALSE, FALSE))
+  pc <- res$power_corrected[[1]]
+  expect_identical(pc[[1]], NA_real_)
+  expect_true(all(pc[2:3] > 0 & pc[2:3] < 1))
+  expect_identical(res$ci_corrected[[1]][[1]], c(NA_real_, NA_real_))
+  out <- capture.output(print(res))
+  expect_match(grep("^ *x ", out, value = TRUE), "n/a")
+  expect_no_match(grep("^ *2 ", out, value = TRUE), "n/a")  # factor level f[2]
+})
+
+test_that("tukey: a non-factor target has no required N", {
+  m <- MCPower$new("y ~ x + f")$set_variable_type("f=(factor,3)")$
+    set_effects("x=0.3, f[2]=0.3, f[3]=0.4")
+  res <- m$find_sample_size(correction = "tukey", from_size = 40, to_size = 200, by = 40,
+                            n_sims = 100, seed = 17, verbose = FALSE, progress_callback = FALSE)
+  expect_identical(res$corrected_not_applicable, c(TRUE, FALSE, FALSE))
+  expect_true(is.na(res$first_achieved[["0"]]))
+  expect_null(res$fitted[["0"]])
+  expect_false(is.null(res$fitted[["1"]]))
+  out <- capture.output(print(res))
+  expect_match(grep("^ *x ", out, value = TRUE), "n/a *$")
+  # The corrected all-targets and joint views are not applicable as a whole.
+  expect_true(any(out == "First N achieving all targets: n/a"))
+  expect_null(res$first_joint_achieved)
+  expect_null(res$fitted_joint)
+  expect_null(res$success_count_histogram_corrected)
+  expect_false(is.null(res$success_count_histogram_uncorrected))
+  long <- capture.output(print(summary(res)))
+  expect_true(any(grepl(
+    "Joint detection → required N (target 80%): n/a (a test has no corrected power under this correction)",
+    long, fixed = TRUE)))
+})
+
+test_that("tukey: plots of a result with a flagged target render and leave it out", {
+  m <- MCPower$new("y ~ x + f")$set_variable_type("f=(factor,3)")$
+    set_effects("x=0.3, f[2]=0.3, f[3]=0.4")
+  res <- m$find_power(120, correction = "tukey", n_sims = 100, seed = 15,
+                      verbose = FALSE, progress_callback = FALSE)
+  # The flagged target's corrected power is NA; the envelope must carry it
+  # as null (jsonlite writes NA as the string "NA" otherwise, which the
+  # engine cannot parse).
+  f <- tempfile(fileext = ".html")
+  on.exit(unlink(f), add = TRUE)
+  save_plot(res, f)
+  html <- paste(readLines(f, warn = FALSE), collapse = "\n")
+  expect_true(grepl('"target":"f[2]"', html, fixed = TRUE))
+  expect_false(grepl('"target":"x"', html, fixed = TRUE))
+
+  ss <- m$find_sample_size(correction = "tukey", from_size = 40, to_size = 200, by = 40,
+                           n_sims = 50, seed = 17, verbose = FALSE, progress_callback = FALSE)
+  g <- tempfile(fileext = ".html")
+  on.exit(unlink(g), add = TRUE)
+  save_plot(ss, g)
+  html <- paste(readLines(g, warn = FALSE), collapse = "\n")
+  expect_true(grepl('"target":"f[3]"', html, fixed = TRUE))
+  # No corrected joint (at-least-k / exactly-k) chart.
+  expect_false(grepl("P(detect >= k)", html, fixed = TRUE))
+  # Control: under Holm the same model draws it.
+  h <- m$find_sample_size(correction = "holm", from_size = 40, to_size = 200, by = 40,
+                          n_sims = 50, seed = 17, verbose = FALSE, progress_callback = FALSE)
+  hf <- tempfile(fileext = ".html")
+  on.exit(unlink(hf), add = TRUE)
+  save_plot(h, hf)
+  expect_true(grepl("P(detect >= k)", paste(readLines(hf, warn = FALSE), collapse = "\n"),
+                    fixed = TRUE))
 })
 
 test_that("set_parallel tombstone", {
@@ -352,13 +443,18 @@ test_that("counts below 1 are an R error, not a session abort", {
   m <- MCPower$new("y ~ x1")$set_effects("x1=0.3")
   fp <- function(...) m$find_power(..., verbose = FALSE, progress_callback = FALSE)
   fss <- function(...) m$find_sample_size(..., verbose = FALSE, progress_callback = FALSE)
-  expect_error(fp(-5, n_sims = 20L), "sample_size must be a positive integer, got -5", fixed = TRUE)
+  expect_error(fp(-5, n_sims = 20L), "sample_size must be at least 20, got -5", fixed = TRUE)
+  # The engine backstop behind the host check (bridge positive_count).
+  m$.__enclos_env__$private$apply()
+  bytes <- m$.__enclos_env__$private$build_contract_bytes("optimistic")
+  expect_error(mcpower:::find_power(bytes, -5L, 20L, 1, NULL),
+               "sample_size must be a positive integer, got -5", fixed = TRUE)
   expect_error(fp(100, n_sims = -1L), "n_sims must be a positive integer, got -1", fixed = TRUE)
   expect_error(fp(100, n_sims = 0L), "n_sims must be a positive integer, got 0", fixed = TRUE)
   expect_error(fss(from_size = -10, to_size = 100, by = 10, n_sims = 20L),
                "from_size must be a positive integer, got -10", fixed = TRUE)
   expect_error(fss(from_size = 50, to_size = 100, by = -10, n_sims = 20L),
-               "by must be a positive integer, got -10", fixed = TRUE)
+               'by must be a positive integer or "auto", got -10', fixed = TRUE)
   expect_error(fss(from_size = 50, to_size = 100, by = 10, n_sims = -3L),
                "n_sims must be a positive integer, got -3", fixed = TRUE)
 })

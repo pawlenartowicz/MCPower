@@ -19,6 +19,30 @@ pub enum SpecError {
     )]
     TestFormulaPredictorMissing { name: String },
     #[error(
+        "test_formula leaves out '{name}', which has a random slope in the model; keep '{name}' in test_formula (the test model keeps the model's random effects, and a random slope needs its variable as a fixed effect)"
+    )]
+    TestFormulaDropsSlopeVariable { name: String },
+    /// `term` is the first random-effect term of the test_formula, as written.
+    #[error(
+        "test_formula sets the fixed effects of the test model only; the test model keeps the model's random effects. Remove '{term}' from test_formula"
+    )]
+    TestFormulaRandomEffect { term: String },
+    /// A post-hoc request (`'all-contrasts'`, alias `'all-posthoc'`) on a model that is not OLS.
+    /// `model` names the model kind; `example` lists the factor's dummies.
+    #[error(
+        "post-hoc comparisons ('all-contrasts') are available for OLS models only; this model is {model}. Test the factor's dummies instead, e.g. target_test = '{example}'"
+    )]
+    PosthocRequiresOls { model: String, example: String },
+    /// A named contrast (`'f[2] vs f[3]'`) on a model that is not OLS.
+    #[error(
+        "contrasts ('{contrast}') are available for OLS models only; this model is {model}. Test the factor's dummies instead, e.g. target_test = '{example}'"
+    )]
+    ContrastRequiresOls {
+        contrast: String,
+        model: String,
+        example: String,
+    },
+    #[error(
         "predictor '{name}' is not a factor; post-hoc pairwise tests require a factor predictor"
     )]
     NotAFactorPredictor { name: String },
@@ -34,6 +58,50 @@ pub enum SpecError {
         "a random slope requires a random intercept in this engine version; intercept suppression ('0 +' / '-1 +') in a random-effects term is not supported — write '(x | g)' or '(1 + x | g)'"
     )]
     RandomInterceptSuppressionUnsupported,
+    #[error(
+        "uncorrelated random effects ('||') are not supported; write '(1 + x | g)' and set the slope-intercept correlation to 0"
+    )]
+    UncorrelatedRandomEffectsUnsupported,
+    /// The colon spelling of a nested intercept, `(1|a:b)`.
+    #[error(
+        "'(1|{parent}:{child})' is not supported; write '(1|{parent}/{child})', which gives {parent} and {child} within {parent} a random intercept each"
+    )]
+    NestedColonFormUnsupported { parent: String, child: String },
+    /// A random slope inside a nested term, `(1 + x|a/b)` or `(x|a/b)`.
+    /// `term` is the term in canonical spacing.
+    #[error(
+        "random slopes in a nested term ('{term}') are not supported in the formula; write '(1|{parent}/{child})' and, in Python or R, declare the slope with set_cluster('{parent}:{child}', random_slopes = ...)"
+    )]
+    NestedSlopeUnsupported {
+        term: String,
+        parent: String,
+        child: String,
+    },
+    /// More than one nested term, `(1|a/b) + (1|c/d)`; the engine carries one
+    /// nested grouping.
+    #[error(
+        "only one nested term is supported per model; the formula has '{first}' and '{second}'"
+    )]
+    MultipleNestedTermsUnsupported { first: String, second: String },
+    /// A random-effect term whose grouping name the parser does not take.
+    #[error(
+        "the grouping name '{name}' in '{term}' is not supported; a grouping name takes ASCII letters, digits and '_' and does not start with a digit"
+    )]
+    GroupingNameUnsupported { term: String, name: String },
+    /// A parenthesised term with '|' that no random-effect pattern matches.
+    #[error(
+        "unsupported random-effect term '{term}'; write a random intercept '(1|g)', a random slope '(1 + x|g)' or a nested intercept '(1|a/b)'"
+    )]
+    RandomEffectTermUnsupported { term: String },
+    /// The named `df_method` test is not defined on this design (the
+    /// contract's own refusal, raised here so every port reports it as a user
+    /// error).
+    #[error("{0}")]
+    DfMethodNotDefined(engine_contract::ContractError),
+    /// A contract rule the user's input broke
+    /// (`ContractError::is_user_input`); the message is the contract's own.
+    #[error("{0}")]
+    ContractRule(engine_contract::ContractError),
     #[error("effect '{name}': effect_size must be finite, got {value}")]
     NonFiniteEffect { name: String, value: f64 },
     #[error("factor '{name}': must have {min}..={max} levels, got {got}")]
@@ -86,6 +154,8 @@ pub enum SpecError {
     ScenarioBinarySwapUnsupported { name: String },
     #[error("effect count mismatch: model has {expected} effects, got {got}")]
     EffectCountMismatch { expected: usize, got: usize },
+    /// A contract validation failure that only a port or builder bug can
+    /// cause; user-input rules go to [`SpecError::ContractRule`].
     #[error("internal contract validation failed: {0}")]
     InternalContractValidate(String),
     #[error(

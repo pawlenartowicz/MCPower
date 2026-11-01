@@ -110,7 +110,7 @@ export function buildFindCallLines(
   // agq default is 1 (Laplace) → omit; emit only the adaptive-quadrature opt-in.
   if (agq && agq > 1) lines.push(`    agq=${agq},`);
   // Already rendered in the caller's language like `unitArg` (mixed only);
-  // omitted for the default reference distribution, between_within.
+  // omitted for the default test, auto.
   if (dfMethodArg) lines.push(`    ${dfMethodArg},`);
   // Already rendered in the caller's language (Python `unit="…"`, R `unit = "…"`);
   // omitted for the default unit, observations.

@@ -792,6 +792,71 @@
       "id": "err_empty_slope_var_list",
       "formula": "y ~ x + (1++|g)",
       "error": "empty slope term"
+    },
+    {
+      "id": "err_nested_colon_form",
+      "formula": "y ~ x + (1|school:classroom)",
+      "error": "'\\(1\\|school:classroom\\)' is not supported; write '\\(1\\|school/classroom\\)', which gives school and classroom within school a random intercept each"
+    },
+    {
+      "id": "err_nested_colon_form_beside_parent",
+      "formula": "y ~ x + (1|school) + (1|school:classroom)",
+      "error": "'\\(1\\|school:classroom\\)' is not supported; write '\\(1\\|school/classroom\\)'"
+    },
+    {
+      "id": "err_nested_slope_explicit",
+      "formula": "y ~ x + (1 + x|school/classroom)",
+      "error": "random slopes in a nested term \\('\\(1 \\+ x\\|school/classroom\\)'\\) are not supported in the formula; write '\\(1\\|school/classroom\\)' and, in Python or R, declare the slope with set_cluster\\('school:classroom', random_slopes = \\.\\.\\.\\)"
+    },
+    {
+      "id": "err_interaction_stray_colon",
+      "formula": "y ~ x1 + x2:",
+      "error": "formula syntax error at position 0: interaction 'x2:' needs at least two variables"
+    },
+    {
+      "id": "err_random_effect_grouping_in_parens",
+      "formula": "y ~ x + (1|(g))",
+      "error": "unsupported random-effect term"
+    },
+    {
+      "id": "err_random_effect_double_parens",
+      "formula": "y ~ x + ((1|g))",
+      "error": "unsupported random-effect term"
+    },
+    {
+      "id": "err_nested_slope_implicit",
+      "formula": "y ~ x + (x|school/classroom)",
+      "error": "random slopes in a nested term \\('\\(x\\|school/classroom\\)'\\) are not supported in the formula"
+    },
+    {
+      "id": "err_unsupported_random_effect_term",
+      "formula": "y ~ x + (a|b|c)",
+      "error": "unsupported random-effect term '\\(a\\|b\\|c\\)'"
+    },
+    {
+      "id": "err_two_nested_terms",
+      "formula": "y ~ x + (1|a/b) + (1|c/d)",
+      "error": "only one nested term is supported per model; the formula has '\\(1\\|a/b\\)' and '\\(1\\|c/d\\)'"
+    },
+    {
+      "id": "err_grouping_name_with_dot",
+      "formula": "y ~ x + (1|school.id)",
+      "error": "the grouping name 'school\\.id' in '\\(1\\|school\\.id\\)' is not supported; a grouping name takes ASCII letters, digits and '_' and does not start with a digit"
+    },
+    {
+      "id": "err_three_level_nested",
+      "formula": "y ~ x + (1|a/b/c)",
+      "error": "unsupported random-effect term '\\(1\\|a/b/c\\)'"
+    },
+    {
+      "id": "err_three_level_colon_grouping",
+      "formula": "y ~ x + (1|a:b:c)",
+      "error": "unsupported random-effect term '\\(1\\|a:b:c\\)'"
+    },
+    {
+      "id": "err_grouping_name_non_ascii",
+      "formula": "y ~ x + (1|szkoła)",
+      "error": "the grouping name 'szkoła' in '\\(1\\|szkoła\\)' is not supported; a grouping name takes ASCII letters"
     }
   ]
 }

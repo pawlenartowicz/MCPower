@@ -43,13 +43,51 @@ fn rate(k: u64, n: usize) -> f64 {
 use crate::result::{EstimatorExtras, PosthocPower, PowerResult};
 use engine_core::BatchResult;
 use engine_core::EstimatorSpec;
+use engine_core::SimulationSpec;
+
+/// Per power-vector entry (marginals then contrasts), whether the target lies
+/// outside the correction's family and so has no corrected power. Only Tukey
+/// HSD has such targets: a target whose studentized-range `k` is NaN (not a
+/// factor level) never rejects, so a 0.0 corrected rate would be a value the
+/// test never estimated. Empty under every other correction. Feeds
+/// `PowerResult.corrected_not_applicable` through `aggregate_batch`.
+pub fn corrected_not_applicable(spec: &SimulationSpec) -> Vec<bool> {
+    engine_core::batch::tukey_k_per_target(spec)
+        .iter()
+        .map(|k| k.is_nan())
+        .collect()
+}
+
+/// Overwrite a flagged target's corrected power and both CI bounds with NaN
+/// (its corrected success count stays 0). Shared by `aggregate_batch` and the
+/// merge recompute so native and WASM agree. `flags` is empty or one entry
+/// per power-vector entry.
+pub(crate) fn mask_not_applicable(
+    power_corrected: &mut [f64],
+    ci_corrected: &mut [Ci],
+    flags: &[bool],
+) {
+    for (t, &na) in flags.iter().enumerate() {
+        if na {
+            power_corrected[t] = f64::NAN;
+            ci_corrected[t] = Ci {
+                lo: f64::NAN,
+                hi: f64::NAN,
+            };
+        }
+    }
+}
 
 /// Fold the raw `BatchResult` (uncorrected/corrected uint8 grids of shape
 /// `[n_sims, n_ss, n_targets]`, converged of shape `[n_sims, n_ss]`) into one
 /// `PowerResult` per sample size.
 ///
 /// Caller fills in `n` (sample size) after this returns. `estimator` drives which
-/// `EstimatorExtras` variant is constructed.
+/// `EstimatorExtras` variant is constructed. `corrected_not_applicable` is the
+/// spec's [`corrected_not_applicable`] (empty, or one flag per power-vector
+/// entry); it is copied into every result and its flagged entries get NaN
+/// corrected power and CI. When any entry is flagged the corrected joint view
+/// is not applicable: `success_count_histogram_corrected` is left empty.
 ///
 /// Counter-pool mirror: `merge_one_power_result` (merge.rs) re-pools every raw
 /// counter this fold emits — a new counter field added here must be pooled
@@ -59,10 +97,16 @@ pub fn aggregate_batch(
     target_indices: &[u32],
     contrast_pairs: &[(u32, u32)],
     estimator: &EstimatorSpec,
+    corrected_not_applicable: &[bool],
 ) -> Vec<PowerResult> {
     let n_sims = batch.shape.n_sims as usize;
     let n_ss = batch.shape.n_sample_sizes as usize;
     let n_targets = batch.shape.n_targets as usize;
+    assert!(
+        corrected_not_applicable.is_empty() || corrected_not_applicable.len() == n_targets,
+        "corrected_not_applicable has {} entries for {n_targets} targets",
+        corrected_not_applicable.len()
+    );
     // Total post-hoc contrasts across all blocks. Hoisted so both the post-hoc
     // fold and the joint histogram (below) share one definition. 0 when no
     // post-hoc was requested.
@@ -74,6 +118,7 @@ pub fn aggregate_batch(
         .sum();
     let sim_posthoc_stride = n_ss * total_contrasts;
     let target_indices_vec: Vec<usize> = target_indices.iter().map(|&i| i as usize).collect();
+    let any_not_applicable = corrected_not_applicable.iter().any(|&na| na);
 
     let mut out = Vec::with_capacity(n_ss);
     for ss_idx in 0..n_ss {
@@ -100,6 +145,7 @@ pub fn aggregate_batch(
             k_unc_vec.push(k_unc);
             k_cor_vec.push(k_cor);
         }
+        mask_not_applicable(&mut power_cor, &mut ci_cor, corrected_not_applicable);
 
         // Per-estimator meaning differs (Ols: closed-form rank ok; Glm: IRLS
         // converged; Mle: optimiser didn't hit singularity); the count is just
@@ -246,6 +292,7 @@ pub fn aggregate_batch(
             power_corrected: power_cor,
             ci_uncorrected: ci_unc,
             ci_corrected: ci_cor,
+            corrected_not_applicable: corrected_not_applicable.to_vec(),
             convergence_rate: conv_rate,
             boundary_hit: bh_slice,
             estimator_extras,
@@ -256,7 +303,14 @@ pub fn aggregate_batch(
             overall_significant_count: overall_count,
             overall_significant_ci,
             success_count_histogram_uncorrected: hist_unc,
-            success_count_histogram_corrected: hist_cor,
+            // A target outside the correction family never rejects, so the
+            // corrected joint view would count it as never significant: the
+            // whole corrected histogram is not applicable then (left empty).
+            success_count_histogram_corrected: if any_not_applicable {
+                Vec::new()
+            } else {
+                hist_cor
+            },
             grid_warnings: Vec::new(),
             posthoc,
             factor_exclusion_counts: excl_sparse,
@@ -345,7 +399,7 @@ mod tests {
         ];
         let posthoc_cor = posthoc_unc.clone();
         let batch = make_batch_posthoc(posthoc_unc, posthoc_cor, shape);
-        let aggs = aggregate_batch(&batch, &[0], &[], &EstimatorSpec::Ols);
+        let aggs = aggregate_batch(&batch, &[0], &[], &EstimatorSpec::Ols, &[]);
 
         assert_eq!(aggs.len(), 2, "two ss slots");
 
@@ -434,7 +488,7 @@ mod tests {
             event_rate: vec![],
             shape,
         };
-        let aggs = aggregate_batch(&batch, &[1], &[], &EstimatorSpec::Ols);
+        let aggs = aggregate_batch(&batch, &[1], &[], &EstimatorSpec::Ols, &[]);
         assert_eq!(aggs.len(), 1);
         let pr = &aggs[0];
 
@@ -505,7 +559,7 @@ mod tests {
             0, 0, 0, // sim 3
         ];
         let batch = make_batch_posthoc(posthoc_unc, posthoc_cor, shape);
-        let aggs = aggregate_batch(&batch, &[0, 1], &[], &EstimatorSpec::Ols);
+        let aggs = aggregate_batch(&batch, &[0, 1], &[], &EstimatorSpec::Ols, &[]);
 
         assert_eq!(aggs.len(), 1, "one ss slot");
         assert_eq!(aggs[0].posthoc.len(), 1, "one block for the one factor");
@@ -576,7 +630,7 @@ mod tests {
             event_rate: vec![],
             shape,
         };
-        let aggs = aggregate_batch(&batch, &[0], &[], &EstimatorSpec::Ols);
+        let aggs = aggregate_batch(&batch, &[0], &[], &EstimatorSpec::Ols, &[]);
         assert_eq!(aggs.len(), 2);
 
         // ss_idx = 0: f0 sparse in sims 0,2 → 2; f1 sparse in sim 1 → 1; sep: f1 in sim 2 → 1

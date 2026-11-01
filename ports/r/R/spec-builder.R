@@ -717,7 +717,7 @@ RVariableRegistry <- R6::R6Class(
 # The integer code list is wrapped in I() so a length-1 list still serializes
 # as a JSON array under auto_unbox. The three RE knobs (random_effect_dist/df,
 # icc_noise_sd) are always emitted here; .to_linear_spec_list zeros them for
-# non-LME families so the spec-builder produces lme: None for those calls.
+# a model without random effects so the spec-builder produces lme: None there.
 .scenario_dict <- function(name, scenario_configs = .scenario_defaults()) {
   if (!(name %in% names(scenario_configs))) {
     stop(sprintf("Unknown scenario %s; configured: %s",
@@ -1057,9 +1057,10 @@ RVariableRegistry <- R6::R6Class(
 
   # Scenarios (model.py _to_linear_spec_dict).
   scenarios <- lapply(scenario_names, function(nm) .scenario_dict(nm, scenario_configs))
-  # RE knobs (random_effect_dist/df, icc_noise_sd) are LME-only: the engine
-  # contract rejects lme: Some(...) when the estimator is not Mle.  Zero them
-  # for non-LME families so the spec-builder produces lme: None for those calls.
+  # RE knobs (random_effect_dist/df, icc_noise_sd) perturb the random effects,
+  # so they apply to every clustered model; the engine contract rejects
+  # lme: Some(...) without a cluster. Zero them for a model without random
+  # effects so the spec-builder produces lme: None there.
   if (length(reg$`_random_effects_parsed`) == 0L) {
     for (i in seq_along(scenarios)) {
       scenarios[[i]]$random_effect_dist <- 0L

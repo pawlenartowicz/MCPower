@@ -7,7 +7,6 @@ from typing import Any, List, Optional, Tuple, Union
 
 __all__ = [
     "_validate_cluster_config",
-    "_validate_cluster_sample_size",
     "_validate_estimator",
 ]
 
@@ -144,19 +143,21 @@ def _validate_simulations(n_simulations: Any) -> Tuple[int, _ValidationResult]:
 def _validate_sample_size(sample_size: Any) -> _ValidationResult:
     """Validate sample size parameter.
 
-    Requires an integer >= 20 and <= 100,000.
+    Requires an integer inside config ``limits.sample_size`` (20 to 100,000).
     """
+    from ..config import get_limits
     errors = []
 
     if not isinstance(sample_size, int):
         errors.append(f"sample_size must be an integer, got {type(sample_size).__name__}")
         return _ValidationResult(False, errors, [])
 
-    if sample_size < 20:
-        errors.append(f"sample_size must be at least 20, got {sample_size}")
-    elif sample_size > 100000:
+    lo, hi = get_limits()["sample_size"]
+    if sample_size < lo:
+        errors.append(f"sample_size must be at least {lo}, got {sample_size}")
+    elif sample_size > hi:
         errors.append(
-            f"sample_size too large ({sample_size:,}). Maximum recommended: 100,000. We cannot guarantee stability for such small p-values."
+            f"sample_size too large ({sample_size:,}). Maximum recommended: {hi:,}. We cannot guarantee stability for such small p-values."
         )
 
     return _ValidationResult.from_errors(errors)
@@ -165,9 +166,10 @@ def _validate_sample_size(sample_size: Any) -> _ValidationResult:
 def _validate_sample_size_for_model(sample_size: int, n_variables: int) -> _ValidationResult:
     """Validate that sample size is sufficient for the model complexity.
 
-    Requires sample_size >= 15 + n_variables, where n_variables is the number
-    of columns in the design matrix (continuous predictors, factor dummy
-    variables, and interaction terms).
+    Requires sample_size >= base + n_variables, where base is config
+    ``limits.sample_size_base`` and n_variables is the number of columns in the
+    design matrix (continuous predictors, factor dummy variables, and
+    interaction terms).
 
     Args:
         sample_size: Total number of observations.
@@ -176,15 +178,17 @@ def _validate_sample_size_for_model(sample_size: int, n_variables: int) -> _Vali
     Returns:
         _ValidationResult with errors if sample size is insufficient.
     """
+    from ..config import get_limits
     errors = []
-    # Green's rule of thumb: N >= 15 + p for adequate power in regression,
+    # Green's rule of thumb: N >= base + p for adequate power in regression,
     # where p is the number of predictors (design matrix columns).
-    min_required = 15 + n_variables
+    base = get_limits()["sample_size_base"]
+    min_required = base + n_variables
 
     if sample_size < min_required:
         errors.append(
             f"sample_size ({sample_size}) is too small for a model with {n_variables} "
-            f"variables. Minimum required: {min_required} (15 + {n_variables} variables)."
+            f"variables. Minimum required: {min_required} ({base} + {n_variables} variables)."
         )
 
     return _ValidationResult.from_errors(errors)
@@ -438,6 +442,11 @@ def _validate_test_formula(test_formula: str, available_variables: List[str]) ->
     """
     Simple validation for test_formula - just check if variables exist.
 
+    A formula with a random-effect term (any ``|``) is left to the engine,
+    which refuses it with the message every port shows (test_formula takes
+    fixed effects only); scanning it here would report the grouping name as
+    a missing predictor.
+
     Args:
         test_formula: Formula string to test (e.g., "x1 + x2:x3")
         available_variables: List of base variable names
@@ -456,6 +465,9 @@ def _validate_test_formula(test_formula: str, available_variables: List[str]) ->
     if not test_formula.strip():
         errors.append("test_formula cannot be empty")
         return _ValidationResult(False, errors, [])
+
+    if "|" in test_formula:
+        return _ValidationResult.from_errors([])
 
     try:
         # Unicode-aware identifier extraction
@@ -558,6 +570,9 @@ def _validate_cluster_config(
     parsed_grouping_vars: List[str],
     n_per_parent: Optional[int] = None,
     is_nested_child: bool = False,
+    random_slopes: Optional[List[str]] = None,
+    slope_variance: Any = 0.0,
+    slope_intercept_corr: Any = 0.0,
 ) -> _ValidationResult:
     """Validate cluster configuration parameters.
 
@@ -584,6 +599,8 @@ def _validate_cluster_config(
     icc_lo, icc_hi = get_limits()["icc_stability"]
     if not isinstance(icc, (int, float)):
         errors.append("ICC must be a number")
+    elif not math.isfinite(icc):
+        errors.append(f"ICC must be a finite number, got {icc}")
     elif icc < 0 or icc >= 1:
         errors.append(f"ICC must be between 0 and 1 (exclusive on upper end), got {icc}")
     elif icc != 0 and (icc < icc_lo or icc > icc_hi):
@@ -617,56 +634,24 @@ def _validate_cluster_config(
             errors.append(f"n_clusters must be an integer >= 2, got {n_clusters}")
 
     if cluster_size is not None:
-        reliable = _cluster_limits()["reliable_rows_per_cluster"]
-        if not isinstance(cluster_size, int) or cluster_size < reliable:
-            errors.append(f"cluster_size must be an integer >= {reliable} for reliable mixed model estimation. Got {cluster_size}.")
+        min_rows = _cluster_limits()["min_rows_per_cluster"]
+        if not isinstance(cluster_size, int) or cluster_size < min_rows:
+            errors.append(f"cluster_size must be an integer >= {min_rows}. Got {cluster_size}.")
 
-    return _ValidationResult.from_errors(errors, warnings)
-
-
-def _validate_cluster_sample_size(
-    sample_size: int,
-    n_clusters: Optional[int],
-    cluster_size: Optional[int],
-) -> _ValidationResult:
-    """
-    Validate that cluster configuration with sample_size provides sufficient observations.
-
-    Args:
-        sample_size: Total number of observations
-        n_clusters: Number of clusters
-        cluster_size: Size per cluster (if fixed), or None (computed from sample_size)
-
-    Returns:
-        ValidationResult with errors if observations per cluster < 5
-    """
-    errors: List[str] = []
-    warnings: List[str] = []
-
-    if cluster_size is not None:
-        effective_cluster_size = cluster_size
-    else:
-        effective_cluster_size = sample_size // n_clusters
-
-    limits = _cluster_limits()
-    reliable = limits["reliable_rows_per_cluster"]
-    recommended = limits["recommended_rows_per_cluster"]
-    if effective_cluster_size < reliable:
-        hint = (
-            f" Either increase sample_size to {n_clusters * reliable} or reduce n_clusters to {sample_size // reliable}."
-            if n_clusters is not None
-            else f" Increase cluster_size to at least {reliable}."
-        )
-        errors.append(
-            f"Insufficient observations per cluster: {effective_cluster_size} (sample_size={sample_size}, "
-            f"n_clusters={n_clusters}). Need at least {reliable} observations per cluster for reliable "
-            f"mixed model estimation.{hint}"
-        )
-    elif effective_cluster_size < recommended:
-        warnings.append(
-            f"Low observations per cluster: {effective_cluster_size} (sample_size={sample_size}, "
-            f"n_clusters={n_clusters}). Recommended: at least {recommended} observations per cluster. "
-            f"Small cluster sizes may cause convergence issues or biased variance estimates."
-        )
+    # A NaN or infinity would reach the engine as invalid JSON; the range check
+    # on correlations ([-1, 1]) stays with the engine. A slope at variance 0
+    # is fitted but never simulated, so power would read as if it were absent.
+    for name, value in (
+        ("slope_variance", slope_variance),
+        ("slope_intercept_corr", slope_intercept_corr),
+    ):
+        try:
+            finite = math.isfinite(float(value))
+        except (TypeError, ValueError):
+            finite = False
+        if not finite:
+            errors.append(f"{name} must be a finite number, got {value!r}")
+        elif name == "slope_variance" and random_slopes and float(value) <= 0:
+            errors.append(f"random_slopes need a slope_variance above 0, got {value!r}")
 
     return _ValidationResult.from_errors(errors, warnings)

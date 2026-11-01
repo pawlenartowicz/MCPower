@@ -3,6 +3,8 @@
  *
  * - Load once on first access via `loadHistory()`.
  * - New entries prepended (newest-first); FIFO eviction beyond MAX_ENTRIES.
+ * - A run on uploaded data (`spec.csv` set) is not kept: the spec would carry
+ *   every column of the dataset into each entry.
  * - Tests mock `@tauri-apps/plugin-store` because there's no IPC in jsdom.
  */
 import type { AppSpec } from '$lib/domain/app-spec';
@@ -26,6 +28,10 @@ export interface HistoryEntry {
 
 const FILE = 'history.json';
 const MAX_ENTRIES = 25;
+
+function holdsUpload(entry: HistoryEntry): boolean {
+  return entry.spec?.csv != null;
+}
 
 /** Exposed for tests to reset the module-level cache between test runs. */
 export function resetHistoryCache(): void {
@@ -62,6 +68,7 @@ export async function pushHistoryEntry(entry: HistoryEntry): Promise<HistoryEntr
   // loadHistory returns oldest-first (append order); we append the new entry,
   // then evict from the front (oldest) when over MAX_ENTRIES.
   const current = await loadHistory();
+  if (holdsUpload(entry)) return [...current].reverse();
   const appended = [...current, entry];
   const trimmed = appended.length > MAX_ENTRIES ? appended.slice(appended.length - MAX_ENTRIES) : appended;
   await saveHistory(trimmed);

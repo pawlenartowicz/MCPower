@@ -322,6 +322,12 @@ fn map_spec_error(e: SpecError) -> PyErr {
         | SpecError::EmptySlopeTerm { .. }
         | SpecError::RandomSlopesUnsupported
         | SpecError::RandomInterceptSuppressionUnsupported
+        | SpecError::UncorrelatedRandomEffectsUnsupported
+        | SpecError::NestedColonFormUnsupported { .. }
+        | SpecError::NestedSlopeUnsupported { .. }
+        | SpecError::RandomEffectTermUnsupported { .. }
+        | SpecError::MultipleNestedTermsUnsupported { .. }
+        | SpecError::GroupingNameUnsupported { .. }
         | SpecError::NonFiniteEffect { .. }
         | SpecError::FactorLevelCount { .. }
         | SpecError::FactorProportionSum { .. }
@@ -344,6 +350,12 @@ fn map_spec_error(e: SpecError) -> PyErr {
         | SpecError::UnknownVariableType { .. }
         | SpecError::UnknownContrastName { .. }
         | SpecError::TestFormulaPredictorMissing { .. }
+        | SpecError::TestFormulaDropsSlopeVariable { .. }
+        | SpecError::TestFormulaRandomEffect { .. }
+        | SpecError::PosthocRequiresOls { .. }
+        | SpecError::ContrastRequiresOls { .. }
+        | SpecError::DfMethodNotDefined(_)
+        | SpecError::ContractRule(_)
         | SpecError::RecoveryColumnMissing { .. }
         | SpecError::RecoveryColumnLength { .. }
         | SpecError::InvalidVariableTypeValue { .. }

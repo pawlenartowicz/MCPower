@@ -78,6 +78,7 @@ fn sample_size_result_survives_json_roundtrip_with_embedded_nan() {
         power_corrected: vec![0.5],
         ci_uncorrected: vec![Ci { lo: 0.4, hi: 0.6 }],
         ci_corrected: vec![Ci { lo: 0.4, hi: 0.6 }],
+        corrected_not_applicable: vec![],
         convergence_rate: 1.0,
         boundary_hit: vec![],
         estimator_extras: EstimatorExtras::Mle {

@@ -6,7 +6,8 @@
 //! `t_sq > t_crit_sq` comparisons.
 //!
 //! One exception: a draw tested at its own Satterthwaite df
-//! ([`uses_satterthwaite`]) has no df known before the fit, so it is decided
+//! ([`mixed_test`] gives [`MixedTest::Satterthwaite`]) has no df known before
+//! the fit, so it is decided
 //! from tail probabilities instead — [`t_tail_sq`] and [`f_tail`], one
 //! incomplete-beta evaluation each, a fraction of one `t_ppf` Newton search.
 //! Tukey HSD there compares against [`TukeyThresholds`], whose curve gives the
@@ -20,11 +21,12 @@
 //! function*, SIAM J. Numer. Anal. Ser. B, 1, 86–96.
 
 use crate::spec::{
-    ClusterSizing, CorrectionMethod, CritValues, DfMethod, EngineError, EstimatorSpec,
+    ClusterSizing, ClusterSpec, CorrectionMethod, CritValues, EngineError, EstimatorSpec,
     SimulationSpec,
 };
 use commonstats::dist::ContinuousCdf;
 use commonstats::dist::continuous::StudentizedRange;
+use engine_contract::MixedTest;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
@@ -882,66 +884,67 @@ pub fn between_column_count(spec: &SimulationSpec, kept: Option<&[u32]>) -> u32 
     }
 }
 
+/// Primary cluster count `g`, one entry per element of `sample_sizes`.
+/// `n_clusters_at` floors; the row→cluster map assigns the remainder rows of a
+/// `FixedSize` design to one further partial cluster, so the count that matches
+/// the data is the ceiling.
+pub fn clusters_per_n(cluster: &ClusterSpec, sample_sizes: &[u32]) -> Vec<usize> {
+    sample_sizes
+        .iter()
+        .map(|&n| match cluster.sizing {
+            ClusterSizing::FixedClusters { n_clusters } => n_clusters.max(1) as usize,
+            ClusterSizing::FixedSize { cluster_size } => {
+                let s = cluster_size.max(1) as usize;
+                (n as usize).div_ceil(s)
+            }
+        })
+        .collect()
+}
+
+/// One flag per target (marginals in `target_indices` order, then contrasts):
+/// whether it is constant within cluster. A contrast β_p − β_n is cluster-level
+/// only if both sides are; one within-cluster side makes the difference vary
+/// within cluster.
+pub fn cluster_level_targets(spec: &SimulationSpec) -> Vec<bool> {
+    let mut flags: Vec<bool> = spec
+        .target_indices
+        .iter()
+        .map(|&c| column_is_cluster_level(spec, c))
+        .collect();
+    flags.extend(
+        spec.contrast_pairs
+            .iter()
+            .map(|&(p, n)| column_is_cluster_level(spec, p) && column_is_cluster_level(spec, n)),
+    );
+    flags
+}
+
 impl BetweenWithinDf {
     /// Resolve the between-within inputs for `spec`, or `None` when the
-    /// asymptotic table applies: `df_method` is `Asymptotic`, the fit is not
-    /// mixed (`Ols`, or `Glm` without a cluster spec), or the design carries
-    /// crossed / nested extra groupings, for which the between/within partition
-    /// of the residual df is not defined. In that last case a Gaussian LMM is
-    /// tested at per-draw Satterthwaite df instead ([`uses_satterthwaite`]),
-    /// the table serving only draws whose df pass fails; a GLMM stays on it.
-    /// `p_between` is supplied by the caller so a reduced-model rebuild can
-    /// pass its own count.
-    ///
-    /// The clustered-`Glm` half of the predicate below is the same condition
-    /// under which `wald_se` is read (clustered-binary GLMM); `Mle` is in scope
-    /// here and not there, so the two are not interchangeable.
+    /// between-within reference does not apply: [`mixed_test`] picks another
+    /// test (Wald z, or per-draw Satterthwaite df, in which case this table's
+    /// asymptotic stand-in serves only draws whose df pass fails), or the fit
+    /// is not mixed (`Ols`, or `Glm` without a cluster spec). Errors where
+    /// [`mixed_test`] does. `p_between` is supplied by the caller so a
+    /// reduced-model rebuild can pass its own count.
     pub fn resolve(
         spec: &SimulationSpec,
         sample_sizes: &[u32],
         p_between: u32,
-    ) -> Option<BetweenWithinDf> {
-        if spec.df_method != DfMethod::BetweenWithin {
-            return None;
+    ) -> Result<Option<BetweenWithinDf>, EngineError> {
+        if mixed_test(spec)? != Some(MixedTest::BetweenWithin) {
+            return Ok(None);
         }
-        // The `?` already established a cluster spec, so a surviving `Glm` is the
-        // clustered GLMM; `Ols` over clustered data is not a mixed fit.
-        let cluster = spec.cluster.as_ref()?;
-        let mixed = matches!(spec.estimator, EstimatorSpec::Mle | EstimatorSpec::Glm);
-        if !mixed || !cluster.extra_groupings.is_empty() {
-            return None;
-        }
-        // `n_clusters_at` floors; the row→cluster map assigns the remainder rows
-        // of a `FixedSize` design to one further partial cluster, so the count
-        // that matches the data is the ceiling.
-        let clusters_per_n = sample_sizes
-            .iter()
-            .map(|&n| match cluster.sizing {
-                ClusterSizing::FixedClusters { n_clusters } => n_clusters.max(1) as usize,
-                ClusterSizing::FixedSize { cluster_size } => {
-                    let s = cluster_size.max(1) as usize;
-                    (n as usize).div_ceil(s)
-                }
-            })
-            .collect();
-        let mut between_per_target: Vec<bool> = spec
-            .target_indices
-            .iter()
-            .map(|&c| column_is_cluster_level(spec, c))
-            .collect();
-        // A contrast β_p − β_n is cluster-level only if both sides are; one
-        // within-cluster side makes the difference vary within cluster.
-        between_per_target.extend(
-            spec.contrast_pairs.iter().map(|&(p, n)| {
-                column_is_cluster_level(spec, p) && column_is_cluster_level(spec, n)
-            }),
-        );
-        Some(BetweenWithinDf {
-            clusters_per_n,
+        let cluster = spec
+            .cluster
+            .as_ref()
+            .expect("a mixed test implies a cluster spec");
+        Ok(Some(BetweenWithinDf {
+            clusters_per_n: clusters_per_n(cluster, sample_sizes),
             p_between,
-            between_per_target,
+            between_per_target: cluster_level_targets(spec),
             collapsed: false,
-        })
+        }))
     }
 
     /// The reference for a fit whose variance components all pinned at zero.
@@ -963,21 +966,24 @@ impl BetweenWithinDf {
     }
 }
 
-/// Whether a run tests its targets at each draw's Satterthwaite df: a Gaussian
-/// LMM (`Mle`) under `DfMethod::BetweenWithin` whose cluster spec carries a
-/// crossed or nested extra grouping — exactly the designs
-/// [`BetweenWithinDf::resolve`] leaves on the asymptotic table because the
-/// between/within partition is not defined there. Such a draw is decided from
-/// per-target p-values ([`t_tail_sq`], [`f_tail`]) at glmm's lmerTest-style
-/// Satterthwaite df; a draw whose df pass fails keeps the asymptotic table. A
-/// GLMM has no Satterthwaite df and stays on Wald z.
-pub fn uses_satterthwaite(spec: &SimulationSpec) -> bool {
-    spec.estimator == EstimatorSpec::Mle
-        && spec.df_method == DfMethod::BetweenWithin
-        && spec
-            .cluster
-            .as_ref()
-            .is_some_and(|c| !c.extra_groupings.is_empty())
+/// The fixed-effect test a run applies, or `None` for a fit that is not mixed
+/// (`Ols`, or `Glm` without a cluster spec), where `df_method` is ignored.
+/// The single reader of `spec.df_method`: every table build and every per-draw
+/// branch asks this function, and the batch decides once. Under
+/// [`MixedTest::Satterthwaite`] each draw is decided from per-target p-values
+/// ([`t_tail_sq`], [`f_tail`]) at glmm's lmerTest-style Satterthwaite df, and a
+/// draw whose df pass fails keeps the asymptotic table. A primary random slope
+/// counts when the fitted structure has one (`cluster_slope_design_cols`
+/// non-empty), whatever its variance. A named test the design does not admit
+/// is an `InvalidSpec` (contract validation refuses it first).
+pub fn mixed_test(spec: &SimulationSpec) -> Result<Option<MixedTest>, EngineError> {
+    spec.df_method
+        .resolve(
+            spec.estimator,
+            spec.cluster.as_ref(),
+            !spec.cluster_slope_design_cols.is_empty(),
+        )
+        .map_err(|e| EngineError::InvalidSpec(e.to_string()))
 }
 
 /// The df split at grid point `n_idx`: the residual df `N − P`, and under the
@@ -1081,8 +1087,9 @@ pub struct CritValueTable {
     /// Denominator df behind each entry of `t_crit_sq_uncorrected`, same shape.
     /// Inner rows are EMPTY whenever no df enters the threshold — every
     /// standard-normal (Wald-z) build, which is `Glm`/`Mle` under
-    /// `DfMethod::Asymptotic` and every fallback in [`BetweenWithinDf::resolve`]
-    /// (per-draw Satterthwaite df never enter a table).
+    /// [`MixedTest::WaldZ`] and the asymptotic stand-in under
+    /// [`MixedTest::Satterthwaite`] (per-draw Satterthwaite df never enter a
+    /// table).
     /// OLS repeats its residual df `N − P` per target.
     pub df_per_target: Vec<Vec<f64>>,
     /// Outer length = `sample_sizes.len()`; inner length = `n_targets`.
@@ -1438,6 +1445,7 @@ impl CritValueTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spec::DfMethod;
 
     /// The exact quantile, as the source's reference: `(isf(α) / √2)²`.
     fn exact_crit_sq(alpha: f64, k: f64, df: f64) -> f64 {
@@ -1469,11 +1477,27 @@ mod tests {
         }
     }
 
+    // Every alpha once, split over k = 3 and 20 (one curve build each), as
+    // separate tests so the harness builds the four curves in parallel. The
+    // full alpha by k grid is `tukey_curve_matches_exact_isf_full`.
     #[test]
-    fn tukey_curve_matches_exact_isf() {
-        for k in [3.0, 20.0] {
-            assert_curve_matches_exact(0.05, k, 2.0, 1000.0, 6);
-        }
+    fn tukey_curve_matches_exact_isf_k3_a10() {
+        assert_curve_matches_exact(0.1, 3.0, 2.0, 1000.0, 3);
+    }
+
+    #[test]
+    fn tukey_curve_matches_exact_isf_k3_a001() {
+        assert_curve_matches_exact(0.001, 3.0, 2.0, 1000.0, 3);
+    }
+
+    #[test]
+    fn tukey_curve_matches_exact_isf_k20_a05() {
+        assert_curve_matches_exact(0.05, 20.0, 2.0, 1000.0, 3);
+    }
+
+    #[test]
+    fn tukey_curve_matches_exact_isf_k20_a01() {
+        assert_curve_matches_exact(0.01, 20.0, 2.0, 1000.0, 3);
     }
 
     #[test]
@@ -1544,7 +1568,7 @@ mod tests {
             EstimatorSpec::Mle,
             ClusterSizing::FixedSize { cluster_size: 8 },
         );
-        let split = BetweenWithinDf::resolve(&spec, &[40], 2).unwrap();
+        let split = BetweenWithinDf::resolve(&spec, &[40], 2).unwrap().unwrap();
         for bw in [split.clone(), split.collapsed(EstimatorSpec::Mle).unwrap()] {
             let t = CritValueTable::build_with_tukey_k(
                 &spec.crit_values,
@@ -2324,7 +2348,7 @@ mod tests {
         correction_method: CorrectionMethod,
         tukey_k: &[f64],
     ) -> CritValueTable {
-        let bw = BetweenWithinDf::resolve(spec, &[n], p_between);
+        let bw = BetweenWithinDf::resolve(spec, &[n], p_between).unwrap();
         CritValueTable::build_with_tukey_k(
             &spec.crit_values,
             &[n],
@@ -2557,10 +2581,12 @@ mod tests {
     }
 
     /// CRIT-16: crossed or nested extra groupings leave the between-within
-    /// partition undefined, so the build falls back to the asymptotic table —
-    /// value for value, not merely without panicking.
+    /// partition undefined. Named, `between_within` is refused there; under
+    /// `auto` the LMM goes to per-draw Satterthwaite df, whose table is the
+    /// asymptotic one value for value (it serves only draws whose df pass
+    /// fails).
     #[test]
-    fn bw_falls_back_to_asymptotic_for_crossed_and_nested_groupings() {
+    fn bw_refused_and_auto_asymptotic_for_crossed_and_nested_groupings() {
         let base = bw_two_predictor_spec(
             EstimatorSpec::Mle,
             ClusterSizing::FixedSize { cluster_size: 8 },
@@ -2580,9 +2606,15 @@ mod tests {
                 slopes: vec![],
             }];
             assert!(
-                BetweenWithinDf::resolve(&spec, &[40], 2).is_none(),
-                "{extra:?} must refuse the between-within split"
+                matches!(
+                    BetweenWithinDf::resolve(&spec, &[40], 2),
+                    Err(EngineError::InvalidSpec(m)) if m.contains("'auto'")
+                ),
+                "{extra:?} must refuse a named between-within split"
             );
+            spec.df_method = DfMethod::Auto;
+            assert_eq!(mixed_test(&spec).unwrap(), Some(MixedTest::Satterthwaite));
+            assert!(BetweenWithinDf::resolve(&spec, &[40], 2).unwrap().is_none());
             let table = bw_table(&spec, 40, 3, 2, CorrectionMethod::Bonferroni, &[]);
             assert_eq!(
                 table.t_crit_sq_uncorrected, reference.t_crit_sq_uncorrected,
@@ -2653,7 +2685,7 @@ mod tests {
         let sizing = ClusterSizing::FixedSize { cluster_size: 8 };
         assert_eq!(sizing.n_clusters_at(41), 5);
         let spec = bw_two_predictor_spec(EstimatorSpec::Mle, sizing);
-        let bw = BetweenWithinDf::resolve(&spec, &[41], 2).unwrap();
+        let bw = BetweenWithinDf::resolve(&spec, &[41], 2).unwrap().unwrap();
         assert_eq!(bw.clusters_per_n, vec![6]);
         // g = 6, p = 3, p_between = 2 ⇒ df_between = 4, df_within = 38 − 4 = 34.
         let table = bw_table(&spec, 41, 3, 2, CorrectionMethod::None, &[]);
@@ -2700,7 +2732,7 @@ mod tests {
             EstimatorSpec::Mle,
             ClusterSizing::FixedSize { cluster_size: 8 },
         );
-        let split = BetweenWithinDf::resolve(&spec, &[40], 2).unwrap();
+        let split = BetweenWithinDf::resolve(&spec, &[40], 2).unwrap().unwrap();
         let collapsed = split.collapsed(EstimatorSpec::Mle).unwrap();
         assert!(collapsed.collapsed && !split.collapsed);
         let table = CritValueTable::build_with_tukey_k(

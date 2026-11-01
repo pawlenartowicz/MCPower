@@ -10,7 +10,7 @@ use engine_contract::{
 
 use crate::correlation::build_correlation_matrix;
 use crate::error::SpecError;
-use crate::formula::parse_formula;
+use crate::formula::{first_random_effect_term, parse_formula};
 use crate::input::{
     HeteroskedasticityInput, LinearSpec, PosthocRequest, ScenarioInput, UploadMode,
 };
@@ -28,7 +28,8 @@ use crate::variables::{PredictorTable, build_predictor_table};
 ///
 /// # Errors
 /// Propagates errors from validation, formula parsing, effect/target/correlation resolution,
-/// and internal contract validation (`InternalContractValidate`).
+/// a random-effect term in `test_formula` (`TestFormulaRandomEffect`), and template
+/// validation (`ContractRule` or `InternalContractValidate`).
 pub fn build_linear_contract_with_skeleton(
     spec: &LinearSpec,
 ) -> Result<(Vec<SimulationContract>, EffectSkeleton), SpecError> {
@@ -144,8 +145,7 @@ pub fn build_linear_contract_with_skeleton(
     for sc in scenarios {
         let mut c = template.clone();
         c.scenario = sc;
-        c.validate_template()
-            .map_err(|e| SpecError::InternalContractValidate(e.to_string()))?;
+        c.validate_template().map_err(contract_validation_error)?;
         out.push(c);
     }
     // The skeleton aligns with `target_indices` (which index `design_test`), so
@@ -191,7 +191,10 @@ pub fn build_contract(
 ///
 /// # Errors
 /// Propagates from validation, formula parsing, cluster/estimator coupling (`ClusterFamilyMismatch`),
-/// random-slope rejection (`RandomSlopesUnsupported`), and internal contract validation.
+/// random-slope rejection (`RandomSlopesUnsupported`), post-hoc requests and contrasts on a
+/// model that is not OLS (`PosthocRequiresOls`, `ContrastRequiresOls`), and contract
+/// validation (`ContractRule` for a rule the user's input broke, `InternalContractValidate`
+/// otherwise).
 pub fn build_contract_with_skeleton(
     spec: &LinearSpec,
     outcome_kind: engine_contract::OutcomeKind,
@@ -223,9 +226,9 @@ pub fn build_contract_with_skeleton(
     }
     let (mut contracts, skeleton) = build_linear_contract_with_skeleton(spec)?;
 
-    // Only random intercepts are supported. Reject random-slope terms
-    // explicitly so callers get a clear error instead of silently dropped
-    // effects.
+    // A random slope reaches the contract through `ClusterSpec::slopes`, and the
+    // ports strip random-effect terms from `spec.formula`. A slope term still
+    // here would be dropped silently, so it is refused.
     // formula is re-parsed here for the random-effect walk; the template builder's parse result is not returned.
     let parsed = parse_formula(&spec.formula)?;
     for re in &parsed.random_effects {
@@ -233,6 +236,47 @@ pub fn build_contract_with_skeleton(
             return Err(SpecError::RandomSlopesUnsupported);
         }
     }
+    let table = build_predictor_table(&parsed, &spec.predictors)?;
+    check_posthoc_needs_ols(spec, &table, estimator, !clusters.is_empty())?;
+
+    // A random slope is fitted on its variable's column of the fitted design,
+    // so a mixed model's test_formula must keep every slope variable (only OLS
+    // fits no random effects). The contract refuses such a design too; this
+    // check runs first to name the variable.
+    let design_test = contracts
+        .first()
+        .filter(|_| estimator != EstimatorSpec::Ols)
+        .and_then(|c| c.design_test.as_ref());
+    if let (Some(cluster), Some(design_test)) = (clusters.first(), design_test) {
+        let slopes = cluster
+            .slopes
+            .iter()
+            .chain(cluster.extra_groupings.iter().flat_map(|g| &g.slopes));
+        for slope in slopes {
+            let kept = design_test
+                .terms
+                .iter()
+                .any(|t| matches!(t, DesignTerm::Direct { column } if *column == slope.column));
+            // Ports resolve slope names to non-factor generation columns, so the
+            // lookup always hits; any other column is left to the contract check.
+            let name = table.non_factor_names.get(slope.column.0 as usize);
+            debug_assert!(name.is_some(), "slope column is a non-factor predictor");
+            if let (false, Some(name)) = (kept, name) {
+                return Err(SpecError::TestFormulaDropsSlopeVariable { name: name.clone() });
+            }
+        }
+    }
+
+    // A named df_method test the design does not admit is a user error, not an
+    // internal one; the contract refuses it too.
+    let cluster = clusters.first();
+    spec.df_method
+        .resolve(
+            estimator,
+            cluster,
+            cluster.is_some_and(|c| !c.slopes.is_empty()),
+        )
+        .map_err(SpecError::DfMethodNotDefined)?;
 
     for c in &mut contracts {
         c.outcome.kind = outcome_kind;
@@ -240,10 +284,68 @@ pub fn build_contract_with_skeleton(
         c.outcome.intercept = intercept;
         c.estimator = estimator;
         c.generation.cluster = clusters.first().cloned();
-        c.validate()
-            .map_err(|e| SpecError::InternalContractValidate(e.to_string()))?;
+        c.validate().map_err(contract_validation_error)?;
     }
     Ok((contracts, skeleton))
+}
+
+/// A contract validation failure as a spec error: a rule the user's input
+/// broke keeps the contract's message as a user error
+/// ([`SpecError::ContractRule`]); a wiring fault is internal.
+fn contract_validation_error(e: engine_contract::ContractError) -> SpecError {
+    if e.is_user_input() {
+        SpecError::ContractRule(e)
+    } else {
+        SpecError::InternalContractValidate(e.to_string())
+    }
+}
+
+/// Refuse post-hoc requests and named contrasts on a model that is not OLS,
+/// naming the request and the factor's dummies to test instead. The contract
+/// (`PosthocRequiresOls`) and the batch keep their own checks as backstops.
+fn check_posthoc_needs_ols(
+    spec: &LinearSpec,
+    table: &PredictorTable,
+    estimator: EstimatorSpec,
+    clustered: bool,
+) -> Result<(), SpecError> {
+    if estimator == EstimatorSpec::Ols {
+        return Ok(());
+    }
+    let model = if clustered {
+        "a mixed model"
+    } else {
+        "a binary or count model"
+    }
+    .to_string();
+    // The dummies of a factor, comma-separated as target_test takes them.
+    let dummies = |factor: &str| -> Option<String> {
+        let fi = table.factor_names.iter().position(|n| n == factor)?;
+        Some(
+            table.factor_levels[fi]
+                .iter()
+                .map(|lvl| format!("{factor}[{lvl}]"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    };
+    if let Some(req) = spec.posthoc_requests.first() {
+        return Err(SpecError::PosthocRequiresOls {
+            model,
+            example: dummies(&req.factor).unwrap_or_else(|| req.factor.clone()),
+        });
+    }
+    if let Some((pos, neg)) = spec.contrast_pairs.first() {
+        let factor = pos.split_once('[').map_or(pos.as_str(), |(f, _)| f);
+        // A contrast between two non-factor effects (the app allows one)
+        // names the two effects themselves.
+        return Err(SpecError::ContrastRequiresOls {
+            contrast: format!("{pos} vs {neg}"),
+            model,
+            example: dummies(factor).unwrap_or_else(|| format!("{pos}, {neg}")),
+        });
+    }
+    Ok(())
 }
 
 /// Resolve cluster-level predictor *names* to `ColumnId`s against the predictor
@@ -471,6 +573,14 @@ fn build_design_test(
     let Some(formula) = &spec.test_formula else {
         return Ok((gen_design.clone(), None));
     };
+    // The test model keeps the model's random effects; test_formula names
+    // fixed effects only, so any random-effect term in it is refused rather
+    // than dropped.
+    if let Some(term) = first_random_effect_term(formula) {
+        return Err(SpecError::TestFormulaRandomEffect {
+            term: term.to_string(),
+        });
+    }
     let parsed = parse_formula(formula)?;
     // An unknown predictor surfaced while building the TEST table is a
     // test_formula term that isn't in the model — re-tag it so the user is
@@ -1434,6 +1544,309 @@ mod tests {
         );
         // Estimator coupling: Mle was stated explicitly and must land on the wire.
         assert_eq!(c.estimator, EstimatorSpec::Mle);
+    }
+
+    /// A clustered GLM fits random slopes, so its test_formula is held to the
+    /// same rule as a linear mixed model's.
+    #[test]
+    fn build_contract_rejects_glmm_test_formula_dropping_slope_variable() {
+        let cluster = engine_contract::ClusterSpec {
+            sizing: engine_contract::ClusterSizing::FixedClusters { n_clusters: 20 },
+            tau_squared: 0.3,
+            slopes: vec![engine_contract::SlopeTerm {
+                column: ColumnId(1),
+                variance: 0.2,
+                corr_with_intercept: 0.0,
+                corr_with: vec![],
+            }],
+            extra_groupings: vec![],
+        };
+        let mut spec = simple_spec();
+        spec.test_formula = Some("y = x1".into());
+        spec.targets = vec!["x1".into()];
+        let err = build_contract(
+            &spec,
+            OutcomeKind::Binary,
+            None,
+            Some(EstimatorSpec::Glm),
+            0.0,
+            vec![cluster],
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, SpecError::TestFormulaDropsSlopeVariable { name } if name == "x2"),
+            "{err:?}"
+        );
+    }
+
+    /// A test_formula that leaves out a random-slope variable is refused with
+    /// the variable's name, for a slope on the primary grouping and on an extra
+    /// grouping alike; one that keeps it builds.
+    #[test]
+    fn build_contract_rejects_test_formula_dropping_slope_variable() {
+        let slope_on_x2 = || engine_contract::SlopeTerm {
+            column: ColumnId(1),
+            variance: 0.2,
+            corr_with_intercept: 0.0,
+            corr_with: vec![],
+        };
+        let primary = engine_contract::ClusterSpec {
+            sizing: engine_contract::ClusterSizing::FixedClusters { n_clusters: 20 },
+            tau_squared: 0.3,
+            slopes: vec![slope_on_x2()],
+            extra_groupings: vec![],
+        };
+        let mut on_extra = primary.clone();
+        on_extra.slopes = vec![];
+        on_extra.extra_groupings = vec![engine_contract::GroupingSpec {
+            relation: engine_contract::GroupingRelation::Crossed { n_clusters: 8 },
+            tau_squared: 0.1,
+            slopes: vec![slope_on_x2()],
+        }];
+        let build = |test_formula: &str, cluster: &engine_contract::ClusterSpec| {
+            let mut spec = simple_spec();
+            spec.test_formula = Some(test_formula.into());
+            spec.targets = vec!["x1".into()];
+            build_contract(
+                &spec,
+                OutcomeKind::Continuous,
+                None,
+                Some(EstimatorSpec::Mle),
+                0.0,
+                vec![cluster.clone()],
+            )
+        };
+        for cluster in [&primary, &on_extra] {
+            let err = build("y = x1", cluster).unwrap_err();
+            assert!(
+                matches!(&err, SpecError::TestFormulaDropsSlopeVariable { name } if name == "x2"),
+                "{err:?}"
+            );
+            assert!(
+                err.to_string().contains("keep 'x2' in test_formula"),
+                "{err}"
+            );
+            let mut keep = simple_spec();
+            keep.test_formula = Some("y = x2".into());
+            keep.targets = vec!["x2".into()];
+            build_contract(
+                &keep,
+                OutcomeKind::Continuous,
+                None,
+                Some(EstimatorSpec::Mle),
+                0.0,
+                vec![cluster.clone()],
+            )
+            .expect("a test_formula that keeps the slope variable builds");
+        }
+    }
+
+    /// A named df_method test the design does not admit stops with a user
+    /// error naming `auto`, for every port alike: `between_within` with a
+    /// crossed grouping (LMM and GLMM), `satterthwaite` on a GLMM. `auto`
+    /// builds both designs.
+    #[test]
+    fn build_contract_rejects_df_method_not_defined_on_design() {
+        use engine_contract::{ContractError, DfMethod};
+        let single = engine_contract::ClusterSpec::intercept_only(
+            engine_contract::ClusterSizing::FixedClusters { n_clusters: 20 },
+            0.3,
+        );
+        let mut crossed = single.clone();
+        crossed.extra_groupings = vec![engine_contract::GroupingSpec {
+            relation: engine_contract::GroupingRelation::Crossed { n_clusters: 8 },
+            tau_squared: 0.1,
+            slopes: vec![],
+        }];
+        let build =
+            |df_method: DfMethod, kind: OutcomeKind, cluster: &engine_contract::ClusterSpec| {
+                let mut spec = simple_spec();
+                spec.df_method = df_method;
+                build_contract(&spec, kind, None, None, 0.0, vec![cluster.clone()])
+            };
+        for (kind, lmm) in [
+            (OutcomeKind::Continuous, true),
+            (OutcomeKind::Binary, false),
+        ] {
+            let err = build(DfMethod::BetweenWithin, kind, &crossed).unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    SpecError::DfMethodNotDefined(ContractError::BetweenWithinNeedsSingleGrouping {
+                        lmm: l
+                    }) if *l == lmm
+                ),
+                "{kind:?}: {err:?}"
+            );
+            assert!(err.to_string().contains("auto"), "{err}");
+            build(DfMethod::Auto, kind, &crossed).expect("auto builds a crossed design");
+        }
+        let err = build(DfMethod::Satterthwaite, OutcomeKind::Binary, &single).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                SpecError::DfMethodNotDefined(ContractError::SatterthwaiteNeedsLmm)
+            ),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("auto"), "{err}");
+        build(DfMethod::Satterthwaite, OutcomeKind::Continuous, &single)
+            .expect("satterthwaite builds an LMM");
+    }
+
+    fn intercept_cluster() -> engine_contract::ClusterSpec {
+        engine_contract::ClusterSpec::intercept_only(
+            engine_contract::ClusterSizing::FixedClusters { n_clusters: 20 },
+            0.3,
+        )
+    }
+
+    /// test_formula takes fixed effects only: a random intercept, a random
+    /// slope and a nested term are each refused with the term as written; a
+    /// fixed-only test_formula builds.
+    #[test]
+    fn build_contract_refuses_random_effect_in_test_formula() {
+        let build = |test_formula: &str| {
+            let mut spec = simple_spec();
+            spec.test_formula = Some(test_formula.into());
+            spec.targets = vec!["x1".into()];
+            build_contract(
+                &spec,
+                OutcomeKind::Continuous,
+                None,
+                None,
+                0.0,
+                vec![intercept_cluster()],
+            )
+        };
+        for (test_formula, term) in [
+            ("y = x1 + (1|g)", "(1|g)"),
+            ("y = x1 + (1 + x1|g)", "(1 + x1|g)"),
+            ("y = x1 + (1|a/b)", "(1|a/b)"),
+        ] {
+            let err = build(test_formula).unwrap_err();
+            assert!(
+                matches!(&err, SpecError::TestFormulaRandomEffect { term: t } if t == term),
+                "{test_formula}: {err:?}"
+            );
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "test_formula sets the fixed effects of the test model only; the test model \
+                     keeps the model's random effects. Remove '{term}' from test_formula"
+                )
+            );
+        }
+        build("y = x1").expect("a fixed-only test_formula builds");
+    }
+
+    /// Post-hoc requests and named contrasts are refused on an LMM and a
+    /// GLMM (and an unclustered GLM) with a message naming the request and
+    /// the factor's dummies; OLS builds both.
+    #[test]
+    fn build_contract_refuses_posthoc_and_contrast_outside_ols() {
+        let mut contrast = anova_3level_spec();
+        contrast.posthoc_requests = vec![];
+        contrast.contrast_pairs = vec![("dose_group[mid]".into(), "dose_group[high]".into())];
+        let dummies = "dose_group[mid], dose_group[high]";
+        let cases = [
+            (
+                OutcomeKind::Continuous,
+                vec![intercept_cluster()],
+                "a mixed model",
+            ),
+            (
+                OutcomeKind::Binary,
+                vec![intercept_cluster()],
+                "a mixed model",
+            ),
+            (OutcomeKind::Binary, vec![], "a binary or count model"),
+        ];
+        for (kind, clusters, model) in cases {
+            let err = build_contract(
+                &anova_3level_spec(),
+                kind,
+                None,
+                None,
+                0.0,
+                clusters.clone(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(&err, SpecError::PosthocRequiresOls { model: m, example }
+                    if m == model && example == dummies),
+                "{kind:?}: {err:?}"
+            );
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "post-hoc comparisons ('all-contrasts') are available for OLS models only; \
+                     this model is {model}. Test the factor's dummies instead, e.g. \
+                     target_test = '{dummies}'"
+                )
+            );
+            let err = build_contract(&contrast, kind, None, None, 0.0, clusters).unwrap_err();
+            assert!(
+                matches!(&err, SpecError::ContrastRequiresOls { contrast: c, model: m, example }
+                    if c == "dose_group[mid] vs dose_group[high]" && m == model && example == dummies),
+                "{kind:?}: {err:?}"
+            );
+            assert!(
+                err.to_string().starts_with(
+                    "contrasts ('dose_group[mid] vs dose_group[high]') are available for OLS \
+                     models only"
+                ),
+                "{err}"
+            );
+        }
+        build_ols_contracts(&anova_3level_spec()).expect("OLS builds a post-hoc request");
+        build_ols_contracts(&contrast).expect("OLS builds a named contrast");
+    }
+
+    /// A contract rule the user's input broke reaches the host as a user
+    /// error with the contract's own message; a wiring fault stays internal.
+    #[test]
+    fn contract_validation_failure_is_classified() {
+        use engine_contract::{ContractError, SlopeTerm};
+        let slope = |column: u32, corr_with: Vec<f64>| SlopeTerm {
+            column: ColumnId(column),
+            variance: 0.2,
+            corr_with_intercept: 0.9,
+            corr_with,
+        };
+        let build = |slopes: Vec<SlopeTerm>| {
+            let mut cluster = intercept_cluster();
+            cluster.slopes = slopes;
+            build_contract(
+                &simple_spec(),
+                OutcomeKind::Continuous,
+                None,
+                None,
+                0.0,
+                vec![cluster],
+            )
+        };
+        // Intercept correlation 0.9 with two uncorrelated slopes: not PSD.
+        let err = build(vec![slope(0, vec![]), slope(1, vec![0.0])]).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                SpecError::ContractRule(ContractError::SlopeCovarianceNotPSD)
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            ContractError::SlopeCovarianceNotPSD.to_string()
+        );
+        assert!(!err.to_string().contains("internal"), "{err}");
+        // A slope on a column the design does not have is a port bug.
+        let err = build(vec![slope(99, vec![])]).unwrap_err();
+        assert!(
+            matches!(&err, SpecError::InternalContractValidate(msg)
+                if msg.contains("ColumnId(99) out of range")),
+            "{err:?}"
+        );
     }
 
     // ── Contrast routing tests ────────────────────────────────────────────────

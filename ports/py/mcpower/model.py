@@ -118,9 +118,6 @@ def _glmm_laplace_bias_warning(
       1. estimator_extras carries a GLM tau_squared_hat_mean above the
          configured threshold (report.thresholds.glmm_tau_sq_warn).
       2. min_cluster_size is strictly below limits.recommended_rows_per_cluster.
-         (Not reliable_rows_per_cluster: the cluster-size validator already
-         rejects configs below reliable, so the only reachable — and meaningful
-         — warning band is [reliable, recommended): allowed but Laplace-risky.)
 
     The message is canonical (verbatim across all ports — mirrors the R port's
     .check_glmm_laplace_bias_warning; change all ports together).
@@ -138,9 +135,6 @@ def _glmm_laplace_bias_warning(
     if tau is None:
         return None
     thr: float = cfg["report"]["thresholds"]["glmm_tau_sq_warn"]
-    # Use recommended (not reliable) so the warning covers the "risky but
-    # allowed" zone (reliable ≤ obs/cluster < recommended); configurations
-    # below reliable are already rejected by the validator.
     min_size: int = cfg["limits"]["recommended_rows_per_cluster"]
     if tau > thr and min_cluster_size < min_size:
         return (
@@ -430,7 +424,8 @@ class MCPower:
                 are controlled by slope_variance and slope_intercept_corr.
                 Passed raw (unconverted) to the engine SlopeTerm.
             slope_variance: Variance of the random-slope distribution (raw,
-                passed unconverted to SlopeTerm). 0.0 disables the slope term.
+                passed unconverted to SlopeTerm). Above 0; required with
+                random_slopes.
             slope_intercept_corr: Pearson correlation between the random
                 intercept and each random slope (raw, passed unconverted to
                 SlopeTerm).
@@ -479,9 +474,10 @@ class MCPower:
                 )
             if tau_squared is None:
                 tau_squared = 0.0
-            if not (isinstance(tau_squared, (int, float)) and not isinstance(tau_squared, bool) and float(tau_squared) >= 0.0):
+            if not (isinstance(tau_squared, (int, float)) and not isinstance(tau_squared, bool)
+                    and math.isfinite(tau_squared) and tau_squared >= 0.0):
                 raise ValueError(
-                    f"tau_squared must be a non-negative number, got {tau_squared!r}"
+                    f"tau_squared must be a finite non-negative number, got {tau_squared!r}"
                 )
         elif tau_squared is not None:
             raise ValueError(
@@ -499,6 +495,9 @@ class MCPower:
             parsed_grouping_vars,
             n_per_parent,
             is_nested_child,
+            random_slopes=random_slopes,
+            slope_variance=slope_variance,
+            slope_intercept_corr=slope_intercept_corr,
         ).raise_if_invalid()
 
         if cluster_level_vars:
@@ -818,15 +817,20 @@ class MCPower:
             )
 
     def _validate_df_method_arg(self, df_method: str) -> None:
-        """Validate a per-call ``df_method=`` kwarg.
+        """Validate a per-call ``df_method=`` kwarg by name.
 
-        Accepts ``"asymptotic"`` and ``"between_within"`` only.
+        Accepts ``"auto"``, ``"between_within"``, ``"satterthwaite"`` and
+        ``"asymptotic"``. Whether a named method is defined on the design
+        (``between_within`` needs a single grouping factor,
+        ``satterthwaite`` a linear mixed model) is checked when the contract
+        is built, so every port reports it with the same message.
         """
-        key = (df_method or "between_within").lower().replace("-", "_").replace(" ", "_")
-        if key not in {"asymptotic", "between_within"}:
+        key = str(df_method).lower().replace("-", "_").replace(" ", "_")
+        if key not in {"auto", "between_within", "satterthwaite", "asymptotic"}:
             raise ValueError(
                 f"df_method={df_method!r} is not recognised. "
-                "Valid values: 'between_within' (default) or 'asymptotic'."
+                "Valid values: 'auto' (default), 'between_within', "
+                "'satterthwaite' or 'asymptotic'."
             )
 
     def _resolved_n_simulations(self) -> int:
@@ -1387,10 +1391,7 @@ class MCPower:
                 has no random-effect terms; ICC out of range (defensive
                 re-check); sample_size incompatible with cluster spec.
         """
-        from .spec.validators import (
-            _validate_cluster_config,
-            _validate_cluster_sample_size,
-        )
+        from .spec.validators import _validate_cluster_config
 
         parsed_re = self._registry._random_effects_parsed
         parsed_grouping_vars = [re["grouping_var"] for re in parsed_re]
@@ -1410,7 +1411,15 @@ class MCPower:
                     "use family='lme'"
                 )
             if not self._pending_clusters:
-                # No clusters anywhere; nothing to validate.
+                # A random-effect term with no set_cluster would run the model
+                # unclustered, dropping every random effect without notice.
+                if parsed_grouping_vars:
+                    raise ValueError(
+                        f"the random-effect term on '{parsed_grouping_vars[0]}' has no "
+                        "set_cluster call; every grouping variable in the formula "
+                        "must be configured before find_power"
+                    )
+                # No random effects and no clusters; nothing to validate.
                 return
             # Clusters present + formula has random effects + non-lme family:
             # this is the clustered-OLS path (estimator override). Fall through
@@ -1433,10 +1442,12 @@ class MCPower:
         for g in parsed_grouping_vars:
             if g not in self._pending_clusters:
                 raise ValueError(
-                    f"random effect '(1|{g})' has no set_cluster call; "
+                    f"the random-effect term on '{g}' has no set_cluster call; "
                     "every grouping variable in the formula must be "
                     "configured before find_power"
                 )
+
+        self._check_slopes_match_formula()
 
         items = list(self._pending_clusters.items())
         primary_var, primary_cfg = items[0]
@@ -1471,20 +1482,7 @@ class MCPower:
         if sample_size is None:
             return
 
-        if n_clusters_primary is not None:
-            ss_result = _validate_cluster_sample_size(
-                int(sample_size), int(n_clusters_primary), cluster_size_primary
-            )
-            ss_result.raise_if_invalid()
-            for w in ss_result.warnings:
-                warnings.warn(w, UserWarning, stacklevel=2)
-        else:
-            ss_result = _validate_cluster_sample_size(
-                int(sample_size), None, int(cluster_size_primary)
-            )
-            ss_result.raise_if_invalid()
-            for w in ss_result.warnings:
-                warnings.warn(w, UserWarning, stacklevel=2)
+        if n_clusters_primary is None:
             from .config import get_cluster_limits
 
             min_clusters = get_cluster_limits()["min_clusters"]
@@ -1825,6 +1823,45 @@ class MCPower:
             clusters_json,
         )
 
+    def _check_slopes_match_formula(self) -> None:
+        """Refuse a random slope that only one of the formula and
+        ``set_cluster`` declares. The formula's ``(1 + x|g)`` term names the
+        slope and ``set_cluster(random_slopes=...)`` sizes it; a slope given in
+        one place only would otherwise be dropped (formula only) or added
+        (``set_cluster`` only) without notice. The formula cannot write a
+        slope on either grouping of a nested ``(1|A/B)`` term, so there
+        ``set_cluster`` is the only route and its slopes are not checked
+        against the formula. Mirrors the R port's
+        ``check_slopes_match_formula`` (``mcpower.R``); change the messages
+        together."""
+        parsed_re = self._registry._random_effects_parsed
+        formula_slopes = {
+            re["grouping_var"]: list(re.get("slope_vars") or []) for re in parsed_re
+        }
+        nested = self._nested_child_vars() | {
+            re["parent_var"] for re in parsed_re if re.get("parent_var") is not None
+        }
+        for g, cfg in self._pending_clusters.items():
+            in_formula = formula_slopes.get(g, [])
+            configured = list(cfg.get("random_slopes") or [])
+            for v in in_formula:
+                if v not in configured:
+                    raise ValueError(
+                        f"the formula gives '{g}' a random slope on '{v}', but "
+                        f"set_cluster('{g}', ...) does not configure it; add "
+                        f"'{v}' to random_slopes (and set slope_variance) in "
+                        "that set_cluster call"
+                    )
+            if g in nested:
+                continue
+            for v in configured:
+                if v not in in_formula:
+                    raise ValueError(
+                        f"set_cluster('{g}', ...) gives '{v}' a random slope, "
+                        f"but the formula has no random slope on '{v}' for "
+                        f"'{g}'; write '(1 + {v}|{g})' in the formula"
+                    )
+
     def _slope_terms_for(self, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Build the SlopeTerm list for one grouping from its _pending_clusters config.
 
@@ -2024,8 +2061,15 @@ class MCPower:
         every β without it, ``"all"`` drops it, and an explicit
         ``target_test="overall"`` raises. ``correction``
         is the multiple-comparison correction (``"none"`` /
-        ``"bonferroni"`` / ``"holm"`` / ``"bh"`` aka ``"fdr"``,
-        case-insensitive); ``None`` means no correction. ``wald_se`` selects
+        ``"bonferroni"`` / ``"holm"`` / ``"bh"`` aka ``"fdr"`` /
+        ``"tukey"``, case-insensitive); ``None`` means no correction.
+        ``"tukey"`` corrects factor levels and post-hoc contrasts only: a
+        target outside every factor (a continuous or binary predictor, an
+        interaction) has no Tukey-corrected power, so its ``power_corrected``
+        and ``ci_corrected`` entries are NaN, ``corrected_not_applicable`` is
+        ``True`` at its position, and the tables print ``n/a``. With such a
+        target the corrected joint view is not applicable as a whole:
+        ``success_count_histogram_corrected`` is ``None``. ``wald_se`` selects
         the standard-error flavour for the clustered-binary/count GLMM
         estimator: ``"rx"`` (default, the Schur speed knob, lme4
         ``use.hessian = FALSE``) or ``"hessian"`` (per-fit FD-Hessian SE,
@@ -2036,19 +2080,33 @@ class MCPower:
         eligible (a Binary or Count GLMM with a single grouping factor and at
         most 3 random effects per group) — an ineligible or even/out-of-range
         value warns and runs at Laplace instead. No-op for OLS/LMM.
-        ``df_method`` selects the reference distribution for mixed-model
-        fixed-effect tests: ``"between_within"`` (default) tests each fixed
-        effect against a t with between-within denominator degrees of
-        freedom — between-cluster df if the predictor is cluster-level,
-        within-cluster df otherwise; ``"asymptotic"`` tests against a Wald z.
-        Ignored for OLS and unclustered GLM. With crossed or nested extra
-        groupings an LME is tested at each fit's Satterthwaite df instead, and
-        a GLMM against a Wald z. Cluster-level predictors
-        must be declared with ``cluster_level_vars`` (see
-        :meth:`set_cluster`) for the between df to apply. A fit whose random-effect variances all collapse
-        to zero (a singular fit) is tested against the residual df ``N - p``
-        (LME) or Wald z (GLMM) instead, the collapsed model's own reference —
-        the same switch a Satterthwaite reference makes there.
+        ``df_method`` selects the test for mixed-model fixed effects
+        (ignored for OLS and unclustered GLM). ``"auto"`` (default) picks one
+        per design: between-within df for a single-grouping linear mixed
+        model without a random slope and for any single-grouping binary or
+        count mixed model; Satterthwaite df, computed for each fit as
+        lmerTest does, for every other linear mixed model (a random slope, or
+        crossed or nested groupings); Wald z for a binary or count model with
+        crossed or nested groupings. ``"between_within"`` tests each fixed
+        effect against a t with between-within denominator df (between-cluster
+        df if the predictor is cluster-level, within-cluster df otherwise) and
+        needs a single grouping factor; ``"satterthwaite"`` uses each fit's
+        Satterthwaite df on any linear mixed model and is not defined for a
+        binary or count model; ``"asymptotic"`` tests against a Wald z. A
+        named method the design does not support raises ``ValueError``. A fit
+        whose Satterthwaite df cannot be computed is tested against a Wald z.
+        Cluster-level predictors must be declared with ``cluster_level_vars``
+        (see :meth:`set_cluster`) for the between df to apply. Under
+        between-within df, a fit whose random-effect variances all collapse to
+        zero (a singular fit) is tested against the residual df ``N - p``
+        (LME) or Wald z (GLMM), the collapsed model's own reference;
+        Satterthwaite df reach the residual df there on their own.
+
+        ``test_formula`` fits a test model that differs from the model that
+        generates the data (e.g. ``"y ~ x1"`` to leave out ``x2``). It sets
+        the test model's fixed effects only: the test model keeps the model's
+        random effects, and a random-effect term in ``test_formula`` raises
+        ``ValueError``.
 
         ``scenarios`` runs the sensitivity analysis: the same design is
         rerun under the named scenarios (``True`` = all configured;
@@ -2303,8 +2361,16 @@ class MCPower:
 
         ``target_test`` / ``correction`` mirror :meth:`find_power` — they
         select the tested effect(s) and the multiple-comparison correction for
-        this call (see that method's docstring). ``wald_se`` / ``df_method`` /
-        ``agq`` mirror :meth:`find_power` — see that docstring for details.
+        this call (see that method's docstring). Under ``"tukey"`` a target
+        outside every factor has no corrected power, so it has no required N:
+        its ``first_achieved`` and ``fitted`` entries are ``None`` and the
+        tables print ``n/a``. The corrected joint view is then not applicable
+        as a whole: ``first_joint_achieved``, ``first_joint_achieved_unit``,
+        ``fitted_joint`` and ``success_count_histogram_corrected`` are
+        ``None``, and "First N achieving all targets" reads ``n/a``.
+        ``wald_se`` / ``df_method`` /
+        ``agq`` / ``test_formula`` mirror :meth:`find_power`; see that
+        docstring for details.
 
         The search sweeps ``from_size .. to_size`` and reports the smallest N
         that reaches the target power for each tested effect. ``by`` controls

@@ -19,11 +19,6 @@
   import { EXTRA_GROUPING_DEFAULTS, SLOPE_DEFAULTS, mixedOutcomeKind } from '$lib/domain/family';
   import { boundToObservations } from '$lib/domain/unit-label';
 
-  // input floor = engine hard floor; 'reliable'/'recommended' are advisory.
-  const MIN_OBS_PER_CLUSTER = LIMITS.min_rows_per_cluster;           // 2 (was hardcoded 5, mislabeled "hard minimum")
-  const RELIABLE_OBS_PER_CLUSTER = LIMITS.reliable_rows_per_cluster; // 5 (advisory)
-  const RECOMMENDED_OBS_PER_CLUSTER = LIMITS.recommended_rows_per_cluster; // 10
-
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
 
   let advancedOpen = $state(false);
@@ -40,6 +35,8 @@
     return result ? toClusterTerms(result) : [];
   });
   const primary = $derived(terms[0] ?? null);
+  // Engine floor: `min_rows_in_cluster` in engine-orchestrator — change together.
+  const minObsPerCluster = $derived(LIMITS.min_rows_per_cluster + (primary?.slopeVars.length ?? 0));
   const extraTerms = $derived(terms.slice(1));
   const nestedCount = $derived(extraTerms.filter((t) => t.parent !== null).length);
   // Poisson has no residual variance to scale an ICC against (family.ts docs
@@ -157,10 +154,8 @@
     const d = derivedClusterSize;
     if (d == null) return null;
     const { size: s, source } = d;
-    if (s < MIN_OBS_PER_CLUSTER) return { tone: 'error', msg: `~${s} obs/cluster${source} — below the engine hard minimum of ${MIN_OBS_PER_CLUSTER}; the engine will fail.` };
-    if (s < RELIABLE_OBS_PER_CLUSTER) return { tone: 'warn', msg: `~${s} obs/cluster${source} — below the reliable threshold of ${RELIABLE_OBS_PER_CLUSTER}; estimates may be unreliable.` };
-    if (s < RECOMMENDED_OBS_PER_CLUSTER) return { tone: 'warn', msg: `~${s} obs/cluster${source} — below the recommended ${RECOMMENDED_OBS_PER_CLUSTER}; estimates may be unstable.` };
-    return null;
+    if (s >= minObsPerCluster) return null;
+    return { tone: 'error', msg: `~${s} obs/cluster${source} — below the engine hard minimum of ${minObsPerCluster}; the engine will fail.` };
   });
 </script>
 
@@ -259,7 +254,7 @@
               aria-label="Observations per cluster"
               class="h-7 w-24 shrink-0"
               step={1}
-              min={MIN_OBS_PER_CLUSTER}
+              min={minObsPerCluster}
               value={cfg.cluster.clusterSize}
               oninput={(v) => { if (cfg.cluster) cfg.cluster.clusterSize = v; }}
             />

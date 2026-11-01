@@ -61,15 +61,6 @@ Real candidates, but with an open question that has to clear before they ship:
 - **Bayesian power (Bayes factors)** — under consideration only if it can run
   fast enough to stay interactive, since the appeal of MCPower is getting an
   answer in seconds, not minutes.
-- **Satterthwaite degrees of freedom for mixed models** — a finer-grained
-  small-sample correction than between-within, for designs with few clusters,
-  where the Wald z test is mildly anticonservative. A between-within
-  degrees-of-freedom correction (`df_method="between_within"`) already
-  shipped and is the default; on linear mixed models it matched lmerTest
-  Satterthwaite in the [[validation/validation_df_calibration|calibration]],
-  on logit GLMMs with 5–10 clusters it still over-rejects. Linear mixed
-  models with a crossed or nested extra grouping already use Satterthwaite df
-  under `"between_within"`; single-grouping designs and GLMMs do not.
 
 ## Deliberately out of scope
 

@@ -4,7 +4,13 @@
 // three echo branches are asserted at the rendered components).
 import { describe, expect, it } from 'vitest';
 import type { AppSpec } from './app-spec';
-import { boundToObservations, partsText, powerNToObservations, unitEchoParts } from './unit-label';
+import {
+  boundToObservations,
+  limitsInUnit,
+  partsText,
+  powerNToObservations,
+  unitEchoParts,
+} from './unit-label';
 
 describe('boundToObservations', () => {
   it('leaves an observations bound alone', () => {
@@ -57,5 +63,17 @@ describe('unitEchoParts', () => {
   it('returns nothing without a usable fixed value', () => {
     expect(unitEchoParts('observations', 'n_clusters', 'subject', 80, 400, 0)).toEqual([]);
     expect(unitEchoParts('observations', 'n_clusters', 'subject', 80, Number.NaN, 20)).toEqual([]);
+  });
+});
+
+describe('limitsInUnit', () => {
+  it('keeps observation limits and restates them as whole cluster counts', () => {
+    expect(limitsInUnit('observations', [20, 100000], 30)).toEqual([20, 100000]);
+    expect(limitsInUnit('clusters', [20, 100000], 30)).toEqual([1, 3333]);
+  });
+
+  it('gives no bounds when no whole value fits or there is no divisor', () => {
+    expect(limitsInUnit('clusters', [20, 100000], 0)).toBeNull();
+    expect(limitsInUnit('clusters', [20, 100000], 200000)).toBeNull();
   });
 });

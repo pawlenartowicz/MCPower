@@ -304,13 +304,16 @@ pub struct MixedSpec {
     /// `#[serde(default)]` keeps older specs intact; skip-serialize when default.
     #[serde(default, skip_serializing_if = "wald_se_is_default")]
     pub wald_se: WaldSe,
-    /// Reference distribution for the fixed-effect Wald tests. `BetweenWithin`
-    /// (default) is the between-within denominator df, which reaches a
-    /// predictor as the between-cluster df only when that predictor is also
-    /// listed in `cluster_level_vars`; `Asymptotic` opts into the Wald z
-    /// against the standard normal. Mixed-only knob — the other families' fits
-    /// ignore it, so it is not carried on their specs. `#[serde(default)]` keeps older
-    /// specs intact; skip-serialize when default.
+    /// Test for the fixed effects. `Auto` (default) picks one per design (see
+    /// `DfMethod`); `BetweenWithin` is the between-within denominator df, which
+    /// reaches a predictor as the between-cluster df only when that predictor
+    /// is also listed in `cluster_level_vars`; `Satterthwaite` is per-fit
+    /// Satterthwaite df; `Asymptotic` is the Wald z against the standard
+    /// normal. A named test the design does not admit is refused when the
+    /// contract is built. Mixed-only knob: the other families' fits ignore it,
+    /// so it is not carried on their specs. `#[serde(default)]` keeps older
+    /// specs intact (an older spec without the field runs `Auto`);
+    /// skip-serialize when default.
     #[serde(default, skip_serializing_if = "df_method_is_default")]
     pub df_method: DfMethod,
     /// Scenarios to fan out, mirroring `engine_spec_builder::ScenarioInput`

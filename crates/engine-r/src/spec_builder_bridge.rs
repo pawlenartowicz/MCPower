@@ -1,6 +1,8 @@
 //! extendr bindings for spec building and formula/assignment parsing; mirrors engine-py's spec_builder_bridge — change together.
 use extendr_api::error::Result;
 use extendr_api::prelude::*;
+
+use crate::r_error;
 use serde::Serialize;
 
 /// Build the whole `Vec<SimulationContract>` as a single msgpack blob,
@@ -28,26 +30,26 @@ pub fn build_contract_from_spec(
     clusters_json: &str,
 ) -> Result<List> {
     let spec: engine_spec_builder::LinearSpec = serde_json::from_str(json)
-        .map_err(|e| Error::Other(format!("malformed LinearSpec JSON: {e}")))?;
+        .map_err(|e| r_error(format!("malformed LinearSpec JSON: {e}")))?;
     let outcome = match outcome_kind {
         "continuous" => engine_contract::OutcomeKind::Continuous,
         "binary" => engine_contract::OutcomeKind::Binary,
         "count" => engine_contract::OutcomeKind::Count,
-        other => return Err(Error::Other(format!("unknown outcome_kind {other:?}"))),
+        other => return Err(r_error(format!("unknown outcome_kind {other:?}"))),
     };
     let link = match link {
         "" | "canonical" => None,
         "probit" => Some(engine_contract::LinkKind::Probit),
-        other => return Err(Error::Other(format!("unknown link {other:?}"))),
+        other => return Err(r_error(format!("unknown link {other:?}"))),
     };
     let est = match estimator {
         "ols" => engine_contract::EstimatorSpec::Ols,
         "glm" => engine_contract::EstimatorSpec::Glm,
         "mle" => engine_contract::EstimatorSpec::Mle,
-        other => return Err(Error::Other(format!("unknown estimator {other:?}"))),
+        other => return Err(r_error(format!("unknown estimator {other:?}"))),
     };
     let clusters: Vec<engine_contract::ClusterSpec> = serde_json::from_str(clusters_json)
-        .map_err(|e| Error::Other(format!("malformed clusters_json: {e}")))?;
+        .map_err(|e| r_error(format!("malformed clusters_json: {e}")))?;
     let (contracts, skeleton) = engine_spec_builder::build_contract_with_skeleton(
         &spec,
         outcome,
@@ -56,12 +58,12 @@ pub fn build_contract_from_spec(
         intercept,
         clusters,
     )
-    .map_err(|e| Error::Other(format!("{e}")))?;
+    .map_err(r_error)?;
     let names: Vec<String> = contracts.iter().map(|c| c.scenario.name.clone()).collect();
     let bytes = rmp_serde::to_vec_named(&contracts)
-        .map_err(|e| Error::Other(format!("msgpack encode failed: {e}")))?;
+        .map_err(|e| r_error(format!("msgpack encode failed: {e}")))?;
     let skeleton_json = serde_json::to_string(&skeleton)
-        .map_err(|e| Error::Other(format!("skeleton encode failed: {e}")))?;
+        .map_err(|e| r_error(format!("skeleton encode failed: {e}")))?;
     Ok(list!(
         names = names,
         contracts = Raw::from_bytes(&bytes),
@@ -98,17 +100,17 @@ pub fn re_dist_codes() -> String {
 #[extendr]
 pub fn build_recovery_design(spec_json: &str) -> Result<List> {
     let spec: engine_spec_builder::LinearSpec = serde_json::from_str(spec_json)
-        .map_err(|e| Error::Other(format!("invalid LinearSpec JSON: {e}")))?;
-    let parsed = engine_spec_builder::parse_formula(&spec.formula)
-        .map_err(|e| Error::Other(format!("{e}")))?;
-    let table = engine_spec_builder::build_predictor_table(&parsed, &spec.predictors)
-        .map_err(|e| Error::Other(format!("{e}")))?;
-    let upload = spec.upload.as_ref().ok_or_else(|| {
-        Error::Other("build_recovery_design: LinearSpec has no upload block".into())
-    })?;
+        .map_err(|e| r_error(format!("invalid LinearSpec JSON: {e}")))?;
+    let parsed = engine_spec_builder::parse_formula(&spec.formula).map_err(r_error)?;
+    let table =
+        engine_spec_builder::build_predictor_table(&parsed, &spec.predictors).map_err(r_error)?;
+    let upload = spec
+        .upload
+        .as_ref()
+        .ok_or_else(|| r_error("build_recovery_design: LinearSpec has no upload block"))?;
     let rd =
         engine_spec_builder::build_recovery_design(&table, &upload.columns, upload.n_rows as usize)
-            .map_err(|e| Error::Other(format!("{e}")))?;
+            .map_err(r_error)?;
     Ok(list!(
         design_flat = rd.design_flat,
         semantic_names = rd.semantic_names,
@@ -122,7 +124,7 @@ pub fn build_recovery_design(spec_json: &str) -> Result<List> {
 /// unbalanced parentheses.
 #[extendr]
 pub fn split_assignments(input: &str) -> Result<Vec<String>> {
-    engine_spec_builder::split_assignments(input).map_err(|e| Error::Other(format!("{e}")))
+    engine_spec_builder::split_assignments(input).map_err(r_error)
 }
 
 // ── Parser bridge ─────────────────────────────────────────────────────────────
@@ -187,9 +189,8 @@ struct AssignmentsJson {
 /// Mirrors `engine-py/src/spec_builder_bridge.rs` `parse_formula`.
 #[extendr]
 pub fn parse_formula(input: &str) -> Result<String> {
-    let parsed = rust_parse_formula(input).map_err(|e| Error::Other(format!("{e}")))?;
-    serde_json::to_string(&parsed)
-        .map_err(|e| Error::Other(format!("JSON serialization failed: {e}")))
+    let parsed = rust_parse_formula(input).map_err(r_error)?;
+    serde_json::to_string(&parsed).map_err(|e| r_error(format!("JSON serialization failed: {e}")))
 }
 
 /// Parse an assignment string (variable types / correlations / effects) into a JSON string.
@@ -208,28 +209,28 @@ pub fn parse_assignments(input: &str, kind: &str, known_json: &str) -> Result<St
         "variable_type" => AssignmentKind::VariableType,
         "correlation" => AssignmentKind::Correlation,
         "effect" => AssignmentKind::Effect,
-        other => return Err(Error::Other(format!("unknown kind: {other}"))),
+        other => return Err(r_error(format!("unknown kind: {other}"))),
     };
     // Deserialize the known-names JSON: {"predictors": [...], "interaction_terms": [...]}
     let known_raw: serde_json::Value = serde_json::from_str(known_json)
-        .map_err(|e| Error::Other(format!("malformed known_json: {e}")))?;
+        .map_err(|e| r_error(format!("malformed known_json: {e}")))?;
     let predictors: Vec<String> = known_raw["predictors"]
         .as_array()
-        .ok_or_else(|| Error::Other("known_json missing 'predictors' array".to_string()))?
+        .ok_or_else(|| r_error("known_json missing 'predictors' array"))?
         .iter()
         .map(|v| {
             v.as_str()
-                .ok_or_else(|| Error::Other("predictors must be strings".to_string()))
+                .ok_or_else(|| r_error("predictors must be strings"))
                 .map(|s| s.to_string())
         })
         .collect::<Result<Vec<_>>>()?;
     let interaction_terms: Vec<String> = known_raw["interaction_terms"]
         .as_array()
-        .ok_or_else(|| Error::Other("known_json missing 'interaction_terms' array".to_string()))?
+        .ok_or_else(|| r_error("known_json missing 'interaction_terms' array"))?
         .iter()
         .map(|v| {
             v.as_str()
-                .ok_or_else(|| Error::Other("interaction_terms must be strings".to_string()))
+                .ok_or_else(|| r_error("interaction_terms must be strings"))
                 .map(|s| s.to_string())
         })
         .collect::<Result<Vec<_>>>()?;
@@ -237,8 +238,7 @@ pub fn parse_assignments(input: &str, kind: &str, known_json: &str) -> Result<St
         predictors: &predictors,
         interaction_terms: &interaction_terms,
     };
-    let parsed = rust_parse_assignments(input, kind_enum, &known_struct)
-        .map_err(|e| Error::Other(format!("{e}")))?;
+    let parsed = rust_parse_assignments(input, kind_enum, &known_struct).map_err(r_error)?;
 
     let items: Vec<AssignmentItemJson> = parsed
         .items
@@ -289,8 +289,7 @@ pub fn parse_assignments(input: &str, kind: &str, known_json: &str) -> Result<St
         .collect();
     let errors: Vec<String> = parsed.errors.iter().map(|e| e.to_string()).collect();
     let envelope = AssignmentsJson { items, errors };
-    serde_json::to_string(&envelope)
-        .map_err(|e| Error::Other(format!("JSON serialization failed: {e}")))
+    serde_json::to_string(&envelope).map_err(|e| r_error(format!("JSON serialization failed: {e}")))
 }
 
 extendr_module! {

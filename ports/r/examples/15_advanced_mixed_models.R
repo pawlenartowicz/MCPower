@@ -60,7 +60,7 @@ model$set_effects("teaching_method=0.4")
 # 10 schools x 3 classrooms each = 30 classrooms total. n_per_parent=3 is what
 # makes the child grouping nested within school rather than crossed with it.
 model$set_cluster("school", ICC = 0.15, n_clusters = 10)
-model$set_cluster("school:classroom", ICC = 0.10, n_clusters = 30, n_per_parent = 3)
+model$set_cluster("school:classroom", ICC = 0.10, n_per_parent = 3)
 
 cat(">>> model$find_power(sample_size = 300, target_test = 'teaching_method')\n")
 invisible(model$find_power(sample_size = 300, target_test = "teaching_method"))

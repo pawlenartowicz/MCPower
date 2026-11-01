@@ -367,9 +367,8 @@ fn validate_template_skips_invariant_13_but_full_validate_fires_it() {
 #[test]
 fn invariant_13_admits_glmm_scenario() {
     // Glm + Binary + cluster = Some is the GLMM pairing (M4). scenario.lme
-    // must be accepted because the GLMM kernel draws per-block τ² from it,
-    // exactly like LMM (Mle). The old guard only allowed Mle; this test
-    // pins the new two-armed guard (mle || glmm).
+    // must be accepted because data generation draws the per-block τ² from
+    // it, exactly like LMM (Mle).
     let mut c = example1_simple_ols();
     c.outcome.kind = OutcomeKind::Binary;
     c.estimator = EstimatorSpec::Glm;
@@ -382,6 +381,24 @@ fn invariant_13_admits_glmm_scenario() {
     assert!(
         c.validate().is_ok(),
         "Glm + Binary + cluster + scenario.lme must be accepted (GLMM path)"
+    );
+}
+
+#[test]
+fn invariant_13_admits_clustered_ols_scenario() {
+    // OLS fitted to clustered data: data generation still draws the random
+    // effects, so their scenario perturbations apply as for an LMM.
+    let mut c = baseline();
+    c.generation.cluster = Some(some_valid_cluster_spec());
+    c.scenario.lme = Some(LmeScenarioPerturbations {
+        random_effect_dist: ResidualDist::Normal,
+        random_effect_df: 5.0,
+        icc_noise_sd: 0.05,
+    });
+    assert_eq!(c.estimator, EstimatorSpec::Ols);
+    assert!(
+        c.validate().is_ok(),
+        "Ols + cluster + scenario.lme must be accepted"
     );
 }
 
@@ -933,6 +950,14 @@ fn extra_grouping_accepts_three_slopes_at_cap() {
     // corr_with lower triangle: slope[k] needs exactly k entries (mirrors the primary
     // slope validator — see check_slope_terms). All zeros → diagonal D_g (PSD trivially).
     let mut spec = two_continuous_lme_spec();
+    // A third continuous fixed effect, so each slope has its own column.
+    spec.generation
+        .columns
+        .push(spec.generation.columns[1].clone());
+    spec.design_generation.terms.push(DesignTerm::Direct {
+        column: ColumnId(2),
+    });
+    spec.outcome.coefficients.push(0.2);
     let cl = spec.generation.cluster.as_mut().unwrap();
     cl.tau_squared = 0.25;
     cl.extra_groupings = vec![GroupingSpec {
@@ -947,7 +972,7 @@ fn extra_grouping_accepts_three_slopes_at_cap() {
                 corr_with: vec![0.0],
             }, // k=1
             SlopeTerm {
-                column: ColumnId(0),
+                column: ColumnId(2),
                 variance: 0.10,
                 corr_with_intercept: 0.0,
                 corr_with: vec![0.0, 0.0],
@@ -1035,6 +1060,39 @@ fn invariant_20_grouping_bounds() {
         c.validate(),
         Err(ContractError::GroupingTauSquaredInvalid { .. })
     ));
+}
+
+#[test]
+fn invariant_20_primary_needs_two_clusters() {
+    // One primary cluster is refused with or without a crossed grouping, and
+    // for OLS on clustered data as well as for the mixed model; two pass.
+    let crossed = GroupingSpec {
+        relation: GroupingRelation::Crossed { n_clusters: 4 },
+        tau_squared: 0.1,
+        slopes: vec![],
+    };
+    for estimator in [EstimatorSpec::Mle, EstimatorSpec::Ols] {
+        for extra in [vec![], vec![crossed.clone()]] {
+            let mut c = mle_with_cluster(ClusterSizing::FixedClusters { n_clusters: 1 });
+            c.estimator = estimator;
+            c.generation.cluster.as_mut().unwrap().extra_groupings = extra.clone();
+            let err = c.validate().unwrap_err();
+            assert_eq!(
+                err,
+                ContractError::PrimaryClusterCountTooSmall { got: 1 },
+                "{estimator:?}, {} extra groupings",
+                extra.len()
+            );
+            assert!(
+                err.to_string()
+                    .starts_with("n_clusters must be an integer >= 2, got 1"),
+                "{err}"
+            );
+            c.generation.cluster.as_mut().unwrap().sizing =
+                ClusterSizing::FixedClusters { n_clusters: 2 };
+            assert!(c.validate().is_ok(), "{estimator:?}: two clusters pass");
+        }
+    }
 }
 
 #[test]
@@ -1492,6 +1550,73 @@ fn slopes_on_extra_grouping_accepted() {
     assert!(spec.validate().is_ok());
 }
 
+/// An extra grouping gets the primary's two covariance rules. Two slopes each
+/// at corr 0.9 with the intercept and uncorrelated with each other cannot form
+/// a correlation matrix, and a slope needs an intercept variance to correlate
+/// against.
+#[test]
+fn extra_grouping_slopes_need_a_valid_covariance() {
+    let mut spec = two_continuous_lme_spec();
+    let extra = GroupingSpec {
+        relation: GroupingRelation::Crossed { n_clusters: 6 },
+        tau_squared: 0.25,
+        slopes: vec![slope(0, 0.10, 0.9), {
+            let mut s = slope(1, 0.10, 0.9);
+            s.corr_with = vec![0.0];
+            s
+        }],
+    };
+    let cl = spec.generation.cluster.as_mut().unwrap();
+    cl.extra_groupings = vec![extra];
+    assert!(matches!(
+        spec.validate(),
+        Err(ContractError::SlopeCovarianceNotPSD)
+    ));
+
+    let cl = spec.generation.cluster.as_mut().unwrap();
+    cl.extra_groupings[0].slopes.truncate(1);
+    cl.extra_groupings[0].tau_squared = 0.0;
+    assert!(matches!(
+        spec.validate(),
+        Err(ContractError::SlopeInterceptVarianceMissing { got }) if got == 0.0
+    ));
+}
+
+/// Only a mixed-model fit reads the slope column out of the test design. OLS on
+/// clustered data fits no random effects, so its test design may drop the
+/// slope variable.
+#[test]
+fn test_design_needs_the_slope_column_for_a_mixed_fit_only() {
+    let mut spec = two_continuous_lme_spec();
+    let cl = spec.generation.cluster.as_mut().unwrap();
+    cl.tau_squared = 0.25;
+    cl.slopes = vec![slope(1, 0.10, 0.0)];
+    let mut test_design = spec.design_generation.clone();
+    test_design.terms.remove(2);
+    spec.design_test = Some(test_design);
+    spec.test.targets = vec![TestTarget::Marginal { term: 1 }];
+    assert!(matches!(
+        spec.validate(),
+        Err(ContractError::SlopeColumnNotInDesign { id: 1 })
+    ));
+    spec.estimator = EstimatorSpec::Ols;
+    assert!(spec.validate().is_ok());
+}
+
+#[test]
+fn repeated_slope_column_rejected() {
+    let mut spec = two_continuous_lme_spec();
+    let cl = spec.generation.cluster.as_mut().unwrap();
+    cl.tau_squared = 0.25;
+    let mut second = slope(0, 0.10, 0.0);
+    second.corr_with = vec![0.0];
+    cl.slopes = vec![slope(0, 0.10, 0.0), second];
+    assert!(matches!(
+        spec.validate(),
+        Err(ContractError::SlopeColumnRepeated { id: 0 })
+    ));
+}
+
 #[test]
 fn slope_on_factor_column_rejected() {
     let mut spec = factor_lme_spec(); // column 2 is FactorSynthetic, with DummyOf terms
@@ -1515,6 +1640,45 @@ fn slope_without_fixed_effect_rejected() {
         spec.validate(),
         Err(ContractError::SlopeColumnNotInDesign { id: 1 })
     ));
+}
+
+/// A random slope is fitted on its column of the FITTED fixed design, so a
+/// `design_test` (test_formula) must keep the slope variable too, not only the
+/// generation design. `y ~ x1 + x2 + (1 + x2 | g)` tested as `y ~ x1` drops the
+/// slope column and is refused; tested as `y ~ x2` it keeps it and validates.
+#[test]
+fn slope_dropped_by_design_test_rejected() {
+    let mut spec = two_continuous_lme_spec();
+    spec.generation.cluster.as_mut().unwrap().slopes = vec![slope(1, 0.10, 0.0)];
+    spec.test.targets = vec![TestTarget::Marginal { term: 1 }];
+    let direct = |c: u32| DesignTerm::Direct {
+        column: ColumnId(c),
+    };
+    spec.design_test = Some(DesignSpec {
+        terms: vec![DesignTerm::Const, direct(0)],
+    });
+    assert!(matches!(
+        spec.validate(),
+        Err(ContractError::SlopeColumnNotInDesign { id: 1 })
+    ));
+    spec.design_test = Some(DesignSpec {
+        terms: vec![DesignTerm::Const, direct(1)],
+    });
+    assert!(spec.validate().is_ok());
+
+    // A clustered GLM fits the slope as well; only OLS may drop its column.
+    spec.design_test = Some(DesignSpec {
+        terms: vec![DesignTerm::Const, direct(0)],
+    });
+    spec.outcome.kind = OutcomeKind::Binary;
+    spec.estimator = EstimatorSpec::Glm;
+    assert!(matches!(
+        spec.validate(),
+        Err(ContractError::SlopeColumnNotInDesign { id: 1 })
+    ));
+    spec.outcome.kind = OutcomeKind::Continuous;
+    spec.estimator = EstimatorSpec::Ols;
+    assert!(spec.validate().is_ok());
 }
 
 #[test]

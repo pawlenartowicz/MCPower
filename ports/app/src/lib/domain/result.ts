@@ -57,15 +57,24 @@ export interface PowerResult {
    *  `target_indices.length + contrast_pairs.length`). Absent in older payloads. */
   contrast_pairs?: [number, number][];
   power_uncorrected: number[];
-  power_corrected: number[];
+  /** `null` (the engine's NaN on the JSON wire) where `corrected_not_applicable` is true. */
+  power_corrected: (number | null)[];
   ci_uncorrected: Ci[];
-  ci_corrected: Ci[];
+  /** Both bounds `null` where `corrected_not_applicable` is true. */
+  ci_corrected: (Ci | { lo: null; hi: null })[];
+  /** One flag per power entry: true where the target lies outside the
+   *  correction's family (under Tukey HSD, any target that is not a factor
+   *  level), so it has no corrected power. Empty under every other
+   *  correction; absent in older payloads. */
+  corrected_not_applicable?: boolean[];
   convergence_rate: number;
   boundary_hit: number[];
   estimator_extras: EstimatorExtras;
   overall_significant_rate?: number | null;
   overall_significant_ci?: Ci | null;
   success_count_histogram_uncorrected?: number[];
+  /** Empty when any target is flagged in `corrected_not_applicable`: the
+   *  corrected joint view is not applicable then. */
   success_count_histogram_corrected?: number[];
   /** Per-factor sparse-exclusion counts (count / n_sims = exclusion rate). Parallel to spec factor_names order. */
   factor_exclusion_counts?: number[];
@@ -96,13 +105,15 @@ export interface SampleSizeResult {
   grid_or_trace: PowerResult[];
   first_achieved: (number | null)[];
   /** Smallest N where >= k targets are jointly significant at target_power,
-   *  derived from each grid point's CORRECTED histogram. Index j is k = j+1. */
+   *  derived from each grid point's CORRECTED histogram. Index j is k = j+1.
+   *  Empty when the grid points flag any target `corrected_not_applicable`. */
   first_joint_achieved: (number | null)[];
   target_power: number;
   method: SampleSizeMethod;
   /** Model-based crossing fits, one per target; parallel to first_achieved.
-   *  Absent in older payloads — fall back to first_achieved when missing. */
-  fitted?: CrossingFit[];
+   *  Absent in older payloads: fall back to first_achieved when missing.
+   *  `null` for a target flagged in the grid points' `corrected_not_applicable`. */
+  fitted?: (CrossingFit | null)[];
   /** Model-based crossing fits for the joint ≥k targets; parallel to first_joint_achieved.
    *  Index j corresponds to k = j+1. Absent in older payloads. */
   fitted_joint?: CrossingFit[];
@@ -165,7 +176,7 @@ export type ProgressEvent =
   | { kind: 'started'; total_sims: number; total_scenarios: number; total_grid_points: number }
   | { kind: 'scenario_started'; label: string; idx: number; total: number }
   | { kind: 'sims_completed'; n: number; completed: number; total: number }
-  | { kind: 'n_point_completed'; n: number; power_uncorrected: number[]; power_corrected: number[] }
+  | { kind: 'n_point_completed'; n: number; power_uncorrected: number[]; power_corrected: (number | null)[] }
   | { kind: 'scenario_completed'; label: string; idx: number }
   | { kind: 'cancelled' }
   | { kind: 'completed' };

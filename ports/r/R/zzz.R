@@ -70,9 +70,10 @@
 .df_method_for_rust <- function(df_method) {
   if (is.null(df_method)) df_method <- .config()$estimation$df_method
   key <- gsub("[- ]", "_", tolower(df_method))
-  if (key %in% c("asymptotic", "between_within")) return(key)
-  stop(sprintf(
-    "unknown df_method %s (use \"asymptotic\" or \"between_within\")",
+  if (key %in% c("auto", "between_within", "satterthwaite", "asymptotic")) return(key)
+  stop(sprintf(paste0(
+    "unknown df_method %s (use \"auto\" (default), \"between_within\", ",
+    "\"satterthwaite\" or \"asymptotic\")"),
     sQuote(df_method)))
 }
 

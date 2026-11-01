@@ -65,30 +65,35 @@ fn assemble_logit_returns_one_contract_with_family_logit() {
 }
 
 #[test]
-fn assemble_logit_forwards_report_overall_and_contrasts() {
+fn assemble_logit_forwards_report_overall() {
     let AppSpec::Logit(mut logit) = sample_logit_spec(0.3) else {
         panic!("expected AppSpec::Logit");
     };
     logit.report_overall = true;
-    logit.contrasts = vec![("x1".into(), "x2".into())];
     let contracts = engine_app_spec::assemble_spec(&AppSpec::Logit(logit)).unwrap();
     let targets = &contracts[0].test.targets;
     // x1 and x2 sit at design positions 1 and 2 (0 is the intercept).
-    assert!(
-        targets.iter().any(|t| matches!(
-            t,
-            engine_contract::TestTarget::Contrast {
-                positive: 1,
-                negative: 2
-            }
-        )),
-        "expected the x1 - x2 contrast target; got {targets:?}"
-    );
     assert!(
         targets
             .iter()
             .any(|t| matches!(t, engine_contract::TestTarget::Joint { terms } if *terms == [1, 2])),
         "expected a Joint omnibus target; got {targets:?}"
+    );
+}
+
+// Contrasts are OLS-only (the GLM fit has no contrast statistic), so a logit
+// contrast is refused when the spec is built rather than by the run.
+#[test]
+fn assemble_logit_refuses_contrasts() {
+    let AppSpec::Logit(mut logit) = sample_logit_spec(0.3) else {
+        panic!("expected AppSpec::Logit");
+    };
+    logit.contrasts = vec![("x1".into(), "x2".into())];
+    let err = engine_app_spec::assemble_spec(&AppSpec::Logit(logit)).unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("contrasts ('x1 vs x2') are available for OLS models only"),
+        "{err}"
     );
 }
 

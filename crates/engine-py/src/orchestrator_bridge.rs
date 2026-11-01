@@ -231,12 +231,14 @@ fn host_value_to_py(py: Python<'_>, hv: &HostValue) -> PyResult<Py<PyAny>> {
         HostValue::VecF64(v) => v.clone().into_py_any(py),
         HostValue::VecU64(v) => v.clone().into_py_any(py),
         HostValue::VecStr(v) => v.clone().into_py_any(py),
+        HostValue::VecBool(v) => v.clone().into_py_any(py),
         HostValue::VecCi(cis) => ci_slice_to_pylist(py, cis)?.into_py_any(py),
         HostValue::OptCi(o) => match o {
             Some(ci) => PyTuple::new(py, [ci.lo, ci.hi])?.into_py_any(py),
             None => Ok(py.None()),
         },
         HostValue::Str(s) => s.as_str().into_py_any(py),
+        HostValue::Null => Ok(py.None()),
         HostValue::Map(pairs) => {
             let d = PyDict::new(py);
             for (k, v) in pairs {

@@ -13,7 +13,7 @@ test_that("two crossed set_cluster calls succeed without error", {
   m <- expect_no_error(
     MCPower$new("y ~ x1 + (1|school) + (1|district)", family = "lme")$
       set_effects("x1=0.3")$
-      set_cluster("school",   ICC = 0.10, n_clusters = 20L, cluster_size = 15L)$
+      set_cluster("school",   ICC = 0.10, n_clusters = 20L)$
       set_cluster("district", ICC = 0.05, n_clusters = 10L)
   )
   expect_equal(length(m$.__enclos_env__$private$pending_clusters), 2L)
@@ -24,7 +24,7 @@ test_that("n_per_parent no longer raises a reserved-feature error", {
   expect_no_error(
     MCPower$new("y ~ x1 + (1|school/district)", family = "lme")$
       set_effects("x1=0.3")$
-      set_cluster("school",   ICC = 0.10, n_clusters = 20L, cluster_size = 15L)$
+      set_cluster("school",   ICC = 0.10, n_clusters = 20L)$
       set_cluster("school:district", ICC = 0.05, n_per_parent = 5L)
   )
 })
@@ -35,7 +35,7 @@ test_that("n_per_parent no longer raises a reserved-feature error", {
 test_that("formula with nested '/' no longer raises at apply time", {
   m <- MCPower$new("y ~ x1 + (1|school/district)", family = "lme")$
     set_effects("x1=0.3")$
-    set_cluster("school",   ICC = 0.10, n_clusters = 20L, cluster_size = 15L)$
+    set_cluster("school",   ICC = 0.10, n_clusters = 20L)$
     set_cluster("school:district", ICC = 0.05, n_per_parent = 5L)
   expect_no_error(m$.__enclos_env__$private$apply())
 })
@@ -48,7 +48,7 @@ test_that("formula with nested '/' no longer raises at apply time", {
 test_that("n_per_parent is stored in pending_clusters", {
   m <- MCPower$new("y ~ x1 + (1|school/district)", family = "lme")$
     set_effects("x1=0.3")$
-    set_cluster("school",         ICC = 0.10, n_clusters = 20L, cluster_size = 15L)$
+    set_cluster("school",         ICC = 0.10, n_clusters = 20L)$
     set_cluster("school:district", ICC = 0.05, n_per_parent = 5L)
   expect_equal(m$.__enclos_env__$private$pending_clusters[["school:district"]]$n_per_parent, 5L)
 })
@@ -57,7 +57,7 @@ test_that("n_per_parent is stored in pending_clusters", {
 test_that("two set_cluster calls produce two entries in pending_clusters", {
   m <- MCPower$new("y ~ x1 + (1|school) + (1|district)", family = "lme")$
     set_effects("x1=0.3")$
-    set_cluster("school",   ICC = 0.10, n_clusters = 20L, cluster_size = 15L)$
+    set_cluster("school",   ICC = 0.10, n_clusters = 20L)$
     set_cluster("district", ICC = 0.05, n_clusters = 10L)
   expect_equal(length(m$.__enclos_env__$private$pending_clusters), 2L)
   expect_true("school"   %in% names(m$.__enclos_env__$private$pending_clusters))
@@ -72,7 +72,7 @@ test_that("two set_cluster calls produce two entries in pending_clusters", {
 test_that("two public set_cluster calls produce correct extra_groupings in clusters_json", {
   m <- MCPower$new("y ~ x1 + (1|school) + (1|district)", family = "lme")$
     set_effects("x1=0.3")$
-    set_cluster("school",   ICC = 0.10, n_clusters = 20L, cluster_size = 15L)$
+    set_cluster("school",   ICC = 0.10, n_clusters = 20L)$
     set_cluster("district", ICC = 0.05, n_clusters = 10L)
   m$.__enclos_env__$private$apply()
   enc <- mcpower:::.encode_outcome_and_clusters(
@@ -92,7 +92,7 @@ test_that("two public set_cluster calls produce correct extra_groupings in clust
 test_that("nested grouping with n_per_parent emits NestedWithin relation in clusters_json", {
   m <- MCPower$new("y ~ x1 + (1|school/district)", family = "lme")$
     set_effects("x1=0.3")$
-    set_cluster("school",         ICC = 0.10, n_clusters = 20L, cluster_size = 15L)$
+    set_cluster("school",         ICC = 0.10, n_clusters = 20L)$
     set_cluster("school:district", ICC = 0.05, n_per_parent = 5L)
   m$.__enclos_env__$private$apply()
   enc <- mcpower:::.encode_outcome_and_clusters(

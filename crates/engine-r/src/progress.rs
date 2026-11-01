@@ -32,6 +32,8 @@
 
 use engine_orchestrator::{CancellationToken, OrchestratorError, ProgressEvent, ProgressSink};
 use extendr_api::prelude::*;
+
+use crate::r_error;
 use std::os::raw::c_void;
 use std::panic::AssertUnwindSafe;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
@@ -213,10 +215,10 @@ fn drain_queue(
 /// path.
 pub fn orchestrator_err(e: OrchestratorError) -> Error {
     match e {
-        OrchestratorError::Cancelled { .. } => Error::Other("cancelled by user".into()),
+        OrchestratorError::Cancelled { .. } => r_error("cancelled by user"),
         // Display, not Debug: thiserror's #[error] messages are the curated,
         // host-facing text (mirrors engine-py's exception messages).
-        other => Error::Other(format!("{other}")),
+        other => r_error(other),
     }
 }
 
@@ -241,7 +243,7 @@ fn panic_to_r_error(payload: Box<dyn std::any::Any + Send>) -> Error {
         .map(|s| (*s).to_string())
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "engine panicked".to_string());
-    Error::Other(internal_error_message(&msg))
+    r_error(internal_error_message(&msg))
 }
 
 /// Run an orchestrator entry (with R progress + cancellation) and map its

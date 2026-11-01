@@ -39,17 +39,18 @@ negligible; with very small samples the z approximation runs slightly
 optimistic.
 
 For mixed models (LME and clustered GLMM), the `df_method` setting defaults to
-`"between_within"`: each fixed effect is tested against a *t* distribution
-with between-within denominator degrees of freedom (a cluster-level predictor
-gets the between-cluster df, others get the within-cluster df). With a
-crossed or nested extra grouping it uses Satterthwaite df for an LME and the
-Wald z for a GLMM. Setting `df_method="asymptotic"` opts into the Wald z
-instead. The calibration of both against lmerTest Satterthwaite is on the
+`"auto"`, which picks the test from the design: a *t* with between-within
+denominator degrees of freedom for a single grouping factor without a random
+slope and for any single-grouping GLMM (a cluster-level predictor gets the
+between-cluster df, others get the within-cluster df), Satterthwaite df for
+every other LME (a random slope, or a crossed or nested grouping), and the
+Wald z for a GLMM with a crossed or nested grouping. `"between_within"`,
+`"satterthwaite"` and `"asymptotic"` name one test each. The calibration
+against lmerTest Satterthwaite is on the
 [[validation/validation_df_calibration|denominator-df calibration page]].
-Satterthwaite df are not available for single-grouping designs or for any
-GLMM, and Kenward-Roger corrections are not available. Where the z
-approximation runs optimistic, prefer more clusters over more rows per cluster
-when you can.
+Satterthwaite df are not available for any GLMM, and Kenward-Roger
+corrections are not available. Where the z approximation runs optimistic,
+prefer more clusters over more rows per cluster when you can.
 
 ## Mixed-effects structure has depth limits
 
@@ -143,6 +144,27 @@ statistically equivalent, within the Monte Carlo noise above, but not
 byte-identical. See
 [[internals/engine-architecture|why two runs aren't byte-identical]].
 
+## The app builds fewer designs than Python and R
+
+The numbers agree across the app, Python, and R (next section), but the app
+cannot express every design the other two can. Four gaps are known:
+
+- **Two-level factors in Regression and Mixed models.** A factor card needs at
+  least three levels there, and a binary predictor is drawn per row, so a
+  two-level factor with exactly equal group sizes (or one that enters an
+  interaction) is not available. ANOVA allows two levels but has no interaction
+  terms.
+- **Tukey outside ANOVA.** The app offers it for ANOVA only, so a regression such
+  as `y ~ a * b` with Tukey on `b` cannot be built.
+- **Custom-named scenarios.** The Scenarios tab edits the three built-in presets
+  only.
+- **A fixed cluster size on a nested design.** With a nested grouping the app
+  sets the primary grouping by number of clusters, so a search over the number
+  of clusters at a fixed cluster size is unavailable. (For a crossed grouping
+  that choice is an engine rule, as described above.)
+
+Python and R run all four.
+
 ## App, Python, and R agree — to the last decimal that matters
 
 The same analysis run on the desktop app, in Python, and in R gives the same
@@ -177,6 +199,23 @@ any power.
 
 If you see this warning: increase N, raise the sparse level's proportion, or
 merge rare levels. See [[variable-types]] for setting factor proportions.
+
+## Unequal exact factors in crossed designs
+
+With the default exact group allocation, a factor gets its planned share of
+rows overall and within every primary cluster. In a design with a crossed
+grouping, such as `(1|subject) + (1|item)`, a factor with equal shares (50/50,
+or a third each) also gets its planned share within every crossed level. A
+factor with unequal shares may not: its rows can lean toward some crossed
+levels. With a 70/30 factor over 4 subjects and 2 items, one item gets 25% of
+its rows at the 30% level and the other 35%, at any N. With more subjects and
+items the gap shrinks (1.7 points at 8 subjects and 4 items, N = 480).
+
+The cost to power is small: the factor's standard error grows by at most about
+0.6%, roughly half a point of power, in the designs checked. Sampled allocation
+(`set_factor_sampling("f", "sampled")`, and the default in realistic and
+doomer) has no lean, but its random imbalance is as large or larger, so it is
+not a better choice for this reason.
 
 ## Upload size depends on where MCPower runs
 

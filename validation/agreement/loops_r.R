@@ -9,12 +9,13 @@
 # Rates are over all n_sims: a failed fit counts as not significant, as in
 # MCPower; `converged` is the number of fits that were scored.
 #
-# Decision rules follow MCPower's defaults: OLS t at the residual df; logit
-# Wald z; LME and GLMM Wald statistic against a t at the between-within df
-# (mixed_df(), per coefficient); a fit with every variance component zero uses
-# the single-level reference instead (single_level_fit()). LME with a crossed
-# second grouping (lme_crossed): lmerTest Satterthwaite t per draw, Wald z for a
-# draw whose Satterthwaite df cannot be computed.
+# Decision rules follow MCPower's defaults (df_method = "auto"): OLS t at the
+# residual df; logit Wald z; LME without a random slope and GLMM Wald statistic
+# against a t at the between-within df (mixed_df(), per coefficient); a fit with
+# every variance component zero uses the single-level reference instead
+# (single_level_fit()). LME with a random slope, or with a crossed second
+# grouping (lme_crossed): lmerTest Satterthwaite t per draw, Wald z for a draw
+# whose Satterthwaite df cannot be computed (satterthwaite_decision()).
 # Parser constraints: every formula variable not listed in variable_types is
 # continuous; only pairwise interactions are parsed (a*b*c loses the 3-way term).
 
@@ -243,6 +244,44 @@ mixed_df <- function(n, spec, k) {
 single_level_fit <- function(fit) {
   th <- lme4::getME(fit, "theta")
   all(th[lme4::getME(fit, "lower") == 0] <= 1e-4)
+}
+
+# Per-draw Satterthwaite decision on an lmer fit, mirroring MCPower's
+# MixedTest::Satterthwaite path (engine-core batch.rs Mle arm, critvals.rs
+# mixed_test): each coefficient is tested from the t tail at its lmerTest
+# Satterthwaite df, and the joint Wald test of the TARGETS from the upper F tail
+# of W/k at (k, the smallest target df). When the df pass fails or gives a
+# target a non-finite or non-positive df, the whole draw falls back to the Wald
+# z and the joint chi-square, as MCPower falls back to its asymptotic table. A
+# fit whose variance components are all pinned at zero is not special-cased
+# (the Satterthwaite df reach the residual df there on their own). Returns
+# list(sig = per-coefficient logical, joint = logical).
+satterthwaite_decision <- function(fit, P, TARGETS) {
+  muffle   <- function(w) invokeRestart("muffleWarning")
+  coef_fix <- as.numeric(lme4::fixef(fit))   # [intercept, V1..VP]
+  V_cov    <- as.matrix(stats::vcov(fit))
+  wstat    <- coef_fix[-1L] / sqrt(diag(V_cov))[-1L]
+  sm <- tryCatch(withCallingHandlers(
+    summary(lmerTest::as_lmerModLmerTest(fit), ddf = "Satterthwaite")$coefficients,
+    warning = muffle), error = function(e) NULL)
+  df <- if (!is.null(sm) && "df" %in% colnames(sm) && nrow(sm) == P + 1L)
+          sm[-1L, "df"] else rep(NA_real_, P)
+  ok <- all(is.finite(df[TARGETS]) & df[TARGETS] > 0)
+  idx <- TARGETS + 1L
+  b_t <- coef_fix[idx]
+  Vs  <- tryCatch(solve(V_cov[idx, idx, drop = FALSE], b_t), error = function(e) NULL)
+  W   <- if (is.null(Vs)) NA_real_ else as.numeric(t(b_t) %*% Vs)
+  k   <- length(TARGETS)
+  if (ok) {
+    p     <- 2 * stats::pt(-abs(wstat), df)
+    sig   <- !is.na(p) & p <= ALPHA
+    joint <- is.finite(W) &&
+      stats::pf(W / k, k, min(df[TARGETS]), lower.tail = FALSE) <= ALPHA
+  } else {
+    sig   <- abs(wstat) > stats::qnorm(1 - ALPHA / 2)
+    joint <- is.finite(W) && W > stats::qchisq(1 - ALPHA, k)
+  }
+  list(sig = sig, joint = joint)
 }
 
 # ---------------------------------------------------------------------------
@@ -519,6 +558,14 @@ lme_best_chunk <- function(case, n, n_sims, seed) {
     # Any returned fit is scored, warnings included (mirrors loops_py).
     converged <- converged + 1L
 
+    # A random slope puts the fit on MCPower's Satterthwaite path under auto.
+    if (length(SLOPE_COLS)) {
+      d     <- satterthwaite_decision(fit, P, TARGETS)
+      t_rej <- t_rej + as.integer(d$sig)
+      f_rej <- f_rej + as.integer(d$joint)
+      next
+    }
+
     coef_fix <- as.numeric(lme4::fixef(fit))   # [intercept, V1..VP]
     V_cov    <- as.matrix(stats::vcov(fit))
     se       <- sqrt(diag(V_cov))
@@ -592,12 +639,19 @@ lme_naive <- function(case, n, n_sims, seed) {
     if (is.null(fit)) next
     converged <- converged + 1L
 
-    # lmerTest's summary (the off-the-shelf call, Satterthwaite df included);
-    # the decision reads its t value against the between-within df like the
-    # other tiers, not its Satterthwaite p-value.
+    # lmerTest's summary (the off-the-shelf call, Satterthwaite df included).
+    # Without a random slope the decision reads its t value against the
+    # between-within df like the other tiers; with one it reads the
+    # Satterthwaite p-value, MCPower's test there under auto (a failed df pass
+    # leaves an NA p-value, not significant; MCPower would use the Wald z).
     sm <- tryCatch(summary(fit)$coefficients, error = function(e) NULL)
     if (is.null(sm)) next
 
+    if (length(SLOPE_COLS)) {
+      pv    <- if ("Pr(>|t|)" %in% colnames(sm)) sm[-1L, "Pr(>|t|)"] else rep(NA_real_, P)
+      t_rej <- t_rej + as.integer(!is.na(pv) & pv <= ALPHA)
+      next
+    }
     tv    <- sm[-1L, "t value"]                # drop intercept row
     t_rej <- t_rej + as.integer(abs(tv) > (if (single_level_fit(fit)) tcrit1 else tcrit))
 
@@ -627,7 +681,7 @@ crossed_ids <- function(n, s, i) {
 # b_item ~ N(0, ICC_i/(1-ICC_i)) and e ~ N(0, 1) (the tau^2 the R spec builder
 # gives each grouping); cluster-level factors are drawn once per subject.
 # Fit: lmerTest REML with (1|subject) + (1|item). Decision, mirroring MCPower's
-# crossed LMM path (engine-core batch.rs and critvals.rs uses_satterthwaite):
+# crossed LMM path (engine-core batch.rs and critvals.rs mixed_test):
 # every target is tested from its lmerTest Satterthwaite p-value; when the df
 # pass fails or gives a target a non-finite or non-positive df, the whole draw
 # falls back to the Wald z (|t| > qnorm(1 - ALPHA/2)), as MCPower falls back to

@@ -78,6 +78,21 @@ export function unitAxisTitle(unit: SampleSizeUnit, clusterName: string): string
   return noun.charAt(0).toUpperCase() + noun.slice(1);
 }
 
+/** Total-observation limits restated in `unit`: the whole-number range of a
+ *  value in `unit` whose total stays inside `[lo, hi]`. `fixed` is the
+ *  Clusters card value, as in `boundToObservations`. Null when `fixed` is no
+ *  usable divisor or no whole value fits. */
+export function limitsInUnit(
+  unit: SampleSizeUnit,
+  [lo, hi]: [number, number],
+  fixed: number,
+): [number, number] | null {
+  if (unit === 'observations') return [lo, hi];
+  if (!Number.isFinite(fixed) || fixed < 1) return null;
+  const [min, max] = [Math.ceil(lo / fixed), Math.floor(hi / fixed)];
+  return min <= max ? [min, max] : null;
+}
+
 /** Find power's n, given in the spec's sample-size unit, as the total
  *  observations the engine takes. The adapter has already dropped a unit that
  *  does not match `cluster_dim`, so `cluster_dim.value` is the right factor. */

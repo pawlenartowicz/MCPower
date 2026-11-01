@@ -33,4 +33,4 @@ Two native packages are provided; pick the one that suits your distribution.
 
 ## Updating
 
-To update, download the newer installer from GitHub Releases and install over the existing version — your history and settings are preserved.
+To update, download the newer installer from GitHub Releases and install over the existing version. Your settings and History are kept, except runs on uploaded data, which History does not keep (see [[tutorial-app/upload-data|Upload data]]).

@@ -31,11 +31,16 @@ TOOLS <- list(
 # nsim and progress are simrOptions, passed through powerSim's ... argument
 # (see body(simr::powerSim): opts <- simrOptions(...)).
 #
-# Decision rule: MCPower tests a mixed fixed effect against a t at the
-# between-within df (mixed_df() in loops_r.R, for the tested target); simr's "z"
-# test only stores two-sided normal p-values. |z| > qt(1 - a/2, df) is the same event as
+# Decision rule: without a random slope MCPower (df_method = "auto") tests a
+# mixed fixed effect against a t at the between-within df (mixed_df() in
+# loops_r.R, for the tested target); simr's "z" test only stores two-sided
+# normal p-values. |z| > qt(1 - a/2, df) is the same event as
 # p < 2 * pnorm(-qt(1 - a/2, df)), so summary() scores the stored p-values at
-# that equivalent alpha. Failed fits keep an NA p-value and count as not
+# that equivalent alpha. An LME with a random slope is tested at each fit's
+# Satterthwaite df instead, so it reads simr's "t" test (lmerTest, Satterthwaite)
+# at alpha itself; no fixed critical value exists to align with. A draw whose
+# Satterthwaite df fail keeps an NA p-value there (MCPower would fall back to
+# the Wald z; rare). Failed fits keep an NA p-value and count as not
 # significant over all nsim, as in MCPower.
 # ---------------------------------------------------------------------------
 
@@ -110,9 +115,10 @@ tool_simr <- function(case, n, nsim, seed) {
                                          function(p) identical(sort(p), want), logical(1))]
   if (length(hit) != 1L) stop(sprintf("simr: target '%s' not a unique fixed effect", case$targets[1]))
 
-  ps <- simr::powerSim(fit, test = simr::fixed(hit, "z"),
+  satt <- length(SLOPE_COLS) > 0L
+  ps <- simr::powerSim(fit, test = simr::fixed(hit, if (satt) "t" else "z"),
                        nsim = nsim, progress = FALSE)
-  s <- summary(ps, alpha = simr_alpha(n, spec, N_CLUSTERS))
+  s <- summary(ps, alpha = if (satt) 0.05 else simr_alpha(n, spec, N_CLUSTERS))
   list(power = as.numeric(s$mean))
 }
 
