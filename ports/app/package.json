@@ -27,7 +27,7 @@
     "@types/papaparse": "^5.5.2",
     "@internationalized/date": "^3.12.1",
     "@lucide/svelte": "^1.16.0",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.64.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.3.0",
