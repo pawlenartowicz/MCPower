@@ -99,9 +99,9 @@ harness skips. R already supplies a `glmer` GLMM loop, so Julia GLMM is a second
 comparator, not a gap-filler.
 
 **Timing hygiene:** one discarded warm-up call per (method, case, n), then the
-median of 3 reps for the fast tiers (`mcpower_find_power`,
-`mcpower_find_sample_size`, `loop_best`); a single rep for `loop_naive`; a
-micro warm-up (nsim 4, 10 for Superpower) + a single timed rep for the tools.
+median of 3 reps for `mcpower_find_power` and `mcpower_find_sample_size`; a
+single rep for `loop_best` and `loop_naive`; a micro warm-up (nsim 4, 10 for
+Superpower) + a single timed rep for the tools.
 
 **Metric:** per-sim time is the headline (so the different sim-count tiers are
 comparable); raw wall-clock is recorded too.

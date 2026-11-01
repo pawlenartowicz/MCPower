@@ -10,5 +10,7 @@ data/df_calibration.rds
 data/df_calibration_slopes.csv
 data/df_calibration_slopes.rds
 data/data_generation_recovery.csv
+data/l3_maxima.csv
+data/*.partial.rds
 *_files/
 *_cache/

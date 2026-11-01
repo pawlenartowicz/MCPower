@@ -70,7 +70,7 @@ N_SIMS_SCALE = 1.0
 def scaled_sims(count):
     return max(1, round(N_SIMS_SCALE * count))
 _REPS = {"mcpower_find_power": 3, "mcpower_find_sample_size": 3,
-         "loop_best": 3, "loop_naive": 1}
+         "loop_best": 1, "loop_naive": 1}
 
 
 def seed_for(n: int) -> int:

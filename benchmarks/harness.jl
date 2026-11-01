@@ -32,9 +32,9 @@ const RECORDED_METHODS = ["loop_naive", "loop_best"]
 # n_sims key per recorded method (the loop tiers' counts in validation/agreement/cases.json).
 const _TIER = Dict("loop_best" => "best", "loop_naive" => "naive")
 const _KIND = Dict("loop_best" => "best", "loop_naive" => "naive")
-# Timing hygiene mirrors py: median of 3 reps for loop_best, 1 rep for loop_naive
-# (after one discarded warm-up that absorbs JIT compilation).
-const _REPS = Dict("loop_best" => 3, "loop_naive" => 1)
+# Timing hygiene mirrors py: 1 rep for each loop tier (after one discarded
+# warm-up that absorbs JIT compilation).
+const _REPS = Dict("loop_best" => 1, "loop_naive" => 1)
 
 scaled_sims(count, scale) = max(1, round(Int, scale * count))
 seed_for(n) = 2137 + Int(n)

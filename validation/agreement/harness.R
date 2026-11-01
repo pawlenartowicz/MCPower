@@ -53,7 +53,7 @@ source(file.path(HERE, "tools_r.R"))
 RECORDED_METHODS <- c("mcpower_find_power", "mcpower_find_sample_size",
                       "tool", "loop_naive", "loop_best")
 REPS <- list(mcpower_find_power = 3L, mcpower_find_sample_size = 3L,
-             loop_best = 3L, loop_naive = 1L)
+             loop_best = 1L, loop_naive = 1L)
 
 # --budget agreement: per-grid-point sim counts from cases.json defaults$agreement
 # (replacing the per-case timing counts), one rep per point, no warmup.
