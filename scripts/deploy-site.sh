@@ -63,6 +63,6 @@ cp -r "$REPO_ROOT/site-functions/api" "$STAGE/functions/"
 
 echo "==> Deploying to Cloudflare Pages (project: mcpower-site)"
 # Run wrangler with $STAGE as cwd so it discovers the sibling functions/ next to
-# the deployed assets/ dir; --dir only points pnpm at the app toolchain that
-# resolves wrangler (it does not change wrangler's cwd).
-(cd "$STAGE" && pnpm --dir "$REPO_ROOT/ports/app" dlx wrangler pages deploy assets "${DEPLOY_ARGS[@]}")
+# the deployed assets/ dir. No pnpm --dir here: pnpm 11.28.10 runs dlx from that
+# directory, so wrangler would look for assets/ and functions/ in the wrong place.
+(cd "$STAGE" && pnpm dlx wrangler pages deploy assets "${DEPLOY_ARGS[@]}")
