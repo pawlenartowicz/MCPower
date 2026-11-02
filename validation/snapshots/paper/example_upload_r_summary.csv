@@ -1,2 +1,0 @@
-case,family,comparator,n_points,n_flagged,expected_flagged,mean_z,se_mean_z,max_abs_diff
-ex1_strict,ols,loop,20,3,2.0,-0.1668794857823436,0.22360679774997896,0.02579999999999999

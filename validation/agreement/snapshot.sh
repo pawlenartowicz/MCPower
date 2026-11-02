@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # snapshot.sh <name> — freeze the outputs the paper reads into
-# validation/snapshots/<name>/, plus a MANIFEST.md (date, commit, dirty flag,
+# paper/snapshot/<name>/, plus a MANIFEST.md (date, commit, dirty flag,
 # per-file sha256 and the JSON meta.packages / lang_version).
 #
 # Copied: every results/*_r.json here and the <stem>_points.csv /
 # <stem>_summary.csv beside it; validation/data/{df_calibration,
-# df_calibration_slopes,l3_maxima,data_generation_recovery}.csv;
+# df_calibration_slopes,l3_maxima,data_generation_recovery,glmm_slope_type1,
+# glmm_slope_glmer,rx_vs_hessian_timing}.csv;
 # benchmarks/results/{py,py_1t,py_6p,r,r_1t,jl}.json when present. Smoke outputs
 # (agreement_smoke*, lme_ex2_smoke*) never match *_r.json, and plots are not
 # copied.
@@ -26,7 +27,7 @@ name=${1:-}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 validation=$(dirname "$here")
 repo=$(dirname "$validation")
-target=$validation/snapshots/$name
+target=$repo/paper/snapshot/$name
 
 die() { echo "snapshot.sh: $*" >&2; exit 1; }
 
@@ -55,7 +56,8 @@ for json in "$here"/results/*_r.json; do
     files+=("$csv")
   done
 done
-for f in df_calibration.csv df_calibration_slopes.csv l3_maxima.csv data_generation_recovery.csv; do
+for f in df_calibration.csv df_calibration_slopes.csv l3_maxima.csv data_generation_recovery.csv \
+         glmm_slope_type1.csv glmm_slope_glmer.csv rx_vs_hessian_timing.csv; do
   [[ -f $validation/data/$f ]] || die "missing $validation/data/$f"
   files+=("$validation/data/$f")
 done
@@ -76,13 +78,13 @@ if (( ${#versions[@]} )) && [[ $(printf '%s\n' "${versions[@]}" | cut -d' ' -f1 
   die "mixed meta.packages.mcpower versions:"$'\n'"$(printf '  %s\n' "${versions[@]}")"
 fi
 
-# Read before the temp dir exists, so the dirty flag never sees the snapshot itself.
+# paper/ is left out because a paper run rewrites its results and figures.
 commit=$(git -C "$repo" rev-parse HEAD)
 dirty=no
-[[ -n $(git -C "$repo" status --porcelain) ]] && dirty=yes
+[[ -n $(git -C "$repo" status --porcelain -- . ':!paper') ]] && dirty=yes
 
-mkdir -p "$validation/snapshots"
-tmp=$(mktemp -d "$validation/snapshots/.$name.XXXXXX")
+mkdir -p "$repo/paper/snapshot"
+tmp=$(mktemp -d "$repo/paper/snapshot/.$name.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 chmod 755 "$tmp"
 

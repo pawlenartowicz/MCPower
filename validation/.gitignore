@@ -4,7 +4,7 @@
 # re-freezes from the current engine, so deletion must be visible in git.
 figures/
 *.html
-# Rewritten by each snapshot run and frozen in snapshots/, so they are not goldens.
+# Rewritten by each snapshot run and frozen in paper/snapshot/, so they are not goldens.
 data/df_calibration.csv
 data/df_calibration.rds
 data/df_calibration_slopes.csv

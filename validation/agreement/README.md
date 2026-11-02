@@ -118,7 +118,7 @@ tier detects only gross errors (about 10 points).
 
 ## Snapshot
 
-`snapshot.sh <name>` copies the results into `../snapshots/<name>/` once. It
+`snapshot.sh <name>` copies the results into `paper/snapshot/<name>/` once. It
 refuses if that directory exists, if the mcpower versions in the JSON files
 differ, or if any JSON has `meta.n_sims_scale` other than 1.
 
