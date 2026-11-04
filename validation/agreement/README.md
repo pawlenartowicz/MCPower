@@ -62,9 +62,6 @@ Rscript harness.R --case all --budget agreement --methods mcpower_find_power,loo
 Rscript harness.R --case ols_multi --budget agreement --out results/ols_multi.json   # single case
 ```
 
-The snapshot takes `results/*_r.json` and their `<stem>_points.csv` /
-`<stem>_summary.csv`, never smoke outputs.
-
 `--budget agreement` uses the per-grid-point counts from `cases.json`
 (`defaults.agreement`): MCPower 10,000; loop 2,000; simglm and Superpower 500;
 simr 800. Seed is `2137 + n`. `--scale 0.1` runs a fraction of the simulations
@@ -86,11 +83,11 @@ SMOKE=1 Rscript example_upload.R
 `SKIP_LOOPS=1` runs an example script's MCPower side only, for a run that reuses
 earlier loop records.
 
-`simr_seeds.R` reruns the simr adapter at the 23 simr points where MCPower's power is between .2 and .9, under the original seed and 16 new seeds (`2137 + n + 100000 k`), each a new predictor draw. `simr_seeds_summary.R` compares the result with a snapshot's `agreement_r_points.csv`. The full run is about 13 CPU-hours.
+`simr_seeds.R` reruns the simr adapter at the 23 simr points where MCPower's power is between .2 and .9, under the original seed and 16 new seeds (`2137 + n + 100000 k`), each a new predictor draw. `simr_seeds_summary.R` compares the result with the `agreement_r_points.csv` that `power_agreement.py` writes. The full run is about 13 CPU-hours.
 
 ```bash
 pin 12 -- Rscript simr_seeds.R . results/simr_seeds.csv 12 16 800
-Rscript simr_seeds_summary.R results/simr_seeds.csv ../../paper/snapshot/paper-1.5.0/agreement_r_points.csv results/simr_seeds_points.csv
+Rscript simr_seeds_summary.R results/simr_seeds.csv results/agreement_r_points.csv results/simr_seeds_points.csv
 ```
 
 ## The agreement statistic
@@ -123,12 +120,6 @@ points is an upper bound on the expected flags. A case's mean *z* over 10–16
 points detects a systematic offset of about 1 point against the loop; the tool
 tier detects only gross errors (about 10 points).
 
-## Snapshot
-
-`snapshot.sh <name>` copies the results into `paper/snapshot/<name>/` once. It
-refuses if that directory exists, if the mcpower versions in the JSON files
-differ, or if any JSON has `meta.n_sims_scale` other than 1.
-
 ## Files
 
 | file | role |
@@ -141,6 +132,5 @@ differ, or if any JSON has `meta.n_sims_scale` other than 1.
 | `power_agreement.py` | the agreement statistic, CSVs and plots |
 | `test_power_agreement.py` | unit tests for `power_agreement.py` |
 | `example_upload.R`, `example_misspec.R`, `example_knobs.R` | example checks; `pilot.csv` is the upload pilot |
-| `simr_seeds.R`, `simr_seeds_summary.R` | simr rerun over new predictor draws, and its summary against a snapshot |
-| `snapshot.sh` | writes a frozen snapshot |
+| `simr_seeds.R`, `simr_seeds_summary.R` | simr rerun over new predictor draws, and its summary against `agreement_r_points.csv` |
 | `results/` | rolling outputs (git-ignored) |

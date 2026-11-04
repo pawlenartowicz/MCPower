@@ -8,7 +8,7 @@ w = 0.3, baseline probability .5. The targets are x (a within-cluster effect
 with a random slope) and x:w (a cross-level interaction).
 
 Arms, each on the same seed:
-  auto, hessian     the paper's test: between-within t on one grouping, Hessian standard error
+  auto, hessian     the default test: between-within t on one grouping, Hessian standard error
   asymptotic, rx    Wald z with the rx standard error
   asymptotic, hessian  Wald z with the Hessian standard error, which is glmer's test
 Slope variances are on the log-odds scale, where the level-1 residual variance

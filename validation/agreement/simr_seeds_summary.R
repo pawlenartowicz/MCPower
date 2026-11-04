@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
-# Summarises simr_seeds.csv against the 1.5.0 snapshot.
-# Per point: k = 0 against the snapshot's simr value (reproduction), the mean of
+# Summarises simr_seeds.csv against an agreement run's agreement_r_points.csv.
+# Per point: k = 0 against the agreement run's simr value (reproduction), the mean of
 # the K new seeds against MCPower, and the spread across seeds beyond binomial
 # noise (the predictor-draw component). Writes simr_seeds_points.csv.
-# Usage: Rscript simr_seeds_summary.R <simr_seeds.csv> <snapshot agreement_r_points.csv> <out_points.csv>
+# Usage: Rscript simr_seeds_summary.R <simr_seeds.csv> <agreement_r_points.csv> <out_points.csv>
 
 a <- commandArgs(trailingOnly = TRUE)
 runs <- read.csv(a[1])
@@ -30,11 +30,11 @@ pts <- do.call(rbind, lapply(split(d, list(d$case, d$n), drop = TRUE), function(
 pts <- pts[order(pts$family, pts$case, pts$n), ]
 write.csv(pts, a[3], row.names = FALSE)
 
-cat(sprintf("k = 0 reproduces the snapshot at %d of %d points (max |diff| %.4f)\n",
+cat(sprintf("k = 0 reproduces the agreement run at %d of %d points (max |diff| %.4f)\n",
             sum(abs(pts$rerun_k0 - pts$snap_simr) < 1e-9), nrow(pts), max(abs(pts$rerun_k0 - pts$snap_simr))))
 for (f in c("LMM", "GLMM", "all")) {
   p <- if (f == "all") pts else pts[pts$family == f, ]
-  cat(sprintf("%-4s points %2d | draw SD (RMS over points) %.2f pp | snapshot excess scatter on these points %.2f pp | mean(seeds - MCPower) %+.2f pp, |z| > 1.96 at %d points, max |z| %.2f\n",
+  cat(sprintf("%-4s points %2d | draw SD (RMS over points) %.2f pp | agreement-run excess scatter on these points %.2f pp | mean(seeds - MCPower) %+.2f pp, |z| > 1.96 at %d points, max |z| %.2f\n",
               f, nrow(p), 100 * sqrt(mean(p$draw_sd^2)), 100 * sqrt(max(0, mean(p$snap_excess2))),
               100 * mean(p$mean_minus_mc), sum(abs(p$z_mean) > 1.96), max(abs(p$z_mean))))
 }

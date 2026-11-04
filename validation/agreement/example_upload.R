@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Example 1 check: power from an uploaded pilot (pilot.csv) in strict mode,
+# Upload check: power from an uploaded pilot (pilot.csv) in strict mode,
 # MCPower against an independent resampling loop.
 #
 # Model: outcome ~ conscientiousness + neuroticism + age + gender, OLS, effects

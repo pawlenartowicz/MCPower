@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Example 3 check: cost of misspecifying the analysis model, MCPower against an
+# Misspecification check: cost of misspecifying the analysis model, MCPower against an
 # independent lm() loop.
 #
 # Continuous X, W standardized and independent; M correlated with X at 0.26;

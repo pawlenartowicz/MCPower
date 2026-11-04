@@ -15,7 +15,7 @@
 # random-effect variance at zero). A converged MCPower fit reported as a Wald z
 # (no df) is a failed Satterthwaite pass.
 #
-# Designs: Example 2 of the MCPower paper, y ~ group * time + (1 + time | subject),
+# Designs: y ~ group * time + (1 + time | subject),
 # 8 rows per subject, group cluster-level and binary, ICC .3, slope variance .10,
 # group:time = 0, at 10, 20, 30 and 60 subjects; and a two-slope design,
 # y ~ x1 + x2 + (1 + x1 + x2 | g), 20 clusters of 10, all effects 0.

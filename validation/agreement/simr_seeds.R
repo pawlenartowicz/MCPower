@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Does simr's scatter around MCPower come from its fixed predictor draw?
 # Reruns the agreement harness's own simr adapter (tool_simr) at the mid-range
-# simr points under the original seed (k = 0, reproduces the snapshot) and
+# simr points under the original seed (k = 0, reproduces the agreement run) and
 # K new seeds (each a new predictor draw). One row per (case, n, k) in
 # simr_seeds.csv.
 # Usage: Rscript simr_seeds.R <agreement_dir> <out_csv> <cores> [K] [nsim]
@@ -31,7 +31,7 @@ cases <- lapply(Filter(function(c) identical(c$tool, "simr"), doc$cases), functi
 })
 names(cases) <- vapply(cases, `[[`, "", "id")
 
-# Mid-range simr points (MCPower power in [.2, .9] in the 1.5.0 snapshot);
+# Mid-range simr points (MCPower power in [.2, .9] in the 1.5.0 agreement run);
 # lme_ex2 thinned to three of its six points for run time.
 points <- list(
   list("glmm_multislope", c(150, 300)),

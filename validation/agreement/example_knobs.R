@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Example 4 check: the scenario knobs, MCPower against an independent lm() loop
+# Scenario-knob check: MCPower against an independent lm() loop
 # that hard-codes each knob's engine definition.
 #
 # Model: y ~ treatment + stress * sleep, OLS, N = 130. treatment a two-level
