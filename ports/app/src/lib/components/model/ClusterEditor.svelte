@@ -15,9 +15,9 @@
   import ExtraGroupingAdvancedDialog from './ExtraGroupingAdvancedDialog.svelte';
   import { familyStore } from '$lib/stores/family.svelte';
   import { parsedFormulaStore, toClusterTerms } from '$lib/stores/parsed-formula.svelte';
-  import { LIMITS } from '$lib/configs/app-config';
   import { EXTRA_GROUPING_DEFAULTS, SLOPE_DEFAULTS, mixedOutcomeKind } from '$lib/domain/family';
   import { boundToObservations } from '$lib/domain/unit-label';
+  import { minRowsInCluster } from '$lib/domain/app-spec-adapter';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
 
@@ -35,9 +35,20 @@
     return result ? toClusterTerms(result) : [];
   });
   const primary = $derived(terms[0] ?? null);
-  // Engine floor: `min_rows_in_cluster` in engine-orchestrator — change together.
-  const minObsPerCluster = $derived(LIMITS.min_rows_per_cluster + (primary?.slopeVars.length ?? 0));
   const extraTerms = $derived(terms.slice(1));
+  const minObsPerCluster = $derived(
+    minRowsInCluster(
+      primary?.slopeVars.length ?? 0,
+      extraTerms
+        .filter((t) => t.parent !== null)
+        .map((t) => ({
+          nPerParent:
+            cfg.cluster?.extraGroupings?.find((g) => g.clusterName === t.cluster)?.n ??
+            EXTRA_GROUPING_DEFAULTS.nestedN,
+          slopes: t.slopeVars.length,
+        })),
+    ),
+  );
   const nestedCount = $derived(extraTerms.filter((t) => t.parent !== null).length);
   // Poisson has no residual variance to scale an ICC against (family.ts docs
   // this on ClusterConfig.tauSquared) — both the primary and every extra

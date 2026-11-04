@@ -12,8 +12,8 @@
 //! fixed clustered-logit spec; reports MIN-of-3 elapsed (timing noise is one-sided)
 //! after a discarded warm-up. The two modes differ ONLY in the per-fit covariance
 //! step layered on the shared Laplace fit:
-//!   * rx       — Schur block solve            (default)
-//!   * hessian  — FD-Hessian of the deviance   (per-fit, opt-in)
+//!   * rx       — Schur block solve            (opt-in)
+//!   * hessian  — FD-Hessian of the deviance   (per-fit, default)
 
 use engine_contract::{ColumnId, SlopeTerm};
 use engine_core::batch::run_batch_st;

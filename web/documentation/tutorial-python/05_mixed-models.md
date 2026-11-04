@@ -258,8 +258,8 @@ model.set_cluster("clinic", tau_squared=0.10, n_clusters=30)
 ### Estimation mode for clustered GLMMs
 
 A clustered binary/count GLMM (logit, probit, or Poisson) accepts two more
-`find_power`/`find_sample_size` arguments: `wald_se` (default `"rx"`, a fast
-Wald-SE shortcut; `"hessian"` is slower and slightly more conservative) and
+`find_power`/`find_sample_size` arguments: `wald_se` (default `"hessian"`, the
+per-fit Hessian SE glmer reports; `"rx"` is faster and slightly more liberal) and
 `agq` (default `1`, Laplace; an odd value up to 25 switches to adaptive
 quadrature for a single-grouping, ≤3-random-effects design):
 

@@ -6,14 +6,15 @@
 # Copied: every results/*_r.json here and the <stem>_points.csv /
 # <stem>_summary.csv beside it; validation/data/{df_calibration,
 # df_calibration_slopes,l3_maxima,data_generation_recovery,glmm_slope_type1,
-# glmm_slope_glmer,rx_vs_hessian_timing}.csv;
-# benchmarks/results/{py,py_1t,py_6p,r,r_1t,jl}.json when present. Smoke outputs
+# glmm_slope_glmer}.csv;
+# benchmarks/results/{py,py_1t,py_6p,py_12,r,r_1t,jl,loops_*,tools_*}.json when present. Smoke outputs
 # (agreement_smoke*, lme_ex2_smoke*) never match *_r.json, and plots are not
 # copied.
 #
 # Refuses — non-zero exit, nothing written — when the target exists, when the
 # files carrying meta.packages.mcpower disagree on the version, or when a JSON's
-# meta.n_sims_scale is not 1 (a smoke or scaled run; absent counts as not 1),
+# meta.n_sims_scale is not 1 (a smoke or scaled run; absent counts as not 1;
+# tools_*.json may be a whole number above 1, their pass scales the simulations up),
 # or when a results/*_r.json lacks a <stem>_points.csv or <stem>_summary.csv
 # that is newer than the JSON.
 # Every check runs before anything is created; the snapshot is built in a temp
@@ -57,11 +58,11 @@ for json in "$here"/results/*_r.json; do
   done
 done
 for f in df_calibration.csv df_calibration_slopes.csv l3_maxima.csv data_generation_recovery.csv \
-         glmm_slope_type1.csv glmm_slope_glmer.csv rx_vs_hessian_timing.csv; do
+         glmm_slope_type1.csv glmm_slope_glmer.csv; do
   [[ -f $validation/data/$f ]] || die "missing $validation/data/$f"
   files+=("$validation/data/$f")
 done
-for f in py py_1t py_6p r r_1t jl; do
+for f in py py_1t py_6p py_12 loops_py_6p loops_r_6p loops_jl_6p loops_py_12 loops_r_12 loops_jl_12 tools_6p tools_12 r r_1t jl; do
   [[ -f $repo/benchmarks/results/$f.json ]] && files+=("$repo/benchmarks/results/$f.json")
 done
 
@@ -69,7 +70,7 @@ versions=()
 for f in "${files[@]}"; do
   [[ $f == *.json ]] || continue
   scale=$(meta "$f" n_sims_scale)
-  [[ $scale == 1 || $scale == 1.0 ]] \
+  [[ $scale == 1 || $scale == 1.0 || ( $f == */tools_*.json && $scale =~ ^[1-9][0-9]*$ ) ]] \
     || die "${f#"$repo"/}: meta.n_sims_scale is '${scale}', not 1 (smoke or scaled run)"
   v=$(meta "$f" mcpower)
   [[ -n $v ]] && versions+=("$v ${f#"$repo"/}")

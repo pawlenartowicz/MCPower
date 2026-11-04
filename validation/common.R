@@ -695,9 +695,11 @@ check_extras_golden <- function(case) {
   m$.debug_n      <- as.integer(saved$n)
   m$.debug_n_sims <- 1L
   m$.debug_seed   <- as.numeric(case$seed)
+  # golden$z is glmer's summary() z, which uses the Hessian SE; the GLMM side uses it too.
   fit <- m$load_data(list(design = saved$design, columns = saved$columns,
                           outcome = saved$outcome, cluster_ids = saved$cluster_ids,
-                          extra_grouping_ids = saved$extra_grouping_ids))
+                          extra_grouping_ids = saved$extra_grouping_ids),
+                     wald_se = if (case$family == "logit") "hessian" else NULL)
   fails <- character(0)
   xfail <- case$family == "logit"  # M4 GLMM: documented XFAIL, use generous backstop
   beta_ok <- function(a, b)

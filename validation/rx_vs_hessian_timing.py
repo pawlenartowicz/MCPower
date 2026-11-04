@@ -1,4 +1,4 @@
-"""Wall-clock cost of wald_se="hessian" against the default "rx" on logit GLMMs.
+"""Wall-clock cost of wald_se="hessian" (the default) against "rx" on logit GLMMs.
 
 Times find_power on one core for random-intercept designs (the cells of
 rx_vs_hessian_type1.py) and random-slope designs (the cells of

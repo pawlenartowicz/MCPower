@@ -169,8 +169,9 @@ MLMM_TOL <- list(
   ab_slope_var_pad = 0.02,  # A<->B random-SLOPE variance pad (M3/M4; harder to recover at moderate K)
   ab_corr_pad      = 0.05,  # A<->B RE-correlation pad (noisiest VC quantity: ratio of theta entries)
   # M4 GLMM B<->C gross-regression backstop (the rmd's XFAIL_BACKSTOP, a 4-field list).
-  # M4 B<->C is a documented XFAIL (RX/PLS Schur SE ~3% anticonservative vs glmer), so the
-  # gate gives M4 beta/z THIS, not the tight floors, or it would FAIL every run. The rmd keeps
+  # M4 B<->C is a documented XFAIL (BOBYQA vs glmer-Laplace agree only to ~2-3x the LMM
+  # bands on the same bytes), so the gate gives M4 beta/z THIS, not the tight floors, or it
+  # would FAIL every run. The rmd keeps
   # `XFAIL_BACKSTOP <- MLMM_TOL$xfail_backstop` as a thin alias so campaign + gate read ONE value.
   xfail_backstop   = list(z_abs = 2.0, beta_abs = 0.05, vc_abs = 0.1, corr_abs = 0.1)
 )
@@ -197,6 +198,6 @@ GLMM_TOL <- list(
                              # floor) because few-cluster AGQ has its own quadrature-placement
                              # noise; set from measured worst-case AGQ parity gaps, not derived
                              # from the GLMM xfail_backstop beta_abs band (that band is 0.05,
-                             # a different quantity — the Laplace-vs-Hessian gross-regression
+                             # a different quantity — the Laplace B<->C gross-regression
                              # backstop, not AGQ quadrature-placement noise).
 )

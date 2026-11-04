@@ -119,8 +119,8 @@ pub struct LogitSpec {
     pub tests: TestSelection,
     pub correction: CorrectionMethod,
     /// Wald SE method. Only affects clustered-binary GLMM (Mixed+Binary);
-    /// OLS/LME and unclustered Glm (Logit) ignore it — default `Rx` (the
-    /// Schur speed knob); `Hessian` (lme4 `use.hessian = TRUE`) is the opt-in.
+    /// OLS/LME and unclustered Glm (Logit) ignore it — default `Hessian`
+    /// (lme4 `use.hessian = TRUE`); `Rx` (the Schur SE) is the faster opt-in.
     /// `#[serde(default)]` keeps older specs intact; skip-serialize when default.
     #[serde(default, skip_serializing_if = "wald_se_is_default")]
     pub wald_se: WaldSe,
@@ -299,8 +299,9 @@ pub struct MixedSpec {
     pub tests: TestSelection,
     pub correction: CorrectionMethod,
     /// Wald SE method. Only affects clustered-binary GLMM (this family with Binary
-    /// outcome); Gaussian LME ignores it. Default `Rx` (the Schur speed knob);
-    /// `Hessian` (per-fit FD-Hessian SE, lme4 `use.hessian = TRUE`) is the opt-in.
+    /// outcome); Gaussian LME ignores it. Default `Hessian`
+    /// (per-fit Hessian SE, lme4 `use.hessian = TRUE`); `Rx` (the Schur SE) is the
+    /// faster opt-in.
     /// `#[serde(default)]` keeps older specs intact; skip-serialize when default.
     #[serde(default, skip_serializing_if = "wald_se_is_default")]
     pub wald_se: WaldSe,

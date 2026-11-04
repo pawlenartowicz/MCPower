@@ -183,7 +183,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "engine-contract"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "glmm",
  "serde",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "commonstats",
  "engine-contract",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "engine-orchestrator"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "engine-r"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "engine-spec-builder"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "engine-core",

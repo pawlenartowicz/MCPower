@@ -153,4 +153,4 @@ Lenartowicz, P. (2025). MCPower: Monte Carlo Power Analysis for Complex Statisti
 ```
 
 ---
-**Paweł Lenartowicz** — [Freestyler Scientist](https://freestylerscientist.pl) · [GitHub](https://github.com/pawlenartowicz/) · [ORCID](https://orcid.org/0000-0002-6906-7217)
+**Paweł Lenartowicz** — [Personal site](https://pawlenartowicz.pl) · [GitHub](https://github.com/pawlenartowicz/) · [ORCID](https://orcid.org/0000-0002-6906-7217)

@@ -78,9 +78,9 @@ pub struct LinearSpec {
     #[serde(default)]
     pub cluster_level_vars: Vec<String>,
     /// Standard-error flavour for the clustered-binary/count GLMM estimator.
-    /// `Rx` (1.1.0 default, fastmode) is the Schur speed knob; `Hessian` uses
-    /// the per-fit FD-Hessian SE (lme4 `use.hessian = TRUE`, the accurate/AGQ
-    /// opt-in). No-op for OLS/LMM and unclustered GLM.
+    /// `Hessian` (the default) is the per-fit Hessian SE (lme4
+    /// `use.hessian = TRUE`); `Rx` is the faster Schur SE. No-op for OLS/LMM and
+    /// unclustered GLM.
     #[serde(default)]
     pub wald_se: engine_contract::WaldSe,
     /// Reference distribution for mixed-model fixed-effect Wald tests. No-op

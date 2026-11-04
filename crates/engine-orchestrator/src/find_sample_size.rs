@@ -16,7 +16,7 @@ use crate::result::{
     OrchestratorError, PowerResult, SampleSizeMethod, SampleSizeResult, Scenario, ScenarioResult,
 };
 use crate::scenario_loop::for_each_scenario;
-use engine_contract::{ClusterSizing, ClusterSpec, SimulationContract};
+use engine_contract::{ClusterSizing, ClusterSpec, GroupingRelation, SimulationContract};
 use engine_core::ProgressSink as EngineProgressSink;
 
 /// The one primary `ClusterSpec` shared by every clustered contract in the
@@ -49,8 +49,24 @@ pub(crate) fn shared_primary_cluster(
 /// plus one for each random slope on it. A cluster of `1 + slopes` rows has as
 /// many random effects as observations, so the residual cannot be told from
 /// them (lme4's `check.nobs.vs.nRE`). Binary and count models share the floor.
+///
+/// A nested child takes the same floor, plus one row per slope on the nested
+/// grouping. Every primary cluster holds `n_per_parent` children in equal
+/// shares, so the primary floor rises to `n_per_parent` times the child floor.
+/// Without it, one row per child gives as many child levels as rows, which
+/// lme4 refuses. Mirrored by `minRowsInCluster` in the app's
+/// app-spec-adapter.ts — change together.
 pub(crate) fn min_rows_in_cluster(cluster: &ClusterSpec) -> usize {
-    crate::config().limits.min_rows_per_cluster as usize + cluster.slopes.len()
+    let floor = crate::config().limits.min_rows_per_cluster as usize;
+    cluster
+        .extra_groupings
+        .iter()
+        .fold(floor + cluster.slopes.len(), |min, g| match g.relation {
+            GroupingRelation::NestedWithin { n_per_parent } => {
+                min.max(n_per_parent.max(1) as usize * (floor + g.slopes.len()))
+            }
+            GroupingRelation::Crossed { .. } => min,
+        })
 }
 
 /// Resolve the shared cluster atom + grid floor + pre-grid warnings for a set
@@ -347,6 +363,39 @@ mod tests {
         assert!(matches!(
             resolve_cluster_grid_params(std::slice::from_ref(&sized)),
             Err(OrchestratorError::ClusterSizeTooSmall { got: 2, min: 3 })
+        ));
+    }
+
+    #[test]
+    fn grid_floor_counts_rows_per_nested_child() {
+        // (1|a/b), 20 parents × 3 children: 2 rows per child ⇒ 6 per parent.
+        let mut c = clustered(ClusterSizing::FixedClusters { n_clusters: 20 }, 0.25);
+        c.generation.cluster.as_mut().unwrap().extra_groupings = vec![GroupingSpec {
+            relation: GroupingRelation::NestedWithin { n_per_parent: 3 },
+            tau_squared: 0.1,
+            slopes: vec![],
+        }];
+        let (atom, hard_min, _) = resolve_cluster_grid_params(std::slice::from_ref(&c)).unwrap();
+        assert_eq!((atom, hard_min), (60, 120));
+
+        // A slope on the nested grouping adds one row per child.
+        let mut sloped = c.clone();
+        sloped.generation.cluster.as_mut().unwrap().extra_groupings[0].slopes = vec![SlopeTerm {
+            column: ColumnId(0),
+            variance: 0.1,
+            corr_with_intercept: 0.0,
+            corr_with: vec![],
+        }];
+        let (_, hard_min, _) = resolve_cluster_grid_params(std::slice::from_ref(&sloped)).unwrap();
+        assert_eq!(hard_min, 180);
+
+        // FixedSize: 3 rows per parent is one row per child.
+        let mut sized = c.clone();
+        sized.generation.cluster.as_mut().unwrap().sizing =
+            ClusterSizing::FixedSize { cluster_size: 3 };
+        assert!(matches!(
+            resolve_cluster_grid_params(std::slice::from_ref(&sized)),
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 3, min: 6 })
         ));
     }
 }

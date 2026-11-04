@@ -731,7 +731,7 @@ scen_hs <- list(
 )
 
 # Co (exact law, clamp negligible): per-block r mean ≈ ρ, SD ≈
-# sqrt(s²/2 + (1-ρ²)²/n). ρ = 0.3, s = 0.15 → the ±0.8 clamp sits 4.7σ out.
+# sqrt(s² + (1-ρ²)²/n). ρ = 0.3, s = 0.15 → the ±0.8 clamp sits 3.3σ out.
 scen_co_low <- list(
   label = "scen_co_low", knob = "correlation_noise_sd",
   formula = "y ~ x1 + x2", family = "ols",
@@ -741,8 +741,8 @@ scen_co_low <- list(
   n = 4000L, K = 400L, seed = 33000
 )
 
-# Co (clamp truncation): ρ = 0.75 puts the +0.8 clamp 0.47σ from the mean —
-# the censored-normal law (clamp_normal_moments) is ~9σ from the naive ρ at
+# Co (clamp truncation): ρ = 0.75 puts the +0.8 clamp 0.33σ from the mean —
+# the censored-normal law (clamp_normal_moments) is ~10σ from the naive ρ at
 # this K, so the gate discriminates truncation-law vs no-truncation.
 scen_co_high <- list(
   label = "scen_co_high", knob = "correlation_noise_sd",

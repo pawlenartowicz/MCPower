@@ -648,5 +648,21 @@ mod tests {
             snap_single_n(std::slice::from_ref(&sloped), 60).unwrap().0,
             60
         );
+
+        // (1|a/b), 20 parents × 3 children: N = 60 is one row per child.
+        let mut nested = count.clone();
+        nested.generation.cluster.as_mut().unwrap().extra_groupings = vec![GroupingSpec {
+            relation: GroupingRelation::NestedWithin { n_per_parent: 3 },
+            tau_squared: 0.1,
+            slopes: vec![],
+        }];
+        assert!(matches!(
+            snap_single_n(std::slice::from_ref(&nested), 60),
+            Err(OrchestratorError::ClusterSizeTooSmall { got: 3, min: 6 })
+        ));
+        assert_eq!(
+            snap_single_n(std::slice::from_ref(&nested), 120).unwrap().0,
+            120
+        );
     }
 }

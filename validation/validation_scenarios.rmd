@@ -99,7 +99,7 @@ run_hs <- function(case) {
        bin_ratio  = mean(res[2, ], na.rm = TRUE), lam = lam)
 }
 
-# Co (p = 2): per-block r mean = censored-normal law, SD = sqrt(s²/2 + sampling).
+# Co (p = 2): per-block r mean = censored-normal law, SD = sqrt(s² + sampling).
 run_co2 <- function(case) {
   m   <- scenario_model(case)
   s   <- case$scenario_configs[[case$scenario]]$correlation_noise_sd
@@ -108,11 +108,11 @@ run_co2 <- function(case) {
     d <- scen_draw(m, case$scenario, case$seed + k)
     stats::cor(d$design[, 2], d$design[, 3])
   }, numeric(1))
-  cm     <- clamp_normal_moments(rho, s / sqrt(2))
+  cm     <- clamp_normal_moments(rho, s)
   sd_law <- sqrt(cm$sd^2 + (1 - cm$mean^2)^2 / case$n)
   list(gates = list(
     `block-r mean = ±0.8-clamp censored law` = zgate(r_k, cm$mean),
-    `block-r SD = √(s²/2 + (1−ρ²)²/n)`       = sdgate(r_k, sd_law)
+    `block-r SD = √(s² + (1−ρ²)²/n)`         = sdgate(r_k, sd_law)
   ), r_k = r_k, cm = cm, rho = rho, s = s)
 }
 
@@ -575,8 +575,8 @@ bins make its law approximate; the slope is the gate).
 
 ## Correlation noise
 
-Per block the off-diagonals get symmetrised Gaussian noise — symmetrisation
-halves the variance, so the per-block ρ law is N(ρ, s²/2) **censored at ±0.8**,
+Per block the off-diagonals get symmetrised Gaussian noise with SD s, so the
+per-block ρ law is N(ρ, s²) **censored at ±0.8**,
 plus finite-n sampling noise in quadrature. The low-ρ case gates the exact law;
 the high-ρ case sits against the clamp, gating the censored-normal truncation
 law itself (mean visibly below the naive ρ).

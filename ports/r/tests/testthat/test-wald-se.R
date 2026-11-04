@@ -2,11 +2,10 @@ library(mcpower)
 
 # wald_se = "hessian" | "rx" per-call arg surface test.
 # Mirrors ports/py/tests/test_wald_se.py.
-# Only affects the GLMM estimator; rx (the 1.1.0 fastmode default) is the Schur
-# speed knob; hessian is the advanced opt-in per-fit FD-Hessian SE (lme4
-# use.hessian = TRUE), at least as conservative.
+# Only affects the GLMM estimator; hessian (the default) is the per-fit Hessian
+# SE (lme4 use.hessian = TRUE), at least as conservative as rx, the faster Schur SE.
 
-test_that("wald_se default is rx; hessian accepted and more conservative", {
+test_that("wald_se default is hessian; rx accepted and hessian more conservative", {
   m <- MCPower$new("y ~ x1 + (1|grp)", family = "logit")$
     set_effects("x1=0.5")$
     set_baseline_probability(0.3)$
@@ -19,8 +18,8 @@ test_that("wald_se default is rx; hessian accepted and more conservative", {
     prx <- m$find_power(sample_size = 200L, n_sims = 400L, wald_se = "rx",
                         seed = 2137L, progress_callback = FALSE, verbose = FALSE)
   })
-  # Default is rx: same seed/data => identical power.
-  expect_equal(pd$power_uncorrected[[1]], prx$power_uncorrected[[1]])
+  # Default is hessian: same seed/data => identical power.
+  expect_equal(pd$power_uncorrected[[1]], ph$power_uncorrected[[1]])
   # Hessian is at least as conservative as rx (equal or lower power);
   # allow 0.05 tolerance for Monte Carlo noise at n_sims=400.
   expect_true(ph$power_uncorrected[[1]] <= prx$power_uncorrected[[1]] + 0.05)

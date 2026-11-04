@@ -1160,7 +1160,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine-app-spec"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "engine-contract"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "glmm",
@@ -1187,7 +1187,7 @@ dependencies = [
 
 [[package]]
 name = "engine-core"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "approx",
  "commonstats",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "engine-orchestrator"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "approx",
  "engine-contract",
@@ -1224,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "engine-py"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1238,7 +1238,7 @@ dependencies = [
 
 [[package]]
 name = "engine-r"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1252,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "engine-spec-builder"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-contract",
  "engine-core",
@@ -1265,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "engine-wasm"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-app-spec",
  "engine-core",
@@ -2787,7 +2787,7 @@ dependencies = [
 
 [[package]]
 name = "mcpower-app"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "engine-app-spec",
  "engine-orchestrator",

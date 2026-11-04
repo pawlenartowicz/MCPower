@@ -53,6 +53,8 @@ suppressPackageStartupMessages({
 })
 
 K        <- as.integer(Sys.getenv("DFCAL_K", "10000"))
+# Logit cells use the Hessian SE, glmer's summary() test, whatever the package default.
+GLMM_WALD_SE <- "hessian"
 K_N      <- as.integer(Sys.getenv("DFCAL_K_N", as.character(K)))
 CORES    <- as.integer(Sys.getenv("DFCAL_CORES", "1"))
 FAMILIES <- trimws(strsplit(Sys.getenv("DFCAL_FAMILIES", "lme,logit"), ",")[[1]])
@@ -447,6 +449,7 @@ pluck <- function(targets, field) vapply(targets, function(t) t[[field]], numeri
 # succeeded on LMM cells) — that keeps the arms on identical draws.
 score_range <- function(cell, effect, n, base_seed, k_from, k_to) {
   m <- build_cell_model(cell, effect, n)
+  ws <- if (cell$family == "logit") GLMM_WALD_SE else NULL
   rej_z <- rej_bw <- rej_sat <- c(0L, 0L)
   rej_sat_joint <- 0L
   sat_ddf <- c(0, 0)
@@ -461,8 +464,8 @@ score_range <- function(cell, effect, n, base_seed, k_from, k_to) {
   for (k in seq.int(k_from, k_to)) {
     m$.debug_seed <- as.numeric(base_seed + k)
     d  <- tryCatch(m$create_data(), error = function(e) NULL)
-    fz <- if (is.null(d)) NULL else tryCatch(m$load_data(d, df_method = "asymptotic"), error = function(e) NULL)
-    fb <- if (is.null(d)) NULL else tryCatch(m$load_data(d, df_method = "between_within"), error = function(e) NULL)
+    fz <- if (is.null(d)) NULL else tryCatch(m$load_data(d, wald_se = ws, df_method = "asymptotic"), error = function(e) NULL)
+    fb <- if (is.null(d)) NULL else tryCatch(m$load_data(d, wald_se = ws, df_method = "between_within"), error = function(e) NULL)
     if (is.null(fz) || is.null(fb) || !isTRUE(fz$converged) || !isTRUE(fb$converged)) {
       skipped <- skipped + 1L; next
     }
@@ -547,7 +550,7 @@ t_start <- Sys.time()
 PARTIAL <- file.path("data", "df_calibration.partial.rds")
 guard <- list(K = K, K_N = K_N, cluster_size = CLUSTER_SIZE, size_grid = SIZE_GRID,
               alpha = ALPHA, target_power = TARGET_POWER, alt_effect = ALT_EFFECT,
-              baseline_p = BASELINE_P, base_seed = BASE_SEED,
+              baseline_p = BASELINE_P, base_seed = BASE_SEED, glmm_wald_se = GLMM_WALD_SE,
               mcpower = as.character(utils::packageVersion("mcpower")),
               reference_from = REFERENCE_FROM)
 done <- if (file.exists(PARTIAL)) readRDS(PARTIAL) else list(guard = guard, cells = list())

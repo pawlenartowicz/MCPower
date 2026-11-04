@@ -75,7 +75,7 @@ fn mixed_appspec_round_trips_through_json() {
         "seed": 2137,
         "tests": { "kind": "all" },
         "correction": "none",
-        "wald_se": "hessian",
+        "wald_se": "rx",
         "df_method": "asymptotic",
         "scenarios": [],
         "csv": null,

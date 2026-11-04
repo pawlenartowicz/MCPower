@@ -754,12 +754,13 @@ lme_crossed_best <- function(case, n, n_sims, seed) loop_best_pool(lme_crossed_b
 
 # ---------------------------------------------------------------------------
 # GLMM kernels (clustered logistic) -- glmer Laplace, Wald statistic against
-# the between-within t (mixed_df()), RX-based SEs (MCPower's wald_se = "rx"). Mirrors
+# the between-within t (mixed_df()), Hessian SEs (MCPower's wald_se = "hessian"). Mirrors
 # lme_best_chunk's clustered DGP but with a binary outcome (like glm_best) and a
 # glmer fit. The random intercept lives on the LATENT logit scale, where the
 # residual variance is pi^2/3 (not 1), so TAU = sqrt(ICC/(1-ICC) * pi^2/3) --
-# matching mcpower's latent-scale logit-ICC convention. The naive tier keeps
-# glmer's default fit (Hessian computed) but reads the RX-based vcov.
+# matching mcpower's latent-scale logit-ICC convention. Both tiers read vcov(fit)
+# as summary() does: the Hessian covariance, or the RX one when the Hessian is
+# not positive definite, as MCPower falls back.
 # No Python counterpart (statsmodels lacks a frequentist Laplace GLMM); the
 # Python harness skips the loop tier for this family.
 # ---------------------------------------------------------------------------
@@ -814,8 +815,7 @@ glmm_best_chunk <- function(case, n, n_sims, seed) {
 
     fit <- tryCatch(
       withCallingHandlers(
-        lme4::glmer(fml, data = df_fit, family = binomial(),
-                    control = lme4::glmerControl(calc.derivs = FALSE)),
+        lme4::glmer(fml, data = df_fit, family = binomial()),
         warning = function(w) invokeRestart("muffleWarning")
       ),
       error = function(e) NULL
@@ -824,7 +824,7 @@ glmm_best_chunk <- function(case, n, n_sims, seed) {
     converged <- converged + 1L
 
     coef_fix <- as.numeric(lme4::fixef(fit))   # [intercept, V1..VP]
-    V_cov    <- as.matrix(stats::vcov(fit))
+    V_cov    <- as.matrix(suppressWarnings(stats::vcov(fit)))   # warns on the RX fallback
     se       <- sqrt(diag(V_cov))
     wstat    <- coef_fix[-1L] / se[-1L]
     one      <- single_level_fit(fit)
@@ -897,9 +897,9 @@ glmm_naive <- function(case, n, n_sims, seed) {
     if (is.null(fit)) next
     converged <- converged + 1L
 
-    # vcov warns when the Hessian and RX covariances differ; RX is the choice here.
+    # vcov warns when it falls back to the RX covariance.
     se <- tryCatch(suppressWarnings(
-            sqrt(diag(as.matrix(stats::vcov(fit, use.hessian = FALSE))))),
+            sqrt(diag(as.matrix(stats::vcov(fit))))),
           error = function(e) NULL)
     if (is.null(se)) next
     wstat <- as.numeric(lme4::fixef(fit))[-1L] / se[-1L]   # drop intercept

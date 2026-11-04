@@ -61,9 +61,12 @@ pub fn scenario_rng(base_seed: u64, sim_id: u64) -> SimRng {
 /// before read, so stale contents are fine).
 ///
 /// Fast path: when `scenario.correlation_noise_sd == 0.0`, copies `base` into
-/// `out`. Otherwise: adds symmetric Gaussian noise, clips to ±0.8, enforces
+/// `out`. Otherwise: adds symmetric Gaussian noise with SD
+/// `correlation_noise_sd` to every off-diagonal entry, clips to ±0.8, enforces
 /// unit diagonal. PSD repair is **not** performed here — the caller invokes
-/// `correlation::psd_repair_and_factor` on `out` immediately after.
+/// `correlation::psd_repair_and_factor` on `out` immediately after. Mirrored by
+/// `perturb_correlation` in `validation/agreement/example_knobs.R` — change
+/// together.
 pub fn perturb_correlation(
     scenario: &ScenarioPerturbations,
     base: MatRef<'_, f64>,
@@ -90,7 +93,9 @@ pub fn perturb_correlation(
         return;
     }
 
-    let sd = scenario.correlation_noise_sd;
+    // Each off-diagonal is the mean (Mᵢⱼ + Mⱼᵢ)/2 of two iid draws, whose SD
+    // is the draw SD / √2; drawing at s·√2 gives noise SD s.
+    let sd = scenario.correlation_noise_sd * std::f64::consts::SQRT_2;
     // Draw n×n iid normals into out as scratch.
     for j in 0..n {
         for i in 0..n {
@@ -281,6 +286,37 @@ mod tests {
         // The noise is live: in-range entries move off the base.
         assert_ne!(out[(0, 2)], base[(0, 2)], "noise must perturb (0,2)");
         assert_ne!(out[(1, 2)], base[(1, 2)], "noise must perturb (1,2)");
+    }
+
+    #[test]
+    fn perturb_correlation_noise_has_the_set_sd() {
+        // ρ = 0 with s = 0.15 puts the ±0.8 clip 5.3σ out, so the realised SD
+        // is s. 20,000 draws give SE(SD) ≈ s/√(2·20000) ≈ 0.00075; the ±0.005
+        // band is ~6.7 SE wide, and the s/√2 ≈ 0.106 slip sits ~59 SE out.
+        let s = 0.15;
+        let scenario = ScenarioPerturbations {
+            name: "realistic".into(),
+            correlation_noise_sd: s,
+            ..Default::default()
+        };
+        let base = mat_from_rows(2, &[&[1.0, 0.0], &[0.0, 1.0]]);
+        let mut rng = scenario_rng(7, 0);
+        let mut out = Mat::<f64>::zeros(2, 2);
+        let mut noise_buf = vec![0.0; 4];
+        let k = 20_000;
+        let mut sum_sq = 0.0;
+        for _ in 0..k {
+            perturb_correlation(
+                &scenario,
+                base.as_ref(),
+                &mut rng,
+                out.as_mut(),
+                &mut noise_buf,
+            );
+            sum_sq += out[(0, 1)] * out[(0, 1)];
+        }
+        let sd = (sum_sq / k as f64).sqrt(); // mean is 0 by construction
+        assert!((sd - s).abs() < 0.005, "realised SD {sd}, set {s}");
     }
 
     #[test]

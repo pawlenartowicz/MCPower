@@ -567,17 +567,12 @@ Draws where `glmer` reports convergence warnings or a singular fit are skipped
 (same policy as M3: two optimizers on the same bytes need not share the optimum
 at a boundary).
 
-> **B↔C is a documented XFAIL, not a hard gate.** MCPower-GLMM diverges from `glmer`'s
-> *default* summary on two known, deferred axes (full rationale in the workspace doc
-> `docs/ideas-features/mixed-model-significance-reference.md`):
-> **(z)** on this GLMM path MCPower's Wald SE is the RX/PLS Schur (`= glmer vcov(use.hessian = FALSE)`),
-> ~3% anticonservative vs glmer's default `use.hessian = TRUE` (GLMM-only; the linear LMM path above
-> uses the standard GLS `(XᵀV̂⁻¹X)⁻¹`, lme4-equivalent, with no Schur/Hessian fork) — a deliberate, documented,
-> deferred choice (that doc's §"Second axis"), *not* a regression; **(β̂/τ̂²/ρ̂)** MCPower-BOBYQA
+> **B↔C is a documented XFAIL, not a hard gate.** Both sides use the per-fit Hessian
+> Wald SE (MCPower's default `wald_se`, glmer's `use.hessian = TRUE`), but MCPower-BOBYQA
 > vs glmer-Laplace agree on the same bytes only to ~2–3× the LMM-inherited `GLMM_TOL` bands,
-> plus glmer's few-cluster convergence noise. The cell logs the measured gaps and renders
-> green, tripping only a generous gross-regression backstop; the engine's own
-> brute-force-Laplace unit tests are the fine fit-regression guard.
+> plus glmer's few-cluster convergence noise, and z = β̂/SE carries that gap. The cell logs
+> the measured gaps and renders green, tripping only a generous gross-regression backstop;
+> the engine's own brute-force-Laplace unit tests are the fine fit-regression guard.
 
 A↔B: `glmer` recovers the spec's β and variance components from MCPower's draws
 over K draws (the spec is the oracle; Monte-Carlo bands).
@@ -691,14 +686,10 @@ glmer_unreliable <- function(rf) {
 
 ```{r m4-bc, results="asis"}
 # 8.3 B↔C: MCPower-GLMM vs glmer(family=binomial), same bytes, 25 draws.
-# DOCUMENTED XFAIL — not a hard gate. MCPower diverges from glmer's *default* summary on two
-# known, deferred axes (workspace doc docs/ideas-features/mixed-model-significance-reference.md):
-#   (z)       Wald SE convention — MCPower = RX/PLS Schur (= glmer vcov(use.hessian=FALSE)),
-#             ~3% anticonservative vs glmer's default use.hessian=TRUE (§"Second axis": a kept,
-#             documented, deferred choice — NOT a regression).
-#   (beta/tau2/rho) optimizer agreement — MCPower-BOBYQA vs glmer-Laplace on the SAME bytes agree
-#             only to ~2-3x the LMM-inherited GLMM_TOL bands, plus glmer few-cluster convergence
-#             noise. A separate, un-recalibrated band gap (GLMM_TOL left untouched).
+# DOCUMENTED XFAIL — not a hard gate. Both sides use the per-fit Hessian Wald SE (MCPower's
+# default wald_se = glmer's use.hessian = TRUE). MCPower-BOBYQA vs glmer-Laplace on the SAME
+# bytes agree only to ~2-3x the LMM-inherited GLMM_TOL bands, plus glmer few-cluster
+# convergence noise, and z = beta/SE carries that gap (GLMM_TOL left untouched).
 # The cell logs the measured gaps and renders green; it trips ONLY a generous gross-regression
 # backstop (an O(1) divergence => the comparison itself is broken). The engine's brute-force-
 # Laplace unit tests are the fine fit-regression guard — this L3 cell is now informational.
@@ -767,14 +758,14 @@ for (case in M4_GLMM_CASES[names(M4_GLMM_CASES) != "glmm_laplace_bias"]) {
   z_fails   <- grep(" z\\[", fails, value = TRUE)
   est_fails <- setdiff(fails, z_fails)
   status <- if (length(fails) == 0) "PASS (within bands)"
-            else sprintf(paste0("XFAIL — %d z (SE convention, %.1f%% max) + ",
+            else sprintf(paste0("XFAIL — %d z (%.1f%% max) + ",
                                 "%d β̂/τ̂²/ρ̂ (optimizer band: β̂ %.1e, τ̂² %.1e, ρ̂ %.1e)"),
                          length(z_fails), 100 * unname(worst["z_rel"]), length(est_fails),
                          unname(worst["beta_abs"]), unname(worst["vc_abs"]), unname(worst["corr_abs"]))
   cat(sprintf("**%s**: %s (%d/%d glmer-clean draws)\n\n", case$label, status, n_cmp, K_BC))
   # Gross-regression backstop ONLY (NOT an acceptance gate; GLMM_TOL untouched): trip on an
   # O(1) divergence meaning the comparison is broken, while tolerating the documented
-  # anticonservative-SE (z) and optimizer-band (β̂/τ̂²/ρ̂) gaps.
+  # optimizer-band gaps in β̂/τ̂²/ρ̂ and the z they carry.
   stopifnot(n_cmp >= 5L,
             worst["z_abs"]    < XFAIL_BACKSTOP$z_abs,
             worst["beta_abs"] < XFAIL_BACKSTOP$beta_abs,

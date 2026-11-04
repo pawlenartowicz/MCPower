@@ -138,9 +138,16 @@ def time_call(fn, *, warmup, reps):
     return statistics.median(times), result
 
 
+def _glmm_wald_se(case):
+    # GLMM cases use the Hessian SE, glmer's summary() test, whatever the package
+    # default; None keeps the default for the other families. Mirrors harness.R.
+    return "hessian" if case.family == "glmm" else None
+
+
 def run_mcpower_find_power(case, n, n_sims, seed):
     m = build_model(case)
     res = m.find_power(sample_size=n, n_sims=n_sims, seed=seed,
+                       wald_se=_glmm_wald_se(case),
                        progress_callback=False, verbose=False)
     return [float(x) for x in res["power_uncorrected"][0]]
 
@@ -151,6 +158,7 @@ def run_mcpower_find_sample_size(case, n_sims, seed):
     res = m.find_sample_size(target_power=case.target_power, from_size=g[0],
                              to_size=g[-1], by=g[1] - g[0], mode="linear",
                              n_sims=n_sims, seed=seed,
+                             wald_se=_glmm_wald_se(case),
                              progress_callback=False, verbose=False)
     n_pts = int(res.get("n_sample_sizes", 0))
     fa = {str(k): (None if v is None else int(v))

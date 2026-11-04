@@ -193,9 +193,9 @@ R formula `y ~ x1 + g + (1|grp)` · linear mixed model (random intercept)
 
 | item | value |
 |:---|:---|
-| generated | 2026-10-31 |
+| generated | 2026-11-04 |
 | R | R version 4.5.3 (2026-03-11) |
-| mcpower | 1.5.0 |
+| mcpower | 1.5.1 |
 | MLE solving bands (beta/stat rel · crit abs) | 0.0001 rel / 0.0001 rel / 1e-08 abs |
 
 ## M2 — crossed & nested groupings (general lmm path)
@@ -296,20 +296,13 @@ Wald z (β̂/se) on both sides. Draws where `glmer` reports convergence
 warnings or a singular fit are skipped (same policy as M3: two
 optimizers on the same bytes need not share the optimum at a boundary).
 
-> **B↔C is a documented XFAIL, not a hard gate.** MCPower-GLMM diverges
-> from `glmer`’s *default* summary on two known, deferred axes (full
-> rationale in the workspace doc
-> `docs/ideas-features/mixed-model-significance-reference.md`): **(z)**
-> on this GLMM path MCPower’s Wald SE is the RX/PLS Schur
-> (`= glmer vcov(use.hessian = FALSE)`), ~3% anticonservative vs glmer’s
-> default `use.hessian = TRUE` (GLMM-only; the linear LMM path above
-> uses the standard GLS `(XᵀV̂⁻¹X)⁻¹`, lme4-equivalent, with no
-> Schur/Hessian fork) — a deliberate, documented, deferred choice (that
-> doc’s §“Second axis”), *not* a regression; **(β̂/τ̂²/ρ̂)** MCPower-BOBYQA
-> vs glmer-Laplace agree on the same bytes only to ~2–3× the
-> LMM-inherited `GLMM_TOL` bands, plus glmer’s few-cluster convergence
-> noise. The cell logs the measured gaps and renders green, tripping
-> only a generous gross-regression backstop; the engine’s own
+> **B↔C is a documented XFAIL, not a hard gate.** Both sides use the
+> per-fit Hessian Wald SE (MCPower’s default `wald_se`, glmer’s
+> `use.hessian = TRUE`), but MCPower-BOBYQA vs glmer-Laplace agree on
+> the same bytes only to ~2–3× the LMM-inherited `GLMM_TOL` bands, plus
+> glmer’s few-cluster convergence noise, and z = β̂/SE carries that gap.
+> The cell logs the measured gaps and renders green, tripping only a
+> generous gross-regression backstop; the engine’s own
 > brute-force-Laplace unit tests are the fine fit-regression guard.
 
 A↔B: `glmer` recovers the spec’s β and variance components from
@@ -328,29 +321,25 @@ Section 8.5 is the Laplace-bias cell: MCPower-GLMM (Laplace) vs
 `glmer(nAGQ = 7)`; the gap must stay within
 `GLMM_TOL$laplace_bias_beta_abs`.
 
-**glmm_intercept**: XFAIL — 60 z (SE convention, 2.6% max) + 13 β̂/τ̂²/ρ̂
-(optimizer band: β̂ 1.6e-03, τ̂² 2.8e-03, ρ̂ 0.0e+00) (60/60 glmer-clean
+**glmm_intercept**: XFAIL — 60 z (1.2% max) + 13 β̂/τ̂²/ρ̂ (optimizer band:
+β̂ 1.6e-03, τ̂² 2.8e-03, ρ̂ 0.0e+00) (60/60 glmer-clean draws)
+
+**glmm_slope**: XFAIL — 40 z (2.2% max) + 91 β̂/τ̂²/ρ̂ (optimizer band: β̂
+2.9e-03, τ̂² 4.0e-03, ρ̂ 5.1e-03) (40/60 glmer-clean draws)
+
+**glmm_multislope**: XFAIL — 30 z (1.6% max) + 62 β̂/τ̂²/ρ̂ (optimizer
+band: β̂ 2.6e-03, τ̂² 2.9e-03, ρ̂ 6.1e-03) (15/60 glmer-clean draws)
+
+**glmm_slope_crossed**: XFAIL — 36 z (3.3% max) + 133 β̂/τ̂²/ρ̂ (optimizer
+band: β̂ 5.0e-03, τ̂² 1.0e-02, ρ̂ 9.1e-03) (38/60 glmer-clean draws)
+
+**glmm_slope_crossed_extra_slopes**: XFAIL — 9 z (1.7% max) + 33 β̂/τ̂²/ρ̂
+(optimizer band: β̂ 2.8e-03, τ̂² 4.1e-03, ρ̂ 3.2e-03) (9/60 glmer-clean
 draws)
 
-**glmm_slope**: XFAIL — 40 z (SE convention, 8.6% max) + 91 β̂/τ̂²/ρ̂
-(optimizer band: β̂ 2.9e-03, τ̂² 4.0e-03, ρ̂ 5.1e-03) (40/60 glmer-clean
+**glmm_slope_nested_extra_slopes**: XFAIL — 14 z (1.4% max) + 33 β̂/τ̂²/ρ̂
+(optimizer band: β̂ 1.3e-03, τ̂² 4.3e-03, ρ̂ 1.7e-03) (14/60 glmer-clean
 draws)
-
-**glmm_multislope**: XFAIL — 30 z (SE convention, 7.8% max) + 62 β̂/τ̂²/ρ̂
-(optimizer band: β̂ 2.6e-03, τ̂² 2.9e-03, ρ̂ 6.1e-03) (15/60 glmer-clean
-draws)
-
-**glmm_slope_crossed**: XFAIL — 38 z (SE convention, 11.5% max) + 133
-β̂/τ̂²/ρ̂ (optimizer band: β̂ 5.0e-03, τ̂² 1.0e-02, ρ̂ 9.1e-03) (38/60
-glmer-clean draws)
-
-**glmm_slope_crossed_extra_slopes**: XFAIL — 9 z (SE convention, 8.4%
-max) + 33 β̂/τ̂²/ρ̂ (optimizer band: β̂ 2.8e-03, τ̂² 4.1e-03, ρ̂ 3.2e-03)
-(9/60 glmer-clean draws)
-
-**glmm_slope_nested_extra_slopes**: XFAIL — 14 z (SE convention, 4.6%
-max) + 33 β̂/τ̂²/ρ̂ (optimizer band: β̂ 1.3e-03, τ̂² 4.3e-03, ρ̂ 1.7e-03)
-(14/60 glmer-clean draws)
 
 ## 8.3b Wald-SE convention (Oracle-1)
 

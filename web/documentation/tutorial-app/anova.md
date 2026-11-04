@@ -18,6 +18,8 @@ Click **Add factor** to create a factor card; factors are auto-named F1, F2, …
 
 Inside the card, effect rows list each comparison in order: the reference level appears first as disabled text, then one labelled effect row per non-reference level (`[2]`, `[3]`, …). Set the standardised effect size on each row — **0.20 / 0.50 / 0.80** (small / medium / large); prefer a value from prior evidence. See [[concepts/effect-sizes|effect sizes]] and [[concepts/variable-types|variable types]].
 
+Effects are in units of the residual SD. In a one-way design that is the within-group SD, so a published Cohen's *d* can be entered as it is. With more factors the residual SD is smaller, so a published *d* understates the effect; the error is usually small and conservative, and all power tools share it. See [[concepts/effect-sizes#Effects from published studies|effects from published studies]].
+
 ### Factor Advanced dialog
 
 Click ⚙ on a factor card to open its Advanced dialog. Here you can:

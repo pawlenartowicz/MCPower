@@ -809,11 +809,13 @@ class MCPower:
 
         Accepts ``"hessian"`` and ``"rx"`` only.
         """
-        key = (wald_se or "rx").lower().replace("-", "_").replace(" ", "_")
+        from .config import get_estimation_defaults
+
+        key = (wald_se or get_estimation_defaults()["wald_se"]).lower().replace("-", "_").replace(" ", "_")
         if key not in {"hessian", "rx"}:
             raise ValueError(
                 f"wald_se={wald_se!r} is not recognised. "
-                "Valid values: 'rx' (default, fastmode) or 'hessian'."
+                "Valid values: 'hessian' (default) or 'rx'."
             )
 
     def _validate_df_method_arg(self, df_method: str) -> None:
@@ -2071,9 +2073,9 @@ class MCPower:
         target the corrected joint view is not applicable as a whole:
         ``success_count_histogram_corrected`` is ``None``. ``wald_se`` selects
         the standard-error flavour for the clustered-binary/count GLMM
-        estimator: ``"rx"`` (default, the Schur speed knob, lme4
-        ``use.hessian = FALSE``) or ``"hessian"`` (per-fit FD-Hessian SE,
-        lme4 ``use.hessian = TRUE`` — slower, the rigor opt-in). ``agq`` sets
+        estimator: ``"hessian"`` (default, the per-fit Hessian SE, lme4
+        ``use.hessian = TRUE``, as glmer's summary reports) or ``"rx"``
+        (the faster Schur SE, lme4 ``use.hessian = FALSE``). ``agq`` sets
         the adaptive Gauss-Hermite quadrature node count for a clustered
         binary/count GLMM fit; ``None``/``1`` uses Laplace (the default).
         An odd value in ``3..=25`` opts into AGQ, but only when the design is

@@ -28,7 +28,7 @@ def _glmm():
     )
 
 
-def test_wald_se_default_is_rx_and_hessian_reaches_engine():
+def test_wald_se_default_is_hessian_and_rx_reaches_engine():
     m = _glmm()
     # "hessian" lands on the contract unchanged.
     payload = m._to_linear_spec_dict(["optimistic"], wald_se="hessian")
@@ -38,16 +38,15 @@ def test_wald_se_default_is_rx_and_hessian_reaches_engine():
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
-        # Default (no kwarg) must equal explicit "rx" — the 1.1.0 fastmode default.
         r_default = m.find_power(200, n_sims=400, seed=2137, verbose=False)
         r_h = m.find_power(200, n_sims=400, wald_se="hessian", seed=2137, verbose=False)
         r_rx = m.find_power(200, n_sims=400, wald_se="rx", seed=2137, verbose=False)
     p_default = r_default["power_uncorrected"][0][0]
     p_h = r_h["power_uncorrected"][0][0]
     p_rx = r_rx["power_uncorrected"][0][0]
-    # Default is rx: same seed/data ⇒ identical power.
-    assert p_default == p_rx
-    # find_power forwards the kwarg: the hessian SE changes the seeded result.
+    # Default is hessian: same seed/data ⇒ identical power.
+    assert p_default == p_h
+    # find_power forwards the kwarg: the rx SE changes the seeded result.
     assert p_h != p_rx
 
 

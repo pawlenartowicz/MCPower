@@ -211,13 +211,13 @@ describe('generateScript (mixed)', () => {
     expect(out).not.toContain('ICC=');
   });
 
-  it('emits wald_se only for the opt-in (hessian), never the default rx', () => {
+  it('emits wald_se only for the opt-in (rx), never the default hessian', () => {
     const base = mixedSpec({ kind: 'n_clusters', value: 20 });
     const binary = { kind: 'binary' as const, baseline_probability: 0.3 };
-    const rx = generateMixedScript({ ...base, outcome: binary, wald_se: 'rx' } as AppSpec, 'find-power', { sample_size: 100 });
-    expect(rx).not.toContain('wald_se');
     const hess = generateMixedScript({ ...base, outcome: binary, wald_se: 'hessian' } as AppSpec, 'find-power', { sample_size: 100 });
-    expect(hess).toContain('wald_se="hessian"');
+    expect(hess).not.toContain('wald_se');
+    const rx = generateMixedScript({ ...base, outcome: binary, wald_se: 'rx' } as AppSpec, 'find-power', { sample_size: 100 });
+    expect(rx).toContain('wald_se="rx"');
   });
 
   it('emits df_method only for a named test, never the default auto, in both languages', () => {

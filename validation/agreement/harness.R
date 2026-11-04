@@ -171,9 +171,14 @@ run_loop <- function(case, kind, n, n_sims, seed) {
   p
 }
 
+# GLMM cases use the Hessian SE, glmer's summary() test, whatever the package
+# default; NULL keeps the default for the other families. Mirrors harness.py.
+glmm_wald_se <- function(case) if (identical(case$family, "glmm")) "hessian" else NULL
+
 run_mcpower_find_power <- function(case, n, n_sims, seed) {
   m <- build_model(case)
-  r <- m$find_power(sample_size = n, n_sims = n_sims, seed = seed, progress_callback = FALSE, verbose = FALSE)
+  r <- m$find_power(sample_size = n, n_sims = n_sims, seed = seed, wald_se = glmm_wald_se(case),
+                    progress_callback = FALSE, verbose = FALSE)
   p <- as.numeric(r$power_uncorrected[[1]])
   names(p) <- attr(r, "mcpower_meta")$effect_names[unlist(r$target_indices)]   # engine coefficient order
   p
@@ -183,7 +188,7 @@ run_mcpower_find_sample_size <- function(case, n_sims, seed) {
   m <- build_model(case); g <- case$n_grid
   r <- m$find_sample_size(target_power = case$target_power, from_size = g[1], to_size = g[length(g)],
                           by = g[2] - g[1], mode = "linear", n_sims = n_sims, seed = seed,
-                          progress_callback = FALSE, verbose = FALSE)
+                          wald_se = glmm_wald_se(case), progress_callback = FALSE, verbose = FALSE)
   fa <- r$first_achieved
   fa <- fa[order(as.integer(names(fa)))]                   # names are 0-based target indices
   # Full per-grid-point power curve (diagnostic: must agree with the find_power
@@ -293,7 +298,9 @@ main <- function(args) {
           records[[length(records) + 1]] <- record(case, method, n, n_sims, tc$time, tc$result)
           cat(sprintf("%6d | %10.4f | %12.6f | [%s]\n", n, tc$time, tc$time / n_sims, paste(sprintf("%.3f", tc$result), collapse = ", ")))
         }
-      } else if (method == "tool") {
+      } else if (method %in% c("tool", paste0("tool_", names(TOOLS)))) {
+        # A named tool method (the multicore passes) runs only that tool's cases.
+        if (method != "tool" && !identical(paste0("tool_", case$tool), method)) next
         if (is.null(case$tool)) {
           cat(sprintf("\n=== %s tool: skipped (cliff — no dedicated tool covers this design) ===\n", case$id))
         } else {

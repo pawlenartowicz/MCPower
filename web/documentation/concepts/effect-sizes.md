@@ -4,13 +4,13 @@ description: "Standardized effect sizes (betas) for power analysis: continuous, 
 ---
 # Effect sizes
 
-An **effect size** in MCPower is a **standardized regression coefficient** (a beta): how strongly one predictor moves the outcome, on a scale that is comparable across predictors. You set one per predictor — the effect you expect it to have. It is the single most important input to a power analysis, since everything else (sample size, correlations, scenarios) is calibrated against it.
+An **effect size** in MCPower is a **standardized regression coefficient** (a beta) in units of the residual SD: how strongly one predictor moves the outcome, on a scale that is comparable across predictors. You set one per predictor — the effect you expect it to have. A published Cohen's *d* or standardized beta uses a larger SD, so entering it unchanged understates the effect; the error is usually small and conservative, and all power tools share it. It is the single most important input to a power analysis, since everything else (sample size, correlations, scenarios) is calibrated against it.
 
 Overestimate your effects and you run an underpowered study; underestimate them and you waste resources on a sample larger than you need. The sections below explain how a beta is interpreted, what benchmarks to reach for, and how the interpretation shifts for binary outcomes.
 
 ## Standardized betas
 
-In MCPower an effect size is a **standardized regression coefficient** (a beta). A beta of 0.30 means a one–standard-deviation increase in the predictor is associated with a 0.30 change in the outcome, measured in **residual SDs**: the outcome's spread left over once the predictors are accounted for, which MCPower fixes at 1. When the predictors explain little of the outcome, a residual SD is close to the outcome's total SD, so reading the beta as "0.30 SD of the outcome" is a fair approximation for small effects. Standardizing this way makes effects comparable across predictors measured on different scales.
+In MCPower an effect size is a **standardized regression coefficient** (a beta). A beta of 0.30 means a one–standard-deviation increase in the predictor is associated with a 0.30 change in the outcome, measured in **residual SDs**: the outcome's spread left over once the predictors are accounted for. When the predictors explain little of the outcome, a residual SD is close to the outcome's total SD, so reading the beta as "0.30 SD of the outcome" is a fair approximation for small effects. Standardizing this way makes effects comparable across predictors measured on different scales.
 
 For binary and factor predictors the interpretation shifts slightly:
 
@@ -18,6 +18,21 @@ For binary and factor predictors the interpretation shifts slightly:
 - A **factor** predictor contributes one effect per non-reference level — each is the difference between that level and the reference. See [[concepts/variable-types|variable types]].
 
 Predictors you don't assign an effect to are treated as having no effect (beta = 0).
+
+## Effects from published studies
+
+For a continuous outcome, MCPower follows Cohen's convention for power analysis, which divides an effect by the error SD: a binary effect is a *d*, and a continuous effect uncorrelated with the other predictors is a signed *f*. An effect keeps its value when you add variables to the model.
+
+It is not identical to a published effect. A standardized beta divides by the outcome's total SD, and a *d* by the within-group SD, and both still contain variance the model explains. A published value entered unchanged therefore understates the effect. The error is usually small and conservative: at an $R^2$ of .10 the entered effect is 5% too small and the planned sample 11% too large. All power tools share this, because power depends on the effect relative to the error SD.
+
+To convert a published value:
+
+- **Standardized beta, continuous predictor:** divide by $\sqrt{1 - R^2}$, where $R^2$ is the model's explained variance.
+- **Standardized beta, binary predictor:** do the same, and also divide by the predictor's SD, which is 0.5 for a 50/50 split. A beta is per SD of the predictor and MCPower's effect is per switch between groups, so skipping this step halves the effect.
+- **Cohen's *d*:** with no covariates, enter it as it is. With covariates, divide by $\sqrt{1 - R^2}$, where $R^2$ is the share of the within-group variance they explain: a *d* of 0.5 with a baseline that correlates .5 with the outcome within groups becomes 0.58. This treats covariates as uncorrelated with the group, as in a randomized design.
+- **Mixed model, random intercept alone:** divide an effect standardized by the total SD by $\sqrt{1 - \mathrm{ICC}}$.
+
+Effects estimated from your own data need no conversion: [[concepts/upload-data#Borrowing starting effects|`get_effects_from_data`]] returns them on this scale. For logit and Poisson outcomes these conversions do not apply, because the effect is a log-odds or log-rate coefficient.
 
 ## Continuous vs binary outcomes
 
@@ -27,7 +42,7 @@ These two cases use different effect-size benchmarks — see [Cohen's benchmarks
 
 ## Cohen's benchmarks
 
-With no pilot data or prior literature to go on, the binary/factor row follows Cohen's (1988) conventions and the continuous row is MCPower's own calibration matched to it:
+With no pilot data or prior literature to go on, the binary/factor row uses Cohen's (1988) conventions for *d* and the continuous row his conventions for *f*:
 
 | Predictor type | Small | Medium | Large |
 |---|---|---|---|
@@ -37,7 +52,7 @@ With no pilot data or prior literature to go on, the binary/factor row follows C
 These are rules of thumb for when nothing better exists. They do not replace an effect-size justification from prior studies, theory, or a smallest effect size of interest.
 
 > [!note] Why two different scales?
-> For **binary/factor** predictors MCPower keeps the variable as 0/1, so the beta equals Cohen's *d* directly — the 0.20/0.50/0.80 benchmarks are Cohen's standard conventions. For **continuous** predictors the variable is standardized to $N(0,1)$, so beta is the change in $Y$ per 1-SD change in $X$. The continuous benchmarks are calibrated so that a "medium" continuous effect ($\beta = 0.25$) yields about the same power as a "medium" binary effect ($d = 0.50$) at the same sample size. The labels *small / medium / large* therefore carry consistent practical meaning across predictor types.
+> For **binary/factor** predictors MCPower keeps the variable as 0/1, so the beta equals Cohen's *d* directly — the 0.20/0.50/0.80 benchmarks are Cohen's standard conventions. For **continuous** predictors the variable is standardized to $N(0,1)$, so beta is the change in $Y$ per 1-SD change in $X$. The continuous benchmarks are half the binary ones, because $f = d / 2$ for two equal groups, so a "medium" continuous effect ($\beta = 0.25$) yields about the same power as a "medium" binary effect ($d = 0.50$) at the same sample size. The labels *small / medium / large* therefore carry consistent practical meaning across predictor types.
 
 ### What a beta looks like in the data
 

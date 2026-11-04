@@ -27,8 +27,8 @@ pub struct SimulationContract {
     pub design_test: Option<DesignSpec>,
     pub estimator: EstimatorSpec,
     /// Fixed-effect Wald-SE mode for the clustered-binary/count GLMM (no-op
-    /// elsewhere). Additive; serde default flipped to `Rx` at 1.1.0 (fastmode),
-    /// mirroring `config.json` estimation.wald_se. (design §7.)
+    /// elsewhere). Additive; serde default `Hessian`, mirroring `config.json`
+    /// estimation.wald_se.
     #[serde(default)]
     pub wald_se: WaldSe,
     /// Reference distribution for mixed-model fixed-effect Wald tests
@@ -104,7 +104,7 @@ mod tests {
         rmpv::encode::write_value(&mut stripped, &val).unwrap();
         let back: SimulationContract = rmp_serde::from_slice(&stripped).unwrap();
         // Absent wald_se/nagq/df_method deserialize to their defaults.
-        assert_eq!(back.wald_se, WaldSe::Rx);
+        assert_eq!(back.wald_se, WaldSe::Hessian);
         assert_eq!(back.nagq, 1);
         assert_eq!(back.df_method, DfMethod::Auto);
     }

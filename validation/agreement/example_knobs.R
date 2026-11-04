@@ -71,14 +71,15 @@ CASES <- c(
 ## --- loop side: engine knob definitions ------------------------------------------
 
 # Correlation noise — mirrors crates/engine-core/src/scenarios.rs
-# perturb_correlation — change together: an iid N(0, sd^2) matrix, symmetrized
-# as (M + t(M)) / 2, added to the base, clipped to +-0.8, unit diagonal. The
+# perturb_correlation — change together: an iid N(0, 2 sd^2) matrix, symmetrized
+# as (M + t(M)) / 2 so each off-diagonal has SD sd, added to the base, clipped
+# to +-0.8, unit diagonal. The
 # matrix covers the continuous columns only (stress, sleep); the factor
 # treatment is outside it.
 perturb_correlation <- function(R, sd) {
   if (sd == 0) return(R)
   k <- nrow(R)
-  M <- matrix(rnorm(k * k, sd = sd), k, k)
+  M <- matrix(rnorm(k * k, sd = sd * sqrt(2)), k, k)
   out <- pmin(pmax(R + (M + t(M)) / 2, -0.8), 0.8)
   diag(out) <- 1
   out

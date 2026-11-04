@@ -6,7 +6,7 @@ import type { DfMethod } from './df-method-options';
 import AnovaIcon from '$lib/icons/AnovaIcon.svelte';
 import LinearIcon from '$lib/icons/LinearIcon.svelte';
 import MixedIcon from '$lib/icons/MixedIcon.svelte';
-import { SIMULATION } from '$lib/configs/app-config';
+import { ESTIMATION, SIMULATION } from '$lib/configs/app-config';
 import type { SampleSizeUnit } from './unit-label';
 
 /**
@@ -257,9 +257,7 @@ const baseAdvanced = (): AdvancedConfig => ({
   simulations: SIMULATION.n_sims.anova,
   seed: SIMULATION.seed,
   correction: 'none',
-  // Default flipped hessian→rx at 1.1.0: the fast Schur SE is the default arm of
-  // the Fast/Accurate/AGQ estimation control.
-  wald_se: 'rx',
+  wald_se: ESTIMATION.wald_se,
   // df_method is left out: absent = the shared default (see AdvancedConfig).
   agq: 1,
   maxFailedSimulations: SIMULATION.max_failed_fraction,

@@ -572,7 +572,9 @@ function lme_naive(case::Case, n, n_sims, seed)
 end
 
 # ---------------------------------------------------------------------------
-# GLMM (clustered logistic) — mirror loops_r.R glmm_best_chunk / glmm_naive.
+# GLMM (clustered logistic) — mirror loops_r.R glmm_best_chunk / glmm_naive,
+# except the SE: MixedModels.jl has no Hessian covariance, so these loops use its
+# own vcov, where loops_r.R reads glmer's Hessian one.
 # Random intercept on the LATENT logit scale (residual var pi^2/3), so
 # TAU = sqrt(ICC/(1-ICC) * pi^2/3); one independent latent-scale slope RE per
 # slope_cols entry. MixedModels Laplace fit; Wald t / F on the between-within df, or z / chi-square when _single_level_fit.

@@ -1,7 +1,7 @@
 //! End-to-end gate for the `WaldSe` mode switch on the clustered-binary GLMM.
 //!
 //! `WaldSe::Hessian` sources the per-fit Wald SE from the FD-Hessian covariance
-//! (glmer `use.hessian = TRUE`), which is ≥ the default `WaldSe::Rx` Schur SE —
+//! (glmer `use.hessian = TRUE`), which is ≥ the `WaldSe::Rx` Schur SE —
 //! so the Wald test is at least as conservative and Hessian power must NOT
 //! exceed Rx power. Both runs share data/seed, so the comparison is paired
 //! (only the SE denominator differs).

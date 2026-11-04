@@ -120,22 +120,21 @@ the slope is the gate).
 
 ## Correlation noise
 
-Per block the off-diagonals get symmetrised Gaussian noise —
-symmetrisation halves the variance, so the per-block ρ law is N(ρ, s²/2)
-**censored at ±0.8**, plus finite-n sampling noise in quadrature. The
-low-ρ case gates the exact law; the high-ρ case sits against the clamp,
-gating the censored-normal truncation law itself (mean visibly below the
-naive ρ).
+Per block the off-diagonals get symmetrised Gaussian noise with SD s, so
+the per-block ρ law is N(ρ, s²) **censored at ±0.8**, plus finite-n
+sampling noise in quadrature. The low-ρ case gates the exact law; the
+high-ρ case sits against the clamp, gating the censored-normal
+truncation law itself (mean visibly below the naive ρ).
 
 |  | Case | Gate | Measured | Law | z | Verdict |
 |:---|:---|:---|---:|---:|---:|:---|
-| block-r mean = ±0.8-clamp censored law | scen_co_low | block-r mean = ±0.8-clamp censored law | 0.29620 | 0.30000 | -0.68832 | PASS |
-| block-r SD = √(s²/2 + (1−ρ²)²/n) | scen_co_low | block-r SD = √(s²/2 + (1−ρ²)²/n) | 0.11048 | 0.10704 | 0.88024 | PASS |
-| block-r mean = ±0.8-clamp censored law1 | scen_co_high | block-r mean = ±0.8-clamp censored law | 0.73059 | 0.72807 | 0.94848 | PASS |
-| block-r SD = √(s²/2 + (1−ρ²)²/n)1 | scen_co_high | block-r SD = √(s²/2 + (1−ρ²)²/n) | 0.07522 | 0.07873 | -1.86440 | PASS |
+| block-r mean = ±0.8-clamp censored law | scen_co_low | block-r mean = ±0.8-clamp censored law | 0.29459 | 0.29998 | -0.69300 | PASS |
+| block-r SD = √(s² + (1−ρ²)²/n) | scen_co_low | block-r SD = √(s² + (1−ρ²)²/n) | 0.15556 | 0.15063 | 0.89628 | PASS |
+| block-r mean = ±0.8-clamp censored law1 | scen_co_high | block-r mean = ±0.8-clamp censored law | 0.71530 | 0.71186 | 0.97614 | PASS |
+| block-r SD = √(s² + (1−ρ²)²/n)1 | scen_co_high | block-r SD = √(s² + (1−ρ²)²/n) | 0.09941 | 0.10463 | -2.10228 | PASS |
 
-At ρ = 0.75, s = 0.15: the censored law predicts mean 0.7281 — the
-−0.0219 shift below the nominal ρ **is** the documented clamp
+At ρ = 0.75, s = 0.15: the censored law predicts mean 0.7119 — the
+−0.0381 shift below the nominal ρ **is** the documented clamp
 truncation, and the realised mean lands on it.
 
 ### PSD repair (3 predictors, high ρ)
@@ -148,7 +147,7 @@ below) and re-checked on every run.
 
 | r12_mean | r13_mean | r23_mean |  r12_sd |  r13_sd |  r23_sd |
 |---------:|---------:|---------:|--------:|--------:|--------:|
-|  0.58466 |  0.56899 |  0.55664 | 0.17938 | 0.18598 | 0.19204 |
+|  0.55857 |  0.53929 |  0.52098 | 0.23126 | 0.24172 | 0.24987 |
 
 ## Distribution swaps (predictors)
 
@@ -248,21 +247,21 @@ orchestrator’s call-seed test (power here: 0.948, 0.28).
 | optimistic: β̂\[intercept\] unbiased | scen_b1_ols | optimistic: β̂\[intercept\] unbiased | -0.0025 | 0.0000 | -2.1096 | PASS |
 | optimistic: β̂\[x1\] unbiased | scen_b1_ols | optimistic: β̂\[x1\] unbiased | 0.3994 | 0.4000 | -0.4687 | PASS |
 | optimistic: β̂\[x2\] unbiased | scen_b1_ols | optimistic: β̂\[x2\] unbiased | 0.2499 | 0.2500 | -0.1007 | PASS |
-| realistic: β̂\[intercept\] unbiased | scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4182 | PASS |
-| realistic: β̂\[x1\] unbiased | scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3959 | 0.4000 | -0.8746 | PASS |
-| realistic: β̂\[x2\] unbiased | scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2523 | 0.2500 | 0.6737 | PASS |
-| doomer: β̂\[intercept\] unbiased | scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2384 | PASS |
-| doomer: β̂\[x1\] unbiased | scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4298 | PASS |
-| doomer: β̂\[x2\] unbiased | scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0555 | PASS |
+| realistic: β̂\[intercept\] unbiased | scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4214 | PASS |
+| realistic: β̂\[x1\] unbiased | scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3961 | 0.4000 | -0.8337 | PASS |
+| realistic: β̂\[x2\] unbiased | scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2522 | 0.2500 | 0.6677 | PASS |
+| doomer: β̂\[intercept\] unbiased | scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2390 | PASS |
+| doomer: β̂\[x1\] unbiased | scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4360 | PASS |
+| doomer: β̂\[x2\] unbiased | scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0553 | PASS |
 | optimistic: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[intercept\] = per-study pseudo-true | -0.4050 | -0.4055 | 0.1720 | PASS |
 | optimistic: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[x1\] = per-study pseudo-true | 0.5007 | 0.5000 | 0.2342 | PASS |
 | optimistic: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[x2\] = per-study pseudo-true | 0.2988 | 0.3000 | -0.4579 | PASS |
-| realistic: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[intercept\] = per-study pseudo-true | -0.3905 | -0.4055 | 1.1979 | PASS |
-| realistic: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[x1\] = per-study pseudo-true | 0.5066 | 0.5000 | 1.0446 | PASS |
-| realistic: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[x2\] = per-study pseudo-true | 0.2992 | 0.3000 | -0.1913 | PASS |
-| doomer: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[intercept\] = per-study pseudo-true | -0.3944 | -0.4055 | 0.4703 | PASS |
-| doomer: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[x1\] = per-study pseudo-true | 0.4939 | 0.5004 | -0.5737 | PASS |
-| doomer: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[x2\] = per-study pseudo-true | 0.2983 | 0.3002 | -0.2780 | PASS |
+| realistic: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[intercept\] = per-study pseudo-true | -0.3906 | -0.4055 | 1.1879 | PASS |
+| realistic: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[x1\] = per-study pseudo-true | 0.5065 | 0.5000 | 1.0327 | PASS |
+| realistic: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[x2\] = per-study pseudo-true | 0.2989 | 0.3000 | -0.2684 | PASS |
+| doomer: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[intercept\] = per-study pseudo-true | -0.3946 | -0.4055 | 0.4652 | PASS |
+| doomer: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[x1\] = per-study pseudo-true | 0.4944 | 0.5004 | -0.5317 | PASS |
+| doomer: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[x2\] = per-study pseudo-true | 0.2995 | 0.3002 | -0.1004 | PASS |
 
 OLS rows gate on the z-band, **intercept included** — the mean-leak
 tripwire (linear averaging keeps OLS β̂ exactly unbiased under every
@@ -332,14 +331,14 @@ they do not fail on the drift itself.
 
 |  | Case | Gate | Measured | Law | z | Verdict |
 |:---|:---|:---|---:|---:|---:|:---|
-| slope magnitude = γ/σ₀ (stale spec anchor) | scen_b5 | slope magnitude = γ/σ₀ (stale spec anchor) | 0.65938 | 0.65206 | 1.59849 | PASS |
-| staleness: lm(λ̂′ ~ λ′ predicted) slope = 1 | scen_b5 | staleness: lm(λ̂′ ~ λ′ predicted) slope = 1 | 0.90100 | 1.00000 | -0.95987 | PASS |
-| drift bounded: max λ′ ≤ clamp-range bound | scen_b5 | drift bounded: max λ′ ≤ clamp-range bound | 5.04465 | 5.39376 | NA | PASS |
+| slope magnitude = γ/σ₀ (stale spec anchor) | scen_b5 | slope magnitude = γ/σ₀ (stale spec anchor) | 0.65974 | 0.65206 | 1.66648 | PASS |
+| staleness: lm(λ̂′ ~ λ′ predicted) slope = 1 | scen_b5 | staleness: lm(λ̂′ ~ λ′ predicted) slope = 1 | 0.91521 | 1.00000 | -1.11396 | PASS |
+| drift bounded: max λ′ ≤ clamp-range bound | scen_b5 | drift bounded: max λ′ ≤ clamp-range bound | 5.19312 | 5.39376 | NA | PASS |
 
 | Preset    | λ set | λ′ 5% | λ′ median | λ′ 95% |
 |:----------|------:|------:|----------:|-------:|
-| realistic |     2 | 1.900 |     1.988 |  2.080 |
-| doomer    |     4 | 3.343 |     3.960 |  4.627 |
+| realistic |     2 | 1.878 |     1.988 |  2.117 |
+| doomer    |     4 | 3.110 |     3.958 |  4.865 |
 
 The staleness gate is the discriminating one: per block, the measured
 ratio λ̂′ tracks the moment-predicted λ′ = exp(4γσ̂′/σ₀) with regression
@@ -389,11 +388,11 @@ Knobs must be live or inert exactly per family.
 | scen_he | jitter slope on x1² = h²β² (h=0.4) | 0.0249 | 0.0256 | -0.2511 | PASS |
 | scen_he | jitter slope on x2² = h²β² (h=0.4) | 0.0083 | 0.0100 | -1.0731 | PASS |
 | scen_hs | log-e² slope γ = ln(λ)/4 | 0.3480 | 0.3466 | 0.6030 | PASS |
-| scen_co_low | block-r mean = ±0.8-clamp censored law | 0.2962 | 0.3000 | -0.6883 | PASS |
-| scen_co_low | block-r SD = √(s²/2 + (1−ρ²)²/n) | 0.1105 | 0.1070 | 0.8802 | PASS |
-| scen_co_high | block-r mean = ±0.8-clamp censored law | 0.7306 | 0.7281 | 0.9485 | PASS |
-| scen_co_high | block-r SD = √(s²/2 + (1−ρ²)²/n) | 0.0752 | 0.0787 | -1.8644 | PASS |
-| scen_co_psd | PSD-repaired r ∈ \[0.45, 0.60\] (shrinks below ρ=0.6 input, stays positive) | 0.5566 | 0.4500 | NA | PASS |
+| scen_co_low | block-r mean = ±0.8-clamp censored law | 0.2946 | 0.3000 | -0.6930 | PASS |
+| scen_co_low | block-r SD = √(s² + (1−ρ²)²/n) | 0.1556 | 0.1506 | 0.8963 | PASS |
+| scen_co_high | block-r mean = ±0.8-clamp censored law | 0.7153 | 0.7119 | 0.9761 | PASS |
+| scen_co_high | block-r SD = √(s² + (1−ρ²)²/n) | 0.0994 | 0.1046 | -2.1023 | PASS |
+| scen_co_psd | PSD-repaired r ∈ \[0.45, 0.60\] (shrinks below ρ=0.6 input, stays positive) | 0.5210 | 0.4500 | NA | PASS |
 | scen_px | swap frequency = q | 0.5300 | 0.5000 | 1.6598 | PASS |
 | scen_px | pick share right_skewed = 1/3 | 0.3726 | 0.3333 | 1.7170 | PASS |
 | scen_px | pick share left_skewed = 1/3 | 0.2925 | 0.3333 | -1.7857 | PASS |
@@ -426,30 +425,30 @@ Knobs must be live or inert exactly per family.
 | scen_b1_ols | optimistic: β̂\[intercept\] unbiased | -0.0025 | 0.0000 | -2.1096 | PASS |
 | scen_b1_ols | optimistic: β̂\[x1\] unbiased | 0.3994 | 0.4000 | -0.4687 | PASS |
 | scen_b1_ols | optimistic: β̂\[x2\] unbiased | 0.2499 | 0.2500 | -0.1007 | PASS |
-| scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4182 | PASS |
-| scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3959 | 0.4000 | -0.8746 | PASS |
-| scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2523 | 0.2500 | 0.6737 | PASS |
-| scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2384 | PASS |
-| scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4298 | PASS |
-| scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0555 | PASS |
+| scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4214 | PASS |
+| scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3961 | 0.4000 | -0.8337 | PASS |
+| scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2522 | 0.2500 | 0.6677 | PASS |
+| scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2390 | PASS |
+| scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4360 | PASS |
+| scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0553 | PASS |
 | scen_b1_glm | optimistic: β̂\[intercept\] = per-study pseudo-true | -0.4050 | -0.4055 | 0.1720 | PASS |
 | scen_b1_glm | optimistic: β̂\[x1\] = per-study pseudo-true | 0.5007 | 0.5000 | 0.2342 | PASS |
 | scen_b1_glm | optimistic: β̂\[x2\] = per-study pseudo-true | 0.2988 | 0.3000 | -0.4579 | PASS |
-| scen_b1_glm | realistic: β̂\[intercept\] = per-study pseudo-true | -0.3905 | -0.4055 | 1.1979 | PASS |
-| scen_b1_glm | realistic: β̂\[x1\] = per-study pseudo-true | 0.5066 | 0.5000 | 1.0446 | PASS |
-| scen_b1_glm | realistic: β̂\[x2\] = per-study pseudo-true | 0.2992 | 0.3000 | -0.1913 | PASS |
-| scen_b1_glm | doomer: β̂\[intercept\] = per-study pseudo-true | -0.3944 | -0.4055 | 0.4703 | PASS |
-| scen_b1_glm | doomer: β̂\[x1\] = per-study pseudo-true | 0.4939 | 0.5004 | -0.5737 | PASS |
-| scen_b1_glm | doomer: β̂\[x2\] = per-study pseudo-true | 0.2983 | 0.3002 | -0.2780 | PASS |
+| scen_b1_glm | realistic: β̂\[intercept\] = per-study pseudo-true | -0.3906 | -0.4055 | 1.1879 | PASS |
+| scen_b1_glm | realistic: β̂\[x1\] = per-study pseudo-true | 0.5065 | 0.5000 | 1.0327 | PASS |
+| scen_b1_glm | realistic: β̂\[x2\] = per-study pseudo-true | 0.2989 | 0.3000 | -0.2684 | PASS |
+| scen_b1_glm | doomer: β̂\[intercept\] = per-study pseudo-true | -0.3946 | -0.4055 | 0.4652 | PASS |
+| scen_b1_glm | doomer: β̂\[x1\] = per-study pseudo-true | 0.4944 | 0.5004 | -0.5317 | PASS |
+| scen_b1_glm | doomer: β̂\[x2\] = per-study pseudo-true | 0.2995 | 0.3002 | -0.1004 | PASS |
 | scen_b2 | x1 jitter slope at λ=1 = h²β₁² | 0.0217 | 0.0256 | -1.7720 | PASS |
 | scen_b2 | x1 jitter slope λ-invariant (paired Δ = 0) | 0.0000 | 0.0000 | 0.0473 | PASS |
 | scen_b3_t | γ = ln(λ)/4 under a high_kurtosis residual | 0.3426 | 0.3466 | -1.6275 | PASS |
 | scen_b3_chi | γ = ln(λ)/4 under a right_skewed residual | 0.3508 | 0.3466 | 1.6939 | PASS |
 | scen_b4 | right_skewed pair: r = NORTA 0.4541 (latent ρ = 0.50) | 0.4546 | 0.4541 | 0.4146 | PASS |
 | scen_b4 | uniform pair: r = NORTA 0.4826 (latent ρ = 0.50) | 0.4830 | 0.4826 | 0.4445 | PASS |
-| scen_b5 | slope magnitude = γ/σ₀ (stale spec anchor) | 0.6594 | 0.6521 | 1.5985 | PASS |
-| scen_b5 | staleness: lm(λ̂′ ~ λ′ predicted) slope = 1 | 0.9010 | 1.0000 | -0.9599 | PASS |
-| scen_b5 | drift bounded: max λ′ ≤ clamp-range bound | 5.0446 | 5.3938 | NA | PASS |
+| scen_b5 | slope magnitude = γ/σ₀ (stale spec anchor) | 0.6597 | 0.6521 | 1.6665 | PASS |
+| scen_b5 | staleness: lm(λ̂′ ~ λ′ predicted) slope = 1 | 0.9152 | 1.0000 | -1.1140 | PASS |
+| scen_b5 | drift bounded: max λ′ ≤ clamp-range bound | 5.1931 | 5.3938 | NA | PASS |
 | fg_glm_ident | bit-identity under logit: optimistic ≡ glm_l4 | 1.0000 | 1.0000 | NA | PASS |
 | fg_glm_flip | h-toggle flip rate = MC prediction (paired Δ = 0) | 0.0023 | 0.0000 | 0.6365 | PASS |
 | fg_probit_ident | bit-identity under probit: optimistic ≡ g_l4 | 1.0000 | 1.0000 | NA | PASS |
@@ -479,9 +478,9 @@ beta unbiased — PASS
 
 | item                     | value                        |
 |:-------------------------|:-----------------------------|
-| Report generated         | 29 October 2026              |
+| Report generated         | 4 November 2026              |
 | R version                | R version 4.5.3 (2026-03-11) |
-| mcpower                  | 1.5.0                        |
+| mcpower                  | 1.5.1                        |
 | Gate band (SE-of-mean z) | 4                            |
 | Golden tolerance         | 1e-09                        |
 | Cases                    | 24                           |

@@ -6,9 +6,28 @@
 # in the harness's micro warm-up, not the timed run.
 # Requires loop_design() from loops_r.R (harness.R sources that first).
 
+# simr and Superpower have no parallel option, so the multicore timing pass
+# (PINNED_CORES > 1) splits them by hand: nsim is cut into one chunk per core,
+# each chunk runs in a forked worker (parallel::mclapply) with its own seed, and
+# the chunk powers are averaged weighted by chunk size, which is the power over
+# all nsim simulations. min_chunk is the tool's smallest nsim per call
+# (Superpower's ANOVA_power refuses fewer than 10); fewer chunks run below it.
+split_by_hand <- function(tool, min_chunk = 1L) function(case, n, nsim, seed) {
+  chunks <- min(as.integer(Sys.getenv("PINNED_CORES", "1")), nsim %/% min_chunk)
+  if (chunks <= 1L) return(tool(case, n, nsim, seed))
+  sizes <- diff(round(seq(0, nsim, length.out = chunks + 1L)))
+  parts <- parallel::mclapply(seq_along(sizes), function(i)
+    tool(case, n, sizes[i], seed * 100L + i)$power, mc.cores = length(sizes))
+  failed <- vapply(parts, inherits, logical(1), "try-error")
+  if (any(failed)) stop(sprintf("split_by_hand: chunk %d failed: %s",
+                                which(failed)[1], trimws(parts[[which(failed)[1]]])))
+  list(power = Reduce(`+`, Map(`*`, parts, sizes)) / nsim)
+}
+
 TOOLS <- list(
-  simr       = function(case, n, nsim, seed) tool_simr(case, n, nsim, seed),
-  superpower = function(case, n, nsim, seed) tool_superpower(case, n, nsim, seed),
+  simr       = split_by_hand(function(case, n, nsim, seed) tool_simr(case, n, nsim, seed)),
+  superpower = split_by_hand(function(case, n, nsim, seed) tool_superpower(case, n, nsim, seed),
+                             min_chunk = 10L),
   simglm     = function(case, n, nsim, seed) tool_simglm(case, n, nsim, seed)
 )
 
@@ -167,8 +186,7 @@ tool_simr_glmm <- function(case, n, nsim, seed) {
     paste(".y_simr ~", sub("^[^~]*~", "", case$formula))
   )
   fit <- suppressWarnings(suppressMessages(
-    lme4::glmer(fml_fit, data = d, family = binomial(),
-                control = lme4::glmerControl(calc.derivs = FALSE))
+    lme4::glmer(fml_fit, data = d, family = binomial())
   ))
 
   # Pin the generating parameters (true intercept + betas, diagonal Cholesky).
@@ -314,7 +332,9 @@ simglm_rhs <- function(spec) {
 
 tool_simglm <- function(case, n, nsim, seed) {
   set.seed(seed)
-  old_plan <- future::plan(future::sequential)   # plan() returns the previous plan
+  # PINNED_CORES > 1 is the multicore timing pass; plan() returns the previous plan.
+  workers <- as.integer(Sys.getenv("PINNED_CORES", "1"))
+  old_plan <- if (workers > 1L) future::plan(future::multicore, workers = workers) else future::plan(future::sequential)
   on.exit(future::plan(old_plan), add = TRUE)
   spec <- loop_design(case)
 

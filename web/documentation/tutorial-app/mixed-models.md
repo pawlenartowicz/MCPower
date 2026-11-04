@@ -32,6 +32,8 @@ Which of the two fields you fix also decides what **Find sample size** can searc
 
 Each fixed-effect predictor is one card: pick its type next to the name (continuous, binary, or factor), then set its standardised effect size in the same card — continuous **0.10 / 0.25 / 0.40**, binary or factor **0.20 / 0.50 / 0.80**. See [[concepts/variable-types|variable types]] and [[concepts/effect-sizes|effect sizes]].
 
+With a continuous outcome, effects are in units of the residual SD, which here is the within-cluster SD. A published effect standardized by the total SD uses a larger SD, so entering it unchanged understates the effect. The error is conservative, and all power tools share it; with a random intercept alone, dividing by √(1 − ICC) removes it. See [[concepts/effect-sizes#Effects from published studies|effects from published studies]].
+
 ## 5. Sensitivity analysis (scenarios)
 
 The **Sensitivity analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. Mixed models additionally perturb the random effect (its distribution, df, and ICC noise). If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/sensitivity-analysis|sensitivity analysis]].

@@ -48,21 +48,19 @@ impl EstimatorSpec {
 }
 
 /// Fixed-effect Wald-SE denominator selection for the clustered-binary/count
-/// GLMM. Additive contract field; no-op for OLS/LMM. `Rx` is the 1.1.0 default
-/// (fastmode: rx + Laplace is accurate enough for power analysis, where
-/// Monte-Carlo noise dominates); `Hessian` (lme4 `use.hessian = TRUE`) is the
-/// rigor opt-in. This default mirrors `configs/config.json` `estimation.wald_se`
+/// GLMM. Additive contract field; no-op for OLS/LMM. `Hessian` (lme4
+/// `use.hessian = TRUE`, the SE glmer's summary reports) is the default; `Rx` is
+/// the faster opt-in. This default mirrors `configs/config.json` `estimation.wald_se`
 /// — the single home for the cross-port default; change both together.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WaldSe {
-    /// Per-fit FD-Hessian SE (glmer `use.hessian = TRUE`) — the lme4 "correct"
-    /// denominator; the accurate/AGQ opt-in.
-    Hessian,
-    /// RX/PLS Schur (glmer `use.hessian = FALSE`) — the 1.1.0 default; faster
-    /// but anticonservative for GLMM (assumes β–θ orthogonality, false under
-    /// IRLS weight coupling), acceptable when MC noise dominates.
+    /// Per-fit Hessian SE (glmer `use.hessian = TRUE`), the SE glmer's summary
+    /// reports.
     #[default]
+    Hessian,
+    /// RX/PLS Schur (glmer `use.hessian = FALSE`) — faster, but anticonservative
+    /// for GLMM (assumes β–θ orthogonality, false under IRLS weight coupling).
     Rx,
 }
 
@@ -173,8 +171,8 @@ mod tests {
             "\"hessian\""
         );
         assert_eq!(serde_json::to_string(&WaldSe::Rx).unwrap(), "\"rx\"");
-        // default flipped to rx at 1.1.0 (fastmode); mirrors config.json estimation.wald_se
-        assert_eq!(WaldSe::default(), WaldSe::Rx);
+        // mirrors config.json estimation.wald_se
+        assert_eq!(WaldSe::default(), WaldSe::Hessian);
     }
 
     #[test]

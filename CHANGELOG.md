@@ -5,6 +5,34 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each language
 port keeps its own version, so a version listed here may reach Python, R, the
 desktop app, and the web app on different dates.
 
+## [1.5.1]
+
+### Changed
+- **Clustered binary and count models (GLMM) use the per-fit Hessian standard
+  error by default.** `wald_se` defaults to `"hessian"`, the standard error
+  glmer's summary reports (lme4 `use.hessian = TRUE`). `"rx"`, the Schur
+  standard error (`use.hessian = FALSE`), is still available and faster: a
+  Hessian run takes 1.24–1.35× as long. The app and web app's estimation
+  switch defaults to Accurate. GLMM results change; `wald_se="rx"` gives the
+  1.5.0 standard error. In the logit calibration under the new default, the
+  between-within *t* test of a cluster-level effect rejects a true null at
+  7.1–9.6% with 5 clusters and 6.2–6.7% with 10, and the Wald *z* at
+  14.4–19.5% with 5 and 10.6% with 10.
+
+### Fixed
+- **Correlation noise had a smaller SD than set.** Each perturbed correlation
+  is the average of two noise draws, so `correlation_noise_sd` reached the
+  correlations divided by √2 (0.106 instead of 0.15 under `realistic`, 0.21
+  instead of 0.30 under `doomer`). The noise now has the set SD. Results under
+  any scenario with correlation noise change, including the `realistic` and
+  `doomer` presets.
+- **Sample-size grid for nested designs.** The lowest grid N counted rows per
+  primary cluster only, so with a nested grouping such as `(1|school/class)`
+  it could put one row in each class, which gives as many class levels as
+  rows and cannot be fitted. Each child cluster now gets at least 2 rows, plus
+  one per random slope on the nested grouping. The app and web app's Find
+  power limits use the same floor.
+
 ## [1.5.0]
 
 ### Added

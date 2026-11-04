@@ -1,3 +1,24 @@
+# mcpower 1.5.1
+
+* **Clustered binary and count models (GLMM) use the per-fit Hessian standard
+  error by default.** `wald_se` defaults to `"hessian"`, the standard error
+  glmer's summary reports (lme4 `use.hessian = TRUE`). `"rx"`, the Schur
+  standard error (`use.hessian = FALSE`), is still available and faster: a
+  Hessian run takes 1.24–1.35× as long. GLMM results change;
+  `wald_se = "rx"` gives the 1.5.0 standard error. In the logit calibration under the new
+  default, the between-within *t* test of a cluster-level effect rejects a
+  true null at 7.1–9.6% with 5 clusters and 6.2–6.7% with 10, and the Wald *z*
+  at 14.4–19.5% with 5 and 10.6% with 10.
+* Correlation noise now has the SD you set. Each perturbed correlation is the
+  average of two noise draws, so `correlation_noise_sd` reached the
+  correlations divided by √2 (0.106 instead of 0.15 under `realistic`, 0.21
+  instead of 0.30 under `doomer`). Results under any scenario with
+  correlation noise change, including the `realistic` and `doomer` presets.
+* The sample-size grid for a nested design such as `(1|school/class)` starts
+  at 2 rows per child cluster, plus one per random slope on the nested
+  grouping. Before, it counted rows per primary cluster only and could put one
+  row in each class, which cannot be fitted.
+
 # mcpower 1.5.0
 
 * `find_power()` and `find_sample_size()` warn when a clustered binary or

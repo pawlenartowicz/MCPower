@@ -28,15 +28,15 @@ For a **clustered binary or count model** (a logit, probit, or Poisson GLMM — 
 
 **`wald_se`** picks between two ways to get the fixed effects' Wald standard errors:
 
-- `"rx"` (the default) — a Schur-complement shortcut, matching lme4's `vcov(use.hessian = FALSE)`. Faster, and the right choice for most runs, including large grids.
-- `"hessian"` — inverts the full per-fit finite-difference Hessian, matching lme4's `vcov(use.hessian = TRUE)`. Slightly slower and slightly more conservative (it doesn't assume the fixed effects and the random-effect variance are orthogonal, an assumption `"rx"` makes and a GLMM's IRLS weight coupling can break). Use it when you want the more conservative SE, or when validating against an `lme4` fit that used `use.hessian = TRUE`.
+- `"hessian"` (the default) — inverts the full per-fit finite-difference Hessian, matching lme4's `vcov(use.hessian = TRUE)`, the standard error glmer's `summary()` reports. Slightly slower and slightly more conservative than `"rx"` (it doesn't assume the fixed effects and the random-effect variance are orthogonal, an assumption `"rx"` makes and a GLMM's IRLS weight coupling can break).
+- `"rx"` — a Schur-complement shortcut, matching lme4's `vcov(use.hessian = FALSE)`. Faster; useful for large grids when speed matters more than matching glmer's summary.
 
 **`agq`** sets the number of adaptive Gauss–Hermite quadrature nodes used to integrate out the random effect, in place of the default Laplace approximation:
 
 - `1` (the default) — Laplace approximation (`nAGQ = 1` in `glmer` terms). Works for any clustered design.
 - an odd integer `> 1`, up to `25` — adaptive Gauss–Hermite quadrature, more accurate than Laplace at small cluster sizes but more expensive. Only allowed for a binary/count GLMM with a **single grouping factor** and **at most 3 random effects per group**. A design outside that envelope (crossed/nested groupings, too many random effects, an even node count, or a value above 25) warns and silently falls back to `agq=1` — the run still completes, on Laplace.
 
-The desktop and web app surface both controls as one three-way switch: **Fast** (`wald_se="rx"`), **Accurate** (`wald_se="hessian"`), and **AGQ** (`agq=k`, k configurable), next to the model's other advanced settings.
+The desktop and web app surface both controls as one three-way switch: **Fast** (`wald_se="rx"`), **Accurate** (`wald_se="hessian"`, the default), and **AGQ** (`agq=k`, k configurable), next to the model's other advanced settings.
 
 ## Denominator degrees of freedom
 

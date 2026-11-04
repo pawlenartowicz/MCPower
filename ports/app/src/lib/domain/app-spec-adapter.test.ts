@@ -1644,6 +1644,25 @@ describe('findPowerSampleSizeError', () => {
     expect(findPowerSampleSizeError(sloped, 3)).toBeNull();
   });
 
+  it('holds each nested child to the minimum rows per cluster', () => {
+    const nested = {
+      ...clusters,
+      cluster_dim: { kind: 'n_clusters', value: 20 },
+      sample_size_unit: 'observations',
+      extra_groupings: [
+        {
+          tau_squared: 0.1,
+          relation: { kind: 'nested_within', n_per_parent: 3 },
+          cluster_name: 'class',
+        },
+      ],
+    } as AppSpec;
+    expect(findPowerSampleSizeError(nested, 60)).toBe(
+      'n = 60 gives 60 observations; Find power needs 120 to 100,000 observations',
+    );
+    expect(findPowerSampleSizeError(nested, 120)).toBeNull();
+  });
+
   it('refuses an n that is not a whole number, also when its total is', () => {
     expect(findPowerSampleSizeError(linear, 150.5)).toBe('n must be a whole number, got 150.5');
     expect(findPowerSampleSizeError(clusters, 2.5)).toBe('n must be a whole number, got 2.5');

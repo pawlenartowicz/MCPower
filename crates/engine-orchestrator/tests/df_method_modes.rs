@@ -325,8 +325,9 @@ fn find_power_between_within_never_exceeds_asymptotic_glm_cluster() {
     let p_bw = twin_power(&bw);
     let p_asymp = twin_power(&asymp);
 
-    assert_eq!(p_asymp, 0.31);
-    assert_eq!(p_bw, 0.30333333333333334);
+    // Pinned from MCPower's own output under the default `wald_se` (Hessian).
+    assert_eq!(p_asymp, 0.29333333333333333);
+    assert_eq!(p_bw, 0.29);
     assert!(
         p_bw < p_asymp,
         "between-within power {p_bw} must sit below asymptotic power {p_asymp}"

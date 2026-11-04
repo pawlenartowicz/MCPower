@@ -373,6 +373,12 @@ the printed tables show \code{n/a}. With such a target the corrected
 joint view is not applicable as a whole:
 \code{success_count_histogram_corrected} is \code{NULL}.}
 
+\item{\code{wald_se}}{Standard error for a clustered binary/count GLMM fit:
+\code{NULL} or \code{"hessian"} (the default) is the per-fit Hessian
+SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports);
+\code{"rx"} is the faster Schur SE (lme4 \code{use.hessian = FALSE}).
+Other models ignore it.}
+
 \item{\code{agq}}{Adaptive Gauss-Hermite quadrature node count for a clustered
 binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the
 default). An odd value in \code{3..=25} opts into AGQ, but only when
@@ -450,6 +456,12 @@ joint view is then not applicable as a whole:
 \code{first_joint_achieved}, \code{first_joint_achieved_unit},
 \code{fitted_joint} and \code{success_count_histogram_corrected} are
 \code{NULL}, and "First N achieving all targets" reads \code{n/a}.}
+
+\item{\code{wald_se}}{Standard error for a clustered binary/count GLMM fit:
+\code{NULL} or \code{"hessian"} (the default) is the per-fit Hessian
+SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports);
+\code{"rx"} is the faster Schur SE (lme4 \code{use.hessian = FALSE}).
+Other models ignore it.}
 
 \item{\code{agq}}{Adaptive Gauss-Hermite quadrature node count for a clustered
 binary/count GLMM fit; \code{NULL} or \code{1} uses Laplace (the

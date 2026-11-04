@@ -11,7 +11,7 @@ This page is the reference for every scenario knob: what assumption violation it
 ## The three built-in scenarios
 
 - **Optimistic** — your exact settings, no perturbations. The best case.
-- **Realistic** — moderate violations: effects vary between participants, correlations fluctuate, distributions drift from normal.
+- **Realistic** — moderate violations: effects vary from study to study, correlations fluctuate, distributions drift from normal.
 - **Doomer** — severe violations, a worst case.
 
 > [!tip] Plan around Realistic
@@ -63,13 +63,13 @@ Your model assumes one true effect for everyone, but in real replications the ef
 
 ### Correlation noise
 
-The correlations you set between predictors are estimates, not fixed truths — each sample's measured correlation wobbles around the real one. The `correlation_noise_sd` knob adds Gaussian noise of that SD to your specified correlations on each draw: at `0.15`, a specified r = 0.30 is simulated from roughly r ≈ 0.20–0.40. Set `0` to turn it off; presets use 0.15 (realistic) and 0.30 (doomer).
+The correlations you set between predictors are estimates, not fixed truths — each sample's measured correlation wobbles around the real one. The `correlation_noise_sd` knob adds Gaussian noise of that SD to every correlation between predictors on each draw, including those you left at 0: at `0.15`, a specified r = 0.30 is simulated from roughly r ≈ 0.15–0.45 (±1 SD). Set `0` to turn it off; presets use 0.15 (realistic) and 0.30 (doomer).
 
 **Definition.** The correlations you specify between predictors are estimates, not constants — a correlation measured in any one sample fluctuates around the population value, so the design's correlation structure is itself uncertain.
 
-**How MCPower simulates it.** Symmetric Gaussian noise with this SD is added to the specified correlations at each design draw; perturbed values are kept within ±0.8 and the matrix is repaired so it remains a valid correlation matrix. The noise applies on the latent scale used to build the joint distribution — before each variable takes its target shape — so it perturbs the structure, not the marginals. A correlation that was **measured** from [[concepts/upload-data|uploaded data]] (`partial` mode) enters this same latent scale — the upload measures the rank (Spearman) correlation and converts it to the latent scale before generation — so the noise perturbs it exactly as it does a value you set by hand.
+**How MCPower simulates it.** Symmetric Gaussian noise with this SD is added to every correlation between predictors at each design draw; perturbed values are kept within ±0.8 and the matrix is repaired so it remains a valid correlation matrix. The noise applies on the latent scale used to build the joint distribution — before each variable takes its target shape — so it perturbs the structure, not the marginals. A correlation that was **measured** from [[concepts/upload-data|uploaded data]] (`partial` mode) enters this same latent scale — the upload measures the rank (Spearman) correlation and converts it to the latent scale before generation — so the noise perturbs it exactly as it does a value you set by hand.
 
-**What the value means.** sd = 0.15: a specified r = 0.30 is simulated from roughly r ≈ 0.20–0.40 (±1 SD) from one design draw to the next.
+**What the value means.** sd = 0.15: a specified r = 0.30 is simulated from roughly r ≈ 0.15–0.45 (±1 SD) from one design draw to the next.
 
 > [!note] Empirical values in research
 > - Gnambs (2023) — the standard error of a correlation is ≈ 1/√(n−3): about 0.15 at n ≈ 45–50 and 0.30 at n ≈ 14. Realistic 0.15 is the per-sample SD of r in a typical mid-sized study; doomer 0.30 is that of a severely underpowered one.
@@ -153,7 +153,7 @@ Mixed models support three scenario knobs for stress-testing the random-effect s
 
 **`random_effect_dist`**: the shape of the group-level random effects. Values: `"normal"` (default), `"heavy_tailed"` (Student t, parameterised by `random_effect_df`; fatter tails mean more extreme cluster-to-cluster variation), `"right_skewed"` (asymmetric: some clusters have systematically higher baselines). In all cases the random effects are scaled to unit variance so that `tau_squared` (set via ICC) remains the between-cluster variance component; the shape changes only the tail behaviour. Heavier tails have a modest power cost: very large or very small cluster random effects add noise around the within-cluster fixed effects.
 
-**`random_effect_df`**: degrees of freedom for `heavy_tailed`. Minimum 3. At df = 5 the excess kurtosis is 6 (pronounced tails); at df = 10 it is 1.5 (mild). Shared between `heavy_tailed` and `right_skewed` when both are in a pool.
+**`random_effect_df`**: degrees of freedom for `heavy_tailed`. Minimum 3. At df = 5 the excess kurtosis is 6 (pronounced tails); at df = 10 it is 1 (mild). Shared between `heavy_tailed` and `right_skewed` when both are in a pool.
 
 **`icc_noise_sd`**: block-to-block Gaussian jitter on the between-cluster variance. At each design draw the random-intercept variance `τ²` (the ICC→τ² conversion of your specified ICC) is perturbed by a draw from N(0, `icc_noise_sd`²) and clamped at 0. Useful for probing sensitivity to ICC uncertainty, a common issue when the ICC is estimated from a pilot study.
 

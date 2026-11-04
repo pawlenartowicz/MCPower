@@ -54,9 +54,9 @@ describe('family domain', () => {
     expect(defaultFamilyConfig('mixed').baselineRate).toBeUndefined();
   });
 
-  it('defaults the estimation control to Fast (wald_se rx, agq 1)', () => {
+  it('defaults the estimation control to Accurate (wald_se hessian, agq 1)', () => {
     const adv = defaultFamilyConfig('regression').advanced;
-    expect(adv.wald_se).toBe('rx');
+    expect(adv.wald_se).toBe('hessian');
     expect(adv.agq).toBe(1);
   });
 

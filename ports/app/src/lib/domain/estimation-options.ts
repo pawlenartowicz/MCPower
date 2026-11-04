@@ -1,15 +1,15 @@
 // Three-way estimation control for GLMM fits, encoded as a (wald_se, agq) pair on
 // AdvancedConfig. Mirrors wald-se-options.ts in structure.
-//   Fast     → wald_se='rx',      agq=1  (Schur SE, Laplace — the default)
-//   Accurate → wald_se='hessian', agq=1  (per-fit Hessian SE, Laplace)
+//   Fast     → wald_se='rx',      agq=1  (Schur SE, Laplace)
+//   Accurate → wald_se='hessian', agq=1  (per-fit Hessian SE, Laplace — the default)
 //   AGQ      → wald_se='hessian', agq=k  (adaptive Gauss-Hermite, k odd > 1)
 import type { WaldSe } from './wald-se-options';
 
 export type EstimationMode = 'fast' | 'accurate' | 'agq';
 
 export const ESTIMATION_LABEL: Record<EstimationMode, string> = {
-  fast: 'Fast (Schur SE, default)',
-  accurate: 'Accurate (Hessian SE)',
+  fast: 'Fast (Schur SE)',
+  accurate: 'Accurate (Hessian SE, default)',
   agq: 'High accuracy (adaptive quadrature)',
 };
 

@@ -101,7 +101,7 @@ The choice matters most for cluster-level predictors (see [Cluster-level predict
 | Recommendation | Rationale |
 |---|---|
 | 10–20 clusters minimum | Below 10, random-effect estimation is unstable. |
-| At least 2 observations per cluster, plus 1 for each random slope on the primary grouping | Enforced. |
+| At least 2 observations per cluster, plus 1 for each random slope on the primary grouping. With a nested grouping such as `(1|school/class)`, every child cluster needs the same: at least 2 observations per class, plus 1 for each random slope on `class` | Enforced. |
 
 > [!note] What actually drives power
 > When treatment is assigned at the individual level within clusters, ICC and cluster allocation have only a minor effect on fixed-effect power — power depends mostly on total $n$.
@@ -245,7 +245,7 @@ At small cluster sizes the Laplace approximation can be optimistic. MCPower warn
 
 ### SE method and quadrature
 
-A clustered GLMM (binary or count) has two more expert controls: `wald_se` (which standard-error method) and `agq` (Laplace vs adaptive Gauss–Hermite quadrature). The default `wald_se="rx"` is the fast Schur-complement shortcut; `wald_se="hessian"` is the slower, slightly more conservative per-fit Hessian inversion. `agq=1` (default) is the Laplace approximation used above; an odd `agq` up to 25 switches to adaptive quadrature for a single-grouping-factor design. See [[concepts/simulation-settings#estimation-mode|Estimation mode]] for the full explanation, including the lme4 correspondence and AGQ's eligibility rules.
+A clustered GLMM (binary or count) has two more expert controls: `wald_se` (which standard-error method) and `agq` (Laplace vs adaptive Gauss–Hermite quadrature). The default `wald_se="hessian"` is the per-fit Hessian inversion, the standard error glmer's summary reports; `wald_se="rx"` is the faster, slightly more liberal Schur-complement shortcut. `agq=1` (default) is the Laplace approximation used above; an odd `agq` up to 25 switches to adaptive quadrature for a single-grouping-factor design. See [[concepts/simulation-settings#estimation-mode|Estimation mode]] for the full explanation, including the lme4 correspondence and AGQ's eligibility rules.
 
 These controls only affect the **clustered binary/count GLMM**. OLS, Gaussian mixed models, and unclustered GLMs already have exact standard errors, so both settings are ignored there.
 
@@ -273,11 +273,11 @@ degrees of freedom]] for the full explanation.
 With few clusters, the between-within *t* test of a **cluster-level** effect in a
 clustered binary or count model still rejects a true null more often than α.
 In MCPower's calibration (logit, α = 0.05, 20 observations per cluster), the
-Type I error rate was 7.5–9.6% at 5 clusters, 6.6–6.8% at 10, and about 6% at
+Type I error rate was 7.1–9.6% at 5 clusters, 6.2–6.7% at 10, and 5.6–6.3% at
 20–30. Within-cluster effects stayed near 5% at every cluster count. Part of
 the power reported for a cluster-level effect is then this excess rejection,
-not real sensitivity. The Wald z rejects more often still: 14.6–20.3% at 5
-clusters, 10.9–11.2% at 10, and 7.2–8.1% at 20–30 in the same calibration. It is
+not real sensitivity. The Wald z rejects more often still: 14.4–19.5% at 5
+clusters, 10.6% at 10, and 7.0–7.9% at 20–30 in the same calibration. It is
 the test under `df_method="asymptotic"` and for a design with a crossed or
 nested extra grouping; the calibration did not cover those two designs.
 

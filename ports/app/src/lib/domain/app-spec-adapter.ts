@@ -461,20 +461,36 @@ function projectAnova(config: FamilyConfig): AdaptResult {
   return { spec, errors, warnings };
 }
 
+/** The fewest rows a primary cluster can hold: `limits.min_rows_per_cluster`
+ *  plus one per primary random slope, raised for each nested grouping to
+ *  `n_per_parent` children of that floor plus one per nested slope. Mirrors
+ *  `min_rows_in_cluster` in engine-orchestrator — change together. */
+export function minRowsInCluster(
+  primarySlopes: number,
+  nested: { nPerParent: number; slopes: number }[],
+): number {
+  const floor = LIMITS.min_rows_per_cluster;
+  return Math.max(floor + primarySlopes, ...nested.map((g) => g.nPerParent * (floor + g.slopes)));
+}
+
 /** Find power's limits on total observations: config `limits.sample_size`,
  *  with the lower limit raised to the smallest design the sample-size search
  *  takes: `limits.min_clusters` clusters under a fixed cluster size, and
- *  `limits.min_rows_per_cluster` rows per cluster, plus one per primary random
- *  slope, under a fixed cluster count. Mirrors `resolve_cluster_grid_params` in
- *  engine-orchestrator — change together. */
+ *  `minRowsInCluster` rows per cluster under a fixed cluster count. Mirrors
+ *  `resolve_cluster_grid_params` in engine-orchestrator — change together. */
 export function findPowerLimits(spec: AppSpec | null): [number, number] {
   const [lo, hi] = LIMITS.sample_size;
   if (spec?.family !== 'mixed') return [lo, hi];
   const { kind, value } = spec.cluster_dim;
+  const nested = (spec.extra_groupings ?? []).flatMap((g) =>
+    g.relation.kind === 'nested_within'
+      ? [{ nPerParent: g.relation.n_per_parent, slopes: g.slopes?.length ?? 0 }]
+      : [],
+  );
   const min =
     kind === 'cluster_size'
       ? LIMITS.min_clusters
-      : LIMITS.min_rows_per_cluster + (spec.slopes?.length ?? 0);
+      : minRowsInCluster(spec.slopes?.length ?? 0, nested);
   return [Math.max(lo, min * value), hi];
 }
 

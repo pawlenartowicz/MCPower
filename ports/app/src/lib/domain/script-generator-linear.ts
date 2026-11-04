@@ -3,6 +3,7 @@
 // NOTE: Exports helpers reused by script-generator-{logit,anova,mixed}.ts; shared call-structure changes must apply to all four.
 import type { AppSpec, LinearSpec, VarType, CorrectionMethod } from './app-spec';
 import type { SampleSizeMethod } from './result';
+import { ESTIMATION } from '$lib/configs/app-config';
 import { SIMULATION } from '$lib/configs/app-config';
 
 export interface ScriptParams {
@@ -74,7 +75,7 @@ export function buildConfigLines(
 
 /** The find_power / find_sample_size call block, shared by every family generator.
  *  Lines that restate a port default (bounds 30/200, by auto, correction none,
- *  wald_se rx, agq 1) are omitted. `waldSe` and `agq` are the find_* kwargs both
+ *  the config wald_se, agq 1) are omitted. `waldSe` and `agq` are the find_* kwargs both
  *  ports expose for the clustered GLMM; omitted/undefined for families that lack them.
  *  `unitArg` and `dfMethodArg` are already-rendered arguments (mixed only). */
 export function buildFindCallLines(
@@ -105,8 +106,7 @@ export function buildFindCallLines(
   }
   if (testsArg !== null) lines.push(`    target_test="${testsArg}",`);
   if (correction !== 'none') lines.push(`    correction="${correction}",`);
-  // wald_se default flipped to rx at 1.1.0 — omit the default (rx), emit the opt-in.
-  if (waldSe && waldSe !== 'rx') lines.push(`    wald_se="${waldSe}",`);
+  if (waldSe && waldSe !== ESTIMATION.wald_se) lines.push(`    wald_se="${waldSe}",`);
   // agq default is 1 (Laplace) → omit; emit only the adaptive-quadrature opt-in.
   if (agq && agq > 1) lines.push(`    agq=${agq},`);
   // Already rendered in the caller's language like `unitArg` (mixed only);

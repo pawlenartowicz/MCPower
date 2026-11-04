@@ -24,7 +24,7 @@ requiring you to guess at parameter values:
 > Sensitivity analysis works for [[04_logistic-regression|logistic models]] too —
 > the same call with `family="logit"`. See
 > [[concepts/sensitivity-analysis|Sensitivity analysis]] for which knobs apply per
-> model family. Mixed models do not support scenarios yet.
+> model family.
 
 <!-- example:08-builtin -->
 ```python
@@ -108,11 +108,11 @@ Plots: result.plot() to view, result.plot('chart.png') to save.
 
 The power table gains three columns, one per scenario. Power erodes as
 conditions worsen, and the two coefficients erode differently. `age` starts at
-95.2% under optimistic conditions, eases to 90.2% under realistic, and falls to
-81.4% under doomer; `treatment` slides from 86.4% to 82.2% to 76.4% — dipping
+95.2% under optimistic conditions, eases to 90.6% under realistic, and falls to
+82.2% under doomer; `treatment` slides from 86.4% to 82.9% to 76.2% — dipping
 below the 80% target by the doomer scenario. The **Robustness** section at the
-bottom makes the deltas explicit: by the doomer scenario `age` has lost 13.9
-percentage points and `treatment` 9.9. `age` is the more sensitive to departures
+bottom makes the deltas explicit: by the doomer scenario `age` has lost 13.1
+percentage points and `treatment` 10.1. `age` is the more sensitive to departures
 from the idealised setup, but `treatment` — starting lower — is the one that
 slips under target first.
 
