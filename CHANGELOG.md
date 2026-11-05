@@ -9,8 +9,10 @@ desktop app, and the web app on different dates.
 
 ### Changed
 - **Clustered binary and count models (GLMM) use the per-fit Hessian standard
-  error by default.** `wald_se` defaults to `"hessian"`, the standard error
-  glmer's summary reports (lme4 `use.hessian = TRUE`). `"rx"`, the Schur
+  error by default.** `wald_se` defaults to `"hessian"` (lme4
+  `use.hessian = TRUE`), the standard error glmer's summary reports for a fit
+  that is not singular. At a singular fit glmer reports the Schur standard
+  error, and MCPower keeps the Hessian. `"rx"`, the Schur
   standard error (`use.hessian = FALSE`), is still available and faster: a
   Hessian run takes 1.24–1.35× as long. The app and web app's estimation
   switch defaults to Accurate. GLMM results change; `wald_se="rx"` gives the

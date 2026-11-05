@@ -10,7 +10,7 @@
     "nested_n_per_parent": 2
   },
   "estimation": {
-    "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'hessian' (the SE glmer's summary reports) is the default; 'rx' is the faster Schur SE. nagq: 1 = Laplace. df_method: 'auto' is the default and picks the test per design (between-within df for a single-grouping LMM without a primary random slope and for any single-grouping GLMM, Satterthwaite df for any other LMM, Wald z for a crossed or nested GLMM); 'between_within', 'satterthwaite' and 'asymptotic' name one test each. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq, DfMethod::default) — change together.",
+    "_note": "Cross-port GLMM estimation defaults (single home). wald_se: 'hessian' (the SE glmer's summary reports for a fit that is not singular; at a singular fit glmer reports the Schur SE, and MCPower keeps the Hessian) is the default; 'rx' is the faster Schur SE. nagq: 1 = Laplace. df_method: 'auto' is the default and picks the test per design (between-within df for a single-grouping LMM without a primary random slope and for any single-grouping GLMM, Satterthwaite df for any other LMM, Wald z for a crossed or nested GLMM); 'between_within', 'satterthwaite' and 'asymptotic' name one test each. Mirrors the contract's serde Default impls (WaldSe::default, default_nagq, DfMethod::default) — change together.",
     "wald_se": "hessian",
     "nagq": 1,
     "df_method": "auto"

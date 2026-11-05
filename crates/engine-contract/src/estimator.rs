@@ -49,14 +49,15 @@ impl EstimatorSpec {
 
 /// Fixed-effect Wald-SE denominator selection for the clustered-binary/count
 /// GLMM. Additive contract field; no-op for OLS/LMM. `Hessian` (lme4
-/// `use.hessian = TRUE`, the SE glmer's summary reports) is the default; `Rx` is
+/// `use.hessian = TRUE`) is the default; `Rx` is
 /// the faster opt-in. This default mirrors `configs/config.json` `estimation.wald_se`
 /// — the single home for the cross-port default; change both together.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WaldSe {
-    /// Per-fit Hessian SE (glmer `use.hessian = TRUE`), the SE glmer's summary
-    /// reports.
+    /// Per-fit Hessian SE (glmer `use.hessian = TRUE`). It is computed at a
+    /// singular fit too, where glmer has no Hessian and its summary reports
+    /// the RX SE.
     #[default]
     Hessian,
     /// RX/PLS Schur (glmer `use.hessian = FALSE`) — faster, but anticonservative

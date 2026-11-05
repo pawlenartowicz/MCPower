@@ -375,7 +375,9 @@ joint view is not applicable as a whole:
 
 \item{\code{wald_se}}{Standard error for a clustered binary/count GLMM fit:
 \code{NULL} or \code{"hessian"} (the default) is the per-fit Hessian
-SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports);
+SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports for a
+fit that is not singular; at a singular fit glmer reports the Schur SE,
+and MCPower keeps the Hessian);
 \code{"rx"} is the faster Schur SE (lme4 \code{use.hessian = FALSE}).
 Other models ignore it.}
 
@@ -459,7 +461,9 @@ joint view is then not applicable as a whole:
 
 \item{\code{wald_se}}{Standard error for a clustered binary/count GLMM fit:
 \code{NULL} or \code{"hessian"} (the default) is the per-fit Hessian
-SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports);
+SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports for a
+fit that is not singular; at a singular fit glmer reports the Schur SE,
+and MCPower keeps the Hessian);
 \code{"rx"} is the faster Schur SE (lme4 \code{use.hessian = FALSE}).
 Other models ignore it.}
 

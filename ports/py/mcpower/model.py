@@ -2074,7 +2074,9 @@ class MCPower:
         ``success_count_histogram_corrected`` is ``None``. ``wald_se`` selects
         the standard-error flavour for the clustered-binary/count GLMM
         estimator: ``"hessian"`` (default, the per-fit Hessian SE, lme4
-        ``use.hessian = TRUE``, as glmer's summary reports) or ``"rx"``
+        ``use.hessian = TRUE``, as glmer's summary reports for a fit that is
+        not singular; at a singular fit glmer reports the Schur SE, and
+        MCPower keeps the Hessian) or ``"rx"``
         (the faster Schur SE, lme4 ``use.hessian = FALSE``). ``agq`` sets
         the adaptive Gauss-Hermite quadrature node count for a clustered
         binary/count GLMM fit; ``None``/``1`` uses Laplace (the default).

@@ -1067,7 +1067,9 @@ MCPower <- R6::R6Class(
     #'   \code{success_count_histogram_corrected} is \code{NULL}.
     #' @param wald_se Standard error for a clustered binary/count GLMM fit:
     #'   \code{NULL} or \code{"hessian"} (the default) is the per-fit Hessian
-    #'   SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports);
+    #'   SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports for a
+    #'   fit that is not singular; at a singular fit glmer reports the Schur SE,
+    #'   and MCPower keeps the Hessian);
     #'   \code{"rx"} is the faster Schur SE (lme4 \code{use.hessian = FALSE}).
     #'   Other models ignore it.
     #' @param agq Adaptive Gauss-Hermite quadrature node count for a clustered
@@ -1221,7 +1223,9 @@ MCPower <- R6::R6Class(
     #'   \code{NULL}, and "First N achieving all targets" reads \code{n/a}.
     #' @param wald_se Standard error for a clustered binary/count GLMM fit:
     #'   \code{NULL} or \code{"hessian"} (the default) is the per-fit Hessian
-    #'   SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports);
+    #'   SE (lme4 \code{use.hessian = TRUE}, as glmer's summary reports for a
+    #'   fit that is not singular; at a singular fit glmer reports the Schur SE,
+    #'   and MCPower keeps the Hessian);
     #'   \code{"rx"} is the faster Schur SE (lme4 \code{use.hessian = FALSE}).
     #'   Other models ignore it.
     #' @param agq Adaptive Gauss-Hermite quadrature node count for a clustered

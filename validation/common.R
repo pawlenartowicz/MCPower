@@ -695,7 +695,8 @@ check_extras_golden <- function(case) {
   m$.debug_n      <- as.integer(saved$n)
   m$.debug_n_sims <- 1L
   m$.debug_seed   <- as.numeric(case$seed)
-  # golden$z is glmer's summary() z, which uses the Hessian SE; the GLMM side uses it too.
+  # golden$z is glmer's summary() z: the Hessian SE, except at a singular fit, where
+  # glmer reports RX. The GLMM side uses the Hessian SE in both cases.
   fit <- m$load_data(list(design = saved$design, columns = saved$columns,
                           outcome = saved$outcome, cluster_ids = saved$cluster_ids,
                           extra_grouping_ids = saved$extra_grouping_ids),

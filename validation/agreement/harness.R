@@ -171,8 +171,9 @@ run_loop <- function(case, kind, n, n_sims, seed) {
   p
 }
 
-# GLMM cases use the Hessian SE, glmer's summary() test, whatever the package
-# default; NULL keeps the default for the other families. Mirrors harness.py.
+# GLMM cases use the Hessian SE whatever the package default (glmer's
+# summary() SE, except at a singular fit, where glmer reports RX); NULL
+# keeps the default for the other families. Mirrors harness.py.
 glmm_wald_se <- function(case) if (identical(case$family, "glmm")) "hessian" else NULL
 
 run_mcpower_find_power <- function(case, n, n_sims, seed) {

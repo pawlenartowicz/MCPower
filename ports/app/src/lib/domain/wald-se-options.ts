@@ -1,5 +1,7 @@
 // Wald SE (standard error) method for GLMM families. 'hessian' is the default
-// per-fit Hessian SE (lme4 use.hessian = TRUE, as glmer's summary reports);
+// per-fit Hessian SE (lme4 use.hessian = TRUE, as glmer's summary reports for a
+// fit that is not singular; at a singular fit glmer reports the Schur SE, and
+// MCPower keeps the Hessian);
 // 'rx' is the faster Schur SE. Mirrors correction-options.ts in structure.
 export type WaldSe = 'hessian' | 'rx';
 

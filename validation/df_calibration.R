@@ -53,7 +53,8 @@ suppressPackageStartupMessages({
 })
 
 K        <- as.integer(Sys.getenv("DFCAL_K", "10000"))
-# Logit cells use the Hessian SE, glmer's summary() test, whatever the package default.
+# Logit cells use the Hessian SE whatever the package default (glmer's summary()
+# SE, except at a singular fit, where glmer reports RX).
 GLMM_WALD_SE <- "hessian"
 K_N      <- as.integer(Sys.getenv("DFCAL_K_N", as.character(K)))
 CORES    <- as.integer(Sys.getenv("DFCAL_CORES", "1"))

@@ -139,8 +139,9 @@ def time_call(fn, *, warmup, reps):
 
 
 def _glmm_wald_se(case):
-    # GLMM cases use the Hessian SE, glmer's summary() test, whatever the package
-    # default; None keeps the default for the other families. Mirrors harness.R.
+    # GLMM cases use the Hessian SE whatever the package default (glmer's
+    # summary() SE, except at a singular fit, where glmer reports RX); None
+    # keeps the default for the other families. Mirrors harness.R.
     return "hessian" if case.family == "glmm" else None
 
 
