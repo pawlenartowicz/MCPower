@@ -13,6 +13,8 @@ across four families (`ols`, `logit`, `lme`, `glmm`). `lme_ex2` is a random
 intercept and slope design with a cluster-level binary predictor and 60 clusters.
 `lme_crossed` crosses 20 subjects with 10 items (a second grouping in `crossed`)
 and is agreement-only (`benchmark: false`), so the speed benchmark skips it.
+`glmm_multislope` is benchmark-only (`agreement: false`): glmer warns on 8–58% of
+its fits over the grid, and the loop counts a fit that warns as failed.
 Each case names its `targets` and the dedicated tool
 that covers it (`tool`), or `null` when none does. The `defaults.agreement` block
 holds the per-grid-point simulation counts.
@@ -38,7 +40,8 @@ the same quantity:
   `df_method = "auto"`; Wald *z* for a draw whose Satterthwaite df cannot be
   computed. The single-level rule above does not apply here.
 - A failed fit counts as not significant, and power is divided by all
-  simulations. A singular fit is not a failure.
+  simulations. An lmer or glmer fit that warns is a failed fit; a singular fit is not.
+  Each loop and MCPower record carries its count of failed fits (`failed`).
 - Superpower is scored on the pairwise contrast equal to MCPower's dummy
   coefficient, not its omnibus *F*. On a between-within case simr runs its *z*
   test, which stores *z* p-values, so its summary is taken at the alpha that
@@ -83,7 +86,7 @@ SMOKE=1 Rscript example_upload.R
 `SKIP_LOOPS=1` runs an example script's MCPower side only, for a run that reuses
 earlier loop records.
 
-`simr_seeds.R` reruns the simr adapter at the 23 simr points where MCPower's power is between .2 and .9, under the original seed and 16 new seeds (`2137 + n + 100000 k`), each a new predictor draw. `simr_seeds_summary.R` compares the result with the `agreement_r_points.csv` that `power_agreement.py` writes. The full run is about 13 CPU-hours.
+`simr_seeds.R` reruns the simr adapter at the 21 simr points where MCPower's power is between .2 and .9, under the original seed and 16 new seeds (`2137 + n + 100000 k`), each a new predictor draw. `simr_seeds_summary.R` compares the result with the `agreement_r_points.csv` that `power_agreement.py` writes. The full run is about 13 CPU-hours.
 
 ```bash
 pin 12 -- Rscript simr_seeds.R . results/simr_seeds.csv 12 16 800

@@ -544,18 +544,11 @@ lme_best_chunk <- function(case, n, n_sims, seed) {
     df_fit$.y        <- as.numeric(y)
     df_fit$.g        <- factor(cluster_ids)
 
-    # Muffle warnings inline (single fit); a real error -> NULL (not significant).
-    # (Do NOT re-run lmer in a warning handler — that double-fits and inflates timing.)
-    fit <- tryCatch(
-      withCallingHandlers(
-        lme4::lmer(fml, data = df_fit, REML = TRUE,
-                   control = lme4::lmerControl(calc.derivs = FALSE)),
-        warning = function(w) invokeRestart("muffleWarning")
-      ),
-      error = function(e) NULL
-    )
+    # A fit that warns or errors is a failed fit (not significant).
+    fit <- tryCatch(lme4::lmer(fml, data = df_fit, REML = TRUE,
+                               control = lme4::lmerControl(calc.derivs = FALSE)),
+                    warning = function(w) NULL, error = function(e) NULL)
     if (is.null(fit)) next
-    # Any returned fit is scored, warnings included (mirrors loops_py).
     converged <- converged + 1L
 
     # A random slope puts the fit on MCPower's Satterthwaite path under auto.
@@ -628,14 +621,9 @@ lme_naive <- function(case, n, n_sims, seed) {
     df_fit$.y     <- as.numeric(y)
     df_fit$.g     <- factor(cluster_ids)
 
-    # Muffle warnings inline (single fit); a real error -> NULL (not significant).
-    fit <- tryCatch(
-      withCallingHandlers(
-        lmerTest::lmer(fml, data = df_fit, REML = TRUE),
-        warning = function(w) invokeRestart("muffleWarning")
-      ),
-      error = function(e) NULL
-    )
+    # A fit that warns or errors is a failed fit (not significant).
+    fit <- tryCatch(lmerTest::lmer(fml, data = df_fit, REML = TRUE),
+                    warning = function(w) NULL, error = function(e) NULL)
     if (is.null(fit)) next
     converged <- converged + 1L
 
@@ -721,12 +709,10 @@ lme_crossed_best_chunk <- function(case, n, n_sims, seed) {
     df_fit$.s     <- factor(ids$subject)
     df_fit$.i     <- factor(ids$item)
 
-    fit <- tryCatch(
-      withCallingHandlers(
-        lmerTest::lmer(fml, data = df_fit, REML = TRUE,
-                       control = lme4::lmerControl(calc.derivs = FALSE)),
-        warning = muffle),
-      error = function(e) NULL)
+    # A fit that warns or errors is a failed fit (not significant).
+    fit <- tryCatch(lmerTest::lmer(fml, data = df_fit, REML = TRUE,
+                                   control = lme4::lmerControl(calc.derivs = FALSE)),
+                    warning = function(w) NULL, error = function(e) NULL)
     if (is.null(fit)) next
     # summary() without a usable df pass returns lme4's table (no df column).
     sm <- tryCatch(withCallingHandlers(
@@ -760,7 +746,10 @@ lme_crossed_best <- function(case, n, n_sims, seed) loop_best_pool(lme_crossed_b
 # residual variance is pi^2/3 (not 1), so TAU = sqrt(ICC/(1-ICC) * pi^2/3) --
 # matching mcpower's latent-scale logit-ICC convention. Both tiers read vcov(fit)
 # as summary() does: the Hessian covariance, or the RX one when the Hessian is
-# not positive definite, as MCPower falls back.
+# not positive definite, as MCPower falls back. A fit that warns (lme4's
+# convergence checks) is a failed fit and counts as not significant: its
+# finite-difference Hessian can be off by two orders of magnitude (SE 0.003
+# where RX gives 0.3). A singular fit only messages and is scored.
 # No Python counterpart (statsmodels lacks a frequentist Laplace GLMM); the
 # Python harness skips the loop tier for this family.
 # ---------------------------------------------------------------------------
@@ -813,13 +802,8 @@ glmm_best_chunk <- function(case, n, n_sims, seed) {
     df_fit$.y     <- as.numeric(y)
     df_fit$.g     <- factor(cluster_ids)
 
-    fit <- tryCatch(
-      withCallingHandlers(
-        lme4::glmer(fml, data = df_fit, family = binomial()),
-        warning = function(w) invokeRestart("muffleWarning")
-      ),
-      error = function(e) NULL
-    )
+    fit <- tryCatch(lme4::glmer(fml, data = df_fit, family = binomial()),
+                    warning = function(w) NULL, error = function(e) NULL)
     if (is.null(fit)) next
     converged <- converged + 1L
 
@@ -887,13 +871,8 @@ glmm_naive <- function(case, n, n_sims, seed) {
     df_fit$.y     <- as.numeric(y)
     df_fit$.g     <- factor(cluster_ids)
 
-    fit <- tryCatch(
-      withCallingHandlers(
-        lme4::glmer(fml, data = df_fit, family = binomial()),
-        warning = function(w) invokeRestart("muffleWarning")
-      ),
-      error = function(e) NULL
-    )
+    fit <- tryCatch(lme4::glmer(fml, data = df_fit, family = binomial()),
+                    warning = function(w) NULL, error = function(e) NULL)
     if (is.null(fit)) next
     converged <- converged + 1L
 

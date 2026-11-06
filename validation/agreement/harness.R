@@ -78,7 +78,7 @@ seed_for <- function(n) 2137L + as.integer(n)
 load_cases <- function(path, agreement = FALSE) {
   doc <- jsonlite::fromJSON(path, simplifyVector = FALSE)
   defaults <- doc$defaults
-  keep <- Filter(function(c) agreement || !isFALSE(c$benchmark), doc$cases)
+  keep <- Filter(function(c) !isFALSE(if (agreement) c$agreement else c$benchmark), doc$cases)
   lapply(keep, function(c) {
     d <- defaults[[c$family]]
     n <- c$n %||% d$n                       # per-case grid override
@@ -165,9 +165,11 @@ run_loop <- function(case, kind, n, n_sims, seed) {
   fam <- if (!is.null(case$crossed)) "lme_crossed" else case$family
   fn <- LOOPS[[fam]][[kind]]
   if (is.null(fn)) stop(sprintf("%s: no %s loop for %s", case$id, kind, fam))
-  p <- as.numeric(fn(case, n, n_sims, seed)$power)
+  out <- fn(case, n, n_sims, seed)
+  p <- as.numeric(out$power)
   names(p) <- rep("", length(p))
   names(p)[loop_design(case)$targets] <- case$targets
+  attr(p, "failed") <- n_sims - out$converged   # read by record()
   p
 }
 
@@ -182,6 +184,7 @@ run_mcpower_find_power <- function(case, n, n_sims, seed) {
                     progress_callback = FALSE, verbose = FALSE)
   p <- as.numeric(r$power_uncorrected[[1]])
   names(p) <- attr(r, "mcpower_meta")$effect_names[unlist(r$target_indices)]   # engine coefficient order
+  attr(p, "failed") <- as.integer(round(n_sims * (1 - r$convergence_rate[[1]])))   # read by record()
   p
 }
 
@@ -207,15 +210,18 @@ run_mcpower_find_sample_size <- function(case, n_sims, seed) {
 # order; the simr adapter passes a single unnamed value for targets[1], so its
 # power has length 1 while `targets` stays the full list.
 record <- function(case, method, n, n_sims, elapsed, power) {
+  failed <- attr(power, "failed")   # failed fits, set by run_loop() and run_mcpower_find_power()
   if (!is.null(names(power))) {
     miss <- setdiff(case$targets, names(power))
     if (length(miss)) stop(sprintf("%s/%s: no power for target(s) %s", case$id, method, paste(miss, collapse = ", ")))
     power <- power[case$targets]
   }
-  list(case_id = case$id, family = case$family, lang = "r", method = method,
-       n = n, n_sims = n_sims, time_s = elapsed, per_sim_s = elapsed / n_sims,
-       targets = I(as.character(case$targets)),
-       power = I(as.numeric(power)))   # I() keeps it a JSON array even when length 1
+  rec <- list(case_id = case$id, family = case$family, lang = "r", method = method,
+              n = n, n_sims = n_sims, time_s = elapsed, per_sim_s = elapsed / n_sims,
+              targets = I(as.character(case$targets)),
+              power = I(as.numeric(power)))   # I() keeps it a JSON array even when length 1
+  if (!is.null(failed)) rec$failed <- failed
+  rec
 }
 
 build_meta <- function(threads_mode) {

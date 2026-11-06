@@ -34,7 +34,6 @@ names(cases) <- vapply(cases, `[[`, "", "id")
 # Mid-range simr points (MCPower power in [.2, .9] in the 1.5.0 agreement run);
 # lme_ex2 thinned to three of its six points for run time.
 points <- list(
-  list("glmm_multislope", c(150, 300)),
   list("glmm_simple",     c(100, 200)),
   list("glmm_slope",      c(100, 200, 300)),
   list("lme_ex2",         c(360, 600, 840)),

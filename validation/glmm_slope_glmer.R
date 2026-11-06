@@ -58,9 +58,11 @@ glmer_z <- function(d) {
   X <- d$design
   df <- data.frame(V1 = X[, 1], V2 = X[, 2], V3 = X[, 3], V4 = X[, 4], .y = d$outcome,
                    .g = factor(d$cluster_ids))
-  fit <- tryCatch(suppressWarnings(suppressMessages(
-    lme4::glmer(.y ~ 0 + V1 + V2 + V3 + V4 + (1 + V2 | .g), data = df, family = binomial()))),
-    error = function(e) NULL)
+  # A fit that warns (lme4's convergence checks) does not converge; a singular
+  # fit only messages.
+  fit <- tryCatch(suppressMessages(
+    lme4::glmer(.y ~ 0 + V1 + V2 + V3 + V4 + (1 + V2 | .g), data = df, family = binomial())),
+    warning = function(w) NULL, error = function(e) NULL)
   if (is.null(fit)) return(c(NA, NA, NA, NA, NA))
   b <- lme4::fixef(fit)[c("V2", "V4")]
   # vcov() as summary() calls it: the Hessian where one is usable, else rx. Naming
