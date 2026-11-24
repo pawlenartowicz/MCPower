@@ -6,7 +6,7 @@ from mcpower.spec.spec_builder import build_scenario_dict
 
 def test_default_scenarios_match_canonical():
     cfg = get_default_scenario_config()
-    assert set(cfg) == {"optimistic", "realistic", "doomer"}
+    assert set(cfg) == {"optimistic", "realistic", "pessimistic"}
     opt = cfg["optimistic"]
     assert opt["new_distributions"] == ["right_skewed", "left_skewed", "uniform"]
     assert opt["random_effect_dist"] == "normal"
@@ -26,7 +26,7 @@ def test_sampled_factor_proportions_default_and_override():
     defaults = get_default_scenario_config()
     assert defaults["optimistic"]["sampled_factor_proportions"] is False
     assert defaults["realistic"]["sampled_factor_proportions"] is True
-    assert defaults["doomer"]["sampled_factor_proportions"] is True
+    assert defaults["pessimistic"]["sampled_factor_proportions"] is True
 
     # Knob omitted in a custom scenario → exact-allocation default (False).
     assert (

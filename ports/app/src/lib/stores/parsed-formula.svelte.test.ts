@@ -35,7 +35,15 @@ describe('parsed-formula derivations', () => {
       outcome: 'y',
       predictors: ['x1', 'x2'],
       interaction_terms: [['x1', 'x2']],
+      interaction_only: [],
     });
+  });
+  it('marks predictors that appear only inside `:` as interaction-only', () => {
+    const colonOnly: FormulaParse = {
+      ...fp,
+      terms: [{ kind: 'interaction', vars: ['x1', 'x2'] }],
+    };
+    expect(toWireParsed(colonOnly).interaction_only).toEqual(['x1', 'x2']);
   });
   it('maps nested and slope REs to structured cluster terms', () => {
     const multi: FormulaParse = {

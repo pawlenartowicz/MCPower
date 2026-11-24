@@ -42,7 +42,14 @@ print(result.summary())
 ==================================================
 formula: satisfaction = treatment * age
 estimator: OLS  N=200  sims=1600  α=0.05  target=80%
-effects: treatment=0.50, age=0.30, treatment:age=0.35
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+treatment             0.50    0.218   0.446
+age                   0.30    0.261       —
+treatment:age         0.35    0.216       —
+───────────────────────────────────────────
+R² = 0.242
 
 Per-test power
 ───────────────────────────────────

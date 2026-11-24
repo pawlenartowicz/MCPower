@@ -2,8 +2,8 @@
 // Delegates to the @mcpower/engine-wasm worker pool (resolved via a Vite alias
 // to ports/wasm/src/index.ts). Exports the same surface as engine.ts so the
 // alias swap is transparent to every caller.
-import type { AppSpec, EffectDescriptor, EffectSize, EffectsFromData } from '$lib/domain/app-spec';
-export type { EffectDescriptor, EffectSize, EffectsFromData };
+import type { AppSpec, EffectDescriptor, EffectSize, EffectsFromData, EffectMoments } from '$lib/domain/app-spec';
+export type { EffectDescriptor, EffectSize, EffectsFromData, EffectMoments };
 import type { SampleSizeMethod, ProgressEvent, FormulaParse } from '$lib/domain/result';
 import {
   findPower as poolFindPower,
@@ -13,6 +13,7 @@ import {
   parseFormula as poolParseFormula,
   getEffectsFromData as poolGetEffectsFromData,
   effectSkeleton as poolEffectSkeleton,
+  effectMoments as poolEffectMoments,
 } from '@mcpower/engine-wasm';
 import type { FindPowerResponse, FindSampleSizeResponse } from './engine';
 
@@ -50,6 +51,11 @@ export async function getEffectsFromData(spec: AppSpec): Promise<EffectsFromData
 // Mirrors engine.ts effectSkeleton — see its JSDoc for the return contract.
 export async function effectSkeleton(spec: AppSpec): Promise<EffectDescriptor[]> {
   return poolEffectSkeleton(spec as never) as Promise<EffectDescriptor[]>;
+}
+
+// Mirrors engine.ts effectMoments — see its JSDoc for the return contract.
+export async function effectMoments(spec: AppSpec): Promise<EffectMoments> {
+  return poolEffectMoments(spec as never) as Promise<EffectMoments>;
 }
 
 // WASM workers are single-core by design — thread-count control is n/a.

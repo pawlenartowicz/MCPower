@@ -96,3 +96,17 @@ def test_unsupported_type_raises_typeerror():
     """A plain int (unsupported type) must raise TypeError with the right message."""
     with pytest.raises(TypeError, match="numpy array, list, pandas DataFrame, dict, or file path"):
         normalize_upload_input(42, None)
+
+
+def test_duplicate_column_names_rejected(tmp_path):
+    f = tmp_path / "d.csv"
+    f.write_text("a,a\n1,2\n3,4\n")
+    with pytest.raises(ValueError, match="more than one column named 'a'"):
+        normalize_upload_input(str(f))
+
+
+def test_duplicate_names_in_columns_rejected_for_file(tmp_path):
+    f = tmp_path / "d.csv"
+    f.write_text("p,q\n1,2\n3,4\n")
+    with pytest.raises(ValueError, match="more than one column named 'a'"):
+        normalize_upload_input(str(f), ["a", "a"])

@@ -609,7 +609,7 @@ pub fn generate_sim_data(
                             // stored = x - p; recover 0/1 (consistent with the NORTA
                             // 0/1 marginal).
                             let p = spec.var_params.get(j).copied().unwrap_or(0.0);
-                            if v + p >= 0.5 { 1.0 } else { 0.0 }
+                            crate::spec::recover_uploaded_binary(v, p)
                         }
                         // UploadedData / continuous: copy the standardized value directly.
                         _ => v,
@@ -3265,7 +3265,7 @@ mod tests {
         let spec = ols_spec_simple();
         let mut noisy = spec.clone();
         noisy.scenario = ScenarioPerturbations {
-            name: "doomer".into(),
+            name: "pessimistic".into(),
             correlation_noise_sd: 0.4,
             ..Default::default()
         };
@@ -3301,7 +3301,7 @@ mod tests {
         spec.target_indices = vec![1];
         let mut noisy = spec.clone();
         noisy.scenario = ScenarioPerturbations {
-            name: "doomer".into(),
+            name: "pessimistic".into(),
             correlation_noise_sd: 0.4,
             ..Default::default()
         };
@@ -4854,7 +4854,7 @@ mod tests {
             opt.residual_dist = dist;
             let mut scen = opt.clone();
             scen.scenario = ScenarioPerturbations {
-                name: "doomer".into(),
+                name: "pessimistic".into(),
                 correlation_noise_sd: 0.4,
                 ..Default::default()
             };

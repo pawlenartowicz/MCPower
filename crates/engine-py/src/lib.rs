@@ -147,7 +147,7 @@ fn find_sample_size(
 
 // Mirrors engine-r's `orchestrator_err` (progress.rs) — keep the error→host
 // message mapping in step (both collapse cancellation to the host's interrupt).
-fn orchestrator_err_to_py(e: engine_orchestrator::OrchestratorError) -> PyErr {
+pub(crate) fn orchestrator_err_to_py(e: engine_orchestrator::OrchestratorError) -> PyErr {
     use engine_orchestrator::OrchestratorError as E;
     match e {
         E::Engine(inner) => crate::errors::engine_err_to_py(inner),
@@ -211,6 +211,10 @@ fn _engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_function(wrap_pyfunction!(spec_builder_bridge::split_assignments, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        spec_builder_bridge::standardized_effects,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(plot_bridge::power_plot_set_json, m)?)?;
     m.add_function(wrap_pyfunction!(plot_bridge::sample_size_plot_set_json, m)?)?;
     m.add_function(wrap_pyfunction!(plot_bridge::plot_theme, m)?)?;

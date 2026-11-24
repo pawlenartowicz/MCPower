@@ -1,11 +1,12 @@
 <script lang="ts">
 // Top app bar: MCPower wordmark, FamilyRibbon selector, and chrome action buttons
-// (Settings, History, Tutorial). On narrow viewports it splits into two rows —
+// (Reset, Settings, History, Tutorial, Report a bug). On narrow viewports it splits into two rows —
 // brand + compact icon chrome, then a full-width family ribbon — so the header
 // fits a phone instead of overflowing the viewport and shrinking the whole page.
 import Bug from '@lucide/svelte/icons/bug';
 import GraduationCap from '@lucide/svelte/icons/graduation-cap';
 import History from '@lucide/svelte/icons/history';
+import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 import Settings from '@lucide/svelte/icons/settings';
 import { uiStore } from '$lib/stores/ui.svelte';
 import { openExternal, reportUrl, DOCS_BASE_URL } from '$lib/content/render-doc';
@@ -16,6 +17,8 @@ import Logo from './Logo.svelte';
 let { narrow = false, collapsed = false }: { narrow?: boolean; collapsed?: boolean } = $props();
 
 const chromeActions = [
+  // Resets the whole active-family setup (formula, effects, run settings), not just the formula.
+  { label: 'Reset', Icon: RotateCcw, onClick: () => (uiStore.resetConfirmOpen = true) },
   { label: 'Settings', Icon: Settings, onClick: () => (uiStore.settingsOpen = true) },
   { label: 'History', Icon: History, onClick: () => (uiStore.historyOpen = true) },
   { label: 'Tutorial', Icon: GraduationCap, onClick: () => openExternal(`${DOCS_BASE_URL}/tutorial-app/index`) },

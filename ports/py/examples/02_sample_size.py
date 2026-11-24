@@ -39,7 +39,7 @@ print(result.summary())
 # same view shown inline in Jupyter. Requires: pip install mcpower[plot]
 # result.save_plot("curve.png")
 
-# 6. Robustness — the optimistic / realistic / doomer sweep (see 01) applied to
+# 6. Robustness — the optimistic / realistic / pessimistic sweep (see 01) applied to
 #    the sample-size search: the required N under each scenario.
 print("\n>>> model.find_sample_size(target_test='intervention', from_size=30, to_size=400, by=20, scenarios=True)")
 model.find_sample_size(

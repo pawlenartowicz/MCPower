@@ -65,6 +65,7 @@ export function onThemeChange(cb: () => void): () => void {
  */
 export function buildVegaConfig(c: ChartColors): Record<string, unknown> {
   return {
+    font: 'Manrope, ui-sans-serif, system-ui, sans-serif',
     background: 'transparent',
     view: { stroke: 'transparent' },
     range: { category: [c.chart1, c.chart2, c.chart3, c.chart4, c.chart5] },
@@ -87,11 +88,20 @@ export function buildVegaConfig(c: ChartColors): Record<string, unknown> {
  * helper in ports/wasm/src/index.ts — ports never import from each other so
  * the tiny helper is copied here.
  */
-function deepMerge(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
+function deepMerge(
+  base: Record<string, unknown>,
+  overlay: Record<string, unknown>,
+): Record<string, unknown> {
   for (const [key, value] of Object.entries(overlay)) {
     const existing = base[key];
-    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing) &&
-        value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    if (
+      existing !== null &&
+      typeof existing === 'object' &&
+      !Array.isArray(existing) &&
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value)
+    ) {
       deepMerge(existing as Record<string, unknown>, value as Record<string, unknown>);
     } else {
       base[key] = value;

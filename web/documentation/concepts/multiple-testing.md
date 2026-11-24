@@ -54,7 +54,7 @@ Both kinds are available for linear models fitted with OLS only. A logistic, Poi
 
 Because a correction shrinks the alpha each test sees, the **corrected power** is what you should size a multi-coefficient study against — not the uncorrected number. MCPower computes both, so you can see exactly how much power a correction costs. The correction is also effectively free at runtime: the adjusted critical values are worked out once, before the simulations run, so comparing corrections doesn't slow anything down.
 
-Related: [[concepts/effect-sizes|factor contrasts]] (where post-hoc comparisons come from) and [[concepts/sensitivity-analysis|sensitivity analysis]] (robustness of the corrected estimate). For the exact call and worked output, see the multiple-testing tutorial for your port.
+Related: [[concepts/effect-sizes|factor contrasts]] (where post-hoc comparisons come from) and [[concepts/robustness-analysis|robustness analysis]] (robustness of the corrected estimate). For the exact call and worked output, see the multiple-testing tutorial for your port.
 
 ## References
 

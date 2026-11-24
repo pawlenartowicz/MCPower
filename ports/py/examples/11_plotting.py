@@ -87,7 +87,7 @@ print("\n>>> curve.save_plot('power_curve.html')  # stacked HTML, all blocks")
 curve.save_plot("power_curve.html")
 print("  saved power_curve.html")
 
-# 9. Scenarios. scenarios=True runs the built-in optimistic / realistic / doomer
+# 9. Scenarios. scenarios=True runs the built-in optimistic / realistic / pessimistic
 #    assumptions. On find_power that's grouped bars (one group per scenario)...
 scen = model.find_power(
     sample_size=120, target_test="all", scenarios=True, verbose=False

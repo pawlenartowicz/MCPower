@@ -44,17 +44,17 @@ separately.
 
 ## If you'd rather have…
 
-- [[ols/ols-07]] — Only two groups instead of three: an independent t-test
+- [[ols/ols-07|Two groups as regression (independent t-test)]] — Only two groups instead of three: an independent t-test
   recast as regression with a single dummy.
-- [[anova/anova-01]] — Same 3+ group structure, but you want the omnibus
+- [[anova/anova-01|One-way ANOVA, omnibus F-test across 3+ groups]] — Same 3+ group structure, but you want the omnibus
   F-test of overall group differences rather than per-dummy coefficients.
-- [[anova/anova-02]] — Three-level group factor where you also want all
+- [[anova/anova-02|One-way ANOVA, all pairwise post-hoc comparisons]] — Three-level group factor where you also want all
   pairwise post-hoc comparisons, not just the dummy contrasts vs the reference.
-- [[ols/ols-14]] — Same dummy-coded factor but interacting with a continuous
+- [[ols/ols-14|Factor interacting with a continuous predictor]] — Same dummy-coded factor but interacting with a continuous
   predictor (moderation).
-- [[ols/ols-15]] — Two categorical predictors interacting: a factorial design
+- [[ols/ols-15|Two interacting categorical predictors (2x2 factorial)]] — Two categorical predictors interacting: a factorial design
   as regression.
-- [[glm/glm-03]] — Same multi-level categorical predictor but on a binary
+- [[glm/glm-03|Logistic regression with a categorical predictor]] — Same multi-level categorical predictor but on a binary
   outcome (logistic).
 
 ## Copy-paste setup

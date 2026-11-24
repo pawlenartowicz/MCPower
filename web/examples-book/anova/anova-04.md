@@ -45,13 +45,13 @@ reported for each.
 
 ## If you'd rather have…
 
-- [[anova/anova-05]] — Add a third factor: three-way factorial ANOVA (2x2x2)
+- [[anova/anova-05|Three-way factorial ANOVA (2x2x2)]] — Add a third factor: three-way factorial ANOVA (2x2x2)
   with all main effects and interactions.
-- [[anova/anova-06]] — Keep the two-way factorial but adjust for a continuous
+- [[anova/anova-06|Two-way factorial ANCOVA, covariate-adjusted]] — Keep the two-way factorial but adjust for a continuous
   covariate (factorial ANCOVA).
-- [[anova/anova-01]] — Drop to a single factor: one-way ANOVA omnibus across
+- [[anova/anova-01|One-way ANOVA, omnibus F-test across 3+ groups]] — Drop to a single factor: one-way ANOVA omnibus across
   3+ groups.
-- [[ols/ols-15]] — Same two interacting categorical predictors framed as a
+- [[ols/ols-15|Two interacting categorical predictors (2x2 factorial)]] — Same two interacting categorical predictors framed as a
   regression rather than an ANOVA.
 
 ## Copy-paste setup

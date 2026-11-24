@@ -22,6 +22,16 @@ def value_to_label(v: Any) -> str:
     return str(int(fv)) if fv == int(fv) else str(fv)
 
 
+def _check_unique_names(names) -> None:
+    seen = set()
+    for n in names:
+        if n in seen:
+            raise ValueError(
+                f"uploaded data has more than one column named '{n}'; rename or remove the duplicates"
+            )
+        seen.add(n)
+
+
 def _read_file_to_dict(path: Path) -> Tuple[dict, List[str]]:
     """Read a CSV/TSV file into a column dict using stdlib csv.
 
@@ -56,6 +66,7 @@ def _read_file_to_dict(path: Path) -> Tuple[dict, List[str]]:
         return {}, []
 
     header = rows[0]
+    _check_unique_names(header)
     data_rows = rows[1:]
 
     col_dict: dict = {name: [] for name in header}
@@ -94,7 +105,7 @@ def normalize_upload_input(
 
     Raises:
         TypeError: unsupported *data* type.
-        ValueError: ragged columns, or *columns* length mismatch.
+        ValueError: ragged columns, *columns* length mismatch, or duplicate column names.
     """
     # --- file path (str or os.PathLike) ------------------------------------
     if isinstance(data, (str, os.PathLike)):
@@ -104,12 +115,14 @@ def normalize_upload_input(
                 raise ValueError(
                     f"columns length ({len(columns)}) must match file columns ({len(col_names)})"
                 )
+            _check_unique_names(columns)
             col_dict = {new: col_dict[old] for new, old in zip(columns, col_names)}
         return normalize_upload_input(col_dict, None)
 
     # --- pandas DataFrame (lazy, by module name) ---------------------------
     if _is_module(data, "pandas"):
         names = list(data.columns)
+        _check_unique_names(names)
         # ndarray methods → column-major python lists, no numpy import
         columns_data = data.values.T.tolist()
         return columns_data, names
@@ -141,6 +154,7 @@ def normalize_upload_input(
             columns = [f"column_{i + 1}" for i in range(n_cols)]
         if len(columns) != n_cols:
             raise ValueError(f"columns length ({len(columns)}) must match data columns ({n_cols})")
+        _check_unique_names(columns)
         return columns_data, list(columns)
 
     # --- unsupported --------------------------------------------------------

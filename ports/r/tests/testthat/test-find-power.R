@@ -226,30 +226,30 @@ test_that("logit scenario analysis runs (gate removed)", {
   out <- paste(capture.output(print(res)), collapse = "\n")
   expect_match(out, "optimistic")
   expect_match(out, "realistic")
-  expect_match(out, "doomer")
+  expect_match(out, "pessimistic")
 })
 
 test_that("OLS on clustered data runs the scenario analysis", {
   # Data generation draws the random effects of a clustered OLS model as for
-  # a mixed model, so the port hands the engine realistic and doomer
+  # a mixed model, so the port hands the engine realistic and pessimistic
   # scenarios with a nonzero ICC jitter, the engine accepts them, and power
-  # falls from optimistic to realistic to doomer.
+  # falls from optimistic to realistic to pessimistic.
   m <- MCPower$new("y ~ x + (1|g)")$set_effects("x=0.3")
   m$set_cluster("g", ICC = 0.2, n_clusters = 10L)
   priv <- m$.__enclos_env__$private
   priv$apply()
   payload <- mcpower:::.to_linear_spec_list(
-    priv$registry, c("realistic", "doomer"), alpha = 0.05, correction = NULL,
+    priv$registry, c("realistic", "pessimistic"), alpha = 0.05, correction = NULL,
     target_test = NULL, heteroskedasticity = list(driver_var_index = NULL),
     residual_name = "normal", max_failed = 1.0, test_formula = NULL,
     scenario_configs = priv$scenario_configs)
   expect_true(all(vapply(payload$scenarios, function(sc) sc$icc_noise_sd > 0, NA)))
   res <- m$find_power(100, n_sims = 200, seed = 2137, scenarios = TRUE,
                       verbose = FALSE, progress_callback = FALSE)
-  p <- vapply(c("optimistic", "realistic", "doomer"),
+  p <- vapply(c("optimistic", "realistic", "pessimistic"),
               function(nm) res$scenarios[[nm]]$power_uncorrected[[1]][[1]], 0)
   expect_gt(p[["optimistic"]], p[["realistic"]])
-  expect_gt(p[["realistic"]], p[["doomer"]])
+  expect_gt(p[["realistic"]], p[["pessimistic"]])
 })
 
 test_that("tukey is now accepted (guard removed)", {
@@ -263,6 +263,9 @@ test_that("tukey is now accepted (guard removed)", {
   expect_true(length(res$power_uncorrected) >= 1L)
 })
 
+# Printed lines after the effects block (which ends at the R² line).
+.after_effects <- function(out) out[(grep("^R²", out)[1] + 1L):length(out)]
+
 test_that("tukey: a non-factor target has NA corrected power and prints n/a", {
   m <- MCPower$new("y ~ x + f")$set_variable_type("f=(factor,3)")$
     set_effects("x=0.3, f[2]=0.3, f[3]=0.4")
@@ -273,7 +276,7 @@ test_that("tukey: a non-factor target has NA corrected power and prints n/a", {
   expect_identical(pc[[1]], NA_real_)
   expect_true(all(pc[2:3] > 0 & pc[2:3] < 1))
   expect_identical(res$ci_corrected[[1]][[1]], c(NA_real_, NA_real_))
-  out <- capture.output(print(res))
+  out <- .after_effects(capture.output(print(res)))
   expect_match(grep("^ *x ", out, value = TRUE), "n/a")
   expect_no_match(grep("^ *2 ", out, value = TRUE), "n/a")  # factor level f[2]
 })
@@ -287,7 +290,7 @@ test_that("tukey: a non-factor target has no required N", {
   expect_true(is.na(res$first_achieved[["0"]]))
   expect_null(res$fitted[["0"]])
   expect_false(is.null(res$fitted[["1"]]))
-  out <- capture.output(print(res))
+  out <- .after_effects(capture.output(print(res)))
   expect_match(grep("^ *x ", out, value = TRUE), "n/a *$")
   # The corrected all-targets and joint views are not applicable as a whole.
   expect_true(any(out == "First N achieving all targets: n/a"))

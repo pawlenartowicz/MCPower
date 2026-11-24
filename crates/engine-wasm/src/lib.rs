@@ -206,6 +206,17 @@ pub fn effect_skeleton(spec_json: &str) -> Result<String, JsError> {
     engine_app_spec::effect_skeleton_json(&spec).map_err(err)
 }
 
+// ---- effect moments: standardized effects beside the effect inputs ----
+/// The β-free moments behind the standardized β, Cohen's d and model R² of
+/// `spec_json`'s generating model, as JSON (`{descriptors, moments}`; see
+/// `engine_app_spec::effect_moments_json`). Mirrors the Tauri
+/// `effect_moments_cmd` command.
+#[wasm_bindgen]
+pub fn effect_moments(spec_json: &str) -> Result<String, JsError> {
+    let spec: AppSpec = serde_json::from_str(spec_json).map_err(err)?;
+    engine_app_spec::effect_moments_json(&spec).map_err(err)
+}
+
 // ---- upload: recover effects from data ----
 /// Effect-recovery preview fitted from the spec's uploaded data, as JSON: the
 /// `EffectsFromData` object `{ effects, cluster_icc, baseline_probability }`

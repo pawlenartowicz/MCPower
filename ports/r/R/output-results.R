@@ -173,6 +173,21 @@
 # label/header metadata the report renderer needs (mirrors Python make_*_result).
 .make_result <- function(raw, meta, kind) {
   cls <- if (kind == "find_sample_size") "mcpower_sample_size_result" else "mcpower_result"
+  # result$standardized_effects: standardized β, Cohen's d and model R² of the
+  # effects this run simulated, keyed by effect name; NULL where undefined.
+  # Mirrors Python's PowerResult.standardized_effects.
+  if (!is.null(meta$effect_names)) {
+    n <- length(meta$effect_names)
+    std_beta <- meta$std_beta %||% vector("list", n)
+    cohen_d <- meta$cohen_d %||% vector("list", n)
+    raw$standardized_effects <- list(
+      effects = setNames(lapply(seq_len(n), function(i) {
+        list(input = as.numeric(meta$effect_sizes[[i]]), std_beta = std_beta[[i]],
+             cohen_d = cohen_d[[i]])
+      }), meta$effect_names),
+      r2 = meta$r2
+    )
+  }
   attr(raw, "mcpower_meta") <- meta
   attr(raw, "mcpower_kind") <- kind
   class(raw) <- c(cls, class(raw))

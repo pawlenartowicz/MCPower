@@ -1,6 +1,6 @@
 ---
 title: "ANOVA power analysis - MCPower app"
-description: "ANOVA power & sample-size analysis in the MCPower app - factorial designs, post-hoc corrections, and sensitivity analysis by Monte Carlo simulation."
+description: "ANOVA power & sample-size analysis in the MCPower app - factorial designs, post-hoc corrections, and robustness analysis by Monte Carlo simulation."
 ---
 # ANOVA power (app)
 
@@ -34,15 +34,15 @@ Click ⚙ on a factor card to open its Advanced dialog. Here you can:
 > observations, MCPower warns before simulating and excludes that factor at
 > that N (its effects report power 0). The Diagnostics panel names the factor
 > and the minimum N needed. Details:
-> [[concepts/limitations#Sparse factor levels at small N]].
+> [[concepts/limitations#Sparse factor levels at small N|Sparse factor levels at small N]].
 
 ## 2. Add covariates (optional)
 
 Click **Add covariate** to create a covariate card; covariates are auto-named cov1, cov2, …. Unlike factor cards, the **kind** badge is switchable — choose **continuous**, **binary**, or **factor**. Set the standardised effect size in the card (continuous benchmarks: **0.10 / 0.25 / 0.40**; binary or factor: **0.20 / 0.50 / 0.80**). This is an ANCOVA design: the covariate is included as a predictor to adjust for. See [[concepts/variable-types|variable types]].
 
-## 3. Sensitivity analysis (scenarios)
+## 3. Robustness analysis (scenarios)
 
-The **Sensitivity analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/sensitivity-analysis|sensitivity analysis]].
+The **Robustness analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations), and **Pessimistic** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Pessimistic clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/robustness-analysis|robustness analysis]].
 
 ## 4. Optional settings
 

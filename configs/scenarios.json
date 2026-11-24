@@ -23,7 +23,7 @@
     "random_effect_df": 10,
     "icc_noise_sd": 0.15
   },
-  "doomer": {
+  "pessimistic": {
     "heterogeneity": 0.4,
     "heteroskedasticity_ratio": 4.0,
     "correlation_noise_sd": 0.3,

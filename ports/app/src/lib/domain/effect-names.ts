@@ -5,6 +5,8 @@
 
 import { BENCHMARKS } from '$lib/configs/app-config';
 import { parsedFormulaStore } from '$lib/stores/parsed-formula.svelte';
+import { familyStore } from '$lib/stores/family.svelte';
+import type { EffectDescriptor } from './app-spec';
 import type { EffectRow, FamilyConfig, VariableKind, VariableRow } from './family';
 
 export function factorLevels(v: VariableRow | undefined): string[] {
@@ -274,4 +276,39 @@ export function presetsFor(
   if (name.includes(':')) return CONTINUOUS_PRESETS;
   const v = variables.find((x) => x.name === name);
   return v && (v.kind === 'binary' || v.kind === 'factor') ? COHEN_PRESETS : CONTINUOUS_PRESETS;
+}
+
+// Render one EffectDescriptor to a display name using the port's label store.
+// Mirrors Python _render_descriptor / _factor_label (engine-py report).
+export function renderDescriptor(desc: EffectDescriptor, varLevels: Map<string, string[]>): string {
+  if (desc.kind === 'intercept') return '(Intercept)';
+  if (desc.kind === 'continuous') return desc.predictor;
+  if (desc.kind === 'factor_level') {
+    const levels = varLevels.get(desc.factor) ?? [];
+    const label = (desc.level >= 0 && desc.level < levels.length)
+      ? levels[desc.level]!
+      : String(desc.level + 1);
+    return `${desc.factor}[${label}]`;
+  }
+  // interaction
+  return desc.components.map((c) => renderDescriptor(c, varLevels)).join(':');
+}
+
+// Build a name → levels map from the live familyStore config so skeleton
+// rendering uses whatever labels the user has typed on the card.
+export function buildVarLevels(): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  // We look up the active config variables; for history replays with no live
+  // config this returns an empty map and skeleton renders index+1 names.
+  try {
+    const cfg = familyStore.byFamily[familyStore.active];
+    for (const v of cfg.variables) {
+      if (v.kind === 'factor' && Array.isArray(v.levels) && v.levels.length > 0) {
+        map.set(v.name, factorLevels(v));
+      }
+    }
+  } catch {
+    // No live config — fall back to empty map (skeleton renders index+1 names).
+  }
+  return map;
 }

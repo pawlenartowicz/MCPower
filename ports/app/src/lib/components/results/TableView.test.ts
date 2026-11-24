@@ -376,7 +376,7 @@ describe('TableView — multi-scenario find-power layout (B4)', () => {
 
   it('renders per-scenario columns and a Δ column when the run fans out to >1 scenario', () => {
     const optimistic = powerResult([0.85, 0.78]);
-    const doomer = powerResult([0.55, 0.40]);
+    const pessimistic = powerResult([0.55, 0.40]);
     const tab = {
       id: 'multi-tab',
       label: 'Run 1',
@@ -389,7 +389,7 @@ describe('TableView — multi-scenario find-power layout (B4)', () => {
       // The baseline is not first: Δ must follow REPORT_CONFIG's preferred
       // baseline label ('optimistic'), not the first scenario.
       scenarios: [
-        ['doomer', doomer],
+        ['pessimistic', pessimistic],
         ['optimistic', optimistic],
       ],
     } as RunTab;
@@ -398,7 +398,7 @@ describe('TableView — multi-scenario find-power layout (B4)', () => {
     const headers = [...getByTestId('summary-table').querySelectorAll('thead th')].map((th) =>
       th.textContent?.trim(),
     );
-    expect(headers).toEqual(['Effect', 'doomer', 'optimistic', 'Δ', 'Target']);
+    expect(headers).toEqual(['Effect', 'pessimistic', 'optimistic', 'Δ', 'Target']);
     // The multi layout drops the single-scenario "95% CI" column.
     expect(() => getByText('95% CI')).toThrow();
     // Δ = worst scenario − baseline (optimistic); Target is judged on the baseline.

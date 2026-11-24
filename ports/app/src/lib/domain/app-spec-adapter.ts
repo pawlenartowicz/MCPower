@@ -235,8 +235,13 @@ function projectCommon(
   const interactionEffectNames = parsed.interaction_terms.flatMap((vars) =>
     expandInteraction(vars, varMap),
   );
+  // A `:`-only predictor has no main term, so no main effect is sent; its
+  // stale main-effect rows stay "known" below so they don't raise an error.
+  const interactionOnly = new Set(parsed.interaction_only ?? []);
   const validEffectNames = new Set<string>([
-    ...allPredictors.flatMap((name) => expandMainEffect(varMap.get(name), name, false)),
+    ...allPredictors
+      .filter((name) => !interactionOnly.has(name))
+      .flatMap((name) => expandMainEffect(varMap.get(name), name, false)),
     ...interactionEffectNames,
   ]);
 
@@ -411,12 +416,18 @@ function projectAnova(config: FamilyConfig): AdaptResult {
     return { spec: null, errors: ['ANOVA needs at least one factor'], warnings: [] };
   }
   const covariateRows = config.variables.filter((v) => v.role === 'covariate');
+  // Renaming a card can collide with another; the engine would see `F1 + F1`.
+  const names = [...factorRows, ...covariateRows].map((v) => v.name);
+  const dup = names.find((n, i) => names.indexOf(n) < i);
+  if (dup !== undefined) {
+    return { spec: null, errors: [`duplicate variable name '${dup}'`], warnings: [] };
+  }
 
   // Build the wire ParsedFormula directly from the structured rows — no formula
   // string, no parser. Factors first, then covariates; no interaction terms.
   const parsed: ParsedFormula = {
     outcome: 'y',
-    predictors: [...factorRows, ...covariateRows].map((v) => v.name),
+    predictors: names,
     interaction_terms: [],
   };
 

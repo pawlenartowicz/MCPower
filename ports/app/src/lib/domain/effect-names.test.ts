@@ -13,7 +13,14 @@ vi.mock('$lib/stores/parsed-formula.svelte', async (importOriginal) => {
 });
 
 import { BENCHMARKS } from '$lib/configs/app-config';
-import { effectGroups, effectNames, presetsFor, reconcileTestSelection } from './effect-names';
+import { familyStore } from '$lib/stores/family.svelte';
+import {
+  buildVarLevels,
+  effectGroups,
+  effectNames,
+  presetsFor,
+  reconcileTestSelection,
+} from './effect-names';
 import { defaultFamilyConfig, type VariableRow } from './family';
 
 describe('effectNames', () => {
@@ -419,5 +426,16 @@ describe('reconcileTestSelection', () => {
     };
     reconcileTestSelection(cfg, ['g[1]', 'g[2]', 'g[3]']);
     expect(cfg.contrasts).toEqual([{ positiveName: 'g[2]', negativeName: 'g[3]', enabled: true }]);
+  });
+});
+
+describe('buildVarLevels', () => {
+  it('names a blank level label by its number, as the engine adapter does', () => {
+    familyStore.active = 'regression';
+    familyStore.byFamily.regression.variables = [
+      { kind: 'factor', name: 'g', nLevels: 3, levels: ['a', '', 'c'] },
+    ];
+    expect(buildVarLevels().get('g')).toEqual(['a', '2', 'c']);
+    familyStore.resetAll();
   });
 });

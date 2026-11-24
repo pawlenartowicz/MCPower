@@ -131,7 +131,7 @@ def test_short_form_correction_adds_columns():
 def test_short_form_scenarios_no_delta():
     m = _ols_model()
     s = str(m.find_power(sample_size=120, scenarios=True, verbose=False))
-    assert "optimistic" in s and "realistic" in s and "doomer" in s
+    assert "optimistic" in s and "realistic" in s and "pessimistic" in s
     assert "Δ" not in s and "pp" not in s  # drop is in summary()
     assert "scenarios:" in s
 

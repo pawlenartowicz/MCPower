@@ -330,7 +330,7 @@ def test_find_power_rejects_non_psd_correlation_every_scenario():  # APIC-83
     # structural guards and is rejected by the ENGINE — consistently across
     # scenarios, because the up-front PSD check sits before scenario dispatch.
     # Parity with the pre-cleanup Python message ("positive semi-definite").
-    for scenarios in (False, ["doomer"]):
+    for scenarios in (False, ["pessimistic"]):
         m = MCPower("y = x1 + x2 + x3")
         m.set_effects("x1=0.5, x2=0.3, x3=0.2")
         m.set_correlations(
@@ -446,7 +446,7 @@ def test_removed_residual_swap_keys_rejected(key, value):
 
 def test_residual_wire_carries_distribution_only():
     m = MCPower("y = x1").set_effects("x1=0.5").set_residual_distribution("high_kurtosis")
-    d = m._to_linear_spec_dict(["optimistic", "realistic", "doomer"])
+    d = m._to_linear_spec_dict(["optimistic", "realistic", "pessimistic"])
     assert d["residual"] == {"distribution": "high_kurtosis"}
     removed = {"residual_change_prob", "residual_dists", "residual_df"}
     assert all(not (removed & set(sc)) for sc in d["scenarios"])
@@ -462,7 +462,7 @@ def test_residual_choice_runs_under_every_preset():
     m = MCPower("y = x1").set_effects("x1=0.5").set_residual_distribution("high_kurtosis")
     r = m.find_power(sample_size=60, n_sims=50, seed=2137, scenarios=True,
                      progress_callback=False, verbose=False)
-    assert set(r["scenarios"]) == {"optimistic", "realistic", "doomer"}
+    assert set(r["scenarios"]) == {"optimistic", "realistic", "pessimistic"}
 
 
 # ---------------------------------------------------------------------------

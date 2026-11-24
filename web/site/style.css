@@ -563,19 +563,8 @@ a {
   text-underline-offset: 3px;
 }
 
-/* "Check you're on the latest version" nudge — a quiet left-accent callout. */
-.report-note {
-  margin-top: 1.5rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--primary);
-  border-radius: var(--radius);
-  background: var(--muted);
-  font-size: 0.9375rem;
-}
-
-/* Filed-confirmation banner above the form — mirrors .report-note but with a
-   green left-accent (the theme has no success colour; literal green, one site). */
+/* Filed-confirmation banner above the form — a quiet callout with a green
+   left-accent (the theme has no success colour; literal green, one site). */
 .report-success {
   margin-top: 1.5rem;
   padding: 0.75rem 1rem;

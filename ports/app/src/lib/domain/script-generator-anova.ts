@@ -8,6 +8,8 @@ import {
   toPortCorrection,
   buildConfigLines,
   buildFindCallLines,
+  buildScenarioLines,
+  scenariosOn,
 } from './script-generator-linear';
 import { SIMULATION } from '$lib/configs/app-config';
 
@@ -67,6 +69,7 @@ export function generateAnovaScript(
 
   // Run-config setters — omit values equal to port defaults; set_power takes percent
   for (const line of buildConfigLines(s, SIMULATION.n_sims.ols, lang)) lines.push(line);
+  for (const line of buildScenarioLines(s.scenarios, false, language)) lines.push(line);
 
   lines.push('');
 
@@ -99,7 +102,7 @@ export function generateAnovaScript(
   }
 
   const correction = toPortCorrection(s.correction);
-  for (const line of buildFindCallLines(lang, mode, params, targetTestArg, correction)) {
+  for (const line of buildFindCallLines(lang, mode, params, targetTestArg, correction, scenariosOn(s.scenarios))) {
     lines.push(line);
   }
 

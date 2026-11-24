@@ -1,4 +1,4 @@
-"""Tuning the scenario sweep; set_scenario_configs overrides the built-in optimistic/realistic/doomer presets and defines custom assumption sets that find_power then runs side by side."""
+"""Tuning the scenario sweep; set_scenario_configs overrides the built-in optimistic/realistic/pessimistic presets and defines custom assumption sets that find_power then runs side by side."""
 
 from mcpower import MCPower
 
@@ -11,7 +11,7 @@ model = MCPower("outcome = treatment + experience")
 model.set_effects("treatment=0.4, experience=0.3")
 model.set_variable_type("treatment=binary")
 
-# 2. The built-in sweep (toured in example 01): optimistic / realistic / doomer.
+# 2. The built-in sweep (toured in example 01): optimistic / realistic / pessimistic.
 print(">>> model.find_power(sample_size=150, target_test='all', scenarios=True)")
 model.find_power(sample_size=150, target_test="all", scenarios=True)
 

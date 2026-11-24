@@ -3,7 +3,7 @@
 // constructor family token and the baseline-value setter name/arg, so both
 // script-generator-poisson.ts and this file's own generateLogitScript delegate
 // to the shared generateGlmScript.
-import type { AppSpec, LogitSpec, PoissonSpec, LinearSpec } from './app-spec';
+import { formulaTerms, type AppSpec, type LogitSpec, type PoissonSpec, type LinearSpec } from './app-spec';
 import {
   toPortCorrection,
   buildVarTypeString,
@@ -14,17 +14,18 @@ import {
   buildTestsArg,
   pyEffectName,
   langFor,
+  buildUploadLines,
+  buildScenarioLines,
+  scenariosOn,
+  withoutUploadedTypes,
 } from './script-generator-linear';
 import type { ScriptParams, ScriptLanguage } from './script-generator-linear';
 import { SIMULATION } from '$lib/configs/app-config';
 
 /** Reconstruct formula string from ParsedFormula. Separator is `=` for Python, `~` for R. */
 function buildFormulaString(spec: LogitSpec | PoissonSpec, sep: string = '='): string {
-  const { outcome, predictors, interaction_terms } = spec.parsed_formula;
-  const parts: string[] = [...predictors];
-  for (const terms of interaction_terms) {
-    parts.push(terms.join(':'));
-  }
+  const { outcome } = spec.parsed_formula;
+  const parts = formulaTerms(spec.parsed_formula);
   return `${outcome} ${sep} ${parts.join(' + ')}`;
 }
 
@@ -44,7 +45,7 @@ function generateGlmScript(
   baselineSetter: string,
   baselineValue: number,
 ): string {
-  const s = spec;
+  const s = withoutUploadedTypes(spec);
 
   if (!s.parsed_formula?.outcome) {
     return '# Cannot generate script: missing formula\n';
@@ -62,6 +63,7 @@ function generateGlmScript(
   // Constructor — R uses `~`, Python uses `=`; family distinguishes from OLS.
   const formula = buildFormulaString(s, language === 'r' ? '~' : '=');
   lines.push(lang.construct(formula, family));
+  for (const line of buildUploadLines(s.csv, lang, params.data_filename)) lines.push(line);
 
   // Variable types — only when at least one non-numeric
   const varTypeStr = buildVarTypeString(s.var_types);
@@ -91,6 +93,7 @@ function generateGlmScript(
   // Run-config setters — omit values equal to port defaults; set_power takes percent.
   // Both logit and Poisson resolve to the OLS sims default.
   for (const line of buildConfigLines(s, SIMULATION.n_sims.ols, lang)) lines.push(line);
+  for (const line of buildScenarioLines(s.scenarios, false, language)) lines.push(line);
 
   lines.push('');
 
@@ -99,7 +102,16 @@ function generateGlmScript(
   const testsArg = buildTestsArg(s as LinearSpec);
   // agq is only >1 for a clustered GLMM; unclustered logit/Poisson carries the
   // default (1), so this stays omitted — threaded for symmetry with the mixed generator.
-  for (const line of buildFindCallLines(lang, mode, params, testsArg, correction, undefined, s.agq))
+  for (const line of buildFindCallLines(
+    lang,
+    mode,
+    params,
+    testsArg,
+    correction,
+    scenariosOn(s.scenarios),
+    undefined,
+    s.agq,
+  ))
     lines.push(line);
 
   return lines.join('\n') + '\n';

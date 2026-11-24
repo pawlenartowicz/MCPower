@@ -10,6 +10,7 @@ use engine_orchestrator::{
 fn sample_linear_spec() -> AppSpec {
     AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x1".into(), "x2".into()],
             interaction_terms: vec![],
@@ -55,6 +56,7 @@ fn sample_linear_spec() -> AppSpec {
 fn sample_logit_spec_for_driver() -> AppSpec {
     AppSpec::Logit(LogitSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x1".into(), "x2".into()],
             interaction_terms: vec![],

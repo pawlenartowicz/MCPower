@@ -74,7 +74,7 @@ A factor — detected or declared — can have at most 20 levels; a column with 
 > A level whose proportion times N falls below 5 observations cannot be
 > estimated — MCPower excludes the factor at that N and flags it in the
 > diagnostics; with the default exact allocation you are warned up front.
-> See [[limitations#Sparse factor levels at small N]].
+> See [[limitations#Sparse factor levels at small N|Sparse factor levels at small N]].
 
 **Pin rule.** Declaring any explicit continuous distribution — including explicit `"normal"` — pins that predictor against scenario distribution swaps. An unpinned predictor (left at the default) may be swapped to a non-normal shape by the `distribution_change_prob` knob. If you want a predictor to stay normal regardless of scenario, declare it explicitly.
 
@@ -94,13 +94,13 @@ The five valid names:
 
 There is no `df=` parameter on `set_residual_distribution`. The df of `high_kurtosis`, `right_skewed` and `left_skewed` is 10 in every scenario, and every shape is scaled to unit variance.
 
-The conceptual point is that **type, distribution shape, and residual shape are all part of your design assumptions**. The scenarios of [[concepts/sensitivity-analysis|sensitivity analysis]] perturb the predictors you leave at their defaults, while the residual stays as you set it. For the exact syntax in each port, see the tutorials.
+The conceptual point is that **type, distribution shape, and residual shape are all part of your design assumptions**. The scenarios of [[concepts/robustness-analysis|robustness analysis]] perturb the predictors you leave at their defaults, while the residual stays as you set it. For the exact syntax in each port, see the tutorials.
 
 ## Residuals and heteroskedasticity
 
 **Heteroskedasticity** means the residual variance is not constant — the spread of the noise depends on a predictor instead of being the same everywhere. Linear models assume the opposite (constant variance), so this is an assumption violation worth stress-testing. The **driver** control names the continuous predictor whose value scales that variance; set it with `set_heteroskedasticity_driver(var)`, where `var` is a continuous predictor or the predicted value (the default).
 
-The driver only says *which* predictor governs the spread. *How much* the variance changes along it is the ratio λ, which comes from the active scenario, not the model — so heteroskedasticity is exercised through sensitivity analysis. The driver is restricted to continuous predictors and applies to continuous outcomes, including linear mixed models.
+The driver only says *which* predictor governs the spread. *How much* the variance changes along it is the ratio λ, which comes from the active scenario, not the model — so heteroskedasticity is exercised through robustness analysis. The driver is restricted to continuous predictors and applies to continuous outcomes, including linear mixed models.
 
 ```python
 model.set_heteroskedasticity_driver("x1")
@@ -110,4 +110,4 @@ model.set_heteroskedasticity_driver("x1")
 model$set_heteroskedasticity_driver("x1")
 ```
 
-See the heteroskedasticity section of [[concepts/sensitivity-analysis|sensitivity analysis]] for what λ means, the preset values, and how to set a known ratio.
+See the heteroskedasticity section of [[concepts/robustness-analysis|robustness analysis]] for what λ means, the preset values, and how to set a known ratio.

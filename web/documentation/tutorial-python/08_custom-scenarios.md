@@ -1,12 +1,12 @@
 ---
-title: "Custom Scenarios for Sensitivity Analysis - Python"
-description: "Stress-test power assumptions in Python with MCPower: run optimistic, realistic, and doomer scenarios in one call to assess robustness of your sample size plan."
+title: "Custom Scenarios for Robustness Analysis - Python"
+description: "Stress-test power assumptions in Python with MCPower: run optimistic, realistic, and pessimistic scenarios in one call to assess robustness of your sample size plan."
 ---
 # Custom scenarios
 
 Every power number rests on a set of assumptions — specific effect sizes, a
 well-behaved residual structure, predictors drawn from the distributions you
-specified. [[concepts/sensitivity-analysis|Sensitivity analysis]] asks a harder
+specified. [[concepts/robustness-analysis|Robustness analysis]] asks a harder
 question: *if those assumptions are optimistic, how much do we lose?*
 
 MCPower answers it by re-running your analysis under alternative configurations
@@ -16,14 +16,14 @@ read robustness at a glance.
 ## The built-in sweep
 
 Pass `scenarios=True` to activate the built-in three-scenario sweep —
-**optimistic**, **realistic**, and **doomer**. The built-in profiles are
+**optimistic**, **realistic**, and **pessimistic**. The built-in profiles are
 calibrated to represent a plausible range of real-world conditions without
 requiring you to guess at parameter values:
 
 > [!note]
-> Sensitivity analysis works for [[04_logistic-regression|logistic models]] too —
+> Robustness analysis works for [[04_logistic-regression|logistic models]] too —
 > the same call with `family="logit"`. See
-> [[concepts/sensitivity-analysis|Sensitivity analysis]] for which knobs apply per
+> [[concepts/robustness-analysis|Robustness analysis]] for which knobs apply per
 > model family.
 
 <!-- example:08-builtin -->
@@ -44,16 +44,22 @@ print(result.summary())
 ==================================================
 formula: satisfaction = treatment + age
 estimator: OLS  N=150  sims=1600  α=0.05  target=80%
-effects: treatment=0.50, age=0.30
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+treatment             0.50    0.233   0.479
+age                   0.30    0.279       —
+───────────────────────────────────────────
+R² = 0.132
 
 Per-test power
-─────────────────────────────────────────────────────────────
-Test                 optimistic   realistic   doomer   Target
-─────────────────────────────────────────────────────────────
-Overall F                 98.9%       97.9%    94.9%      80%
-treatment                 86.4%       82.9%    76.2%      80%
-age                       95.2%       90.6%    82.2%      80%
-─────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────
+Test                 optimistic   realistic   pessimistic   Target
+──────────────────────────────────────────────────────────────────
+Overall F                 98.9%       97.9%         94.5%      80%
+treatment                 86.4%       82.8%         75.4%      80%
+age                       95.2%       90.5%         81.4%      80%
+──────────────────────────────────────────────────────────────────
 
 Power & 95% CI — optimistic
 ───────────────────────────────────────────
@@ -70,18 +76,18 @@ Power & 95% CI — realistic
 Test                 Power           CI 95%
 ───────────────────────────────────────────
 Overall F            97.9%   [97.0%, 98.5%]
-treatment            82.9%   [81.0%, 84.7%]
-age                  90.6%   [89.0%, 91.9%]
+treatment            82.8%   [80.9%, 84.6%]
+age                  90.5%   [89.0%, 91.8%]
 ───────────────────────────────────────────
 95% CIs are Monte-Carlo (Wilson), n_sims=1600.
 
-Power & 95% CI — doomer
+Power & 95% CI — pessimistic
 ───────────────────────────────────────────
 Test                 Power           CI 95%
 ───────────────────────────────────────────
-Overall F            94.9%   [93.8%, 95.9%]
-treatment            76.2%   [74.1%, 78.3%]
-age                  82.2%   [80.2%, 84.0%]
+Overall F            94.5%   [93.3%, 95.5%]
+treatment            75.4%   [73.3%, 77.5%]
+age                  81.4%   [79.5%, 83.3%]
 ───────────────────────────────────────────
 95% CIs are Monte-Carlo (Wilson), n_sims=1600.
 
@@ -95,12 +101,12 @@ k     Exactly   At least
 ────────────────────────
 
 Robustness  (Δ power vs baseline: optimistic)
-─────────────────────────────────────────
-Test                 realistic     doomer
-─────────────────────────────────────────
-treatment              -3.4 pp   -10.1 pp
-age                    -4.7 pp   -13.1 pp
-─────────────────────────────────────────
+────────────────────────────────────────────
+Test                 realistic   pessimistic
+────────────────────────────────────────────
+treatment              -3.6 pp      -10.9 pp
+age                    -4.7 pp      -13.8 pp
+────────────────────────────────────────────
 
 Plots: result.plot() to view, result.plot('chart.png') to save.
 ```
@@ -108,11 +114,11 @@ Plots: result.plot() to view, result.plot('chart.png') to save.
 
 The power table gains three columns, one per scenario. Power erodes as
 conditions worsen, and the two coefficients erode differently. `age` starts at
-95.2% under optimistic conditions, eases to 90.6% under realistic, and falls to
-82.2% under doomer; `treatment` slides from 86.4% to 82.9% to 76.2% — dipping
-below the 80% target by the doomer scenario. The **Robustness** section at the
-bottom makes the deltas explicit: by the doomer scenario `age` has lost 13.1
-percentage points and `treatment` 10.1. `age` is the more sensitive to departures
+95.2% under optimistic conditions, eases to 90.5% under realistic, and falls to
+81.4% under pessimistic; `treatment` slides from 86.4% to 82.8% to 75.4% — dipping
+below the 80% target by the pessimistic scenario. The **Robustness** section at the
+bottom makes the deltas explicit: by the pessimistic scenario `age` has lost 13.8
+percentage points and `treatment` 10.9. `age` is the more sensitive to departures
 from the idealised setup, but `treatment` — starting lower — is the one that
 slips under target first.
 
@@ -125,7 +131,7 @@ slips under target first.
 
 `set_scenario_configs` accepts a dict of dicts. Each key is a scenario name;
 each value is a dict of **knobs** to override. The merge has two branches:
-overriding a built-in name (`"optimistic"`, `"realistic"`, `"doomer"`) *updates
+overriding a built-in name (`"optimistic"`, `"realistic"`, `"pessimistic"`) *updates
 that preset* — knobs you don't set keep their preset values — while a brand-new
 name inherits the optimistic values (except `truth_start`, which starts off) and
 applies only the overrides you give.
@@ -142,7 +148,7 @@ The available knobs are:
 
 Knob names are validated up front: an unknown or misspelled key raises a
 `ValueError` listing the valid keys. See
-[[concepts/sensitivity-analysis|Sensitivity analysis]] for every knob's full
+[[concepts/robustness-analysis|Robustness analysis]] for every knob's full
 semantics.
 
 `sampled_factor_proportions` applies to every factor at once. To fix one
@@ -185,15 +191,21 @@ print(result.summary())
 ==================================================
 formula: satisfaction = treatment + age
 estimator: OLS  N=150  sims=1600  α=0.05  target=80%
-effects: treatment=0.50, age=0.30
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+treatment             0.50    0.233   0.479
+age                   0.30    0.279       —
+───────────────────────────────────────────
+R² = 0.132
 
 Per-test power
 ──────────────────────────────────────────────────────────────────
 Test                 optimistic   realistic   stress_test   Target
 ──────────────────────────────────────────────────────────────────
-Overall F                 98.9%       97.8%         93.0%      80%
-treatment                 86.4%       82.9%         73.5%      80%
-age                       95.2%       90.3%         78.2%      80%
+Overall F                 98.9%       97.6%         93.0%      80%
+treatment                 86.4%       82.6%         73.5%      80%
+age                       95.2%       89.7%         78.2%      80%
 ──────────────────────────────────────────────────────────────────
 
 Power & 95% CI — optimistic
@@ -210,9 +222,9 @@ Power & 95% CI — realistic
 ───────────────────────────────────────────
 Test                 Power           CI 95%
 ───────────────────────────────────────────
-Overall F            97.8%   [96.9%, 98.4%]
-treatment            82.9%   [81.0%, 84.6%]
-age                  90.3%   [88.8%, 91.7%]
+Overall F            97.6%   [96.8%, 98.3%]
+treatment            82.6%   [80.7%, 84.4%]
+age                  89.7%   [88.1%, 91.1%]
 ───────────────────────────────────────────
 95% CIs are Monte-Carlo (Wilson), n_sims=1600.
 
@@ -239,8 +251,8 @@ Robustness  (Δ power vs baseline: optimistic)
 ────────────────────────────────────────────
 Test                 realistic   stress_test
 ────────────────────────────────────────────
-treatment              -3.5 pp      -12.9 pp
-age                    -4.9 pp      -17.0 pp
+treatment              -3.7 pp      -12.9 pp
+age                    -5.6 pp      -17.0 pp
 ────────────────────────────────────────────
 
 Plots: result.plot() to view, result.plot('chart.png') to save.
@@ -269,8 +281,8 @@ column in both is nearly identical (~82% / ~90% for treatment/age) because
 overriding a built-in name *updates* the preset: this custom `realistic` keeps
 the realistic values for every knob it doesn't set and only raises
 `heteroskedasticity_ratio` (2.0 → 3.0) and `correlation_noise_sd` (0.15 → 0.20).
-The `stress_test` column replaces `doomer` and pushes harder on `heterogeneity`
-and `distribution_change_prob`, landing near the doomer numbers for `age` (~80%
+The `stress_test` column replaces `pessimistic` and pushes harder on `heterogeneity`
+and `distribution_change_prob`, landing near the pessimistic numbers for `age` (~80%
 in both) while being explicitly designed around what you know about your domain.
 That is the point of custom scenarios: you control what "pessimistic" means,
 rather than accepting a one-size-fits-all profile.

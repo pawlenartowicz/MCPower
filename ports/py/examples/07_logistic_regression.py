@@ -43,7 +43,7 @@ print(result.summary())
 print("\n>>> model.find_sample_size(target_test='dose', from_size=100, to_size=500, by=25)")
 model.find_sample_size(target_test="dose", from_size=100, to_size=500, by=25)
 
-# 8. Scenario sweep — works for logistic models too. Under realistic/doomer,
+# 8. Scenario sweep — works for logistic models too. Under realistic/pessimistic,
 #    heterogeneity becomes log-odds jitter: each effect and the baseline odds
 #    wobble by roughly ±20% / ±40% per observation, and the predictor-side
 #    knobs (correlation noise, distribution swaps) apply as usual. Residual

@@ -155,7 +155,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.27,
         "n": 50,
         "power": 0.31,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_1",
         "target": "target_1"
       },
@@ -164,7 +164,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.12,
         "n": 50,
         "power": 0.15,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_2",
         "target": "target_2"
       },
@@ -173,7 +173,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.44,
         "n": 100,
         "power": 0.48,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_1",
         "target": "target_1"
       },
@@ -182,7 +182,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.24,
         "n": 100,
         "power": 0.28,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_2",
         "target": "target_2"
       },
@@ -191,7 +191,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.57,
         "n": 150,
         "power": 0.61,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_1",
         "target": "target_1"
       },
@@ -200,7 +200,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.37,
         "n": 150,
         "power": 0.41,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_2",
         "target": "target_2"
       },
@@ -209,7 +209,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.68,
         "n": 200,
         "power": 0.71,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_1",
         "target": "target_1"
       },
@@ -218,7 +218,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
         "ci_lo": 0.48,
         "n": 200,
         "power": 0.52,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": "target_2",
         "target": "target_2"
       }
@@ -230,7 +230,7 @@ expression: "parse(&sample_size_curve_spec(&multi_scenario_grid(), &opts))"
     "sort": [
       "optimistic",
       "realistic",
-      "doomer"
+      "pessimistic"
     ],
     "type": "nominal"
   },

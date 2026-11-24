@@ -43,7 +43,13 @@ print(summary(result))
 ==================================================
 formula: score ~ study + caffeine
 estimator: OLS  N=100  sims=1600  α=0.05  target=80%
-effects: study=0.30, caffeine=0.00
+───────────────────────────────────────
+Effect               Input   Std. β   d
+───────────────────────────────────────
+study                 0.30    0.287   —
+caffeine              0.00    0.000   —
+───────────────────────────────────────
+R² = 0.083
 
 Per-test power
 ───────────────────────────────────
@@ -98,7 +104,13 @@ print(summary(result))
 ==================================================
 formula: score ~ study + caffeine
 estimator: OLS  N=100  sims=1600  α=0.05  target=80%
-effects: study=0.30, caffeine=0.00
+───────────────────────────────────────
+Effect               Input   Std. β   d
+───────────────────────────────────────
+study                 0.30    0.287   —
+caffeine              0.00    0.000   —
+───────────────────────────────────────
+R² = 0.083
 
 Per-test power
 ───────────────────────────────────
@@ -153,7 +165,13 @@ print(summary(result))
 ==================================================
 formula: score ~ study + caffeine
 estimator: OLS  N=100  sims=1600  α=0.05  target=80%
-effects: study=0.30, caffeine=0.00
+───────────────────────────────────────
+Effect               Input   Std. β   d
+───────────────────────────────────────
+study                 0.30    0.287   —
+caffeine              0.00    0.000   —
+───────────────────────────────────────
+R² = 0.083
 
 Per-test power
 ───────────────────────────────────

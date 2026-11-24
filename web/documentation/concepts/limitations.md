@@ -107,7 +107,7 @@ specification.
 
 ## Heterogeneity imposes a power ceiling
 
-With heterogeneity turned on — the realistic and doomer scenarios, or any
+With heterogeneity turned on — the realistic and pessimistic scenarios, or any
 custom `heterogeneity > 0` — each simulated study draws its own true effect. At
 large values some of those studies draw essentially no effect (or the wrong
 sign), and those just can't be detected at any sample size. That puts a **hard
@@ -119,7 +119,7 @@ structural, not estimation noise, so keep it in mind.
 |---|---|---|
 | 0.0 | none | default optimistic |
 | 0.2 | ~99.99% | default realistic |
-| 0.4 | ~99% | default doomer |
+| 0.4 | ~99% | default pessimistic |
 | 0.5 | ~98% | custom |
 | 1.0 | ~84% | custom (extreme) |
 
@@ -130,7 +130,7 @@ ceiling, and a required-sample-size search will report it as unreachable at any
 N. When that happens, ask whether per-study heterogeneity is the right
 assumption: for a tightly controlled, single-population, single-protocol study
 where the effect is plausibly homogeneous, set `heterogeneity = 0` in that
-scenario (see [[concepts/sensitivity-analysis|sensitivity analysis]]) rather than
+scenario (see [[concepts/robustness-analysis|robustness analysis]]) rather than
 chasing a sample size that cannot move the ceiling.
 
 ## Same seed, different parallelism — slightly different numbers
@@ -198,7 +198,7 @@ level needs about 100 observations just to be estimable, well before it has
 any power.
 
 If you see this warning: increase N, raise the sparse level's proportion, or
-merge rare levels. See [[variable-types]] for setting factor proportions.
+merge rare levels. See [[variable-types|Variable types]] for setting factor proportions.
 
 ## Unequal exact factors in crossed designs
 
@@ -214,7 +214,7 @@ items the gap shrinks (1.7 points at 8 subjects and 4 items, N = 480).
 The cost to power is small: the factor's standard error grows by at most about
 0.6%, roughly half a point of power, in the designs checked. Sampled allocation
 (`set_factor_sampling("f", "sampled")`, and the default in realistic and
-doomer) has no lean, but its random imbalance is as large or larger, so it is
+pessimistic) has no lean, but its random imbalance is as large or larger, so it is
 not a better choice for this reason.
 
 ## Upload size depends on where MCPower runs

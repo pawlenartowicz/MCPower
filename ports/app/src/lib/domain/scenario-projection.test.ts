@@ -83,7 +83,7 @@ describe('projectScenario (mirrors Python build_scenario_dict)', () => {
     ).toBe(false);
   });
 
-  it('carries truth_start true and defaults missing values to false (optimistic warm-starts, realistic/doomer cold-start)', () => {
+  it('carries truth_start true and defaults missing values to false (optimistic warm-starts, realistic/pessimistic cold-start)', () => {
     expect(projectScenario(cfg({ name: 'optimistic', truth_start: true })).truth_start).toBe(true);
     expect(projectScenario(cfg({ name: 'realistic', truth_start: false })).truth_start).toBe(false);
     // Persisted pre-knob snapshots lack the field at runtime.

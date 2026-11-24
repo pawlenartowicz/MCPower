@@ -993,10 +993,10 @@ MCPower <- R6::R6Class(
     },
 
     #' @description Merge custom scenario configurations on top of the
-    #'   defaults. Scenarios are the named settings bundles of the sensitivity
+    #'   defaults. Scenarios are the named settings bundles of the robustness
     #'   analysis, run via \code{scenarios =} on \code{find_power} and
     #'   \code{find_sample_size}. A preset name (\code{optimistic},
-    #'   \code{realistic}, \code{doomer}) updates that preset; a new name
+    #'   \code{realistic}, \code{pessimistic}) updates that preset; a new name
     #'   inherits every key from \code{optimistic}, except \code{truth_start},
     #'   which starts \code{FALSE}, and then applies the overrides.
     #' @param configs Named list mapping a scenario name to a list of knob
@@ -1010,7 +1010,7 @@ MCPower <- R6::R6Class(
     #'   the data: \code{TRUE} seeds a mixed-model fit at the true random-effect
     #'   structure ("estimation is well-behaved"); \code{FALSE} starts it blind.
     #'   It is \code{TRUE} in \code{optimistic} and \code{FALSE} in
-    #'   \code{realistic} and \code{doomer}, and a new custom scenario starts
+    #'   \code{realistic} and \code{pessimistic}, and a new custom scenario starts
     #'   with it \code{FALSE} unless you set it. OLS and unclustered binary or
     #'   count fits ignore it.
     #' @return The \code{MCPower} object invisibly (for chaining).
@@ -1484,6 +1484,10 @@ MCPower <- R6::R6Class(
     # Captured after each build_contract_from_spec call; NULL until the first
     # find_power / find_sample_size call.  .build_report_meta reads this.
     skeleton_json = NULL,
+    # The spec JSON and contracts of the most recent build_contract_bytes call;
+    # .build_report_meta computes the standardized β / Cohen's d / R² from them
+    # (run paths only, so the debug paths that share the build skip the work).
+    last_build = NULL,
 
     # model.py _set_upload_types: write each matched uploaded column's
     # detected type into the registry: factor levels and labels from the data
@@ -2059,6 +2063,28 @@ MCPower <- R6::R6Class(
           if (is.na(i)) NA_real_ else as.numeric(effect_sizes[[i]])
         }, numeric(1))
       }
+      # Standardized values of the generating model, one engine entry per
+      # generated term named by its descriptor, re-keyed onto effect_names by
+      # component set (as column_effect_sizes is). NULL where undefined.
+      # Mirrors Python _report_meta.
+      std_beta <- cohen_d <- r2 <- NULL
+      if (!is.null(private$last_build)) {
+        st <- jsonlite::fromJSON(
+          standardized_effects(private$last_build$json, private$last_build$contracts),
+          simplifyVector = FALSE)
+        term_key <- function(parts) paste(sort(parts), collapse = "\u001f")
+        st_keys <- vapply(st$effects, function(e) {
+          term_key(.descriptor_components(e$descriptor, factors))
+        }, character(1))
+        picked <- lapply(reg$effect_components, function(parts) {
+          i <- match(term_key(parts), st_keys)
+          if (is.na(i)) stop("internal: no standardized value for effect ", paste(parts, collapse = ":"))
+          st$effects[[i]]
+        })
+        std_beta <- lapply(picked, `[[`, "std_beta")
+        cohen_d <- lapply(picked, `[[`, "cohen_d")
+        r2 <- st$r2
+      }
       meta <- list(
         effect_names = effect_names,
         effect_skeleton = effect_skeleton,
@@ -2066,10 +2092,17 @@ MCPower <- R6::R6Class(
         column_effect_sizes = column_effect_sizes,
         factors = factors,
         estimator = self$estimator,
-        # "binary" for logit-link outcomes (logistic regression and binary GLMM,
-        # whose estimator is "mle" not "glm"); gates the OR = exp(β) readout.
-        # Mirrors Python _report_meta.
+        # "binary" for logit- and probit-link outcomes, "count" for Poisson,
+        # "continuous" otherwise. Mirrors Python _report_meta.
         outcome_kind = self$outcome_kind,
+        # "canonical" | "probit": the OR readout is logit-only, so it gates on
+        # outcome_kind == "binary" and link == "canonical".
+        link = self$link,
+        # Aligned with effect_names; NULL elements where undefined.
+        std_beta = std_beta,
+        cohen_d = cohen_d,
+        r2 = r2,
+        clustered = length(private$pending_clusters) > 0L,
         alpha = self$alpha,
         correction = correction %||% "none",
         target_power = self$power,
@@ -2179,6 +2212,7 @@ MCPower <- R6::R6Class(
         enc$clusters_json)
       # Capture the skeleton so .build_report_meta can use it (avoids a second call).
       private$skeleton_json <- out$skeleton
+      private$last_build <- list(json = json, contracts = out$contracts)
       out$contracts
     }
   )

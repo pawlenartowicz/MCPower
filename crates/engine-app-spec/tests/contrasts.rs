@@ -9,6 +9,7 @@ use engine_contract::CorrectionMethod;
 fn three_level_factor_spec(tests: TestSelection, contrasts: Vec<(String, String)>) -> AppSpec {
     AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["treatment".into()],
             interaction_terms: vec![],

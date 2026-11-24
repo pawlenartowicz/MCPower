@@ -5,6 +5,7 @@ use serde::Serialize;
 fn sample_linear_spec() -> AppSpec {
     AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x1".into(), "x2".into()],
             interaction_terms: vec![],
@@ -138,4 +139,73 @@ fn assemble_linear_matches_golden_projection() {
     let contracts = engine_app_spec::assemble_spec(&spec).unwrap();
     let summary = build_summary(&contracts);
     insta::assert_json_snapshot!(summary);
+}
+
+#[test]
+fn effect_moments_name_every_generated_term_under_a_test_formula() {
+    // The test model drops x1, but the display describes the generating
+    // model: both terms come back, named by the model formula.
+    let AppSpec::Linear(mut linear) = sample_linear_spec() else {
+        panic!("expected AppSpec::Linear");
+    };
+    linear.test_formula = Some("y = x2".into());
+    let json =
+        engine_app_spec::effect_moments_json(&AppSpec::Linear(linear)).expect("effect moments");
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let descriptors = v["descriptors"].as_array().unwrap();
+    assert_eq!(descriptors.len(), 2);
+    assert_eq!(descriptors[0]["predictor"], "x1");
+    assert_eq!(descriptors[1]["predictor"], "x2");
+    let m = &v["moments"];
+    assert_eq!(m["sd"].as_array().unwrap().len(), 2);
+    assert_eq!(m["cov"].as_array().unwrap().len(), 4);
+    assert!(m["groups"][0].is_null(), "x1 is continuous");
+    assert!(m["groups"][1]["w"].is_f64(), "x2 is binary");
+    assert!(m["noise"].is_f64());
+}
+
+#[test]
+fn effect_moments_name_every_generated_term_of_a_colon_only_formula() {
+    // `y ~ x1:x2` fits only the interaction, but x1 and x2 are still
+    // generated: one descriptor per moments column, in generation order.
+    let AppSpec::Linear(mut linear) = sample_linear_spec() else {
+        panic!("expected AppSpec::Linear");
+    };
+    linear.parsed_formula.interaction_terms = vec![vec!["x1".into(), "x2".into()]];
+    linear.parsed_formula.interaction_only = vec!["x1".into(), "x2".into()];
+    linear.effects = vec![EffectSize {
+        name: "x1:x2".into(),
+        value: 0.5,
+    }];
+    let json =
+        engine_app_spec::effect_moments_json(&AppSpec::Linear(linear)).expect("effect moments");
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let descriptors = v["descriptors"].as_array().unwrap();
+    assert_eq!(descriptors.len(), 3, "{descriptors:?}");
+    assert_eq!(descriptors[0]["predictor"], "x1");
+    assert_eq!(descriptors[1]["predictor"], "x2");
+    assert_eq!(descriptors[2]["components"].as_array().unwrap().len(), 2);
+    assert_eq!(v["moments"]["sd"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn assemble_linear_colon_only_formula_tests_only_the_interaction() {
+    // `y ~ x1:x2`: both predictors generate a column, but only the interaction
+    // is a model term, so `tests: All` yields exactly one target.
+    let AppSpec::Linear(mut linear) = sample_linear_spec() else {
+        panic!("expected AppSpec::Linear");
+    };
+    linear.parsed_formula.interaction_terms = vec![vec!["x1".into(), "x2".into()]];
+    linear.parsed_formula.interaction_only = vec!["x1".into(), "x2".into()];
+    linear.effects = vec![EffectSize {
+        name: "x1:x2".into(),
+        value: 0.2,
+    }];
+    let contracts = engine_app_spec::assemble_spec(&AppSpec::Linear(linear)).expect("assemble");
+    assert_eq!(
+        contracts[0].test.targets.len(),
+        1,
+        "{:?}",
+        contracts[0].test.targets
+    );
 }

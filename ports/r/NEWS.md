@@ -1,5 +1,11 @@
-# mcpower 1.5.1
+# mcpower 1.6.0
 
+* The `doomer` preset is now `pessimistic`, and sensitivity analysis is now robustness analysis. Pass `"pessimistic"` wherever you passed `"doomer"`: in `scenarios =` and in `set_scenario_configs()`. Results label the preset `pessimistic`; the numbers are unchanged. `"doomer"` is no longer a preset, so a script that still configures it gets a custom scenario that starts from `optimistic`.
+* Standardized β, Cohen's d and model R² beside every effect. The effect you enter stays a coefficient in residual SDs; the printed result now has an effects block with the standardized β of every effect, Cohen's d of every binary predictor and factor level, and one model R² line ("R² (fixed effects)" with clusters, latent-scale for logit and probit). The block shows the OR on the logit link and the RR for Poisson, and appears in both the short and long output; the long report's `effects:` line becomes this block. `result$standardized_effects` returns the values. Poisson outcomes and random slopes show a dash, as they have no single total SD.
+* Formulas that leave out main effects are fitted as `lm` fits them. In `y ~ x:z` the fitted model was `y ~ x + z + x:z`; it now fits only `x:z`. With a factor, `y ~ f:x` fits x and the f:x terms, and MCPower still reports f[b]:x as the difference from the reference level, as `y ~ x + f:x` does. This holds in power runs, in the test formula, and in effects estimated from uploaded data. Power for such formulas changes; formulas that keep every main effect are unchanged. A random slope or a post-hoc test on a predictor that is not fitted is now refused with a message naming it.
+* Uploaded data with two columns of the same name is refused. Before, one of them was silently kept.
+* A factor whose level list repeats a label is refused. Before, the two levels shared one dummy column.
+* Probit results no longer print an odds ratio. exp(β) is not an odds ratio on the probit link; the OR now appears on the logit link only.
 * **Clustered binary and count models (GLMM) use the per-fit Hessian standard
   error by default.** `wald_se` defaults to `"hessian"` (lme4
   `use.hessian = TRUE`), the standard error glmer's summary reports for a fit
@@ -14,8 +20,8 @@
 * Correlation noise now has the SD you set. Each perturbed correlation is the
   average of two noise draws, so `correlation_noise_sd` reached the
   correlations divided by √2 (0.106 instead of 0.15 under `realistic`, 0.21
-  instead of 0.30 under `doomer`). Results under any scenario with
-  correlation noise change, including the `realistic` and `doomer` presets.
+  instead of 0.30 under `pessimistic`). Results under any scenario with
+  correlation noise change, including the `realistic` and `pessimistic` presets.
 * The sample-size grid for a nested design such as `(1|school/class)` starts
   at 2 rows per child cluster, plus one per random slope on the nested
   grouping. Before, it counted rows per primary cluster only and could put one

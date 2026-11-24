@@ -232,19 +232,19 @@ fn continuous_intercept_jitter_is_excluded() {
 }
 
 // ---------------------------------------------------------------------------
-// End-to-end: logit + doomer runs and lands below optimistic power for a
+// End-to-end: logit + pessimistic runs and lands below optimistic power for a
 // medium-effect case (behavior-constraining, not "runs without error").
 // ---------------------------------------------------------------------------
 #[test]
-fn binary_doomer_power_below_optimistic() {
+fn binary_pessimistic_power_below_optimistic() {
     let p = 0.3_f64;
     let intercept = (p / (1.0 - p)).ln();
     let optimistic = base_spec(OutcomeKind::Binary, vec![intercept, 0.5]);
 
-    let mut doomer = optimistic.clone();
-    // configs/scenarios.json doomer values.
-    doomer.scenario = ScenarioPerturbations {
-        name: "doomer".into(),
+    let mut pessimistic = optimistic.clone();
+    // configs/scenarios.json pessimistic values.
+    pessimistic.scenario = ScenarioPerturbations {
+        name: "pessimistic".into(),
         heterogeneity: 0.4,
         heteroskedasticity_ratio: 4.0,
         correlation_noise_sd: 0.3,
@@ -261,14 +261,14 @@ fn binary_doomer_power_below_optimistic() {
 
     let n_sims = 1000u32;
     let r_opt = run_batch(&optimistic, &[150], n_sims, 42, None).expect("optimistic must run");
-    let r_doom = run_batch(&doomer, &[150], n_sims, 42, None).expect("doomer must run");
+    let r_pess = run_batch(&pessimistic, &[150], n_sims, 42, None).expect("pessimistic must run");
 
     let count = |r: &engine_core::spec::BatchResult| -> u32 {
         r.uncorrected.iter().map(|&b| b as u32).sum()
     };
-    let (c_opt, c_doom) = (count(&r_opt), count(&r_doom));
+    let (c_opt, c_pess) = (count(&r_opt), count(&r_pess));
     assert!(
-        c_doom < c_opt,
-        "doomer power ({c_doom}/{n_sims}) must be below optimistic ({c_opt}/{n_sims})"
+        c_pess < c_opt,
+        "pessimistic power ({c_pess}/{n_sims}) must be below optimistic ({c_opt}/{n_sims})"
     );
 }

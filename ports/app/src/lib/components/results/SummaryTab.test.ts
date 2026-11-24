@@ -121,6 +121,29 @@ describe('SummaryTab', () => {
     expect(panel.textContent).toMatch(/%/);
   });
 
+  it('strict sample-size: reuse lines are labelled by target, not by effect position', () => {
+    const point: PowerResult = { ...makeTab().result as PowerResult, target_indices: [2] };
+    const ssResult: SampleSizeResult = {
+      grid_or_trace: [point],
+      first_achieved: [90],
+      first_joint_achieved: [90],
+      target_power: 0.8,
+      method: { Grid: { by: { Fixed: 10 }, mode: 'Linear' } },
+    };
+    const tab: RunTab = {
+      ...makeTab(),
+      kind: 'find-sample-size',
+      spec: { ...makeTab().spec, csv: makeStrictCsv(100) } as AppSpec,
+      result: ssResult,
+      scenarios: [['default', ssResult]],
+      plots: { blocks: [] },
+    };
+    const { getByTestId } = render(SummaryTab, { props: { tab } });
+    const text = getByTestId('reuse-diagnostic').textContent ?? '';
+    expect(text).toContain('condition[treatment]: ');
+    expect(text).not.toContain('x1: ');
+  });
+
   it('non-strict mode: reuse-diagnostic panel is absent', () => {
     const tab = makeTab();
     // mode='partial' → panel must not render.

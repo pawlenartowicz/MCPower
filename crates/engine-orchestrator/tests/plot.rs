@@ -63,7 +63,7 @@ fn multi_scenario() -> Vec<PlotScenario> {
             )],
         },
         PlotScenario {
-            label: "doomer".into(),
+            label: "pessimistic".into(),
             points: vec![point(
                 120,
                 &[1, 2],
@@ -158,7 +158,7 @@ fn multi_scenario_grid() -> Vec<PlotScenario> {
             &[[55, 30, 15], [30, 38, 32], [15, 35, 50], [7, 30, 63]],
         ),
         mk(
-            "doomer",
+            "pessimistic",
             &[[0.31, 0.15], [0.48, 0.28], [0.61, 0.41], [0.71, 0.52]],
             &[
                 [(0.27, 0.35), (0.12, 0.18)],

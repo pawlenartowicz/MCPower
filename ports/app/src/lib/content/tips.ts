@@ -11,7 +11,7 @@ import mixedEffects from '$docs/concepts/mixed-effects.md?raw';
 import multipleTesting from '$docs/concepts/multiple-testing.md?raw';
 import conceptsIndex from '$docs/concepts/index.md?raw';
 import simulationSettings from '$docs/concepts/simulation-settings.md?raw';
-import scenarioAnalysis from '$docs/concepts/sensitivity-analysis.md?raw';
+import scenarioAnalysis from '$docs/concepts/robustness-analysis.md?raw';
 import uploadConcepts from '$docs/concepts/upload-data.md?raw';
 import requiredSampleSize from '$docs/concepts/required-sample-size.md?raw';
 import uploadApp from '$docs/tutorial-app/upload-data.md?raw';
@@ -53,17 +53,17 @@ export const TIP_SOURCES: Record<string, TipSource> = {
   dfMethod:                 { doc: 'concepts/mixed-effects', anchor: 'denominator-degrees-of-freedom', md: mixedEffects },
   contrasts:                { doc: 'concepts/multiple-testing', anchor: 'contrasts-and-post-hoc', md: multipleTesting },
   testFormulaOverride:      { doc: 'concepts/model-specification', anchor: 'test-formula-misspecification', md: modelSpec },
-  sampledShares:            { doc: 'concepts/sensitivity-analysis', anchor: 'factor-allocation', md: scenarioAnalysis },
+  sampledShares:            { doc: 'concepts/robustness-analysis', anchor: 'factor-allocation', md: scenarioAnalysis },
   outcomeType:              { doc: 'concepts/effect-sizes', anchor: 'continuous-vs-binary-outcomes', md: effectSizes },
 
   // --- Scenario knobs (Settings → Scenarios tab) ---
-  scenHeterogeneity:      { doc: 'concepts/sensitivity-analysis', anchor: 'heterogeneity', md: scenarioAnalysis },
-  scenHeteroskedasticity: { doc: 'concepts/sensitivity-analysis', anchor: 'heteroskedasticity', md: scenarioAnalysis },
-  scenCorrNoise:          { doc: 'concepts/sensitivity-analysis', anchor: 'correlation-noise', md: scenarioAnalysis },
-  scenDistChange:         { doc: 'concepts/sensitivity-analysis', anchor: 'distribution-swaps', md: scenarioAnalysis },
-  scenReDist:             { doc: 'concepts/sensitivity-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
-  scenReDf:               { doc: 'concepts/sensitivity-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
-  scenIccNoise:           { doc: 'concepts/sensitivity-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
+  scenHeterogeneity:      { doc: 'concepts/robustness-analysis', anchor: 'heterogeneity', md: scenarioAnalysis },
+  scenHeteroskedasticity: { doc: 'concepts/robustness-analysis', anchor: 'heteroskedasticity', md: scenarioAnalysis },
+  scenCorrNoise:          { doc: 'concepts/robustness-analysis', anchor: 'correlation-noise', md: scenarioAnalysis },
+  scenDistChange:         { doc: 'concepts/robustness-analysis', anchor: 'distribution-swaps', md: scenarioAnalysis },
+  scenReDist:             { doc: 'concepts/robustness-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
+  scenReDf:               { doc: 'concepts/robustness-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
+  scenIccNoise:           { doc: 'concepts/robustness-analysis', anchor: 'mixed-model-knobs', md: scenarioAnalysis },
 
   // --- Section tips (run cards / tabs) ---
   sampleSizeSearch:    { doc: 'concepts/required-sample-size', anchor: 'the-search-grid', md: requiredSampleSize },

@@ -24,5 +24,5 @@ export interface ScenarioConfig {
   lme: LmeScenario;
 }
 
-export type ScenarioName = 'optimistic' | 'realistic' | 'doomer';
-export const SCENARIO_NAMES: readonly ScenarioName[] = ['optimistic', 'realistic', 'doomer'];
+export type ScenarioName = 'optimistic' | 'realistic' | 'pessimistic';
+export const SCENARIO_NAMES: readonly ScenarioName[] = ['optimistic', 'realistic', 'pessimistic'];

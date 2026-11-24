@@ -76,11 +76,11 @@ test_that("raw_statistics power matches a recompute from stats + crit", {
 
 test_that("raw_statistics power is keyed by .debug_scenario, not a hardcoded label", {
   m <- MCPowerDebug$new("y ~ x1")$set_effects("x1=0.5")
-  m$.debug_scenario <- "doomer"              # a non-default configured scenario
+  m$.debug_scenario <- "pessimistic"              # a non-default configured scenario
   p <- m$raw_statistics()$power
-  expect_identical(names(p$scenarios), "doomer")          # outer key (scenarios_envelope)
+  expect_identical(names(p$scenarios), "pessimistic")          # outer key (scenarios_envelope)
   # Inner field too — guards against a half-relabel (right key, stale field).
-  expect_identical(p$scenarios[[1]]$scenario, "doomer")
+  expect_identical(p$scenarios[[1]]$scenario, "pessimistic")
 })
 
 test_that("MCPowerDebug$load_data round-trips create_data and recovers betas", {

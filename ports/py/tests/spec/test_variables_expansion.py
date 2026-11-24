@@ -110,9 +110,10 @@ def test_two_factor_interaction_cartesian_product():
 
 
 def test_interaction_only_factor_registers_no_main_effects():
-    """y ~ cyl:x has no main term for cyl, so the registry keeps the dummy
+    """y ~ cyl:x has no main term for cyl or x, so the registry keeps the dummy
     columns but registers only the two interaction effects, and the spec
-    builds with matching effect and coefficient counts."""
+    builds with matching effect and coefficient counts. As in R's lm, the
+    fitted design is the intercept, x and the two interactions."""
     from mcpower import MCPower
 
     m = MCPower("y ~ cyl:x")
@@ -124,7 +125,7 @@ def test_interaction_only_factor_registers_no_main_effects():
     assert "cyl[2]" in reg.predictor_names and "cyl[3]" in reg.predictor_names
     spec = m.to_simulation_spec()
     assert spec["outcome"]["coefficients"][-2:] == [0.3, 0.4]
-    assert [t["term"] for t in spec["test"]["targets"] if t["kind"] == "marginal"] == [4, 5]
+    assert [t["term"] for t in spec["test"]["targets"] if t["kind"] == "marginal"] == [2, 3]
 
 
 def test_factor_with_main_term_still_registers_main_dummies():

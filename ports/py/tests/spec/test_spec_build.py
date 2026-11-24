@@ -72,7 +72,7 @@ def test_find_power_logit_with_baseline_and_scenarios_runs() -> None:  # APIC-66
     env = m.find_power(
         sample_size=100, n_sims=50, scenarios=True, progress_callback=False
     )
-    assert set(env["scenarios"].keys()) == {"optimistic", "realistic", "doomer"}
+    assert set(env["scenarios"].keys()) == {"optimistic", "realistic", "pessimistic"}
 
 
 # ---------------------------------------------------------------------------

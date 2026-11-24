@@ -173,7 +173,7 @@ fn entry_label(point: &PlotPoint, i: usize) -> String {
 }
 
 /// Per-scenario `fillOpacity` range, bold → faint, floor 0.4. Scenarios are an
-/// ordered set (optimistic → realistic → doomer for the presets); shade is a
+/// ordered set (optimistic → realistic → pessimistic for the presets); shade is a
 /// second *identity* channel (not magnitude). The n==2 case is widened to 0.6 so
 /// two scenarios stay clearly readable. Only called for 2..=POWER_FACET_THRESHOLD
 /// scenarios (more → facet, see power_at_n_spec).
@@ -250,7 +250,7 @@ pub fn power_at_n_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> String
     // gap = ⅔t, groupband = S·t ⇒ paddingInner = (⅔)/(⅔ + S) = 2/(2 + 3S).
     let y_padding_inner = 2.0 / (2.0 + 3.0 * s);
 
-    // Scenario order = host order (optimistic → realistic → doomer), reused for
+    // Scenario order = host order (optimistic → realistic → pessimistic), reused for
     // yOffset stacking and the fillOpacity ramp. Replaces the old mean-power sort
     // (colour no longer keys on scenario, so power-ordering it is meaningless).
     let scenario_order: Option<Value> = if multi {
@@ -501,9 +501,9 @@ pub fn sample_size_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) ->
             "data": { "values": rows },
             "facet": {
                 "field": "scenario", "type": "nominal", "columns": FACET_COLUMNS,
-                // Honour the host's scenario order (optimistic → realistic → doomer
+                // Honour the host's scenario order (optimistic → realistic → pessimistic
                 // for the presets); without an explicit sort Vega-Lite orders facet
-                // panels alphabetically (doomer, optimistic, realistic).
+                // panels alphabetically (pessimistic, optimistic, realistic).
                 "sort": scenarios.iter().map(|sc| sc.label.as_str()).collect::<Vec<_>>(),
             },
             "spec": { "width": FACET_PANEL_WIDTH, "height": CURVE_HEIGHT, "layer": layers },
@@ -601,9 +601,9 @@ pub fn joint_detection_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions
             "data": { "values": rows },
             "facet": {
                 "field": "scenario", "type": "nominal", "columns": FACET_COLUMNS,
-                // Honour the host's scenario order (optimistic → realistic → doomer
+                // Honour the host's scenario order (optimistic → realistic → pessimistic
                 // for the presets); without an explicit sort Vega-Lite orders facet
-                // panels alphabetically (doomer, optimistic, realistic).
+                // panels alphabetically (pessimistic, optimistic, realistic).
                 "sort": scenarios.iter().map(|sc| sc.label.as_str()).collect::<Vec<_>>(),
             },
             "spec": { "width": FACET_PANEL_WIDTH, "height": CURVE_HEIGHT, "layer": layers },
@@ -709,9 +709,9 @@ pub fn exactly_k_curve_spec(scenarios: &[PlotScenario], opts: &PlotOptions) -> S
             "data": { "values": rows },
             "facet": {
                 "field": "scenario", "type": "nominal", "columns": FACET_COLUMNS,
-                // Honour the host's scenario order (optimistic → realistic → doomer
+                // Honour the host's scenario order (optimistic → realistic → pessimistic
                 // for the presets); without an explicit sort Vega-Lite orders facet
-                // panels alphabetically (doomer, optimistic, realistic).
+                // panels alphabetically (pessimistic, optimistic, realistic).
                 "sort": scenarios.iter().map(|sc| sc.label.as_str()).collect::<Vec<_>>(),
             },
             "spec": { "width": FACET_PANEL_WIDTH, "height": CURVE_HEIGHT, "layer": layers },
@@ -929,7 +929,7 @@ mod exactly_k_curve_tests {
                 point(200, vec![5, 35, 60]),
             ],
         };
-        let scenarios = vec![mk("optimistic"), mk("realistic"), mk("doomer")];
+        let scenarios = vec![mk("optimistic"), mk("realistic"), mk("pessimistic")];
         let opts = PlotOptions {
             target_power_line: Some(0.8),
             ..Default::default()
@@ -1175,10 +1175,10 @@ mod power_at_n_color_tests {
 
     #[test]
     fn bars_shade_scenarios_bold_to_faint_in_host_order() {
-        // Host order deliberately differs from mean-power order (doomer has the
+        // Host order deliberately differs from mean-power order (pessimistic has the
         // lowest power but comes first), so a mean-power sort would reorder it.
         let scenarios = vec![
-            bars_scenario("doomer", vec![0.4, 0.5]),
+            bars_scenario("pessimistic", vec![0.4, 0.5]),
             bars_scenario("optimistic", vec![0.9, 0.95]),
             bars_scenario("realistic", vec![0.7, 0.8]),
         ];
@@ -1187,11 +1187,14 @@ mod power_at_n_color_tests {
         let bar = &v["layer"][0];
         let fo = &bar["encoding"]["fillOpacity"];
         assert_eq!(fo["field"], json!("scenario"));
-        assert_eq!(fo["sort"], json!(["doomer", "optimistic", "realistic"]));
+        assert_eq!(
+            fo["sort"],
+            json!(["pessimistic", "optimistic", "realistic"])
+        );
         assert_eq!(fo["scale"]["range"], json!([1.0, 0.7, 0.4]));
         assert_eq!(
             bar["encoding"]["yOffset"]["sort"],
-            json!(["doomer", "optimistic", "realistic"])
+            json!(["pessimistic", "optimistic", "realistic"])
         );
         // Effect colour still present.
         assert_eq!(bar["encoding"]["color"]["field"], json!("target"));

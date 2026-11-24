@@ -46,3 +46,6 @@ playwright-report/
 .DS_Store
 *.swp
 *.swo
+
+# ─── Local notes ─────────────────────────────────────────────────────────
+/.tag

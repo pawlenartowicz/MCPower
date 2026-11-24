@@ -40,6 +40,14 @@ result = model.find_power(sample_size=120, target_test="treatment")
 Power Analysis — OLS  N=120  sims=1600  α=0.05  target=80%
 formula: satisfaction = treatment + age
 
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+treatment             0.50    0.233   0.479
+age                   0.30    0.279       —
+───────────────────────────────────────────
+R² = 0.132
+
 ───────────────────────────────────
 Test                 Power   Target
 ───────────────────────────────────
@@ -63,7 +71,7 @@ Each rung adds one modelling idea and powers it. Climb from the top:
 5. [[05_mixed-models|Mixed models]] — grouped / hierarchical data
 6. [[06_anova-posthoc|ANOVA & post-hoc]] — factors and pairwise contrasts
 7. [[07_multiple-testing|Multiple testing]] — corrections across many tests
-8. [[08_custom-scenarios|Custom scenarios]] — sensitivity sweeps
+8. [[08_custom-scenarios|Custom scenarios]] — robustness sweeps
 9. [[09_upload-data|Upload data]] — drive simulation from a CSV or dataframe
 10. [[10_model-misspecification|Model misspecification]] — what testing the wrong model costs
 

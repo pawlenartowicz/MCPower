@@ -1,6 +1,6 @@
 // Tauri engine API bridge: routes find_power/find_sample_size/cancel/progress calls to the Tauri backend, or to the E2E mock when VITE_E2E=true.
-import type { AppSpec, EffectDescriptor, EffectSize, EffectsFromData } from '$lib/domain/app-spec';
-export type { EffectDescriptor, EffectSize, EffectsFromData };
+import type { AppSpec, EffectDescriptor, EffectSize, EffectsFromData, EffectMoments } from '$lib/domain/app-spec';
+export type { EffectDescriptor, EffectSize, EffectsFromData, EffectMoments };
 import type {
   PowerResult,
   SampleSizeResult,
@@ -100,6 +100,18 @@ export async function effectSkeleton(spec: AppSpec): Promise<EffectDescriptor[]>
   if (E2E) return mock.effectSkeleton(spec);
   const { invoke } = await api();
   return invoke<EffectDescriptor[]>('effect_skeleton_cmd', { spec });
+}
+
+/**
+ * The moments behind the standardized β, Cohen's d and model R² of `spec`'s
+ * generating model; `evaluateStandardized` turns them into values. Mirrors the
+ * `effectMoments` export of the WASM port and `effect_moments_json` in the
+ * Rust crate.
+ */
+export async function effectMoments(spec: AppSpec): Promise<EffectMoments> {
+  if (E2E) return mock.effectMoments(spec);
+  const { invoke } = await api();
+  return invoke<EffectMoments>('effect_moments_cmd', { spec });
 }
 
 /**

@@ -75,7 +75,7 @@ function makeTab(plots?: PlotSpecs): RunTab {
   const result = {
     n: 80,
     n_sims: 1600,
-    target_indices: [0],
+    target_indices: [1],
     power_uncorrected: [0.8],
     power_corrected: [0.8],
     ci_uncorrected: [{ lo: 0.7, hi: 0.9 }],
@@ -178,6 +178,14 @@ describe('ExportTab — light-print theme', () => {
     const call = embedPrintMock.mock.calls[0] as unknown as [unknown, unknown, Record<string, unknown>];
     const printTheme = call[2];
     expect(printTheme['background']).toBe('#ffffff');
+  });
+
+  it('passes the effect-name label map so the exported chart shows `x`, not `target_1`', async () => {
+    const { getByTestId } = render(ExportTab, { props: { tab: makeTab(PLOTS) } });
+    await fireEvent.click(getByTestId('export-save-btn'));
+    await new Promise((r) => setTimeout(r, 20));
+    const call = embedPrintMock.mock.calls[0] as unknown as [unknown, unknown, unknown, Record<string, string>];
+    expect(call[3]['target_1']).toBe('x');
   });
 });
 

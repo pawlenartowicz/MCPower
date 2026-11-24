@@ -44,16 +44,16 @@ multiplicity correction.
 
 ## If you'd rather have…
 
-- [[anova/anova-02]] — Test every pairwise difference instead of one contrast —
+- [[anova/anova-02|One-way ANOVA, all pairwise post-hoc comparisons]] — Test every pairwise difference instead of one contrast —
   same `life_satisfaction ~ region` design, all post-hoc comparisons with
   multiplicity correction.
-- [[anova/anova-01]] — Just the omnibus "are the groups different at all"
+- [[anova/anova-01|One-way ANOVA, omnibus F-test across 3+ groups]] — Just the omnibus "are the groups different at all"
   F-test, without any planned or post-hoc pairwise comparison.
-- [[ols/ols-12]] — The same 3-level region as a dummy-coded regression — gives
+- [[ols/ols-12|Three-level categorical predictor]] — The same 3-level region as a dummy-coded regression — gives
   each level's coefficient vs the reference rather than ANOVA-style contrasts.
-- [[ols/ols-07]] — Drop to two groups — a planned single comparison becomes a
+- [[ols/ols-07|Two groups as regression (independent t-test)]] — Drop to two groups — a planned single comparison becomes a
   plain independent t-test recast as regression.
-- [[anova/anova-04]] — Add a second factor for a two-way factorial design with
+- [[anova/anova-04|Two-way factorial ANOVA with interaction]] — Add a second factor for a two-way factorial design with
   an interaction, if your grouping has crossed structure.
 
 ## Copy-paste setup

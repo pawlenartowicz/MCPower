@@ -172,6 +172,16 @@ pub fn effect_skeleton_cmd(spec: AppSpec) -> Result<Vec<EffectDescriptor>, Strin
     serde_json::from_str::<Vec<EffectDescriptor>>(&json).map_err(|e| e.to_string())
 }
 
+/// The β-free moments behind the standardized β, Cohen's d and model R² of
+/// `spec`'s generating model, as the JSON-parsed `{descriptors, moments}`
+/// object (see `engine_app_spec::effect_moments_json`). Mirrors the WASM
+/// `effect_moments` export.
+#[tauri::command]
+pub fn effect_moments_cmd(spec: AppSpec) -> Result<serde_json::Value, String> {
+    let json = engine_app_spec::effect_moments_json(&spec).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
 /// Configure the rayon thread pool before the first `find_power` or
 /// `find_sample_size` call. A second call after the pool is initialised
 /// returns an error (pool is a process-global `OnceLock`). Called once from

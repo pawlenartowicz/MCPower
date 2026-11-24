@@ -3428,7 +3428,7 @@ mod tests {
         // A non-zero correlation_noise_sd flips is_optimistic() to false,
         // routing data_gen to perturb_correlation → psd_repair_and_factor.
         spec.scenario = ScenarioPerturbations {
-            name: "doomer".into(),
+            name: "pessimistic".into(),
             correlation_noise_sd: 0.1,
             ..ScenarioPerturbations::optimistic()
         };
@@ -4414,7 +4414,7 @@ mod tests {
 
         let mut jittered = minimal_lme_spec();
         jittered.scenario = ScenarioPerturbations {
-            name: "doomer".into(),
+            name: "pessimistic".into(),
             lme: Some(crate::spec::LmeScenarioPerturbations {
                 random_effect_dist: ResidualDist::Normal,
                 random_effect_df: 0.0,

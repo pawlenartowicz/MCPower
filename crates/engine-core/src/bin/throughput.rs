@@ -15,7 +15,7 @@
 //!
 //! - `off` — the single optimistic (zero-perturbation) spec: what a default
 //!   `scenario_analysis=False` call runs, and the pure-kernel regression signal.
-//! - `on` — the three presets (optimistic, realistic, doomer) run back-to-back
+//! - `on` — the three presets (optimistic, realistic, pessimistic) run back-to-back
 //!   and timed as one row, at **half** the row's n_sims: the triple is 3× the
 //!   fits, so halving keeps the row affordable. fits/sec stays comparable to
 //!   `off` (it is per-fit), so the on−off delta is still the scenario-path cost
@@ -104,8 +104,8 @@ fn preset(name: &str) -> ScenarioPerturbations {
             truth_start: false,
             lme: None,
         },
-        "doomer" => ScenarioPerturbations {
-            name: "doomer".into(),
+        "pessimistic" => ScenarioPerturbations {
+            name: "pessimistic".into(),
             heterogeneity: 0.4,
             heteroskedasticity_ratio: 4.0,
             correlation_noise_sd: 0.3,
@@ -632,7 +632,7 @@ fn cases() -> Vec<Case> {
 fn pass_specs(case: &Case, mode: &str) -> Vec<SimulationSpec> {
     let preset_names: &[&str] = match mode {
         "off" => &["optimistic"],
-        "on" => &["optimistic", "realistic", "doomer"],
+        "on" => &["optimistic", "realistic", "pessimistic"],
         other => unreachable!("unknown mode {other}"),
     };
     preset_names

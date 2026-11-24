@@ -12,10 +12,10 @@ test_that(".scenario_dict optimistic emits truth_start = TRUE", {
   expect_true(d$truth_start)
 })
 
-# (2) realistic/doomer presets default to truth_start = FALSE
-test_that(".scenario_dict realistic and doomer emit truth_start = FALSE", {
+# (2) realistic/pessimistic presets default to truth_start = FALSE
+test_that(".scenario_dict realistic and pessimistic emit truth_start = FALSE", {
   expect_false(mcpower:::.scenario_dict("realistic")$truth_start)
-  expect_false(mcpower:::.scenario_dict("doomer")$truth_start)
+  expect_false(mcpower:::.scenario_dict("pessimistic")$truth_start)
 })
 
 # (3) a brand-new custom scenario does NOT inherit truth_start = TRUE from

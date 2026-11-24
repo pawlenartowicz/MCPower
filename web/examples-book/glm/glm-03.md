@@ -44,13 +44,13 @@ reports power for each contrast separately.
 
 ## If you'd rather have…
 
-- [[ols/ols-12]] — Same multi-level (3-level) categorical predictor, but on a
+- [[ols/ols-12|Three-level categorical predictor]] — Same multi-level (3-level) categorical predictor, but on a
   continuous outcome instead of a binary one.
-- [[glm/glm-09]] — Logistic outcome where a categorical predictor enters as a
+- [[glm/glm-09|Logistic regression: continuous predictor plus categorical control]] — Logistic outcome where a categorical predictor enters as a
   control alongside a continuous predictor.
-- [[anova/anova-01]] — Omnibus test of differences across 3+ groups — the
+- [[anova/anova-01|One-way ANOVA, omnibus F-test across 3+ groups]] — Omnibus test of differences across 3+ groups — the
   linear-model analogue of comparing habitat types.
-- [[glm/glm-04]] — Multiple logistic regression adjusting the binary outcome for
+- [[glm/glm-04|Multiple logistic regression: covariate-adjusted]] — Multiple logistic regression adjusting the binary outcome for
   additional covariates.
 
 ## Copy-paste setup

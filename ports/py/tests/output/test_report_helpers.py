@@ -47,7 +47,7 @@ def _synthetic(n_scen=1, corr=False):
     }
     if n_scen == 1:
         return inner(0.75, 0.60), meta
-    scen = {"optimistic": inner(0.85, 0.70), "doomer": inner(0.55, 0.40)}
+    scen = {"optimistic": inner(0.85, 0.70), "pessimistic": inner(0.55, 0.40)}
     return {"scenarios": scen}, meta
 
 
@@ -78,7 +78,7 @@ def test_main_power_tables_scenarios_only_one_table_no_delta():
     result, meta = _synthetic(n_scen=2)
     tables = main_power_tables(_scenarios(result), meta, dec=1, tdec=0, target=0.8, caption="Per-test power")
     assert len(tables) == 1
-    assert "optimistic" in tables[0] and "doomer" in tables[0]
+    assert "optimistic" in tables[0] and "pessimistic" in tables[0]
     assert "Δ" not in tables[0] and "pp" not in tables[0]  # drop moved to the diagnostics section
 
 

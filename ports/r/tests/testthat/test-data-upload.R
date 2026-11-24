@@ -268,3 +268,13 @@ test_that("upload_data: column types do not depend on unrelated character column
   expect_equal(types, c("continuous", "binary"))
   expect_identical(unlist(m$.__enclos_env__$private$pending_data$raw_columns$x)[1], 1234.56789)
 })
+
+test_that("duplicate column names are rejected", {
+  tmp <- tempfile(fileext = ".csv")
+  writeLines("a,a\n1,2\n3,4", tmp)
+  expect_error(mcpower:::.normalize_upload_input(tmp), "more than one column named 'a'")
+  df <- data.frame(a = 1:2, a = 3:4, check.names = FALSE)
+  expect_error(mcpower:::.normalize_upload_input(df), "more than one column named 'a'")
+  m <- matrix(1:4, ncol = 2, dimnames = list(NULL, c("a", "a")))
+  expect_error(mcpower:::.normalize_upload_input(m), "more than one column named 'a'")
+})

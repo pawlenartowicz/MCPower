@@ -84,6 +84,10 @@ export function applyBuilderVariables(state: BuilderState, existing: VariableRow
       row.levels = [...p.levels];
       row.nLevels = p.levels.length;
       row.referenceLevel = p.levels[0];
+      // Shares from an old level count no longer fit; reset to equal, as VariableCard does.
+      if (row.levelProportions?.length !== p.levels.length) {
+        row.levelProportions = p.levels.map(() => 1 / p.levels.length);
+      }
     } else {
       delete row.levels;
       delete row.nLevels;

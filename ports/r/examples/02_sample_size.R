@@ -40,7 +40,7 @@ if (requireNamespace("vegawidget", quietly = TRUE)) {
   cat("\n>>> plot(result)  # power-vs-N curves, Vega-Lite widget\n")
 }
 
-# 6. Robustness — the optimistic / realistic / doomer sweep (see 01) applied to
+# 6. Robustness — the optimistic / realistic / pessimistic sweep (see 01) applied to
 #    the sample-size search: the required N under each scenario.
 cat("\n>>> model$find_sample_size(target_test = 'intervention', from_size = 30, to_size = 400, by = 20, scenarios = TRUE)\n")
 invisible(model$find_sample_size(

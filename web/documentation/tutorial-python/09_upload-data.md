@@ -44,7 +44,7 @@ real ones:
   correlations among matched predictors.
 - **`mode="strict"`** — bootstrap whole rows; the faithful joint.
 
-See [[concepts/upload-data]] for the two mechanisms behind these (distribution
+See [[concepts/upload-data|Using empirical data]] for the two mechanisms behind these (distribution
 mapping vs. strict bootstrap). The example below uses the default.
 
 ## Uploaded columns set their own type
@@ -108,7 +108,14 @@ Uploaded 32 rows, 11 columns.
 ==================================================
 formula: mpg = hp + wt + am
 estimator: OLS  N=150  sims=1600  α=0.05  target=80%
-effects: hp=-0.30, wt=-0.40, am=0.30
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+hp                   -0.30   -0.248       —
+wt                   -0.40   -0.331       —
+am                    0.30    0.122   0.250
+───────────────────────────────────────────
+R² = 0.316
 
 Per-test power
 ───────────────────────────────────

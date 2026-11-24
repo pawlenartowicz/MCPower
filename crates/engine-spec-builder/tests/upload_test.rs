@@ -93,6 +93,37 @@ fn uploaded_predictor_cannot_be_cluster_level() {
     build(&spec).expect("a synthesized cluster-level predictor builds");
 }
 
+/// Two uploaded columns with the same name are rejected, not last-one-wins.
+#[test]
+fn duplicate_upload_column_names_rejected() {
+    use engine_contract::{EstimatorSpec, OutcomeKind};
+
+    let col = |v: f64| UploadColumn {
+        name: "x1".into(),
+        col_type: UploadColumnType::Continuous,
+        values: vec![v; 5],
+        labels: vec![],
+    };
+    let spec = make_two_predictor_spec_with_upload(UploadInput {
+        mode: UploadMode::Partial,
+        n_rows: 5,
+        columns: vec![col(1.0), col(2.0)],
+    });
+    let err = engine_spec_builder::build_contract(
+        &spec,
+        OutcomeKind::Continuous,
+        None,
+        Some(EstimatorSpec::Ols),
+        0.0,
+        vec![],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, SpecError::DuplicateUploadColumn { ref name } if name == "x1"),
+        "got {err:?}"
+    );
+}
+
 #[test]
 fn matched_predictor_becomes_resampled_unmatched_stays_synthetic() {
     use engine_contract::{ColumnSpec, EstimatorSpec, OutcomeKind, SyntheticKind};

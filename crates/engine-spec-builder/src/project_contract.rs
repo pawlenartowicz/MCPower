@@ -18,7 +18,7 @@ use crate::skeleton::{EffectDescriptor, EffectSkeleton};
 use crate::targets::resolve_targets;
 use crate::upload::{apply_upload, measure_correlations};
 use crate::validate::{validate_effect_assignments, validate_pre_projection};
-use crate::variables::{PredictorTable, build_predictor_table};
+use crate::variables::{PredictorTable, build_model_table};
 
 /// Project a validated `LinearSpec` into `Vec<SimulationContract>` **and** the
 /// `EffectSkeleton` (β-column-aligned, single source of the result-naming
@@ -35,8 +35,8 @@ pub fn build_linear_contract_with_skeleton(
 ) -> Result<(Vec<SimulationContract>, EffectSkeleton), SpecError> {
     validate_pre_projection(spec)?;
     let parsed = parse_formula(&spec.formula)?;
-    let table = build_predictor_table(&parsed, &spec.predictors)?;
-    validate_effect_assignments(spec, &table.effect_names)?;
+    let table = build_model_table(&parsed, &spec.predictors)?;
+    validate_effect_assignments(spec, &table.effect_names[..table.n_formula_effects])?;
 
     let columns = build_columns(&table);
     let cluster_level_columns = resolve_cluster_level_columns(&table, &spec.cluster_level_vars)?;
@@ -44,8 +44,8 @@ pub fn build_linear_contract_with_skeleton(
     let design = build_design(&table)?;
     let coefficients = build_coefficients(&table, spec)?;
     let (design_test, test_table) = build_design_test(spec, &table, &design)?;
-    // design_test here is the generation-design clone when test_formula is None
-    // (correctly-specified); the contract field is set to None separately at the struct literal.
+    // design_test here is the generation-design clone when test_table is None;
+    // the contract field is set to None separately at the struct literal.
     let target_terms = build_target_terms(spec, &table, test_table.as_ref(), &design_test)?;
     let posthoc = build_posthoc_specs(&spec.posthoc_requests, &table, &design_test)?;
     let heteroskedasticity_driver =
@@ -121,11 +121,7 @@ pub fn build_linear_contract_with_skeleton(
             heteroskedasticity_driver,
             link: None,
         },
-        design_test: if spec.test_formula.is_some() {
-            Some(design_test)
-        } else {
-            None
-        },
+        design_test: test_table.is_some().then_some(design_test),
         estimator: EstimatorSpec::Ols, // overwritten by build_contract
         wald_se: spec.wald_se,
         df_method: spec.df_method,
@@ -149,8 +145,9 @@ pub fn build_linear_contract_with_skeleton(
         out.push(c);
     }
     // The skeleton aligns with `target_indices` (which index `design_test`), so
-    // build it from the test table when a `test_formula` is set, else the
-    // generation table — exactly what `build_target_terms` resolves against.
+    // build it from the test table when there is one (a `test_formula`, or a
+    // predictor with no main-effect term), else the generation table — exactly
+    // what `build_target_terms` resolves against.
     let skeleton = build_effect_skeleton(test_table.as_ref().unwrap_or(&table));
     Ok((out, skeleton))
 }
@@ -236,13 +233,14 @@ pub fn build_contract_with_skeleton(
             return Err(SpecError::RandomSlopesUnsupported);
         }
     }
-    let table = build_predictor_table(&parsed, &spec.predictors)?;
+    let table = build_model_table(&parsed, &spec.predictors)?;
     check_posthoc_needs_ols(spec, &table, estimator, !clusters.is_empty())?;
 
     // A random slope is fitted on its variable's column of the fitted design,
-    // so a mixed model's test_formula must keep every slope variable (only OLS
-    // fits no random effects). The contract refuses such a design too; this
-    // check runs first to name the variable.
+    // so a mixed model must keep every slope variable as a main effect, in the
+    // formula and in any test_formula (only OLS fits no random effects). The
+    // contract refuses such a design too; this check runs first to name the
+    // variable.
     let design_test = contracts
         .first()
         .filter(|_| estimator != EstimatorSpec::Ols)
@@ -262,7 +260,11 @@ pub fn build_contract_with_skeleton(
             let name = table.non_factor_names.get(slope.column.0 as usize);
             debug_assert!(name.is_some(), "slope column is a non-factor predictor");
             if let (false, Some(name)) = (kept, name) {
-                return Err(SpecError::TestFormulaDropsSlopeVariable { name: name.clone() });
+                return Err(if table.has_main_term(name) {
+                    SpecError::TestFormulaDropsSlopeVariable { name: name.clone() }
+                } else {
+                    SpecError::SlopeVariableNoMainEffect { name: name.clone() }
+                });
             }
         }
     }
@@ -532,15 +534,21 @@ fn build_coefficients(table: &PredictorTable, spec: &LinearSpec) -> Result<Vec<f
         .map(|e| (e.name.as_str(), e.size))
         .collect();
     let mut interaction_rank = 0u32;
-    for ((name, cols), comps) in table
+    for (i, ((name, cols), comps)) in table
         .effect_names
         .iter()
         .zip(table.effect_columns.iter())
         .zip(table.interaction_components.iter())
+        .enumerate()
     {
-        let value = *assignment_by_name
-            .get(name.as_str())
-            .expect("validate_effect_assignments ensured presence");
+        // Terms added for R's factor coding carry no effect.
+        let value = if i < table.n_formula_effects {
+            *assignment_by_name
+                .get(name.as_str())
+                .expect("validate_effect_assignments ensured presence")
+        } else {
+            0.0
+        };
         let col = if comps.is_empty() {
             cols[0] as usize
         } else {
@@ -558,11 +566,12 @@ fn build_coefficients(table: &PredictorTable, spec: &LinearSpec) -> Result<Vec<f
     Ok(coeffs)
 }
 
-/// Build `design_test` and return the test-side `PredictorTable` (None when
-/// `test_formula` is absent — caller uses the generation table for target
-/// resolution in that case).
+/// Build `design_test` and return the test-side `PredictorTable`. The table is
+/// `None` when the fitted design is the generation design (no `test_formula`
+/// and every predictor has a main-effect term); the caller then uses the
+/// generation table for target resolution.
 ///
-/// When a `test_formula` is set, `design_test.terms` reference the SAME
+/// When a table is returned, `design_test.terms` reference the SAME
 /// `generation.columns` entries as `design_generation` — no columns are
 /// re-emitted; each test term resolves to its generation column ID by name.
 fn build_design_test(
@@ -570,8 +579,13 @@ fn build_design_test(
     gen_table: &PredictorTable,
     gen_design: &DesignSpec,
 ) -> Result<(DesignSpec, Option<PredictorTable>), SpecError> {
+    // Without a test_formula the fitted design is the generation design minus
+    // the predictors that only appear inside interactions.
     let Some(formula) = &spec.test_formula else {
-        return Ok((gen_design.clone(), None));
+        return Ok(match gen_table.fitted() {
+            None => (gen_design.clone(), None),
+            Some(fitted) => (test_design_terms(gen_table, &fitted)?, Some(fitted)),
+        });
     };
     // The test model keeps the model's random effects; test_formula names
     // fixed effects only, so any random-effect term in it is refused rather
@@ -585,11 +599,20 @@ fn build_design_test(
     // An unknown predictor surfaced while building the TEST table is a
     // test_formula term that isn't in the model — re-tag it so the user is
     // told to add it to the model formula (effect may be 0), not just "unknown".
-    let test_table = build_predictor_table(&parsed, &spec.predictors).map_err(|e| match e {
+    let test_table = build_model_table(&parsed, &spec.predictors).map_err(|e| match e {
         SpecError::UnknownPredictor { name } => SpecError::TestFormulaPredictorMissing { name },
         other => other,
     })?;
+    let test_table = test_table.fitted().unwrap_or(test_table);
+    Ok((test_design_terms(gen_table, &test_table)?, Some(test_table)))
+}
 
+/// The fitted design of `test_table`, with every term pointing at its
+/// generation column (resolved by name against `gen_table`).
+fn test_design_terms(
+    gen_table: &PredictorTable,
+    test_table: &PredictorTable,
+) -> Result<DesignSpec, SpecError> {
     let n_gen_non_factor = gen_table.non_factor_names.len() as u32;
     let mut terms = vec![DesignTerm::Const];
     for name in &test_table.non_factor_names {
@@ -643,7 +666,7 @@ fn build_design_test(
             .collect::<Result<Vec<_>, _>>()?;
         terms.push(DesignTerm::Interaction { components });
     }
-    Ok((DesignSpec { terms }, Some(test_table)))
+    Ok(DesignSpec { terms })
 }
 
 /// Design-test term position for every effect in `table`, interaction-aware.
@@ -676,6 +699,21 @@ fn effect_term_positions(table: &PredictorTable) -> Vec<u32> {
     positions
 }
 
+/// The [`EffectSkeleton`] of the generation design (the model formula),
+/// whatever `test_formula` says: index 0 is the intercept and the rest follow
+/// `design_generation` term order. Hosts name `design_generation`-ordered
+/// values (the standardized effects) with it; the skeleton that
+/// [`build_contract_with_skeleton`] returns follows `design_test` instead.
+///
+/// # Errors
+/// Formula parsing and predictor-table errors, as in
+/// [`build_linear_contract_with_skeleton`].
+pub fn generation_skeleton(spec: &LinearSpec) -> Result<EffectSkeleton, SpecError> {
+    let parsed = parse_formula(&spec.formula)?;
+    let table = build_model_table(&parsed, &spec.predictors)?;
+    Ok(build_effect_skeleton(&table))
+}
+
 /// Assemble the β-column-aligned [`EffectSkeleton`] for `table`: index 0 is the
 /// intercept and every other effect is placed at its `design_test` term
 /// position, matching `target_indices`' 1-based space. The per-effect
@@ -695,9 +733,32 @@ pub(crate) fn build_effect_skeleton(table: &PredictorTable) -> EffectSkeleton {
         .count();
     let n_terms = 1 + table.non_factor_names.len() + n_dummies + n_interactions;
     let positions = effect_term_positions(table);
-    // Index 0 is never targeted by an effect (positions are >= 1), so it stays
-    // the intercept; the rest are overwritten in place.
-    let mut skeleton: EffectSkeleton = vec![EffectDescriptor::Intercept; n_terms];
+    // Index 0 is the intercept. Every other slot starts as its own column's
+    // descriptor, so a column with no effect (x and z in the generation design
+    // of `y ~ x:z`) is still named; slots with an effect are overwritten below.
+    let mut skeleton: EffectSkeleton = Vec::with_capacity(n_terms);
+    skeleton.push(EffectDescriptor::Intercept);
+    skeleton.extend(
+        table
+            .non_factor_names
+            .iter()
+            .map(|p| EffectDescriptor::Continuous {
+                predictor: p.clone(),
+            }),
+    );
+    for (f, factor) in table.factor_names.iter().enumerate() {
+        for lvl in &table.factor_levels[f] {
+            let level = table.factor_declared_levels[f]
+                .iter()
+                .position(|l| l == lvl)
+                .expect("dummy level is a declared level") as u32;
+            skeleton.push(EffectDescriptor::FactorLevel {
+                factor: factor.clone(),
+                level,
+            });
+        }
+    }
+    skeleton.resize(n_terms, EffectDescriptor::Intercept);
     for (i, &pos) in positions.iter().enumerate() {
         skeleton[pos as usize] = table.effect_descriptors[i].clone();
     }
@@ -711,16 +772,21 @@ fn build_target_terms(
     design_test: &engine_contract::DesignSpec,
 ) -> Result<Vec<TestTarget>, SpecError> {
     // `TestTarget::Marginal { term }` indexes into `design_test.terms`, not
-    // into `generation.columns`. When `test_formula` is set, names resolve
-    // against the test formula's effect_names (so users can't ask for power
+    // into `generation.columns`. When there is a test table, names resolve
+    // against the test table's effect_names (so users can't ask for power
     // on terms the test model doesn't fit) and the column index comes from
     // the test table's `effect_columns` — which mirror the test design's
     // term layout by construction (intercept at 0, non-factors next, then
-    // dummies in declaration order). In the standard case (no test_formula)
+    // dummies in declaration order). In the standard case (no test table)
     // `gen_table.effect_columns[i][0]` is identical to the term position
     // because `design_test == design_generation`.
     let table = test_table.unwrap_or(gen_table);
-    let resolver_indices = resolve_targets(&spec.targets, &table.effect_names)?;
+    // Only the formula's own effects can be tested; the terms added for R's
+    // factor coding follow them, so the resolved indices are unchanged.
+    let resolver_indices = resolve_targets(
+        &spec.targets,
+        &table.effect_names[..table.n_formula_effects],
+    )?;
     let term_positions_by_effect = effect_term_positions(table);
     use std::collections::BTreeSet;
     let mut term_positions: BTreeSet<u32> = BTreeSet::new();
@@ -830,7 +896,10 @@ fn build_target_terms(
 /// Any other `F[x]` where x is not in the factor's level list → unknown name.
 fn resolve_contrast_name(name: &str, table: &PredictorTable) -> Result<Option<u32>, SpecError> {
     // Check if it's a non-reference effect.
-    if let Some(idx) = table.effect_names.iter().position(|n| n == name) {
+    if let Some(idx) = table.effect_names[..table.n_formula_effects]
+        .iter()
+        .position(|n| n == name)
+    {
         let term = effect_term_positions(table)[idx];
         return Ok(Some(term));
     }
@@ -937,6 +1006,11 @@ fn build_posthoc_specs(
                 _ => None,
             })
             .collect();
+        if target_term_indices.is_empty() {
+            return Err(SpecError::PosthocFactorNotFitted {
+                name: req.factor.clone(),
+            });
+        }
         out.push(PosthocSpec {
             factor_column,
             target_term_indices,
@@ -1579,6 +1653,40 @@ mod tests {
         );
     }
 
+    /// A random slope on a predictor that only enters through an interaction
+    /// has no fitted column to sit on, and is refused with its name.
+    #[test]
+    fn build_contract_rejects_slope_on_interaction_only_predictor() {
+        let cluster = engine_contract::ClusterSpec {
+            sizing: engine_contract::ClusterSizing::FixedClusters { n_clusters: 20 },
+            tau_squared: 0.3,
+            slopes: vec![engine_contract::SlopeTerm {
+                column: ColumnId(1),
+                variance: 0.2,
+                corr_with_intercept: 0.0,
+                corr_with: vec![],
+            }],
+            extra_groupings: vec![],
+        };
+        let mut spec = simple_spec();
+        spec.formula = "y = x1 + x1:x2".into();
+        spec.effects[1].name = "x1:x2".into();
+        spec.targets = vec!["x1".into()];
+        let err = build_contract(
+            &spec,
+            OutcomeKind::Continuous,
+            None,
+            Some(EstimatorSpec::Mle),
+            0.0,
+            vec![cluster],
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, SpecError::SlopeVariableNoMainEffect { name } if name == "x2"),
+            "{err:?}"
+        );
+    }
+
     /// A test_formula that leaves out a random-slope variable is refused with
     /// the variable's name, for a slope on the primary grouping and on an extra
     /// grouping alike; one that keeps it builds.
@@ -2179,6 +2287,20 @@ mod tests {
         spec.targets = vec!["group[B]".into(), "group[C]".into()];
         spec.test_formula = Some("y = group".into());
         let (contracts, skeleton) = build_linear_contract_with_skeleton(&spec).unwrap();
+        // The generation skeleton still names every generated term, in
+        // design_generation order: [Const, Direct x1, group[B], group[C]].
+        let generation = generation_skeleton(&spec).unwrap();
+        assert_eq!(generation.len(), contracts[0].design_generation.terms.len());
+        assert_eq!(
+            generation[1],
+            EffectDescriptor::Continuous {
+                predictor: "x1".into()
+            }
+        );
+        assert!(matches!(
+            contracts[0].design_generation.terms[1],
+            DesignTerm::Direct { .. }
+        ));
         assert_eq!(
             skeleton,
             vec![
@@ -2203,6 +2325,115 @@ mod tests {
                 ));
             }
         }
+    }
+
+    // `y ~ x:z` generates x and z but fits only the interaction, as R's
+    // `lm(y ~ x:z)` does: the fitted design and its skeleton hold the intercept
+    // and x:z, so the omnibus test has 1 numerator df. The generation skeleton
+    // still names the effectless x and z columns after themselves.
+    #[test]
+    fn interaction_only_predictors_are_generated_but_not_fitted() {
+        let mut spec = simple_spec();
+        spec.formula = "y = x:z".into();
+        spec.predictors = ["x", "z"]
+            .iter()
+            .map(|n| PredictorSpec {
+                name: (*n).into(),
+                pinned: false,
+                kind: VarKind::Normal,
+            })
+            .collect();
+        spec.effects = vec![EffectAssignment {
+            name: "x:z".into(),
+            size: 0.3,
+        }];
+        spec.targets = vec!["x:z".into()];
+        spec.report_overall = true;
+        let (contracts, skeleton) = build_linear_contract_with_skeleton(&spec).unwrap();
+        let c = &contracts[0];
+        assert_eq!(c.design_generation.terms.len(), 4);
+        assert_eq!(c.outcome.coefficients, vec![0.0, 0.0, 0.0, 0.3]);
+        let fitted = c
+            .design_test
+            .as_ref()
+            .expect("x and z are left out of the fit");
+        assert_eq!(
+            fitted.terms,
+            vec![
+                DesignTerm::Const,
+                DesignTerm::Interaction {
+                    components: vec![
+                        DesignTerm::Direct {
+                            column: ColumnId(0)
+                        },
+                        DesignTerm::Direct {
+                            column: ColumnId(1)
+                        },
+                    ]
+                },
+            ]
+        );
+        assert_eq!(
+            c.test.targets,
+            vec![
+                TestTarget::Marginal { term: 1 },
+                TestTarget::Joint { terms: vec![1] },
+            ]
+        );
+        let cont = |p: &str| EffectDescriptor::Continuous {
+            predictor: p.into(),
+        };
+        let xz = EffectDescriptor::Interaction {
+            components: vec![cont("x"), cont("z")],
+        };
+        assert_eq!(skeleton, vec![EffectDescriptor::Intercept, xz.clone()]);
+        assert_eq!(
+            generation_skeleton(&spec).unwrap(),
+            vec![EffectDescriptor::Intercept, cont("x"), cont("z"), xz]
+        );
+    }
+
+    // A predictor kept as a main effect stays fitted next to its interaction:
+    // in `y ~ x + x:z` only z is left out.
+    #[test]
+    fn main_effect_partner_stays_fitted() {
+        let mut spec = simple_spec();
+        spec.formula = "y = x + x:z".into();
+        spec.predictors = ["x", "z"]
+            .iter()
+            .map(|n| PredictorSpec {
+                name: (*n).into(),
+                pinned: false,
+                kind: VarKind::Normal,
+            })
+            .collect();
+        spec.effects = vec![
+            EffectAssignment {
+                name: "x".into(),
+                size: 0.2,
+            },
+            EffectAssignment {
+                name: "x:z".into(),
+                size: 0.3,
+            },
+        ];
+        spec.targets = vec!["x".into(), "x:z".into()];
+        let (contracts, _) = build_linear_contract_with_skeleton(&spec).unwrap();
+        let fitted = contracts[0].design_test.as_ref().unwrap();
+        assert_eq!(fitted.terms.len(), 3);
+        assert_eq!(
+            fitted.terms[1],
+            DesignTerm::Direct {
+                column: ColumnId(0)
+            }
+        );
+        assert_eq!(
+            contracts[0].test.targets,
+            vec![
+                TestTarget::Marginal { term: 1 },
+                TestTarget::Marginal { term: 2 },
+            ]
+        );
     }
 
     #[test]
@@ -2238,8 +2469,8 @@ mod tests {
             targets: vec!["x1:x2".into()],
             ..simple_spec()
         };
-        let table = build_predictor_table(&parse_formula(&spec.formula).unwrap(), &spec.predictors)
-            .unwrap();
+        let table =
+            build_model_table(&parse_formula(&spec.formula).unwrap(), &spec.predictors).unwrap();
         let coeffs = build_coefficients(&table, &spec).unwrap();
         // [intercept, x1, x2, x1:x2]
         assert_eq!(coeffs, vec![0.0, 0.5, 0.3, 0.2]);
@@ -2327,6 +2558,56 @@ mod tests {
             EstimatorSpec::Mle,
             "expected Mle from default coupling when estimator is None and cluster is provided"
         );
+    }
+
+    // `y ~ dose_group:x` fits x as well, as R's `lm` does (R codes dose_group
+    // with all three levels there, which spans the same columns). x is
+    // generated with effect 0, is not an effect the user sets, and is not
+    // tested; the overall test covers all three fitted columns.
+    #[test]
+    fn factor_interaction_fits_the_r_margin() {
+        let mut spec = anova_3level_spec();
+        spec.formula = "y = dose_group:x".into();
+        spec.predictors.push(PredictorSpec {
+            name: "x".into(),
+            pinned: false,
+            kind: VarKind::Normal,
+        });
+        for e in &mut spec.effects {
+            e.name.push_str(":x");
+        }
+        spec.posthoc_requests.clear();
+        spec.targets = vec!["dose_group[high]:x".into()];
+        spec.report_overall = true;
+        let (contracts, skeleton) = build_linear_contract_with_skeleton(&spec).unwrap();
+        let c = &contracts[0];
+        // Generation: [Const, x, dose_group[mid], dose_group[high], mid:x, high:x].
+        assert_eq!(c.outcome.coefficients[..4], [0.0; 4]);
+        let x = DesignTerm::Direct {
+            column: ColumnId(0),
+        };
+        let fitted = c.design_test.as_ref().expect("the dummies are left out");
+        assert_eq!(fitted.terms.len(), 4);
+        assert_eq!(fitted.terms[..2], [DesignTerm::Const, x]);
+        assert_eq!(
+            c.test.targets,
+            vec![
+                TestTarget::Marginal { term: 3 },
+                TestTarget::Joint {
+                    terms: vec![1, 2, 3]
+                },
+            ]
+        );
+        assert_eq!(
+            skeleton[1],
+            EffectDescriptor::Continuous {
+                predictor: "x".into()
+            }
+        );
+        // x is not an effect: assigning or testing it is refused.
+        let mut tested = spec.clone();
+        tested.targets = vec!["x".into()];
+        assert!(build_linear_contract_with_skeleton(&tested).is_err());
     }
 
     // ── posthoc_requests projection tests ─────────────────────────────────────
@@ -2421,6 +2702,27 @@ mod tests {
         let spec = contrast_spec_base(); // has posthoc_requests: vec![]
         let c = build_ols_contracts(&spec).unwrap().pop().unwrap();
         assert!(c.posthoc.is_empty());
+    }
+
+    /// `y ~ dose_group:x` fits no dose_group dummies, so there is nothing for a
+    /// post-hoc comparison to test.
+    #[test]
+    fn posthoc_request_for_interaction_only_factor_errors() {
+        let mut spec = anova_3level_spec();
+        spec.formula = "y = dose_group:x".into();
+        spec.predictors.push(PredictorSpec {
+            name: "x".into(),
+            pinned: false,
+            kind: VarKind::Normal,
+        });
+        for e in &mut spec.effects {
+            e.name.push_str(":x");
+        }
+        let err = build_ols_contracts(&spec).unwrap_err();
+        assert!(
+            matches!(&err, SpecError::PosthocFactorNotFitted { name } if name == "dose_group"),
+            "{err:?}"
+        );
     }
 
     #[test]

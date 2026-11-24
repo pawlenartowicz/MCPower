@@ -57,6 +57,7 @@ fn contrast_bearing_spec_ep1_vector_lengths_survive_wire_and_merge() {
     // non-reference, so the assembler emits a true contrast, not a marginal.
     let spec = AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["treatment".into()],
             interaction_terms: vec![],
@@ -166,6 +167,7 @@ fn contrast_bearing_spec_ep1_vector_lengths_survive_wire_and_merge() {
 #[test]
 fn nan_bearing_extras_survive_json_wire_and_merge() {
     let parsed_formula = ParsedFormula {
+        interaction_only: vec![],
         outcome: "y".into(),
         predictors: vec!["x1".into()],
         interaction_terms: vec![],

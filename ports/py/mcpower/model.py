@@ -1256,13 +1256,13 @@ class MCPower:
     def set_scenario_configs(self, configs: Dict[str, Dict[str, Any]]) -> "MCPower":
         """Merge custom scenario configurations on top of the defaults.
 
-        Scenarios are the named settings bundles of the sensitivity analysis
+        Scenarios are the named settings bundles of the robustness analysis
         (run via ``scenarios=`` on ``find_power`` / ``find_sample_size``).
 
         Merge behaviour matches v1:
 
           * If a scenario name already exists in the defaults (``optimistic``,
-            ``realistic``, ``doomer``), the user fields *update* the preset —
+            ``realistic``, ``pessimistic``), the user fields *update* the preset —
             unspecified keys keep their preset values.
           * If a scenario name is brand-new (custom), it inherits every key
             from ``optimistic`` and then applies the user overrides on top —
@@ -2112,7 +2112,7 @@ class MCPower:
         random effects, and a random-effect term in ``test_formula`` raises
         ``ValueError``.
 
-        ``scenarios`` runs the sensitivity analysis: the same design is
+        ``scenarios`` runs the robustness analysis: the same design is
         rerun under the named scenarios (``True`` = all configured;
         ``["optimistic", ...]`` = a subset) with perturbed data-generation
         settings. Returns a result dict (single scenario) or a scenarios
@@ -2171,8 +2171,9 @@ class MCPower:
         outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
         )
+        spec_json = self._spec_json(payload)
         _names, scenarios_bytes, skeleton_json = _engine.build_contract_from_spec(
-            self._spec_json(payload),
+            spec_json,
             outcome_kind_wire,
             link_wire,
             estimator_wire,
@@ -2180,6 +2181,7 @@ class MCPower:
             clusters_json,
         )
         effect_skeleton = _json.loads(skeleton_json)
+        standardized = _json.loads(_engine.standardized_effects(spec_json, scenarios_bytes))
         with managed_progress(progress_callback) as progress_cb:
             raw = _engine.find_power(
                 scenarios_bytes,
@@ -2228,7 +2230,7 @@ class MCPower:
         wire_posthoc_factors = [r["factor"] for r in payload.get("posthoc_requests", [])]
         result = make_power_result(result, self._report_meta(
             correction=correction, posthoc_factors=wire_posthoc_factors,
-            effect_skeleton=effect_skeleton,
+            effect_skeleton=effect_skeleton, standardized=standardized,
             min_cluster_size=_min_cs))
         if verbose:
             print(result)
@@ -2249,7 +2251,7 @@ class MCPower:
         return result
 
     def _report_meta(self, *, correction, posthoc_factors=None, effect_skeleton=None,
-                     min_cluster_size=None,
+                     standardized=None, min_cluster_size=None,
                      unit=None, unit_cluster_name=None):
         """Label + header context the result object needs to render. The port
         owns labels (joined to the engine's integer target_indices).
@@ -2258,6 +2260,12 @@ class MCPower:
         ``build_contract_from_spec``), β-column aligned with ``target_indices``.
         Result names are rendered from it + each factor's ``levels`` store, so
         no port re-derives the factor-expansion layout.
+
+        standardized: the parsed ``_engine.standardized_effects`` JSON —
+        standardized β, Cohen's d and R² of the generating model, one entry per
+        generated term named by its descriptor. Re-keyed here onto
+        ``effect_names`` by component set (as ``column_effect_sizes`` is), into
+        ``std_beta`` / ``cohen_d`` (None where undefined) and ``r2``.
 
         posthoc_factors: list of factor names (in request order) for which
         post-hoc contrasts were requested. Used to build posthoc_factors in the
@@ -2311,6 +2319,17 @@ class MCPower:
                     float("nan") if parts is None
                     else size_of.get(frozenset(parts), float("nan"))
                 )
+        std_beta = cohen_d = r2 = None
+        if standardized is not None:
+            from .output.tables import _descriptor_components
+            by_parts = {
+                frozenset(_descriptor_components(e["descriptor"], factors)): e
+                for e in standardized["effects"]
+            }
+            picked = [by_parts[frozenset(parts)] for parts in self._registry.effect_components]
+            std_beta = [e["std_beta"] for e in picked]
+            cohen_d = [e["cohen_d"] for e in picked]
+            r2 = standardized["r2"]
         meta = {
             "effect_names": effect_names,
             "effect_skeleton": effect_skeleton,
@@ -2318,10 +2337,19 @@ class MCPower:
             "column_effect_sizes": column_effect_sizes,
             "factors": factors,
             "estimator": self.estimator,
-            # "binary" for logit-link outcomes (logistic regression and binary
-            # GLMM, whose estimator is "mle" not "glm"); gates the OR = exp(β)
-            # readout in the report. "continuous" otherwise.
+            # "binary" for logit- and probit-link outcomes (logistic/probit
+            # regression and binary GLMM), "count" for Poisson, "continuous"
+            # otherwise.
             "outcome_kind": self.outcome_kind,
+            # "canonical" | "probit": the OR readout is logit-only, so it gates
+            # on outcome_kind == "binary" and link == "canonical".
+            "link": self.link,
+            # Standardized values of the generating model, aligned with
+            # effect_names (see `standardized` above).
+            "std_beta": std_beta,
+            "cohen_d": cohen_d,
+            "r2": r2,
+            "clustered": bool(self._pending_clusters),
             "alpha": self.alpha,
             "correction": correction or "none",
             "target_power": self.power / 100.0,  # stored as 80.0, render as 0.8
@@ -2480,8 +2508,9 @@ class MCPower:
         outcome_kind_wire, link_wire, estimator_wire, intercept_arg, clusters_json = (
             self._encode_outcome_and_clusters()
         )
+        spec_json = self._spec_json(payload)
         _names, scenarios_bytes, skeleton_json = _engine.build_contract_from_spec(
-            self._spec_json(payload),
+            spec_json,
             outcome_kind_wire,
             link_wire,
             estimator_wire,
@@ -2489,6 +2518,7 @@ class MCPower:
             clusters_json,
         )
         effect_skeleton = _json.loads(skeleton_json)
+        standardized = _json.loads(_engine.standardized_effects(spec_json, scenarios_bytes))
         tp = target_power if target_power is not None else self.power
         if by == "auto":
             from .config import get_simulation_defaults
@@ -2552,7 +2582,7 @@ class MCPower:
         )
         result = make_sample_size_result(result, self._report_meta(
             correction=correction, posthoc_factors=wire_posthoc_factors,
-            effect_skeleton=effect_skeleton,
+            effect_skeleton=effect_skeleton, standardized=standardized,
             min_cluster_size=_min_cs,
             unit=unit, unit_cluster_name=_unit_cluster_name))
         if verbose:

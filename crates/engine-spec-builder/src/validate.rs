@@ -12,6 +12,7 @@ use crate::input::{LinearSpec, VarKind};
 /// - [`SpecError::BinaryProportionOutOfRange`]: a binary proportion outside `[0, 1]` or non-finite.
 /// - [`SpecError::FactorProportionNonPositive`]: a factor proportion ≤ 0 or non-finite.
 /// - [`SpecError::FactorLevelCount`]: a factor level count outside the configured bounds.
+/// - [`SpecError::DuplicateFactorLevel`]: a level label appears twice in `levels`.
 /// - [`SpecError::FactorProportionLengthMismatch`]: proportions length ≠ level count.
 /// - [`SpecError::FactorProportionSum`]: factor proportions don't sum to 1.
 /// - [`SpecError::FactorReferenceMissing`]: the reference level is absent from `levels`.
@@ -59,6 +60,14 @@ pub fn validate_pre_projection(spec: &LinearSpec) -> Result<(), SpecError> {
                         min: factor_min,
                         max: factor_max,
                     });
+                }
+                for (i, l) in levels.iter().enumerate() {
+                    if levels[..i].contains(l) {
+                        return Err(SpecError::DuplicateFactorLevel {
+                            name: pred.name.clone(),
+                            level: l.clone(),
+                        });
+                    }
                 }
                 if proportions.len() != levels.len() {
                     return Err(SpecError::FactorProportionLengthMismatch {
@@ -242,6 +251,28 @@ mod tests {
             }];
             assert!(validate_pre_projection(&s).is_ok(), "proportion {ok}");
         }
+    }
+
+    // A repeated level label would make two dummies share one column.
+    #[test]
+    fn duplicate_factor_level_rejected() {
+        let mut s = base_spec();
+        s.formula = "y = g".into();
+        s.predictors = vec![PredictorSpec {
+            name: "g".into(),
+            pinned: false,
+            kind: VarKind::Factor {
+                levels: vec!["A".into(), "B".into(), "B".into()],
+                proportions: vec![0.4, 0.3, 0.3],
+                reference: "A".into(),
+                sampled_proportions: None,
+            },
+        }];
+        s.effects = vec![];
+        assert!(matches!(
+            validate_pre_projection(&s),
+            Err(SpecError::DuplicateFactorLevel { ref level, .. }) if level == "B"
+        ));
     }
 
     // A factor with fewer than 2 or more than 20 levels is rejected.

@@ -47,7 +47,13 @@ print(summary(result))
 ==================================================
 formula: satisfaction ~ treatment + age
 estimator: OLS  N=120  sims=1600  α=0.05  target=80%
-effects: treatment=0.50, age=0.30
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+treatment             0.50    0.233   0.479
+age                   0.30    0.279       —
+───────────────────────────────────────────
+R² = 0.132
 
 Per-test power
 ───────────────────────────────────
@@ -110,7 +116,13 @@ print(summary(result))
 ==================================================
 formula: satisfaction ~ treatment + age
 estimator: OLS  N≥129  sims=1600  α=0.05  target=80%
-effects: treatment=0.50, age=0.30
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+treatment             0.50    0.233   0.479
+age                   0.30    0.279       —
+───────────────────────────────────────────
+R² = 0.132
 
 Required sample size per effect
 ───────────────────────────────

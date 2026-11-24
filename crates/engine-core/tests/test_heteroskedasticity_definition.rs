@@ -185,8 +185,8 @@ fn lme_het_scales_level1_only_cluster_draw_homoskedastic() {
         slopes: vec![],
         extra_groupings: vec![],
     });
-    let mut spec_doomer = make_spec(None, 4.0);
-    spec_doomer.cluster = Some(ClusterSpec {
+    let mut spec_pessimistic = make_spec(None, 4.0);
+    spec_pessimistic.cluster = Some(ClusterSpec {
         sizing: sizing.clone(),
         tau_squared: 0.5,
         slopes: vec![],
@@ -200,7 +200,7 @@ fn lme_het_scales_level1_only_cluster_draw_homoskedastic() {
         0,
         Some(&ClusterSpec::intercept_only(sizing.clone(), 0.25)),
     );
-    let mut ws_doomer = SimWorkspace::new(
+    let mut ws_pessimistic = SimWorkspace::new(
         n,
         n_pred,
         2,
@@ -208,28 +208,28 @@ fn lme_het_scales_level1_only_cluster_draw_homoskedastic() {
         Some(&ClusterSpec::intercept_only(sizing.clone(), 0.25)),
     );
     generate_sim_data(&spec_off, 11, 2024, &mut ws_off).unwrap();
-    generate_sim_data(&spec_doomer, 11, 2024, &mut ws_doomer).unwrap();
+    generate_sim_data(&spec_pessimistic, 11, 2024, &mut ws_pessimistic).unwrap();
 
     // (1) Cluster draws u_c are homoskedastic: identical regardless of λ.
     for c in 0..n_clusters as usize {
         assert_eq!(
-            ws_off.cluster_u_draws[c], ws_doomer.cluster_u_draws[c],
+            ws_off.cluster_u_draws[c], ws_pessimistic.cluster_u_draws[c],
             "cluster draw u_c[{c}] must be unaffected by heteroskedasticity"
         );
     }
-    // (2) Level-1 residuals DO change under doomer (het is applied to ε).
+    // (2) Level-1 residuals DO change under pessimistic (het is applied to ε).
     assert!(
-        (0..n).any(|i| ws_off.residuals[i] != ws_doomer.residuals[i]),
-        "doomer must apply level-1 heteroskedasticity"
+        (0..n).any(|i| ws_off.residuals[i] != ws_pessimistic.residuals[i]),
+        "pessimistic must apply level-1 heteroskedasticity"
     );
     // (3) Mean level-1 residual variance is preserved ⇒ mean ICC preserved.
     let mean_sq: f64 = (0..n)
-        .map(|i| (ws_doomer.residuals[i] * ws_doomer.residuals[i]) as f64)
+        .map(|i| (ws_pessimistic.residuals[i] * ws_pessimistic.residuals[i]) as f64)
         .sum::<f64>()
         / n as f64;
     assert!(
         (mean_sq - 1.0).abs() < 0.15,
-        "mean level-1 residual² under doomer = {mean_sq}, expected ≈ 1.0 (variance preserved)"
+        "mean level-1 residual² under pessimistic = {mean_sq}, expected ≈ 1.0 (variance preserved)"
     );
 }
 

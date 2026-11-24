@@ -30,6 +30,10 @@ describe('parseFile — CSV/TSV dialect', () => {
         expect(out.dialect?.separator).toBe(',');
     });
 
+    it('rejects duplicate column names', async () => {
+        await expect(parseFile(csvFile('a,a\n1,2'))).rejects.toThrow(/more than one column named 'a'/);
+    });
+
     it('autodetects a semicolon separator', async () => {
         const out = await parseFile(csvFile('a;b;c\n1;2;3'));
         expect(out.dialect?.separator).toBe(';');

@@ -1,6 +1,6 @@
 <script lang="ts">
   // One interaction term as an amber-tinted card. A non-factor interaction is a
-  // single coefficient and collapses to a one-line header (term + tag + controls).
+  // single coefficient: a header (term + tag) with the controls on the row below.
   // A factor-involved interaction expands to one row per non-reference level
   // combination and shows a plain-language hint. The rows come verbatim from
   // effectGroups — the card is a pure projection, no string-sniffing.
@@ -31,10 +31,14 @@
         class="rounded border border-primary px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-primary"
         >interaction</span
       >
-      {#if e}
-        <EffectControls effect={e} {variables} />
-      {/if}
     </div>
+    <!-- Own row, as in VariableCard: inside the wrapping header the controls
+         shrink instead of wrapping and overflow the card. -->
+    {#if e}
+      <div class="mt-2 flex items-center">
+        <EffectControls effect={e} {variables} />
+      </div>
+    {/if}
   {:else}
     <div class="flex flex-wrap items-center gap-2">
       <span class="font-mono text-[13px] font-semibold">{group.term}</span>

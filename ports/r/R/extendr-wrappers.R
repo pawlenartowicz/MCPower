@@ -100,6 +100,12 @@ build_recovery_design <- function(spec_json) .Call(wrap__build_recovery_design, 
 #' unbalanced parentheses.
 split_assignments <- function(input) .Call(wrap__split_assignments, input)
 
+#' Standardized β, Cohen's d and model R² of the generating model, as JSON:
+#' `{"effects": [{"descriptor", "std_beta", "cohen_d"}, ...], "r2"}`.
+#' Mirrors `engine-py/src/spec_builder_bridge.rs` `standardized_effects`
+#' (which documents the shape) — change together.
+standardized_effects <- function(json, contracts) .Call(wrap__standardized_effects, json, contracts)
+
 #' Run a power simulation for all scenarios encoded in `contracts` (a msgpack
 #' `raw` vector produced by `build_contract_from_spec`).
 #'

@@ -298,10 +298,10 @@ The \code{MCPower} object invisibly (for chaining).
 \if{latex}{\out{\hypertarget{method-MCPower-set_scenario_configs}{}}}
 \subsection{Method \code{set_scenario_configs()}}{
 Merge custom scenario configurations on top of the
-defaults. Scenarios are the named settings bundles of the sensitivity
+defaults. Scenarios are the named settings bundles of the robustness
 analysis, run via \code{scenarios =} on \code{find_power} and
 \code{find_sample_size}. A preset name (\code{optimistic},
-\code{realistic}, \code{doomer}) updates that preset; a new name
+\code{realistic}, \code{pessimistic}) updates that preset; a new name
 inherits every key from \code{optimistic}, except \code{truth_start},
 which starts \code{FALSE}, and then applies the overrides.
 \subsection{Usage}{
@@ -322,7 +322,7 @@ overrides. Valid knob names, exactly these ten keys:
 the data: \code{TRUE} seeds a mixed-model fit at the true random-effect
 structure ("estimation is well-behaved"); \code{FALSE} starts it blind.
 It is \code{TRUE} in \code{optimistic} and \code{FALSE} in
-\code{realistic} and \code{doomer}, and a new custom scenario starts
+\code{realistic} and \code{pessimistic}, and a new custom scenario starts
 with it \code{FALSE} unless you set it. OLS and unclustered binary or
 count fits ignore it.}
 }

@@ -129,7 +129,7 @@ Two entry points, a fluent `set_*` chain:
 | `.find_power(sample_size=200, target_test="all")` | Power at a fixed N |
 | `.find_sample_size(target_test="x1", from_size=50, to_size=400)` | Smallest N for target power |
 
-All `set_*` methods chain and return `self`; add `scenarios=True` to either `find_*` for optimistic/realistic/doomer robustness.
+All `set_*` methods chain and return `self`; add `scenarios=True` to either `find_*` for optimistic/realistic/pessimistic robustness.
 
 ## Docs
 

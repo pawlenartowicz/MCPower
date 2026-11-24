@@ -10,6 +10,8 @@
   import { presetsFor } from '$lib/domain/effect-names';
   import type { EffectRow, VariableRow } from '$lib/domain/family';
   import { familyStore } from '$lib/stores/family.svelte';
+  import { standardizedStore } from '$lib/stores/standardized.svelte';
+  import { REPORT_CONFIG } from '$lib/configs/report-config';
 
   // `effect` is the live cfg.effects proxy entry — we mutate effect.value in
   // place (never reassign), so it propagates without a two-way binding.
@@ -33,6 +35,25 @@
     isPoisson
       ? 'Rate ratio = exp(β). Per 1 SD for a continuous predictor, per category for a binary/factor predictor.'
       : 'Odds ratio = exp(β). Per 1 SD for a continuous predictor, per category for a binary/factor predictor.',
+  );
+
+  // What the input means on a reported scale: Cohen's d for a binary predictor
+  // or a factor level (the rows the engine gives a d), standardized β for every
+  // other effect. A dash while no value is available or it is undefined.
+  const showsD = $derived(
+    !effect.name.includes(':') &&
+      (effect.name.includes('[') ||
+        variables.find((v) => v.name === effect.name)?.kind === 'binary'),
+  );
+  const stdRow = $derived(standardizedStore.current?.rows.find((r) => r.name === effect.name));
+  const stdValue = $derived(showsD ? stdRow?.cohen_d : stdRow?.std_beta);
+  const stdText = $derived(
+    `${showsD ? REPORT_CONFIG.text.columns.cohen_d : REPORT_CONFIG.text.columns.std_beta} ${stdValue === null || stdValue === undefined ? '—' : stdValue.toFixed(3)}`,
+  );
+  const stdTooltip = $derived(
+    showsD
+      ? "Cohen's d: the outcome's mean difference between this group and the reference, over the pooled within-group SD (other predictors not held fixed)."
+      : 'Standardized β: the effect per SD of the predictor, in SDs of the outcome (its total SD: all effects, random effects and residual).',
   );
 
   function presetTitle(p: { long: string; value: number }): string {
@@ -62,6 +83,13 @@
     bind:value={effect.value}
     data-testid={`effect-${effect.name}`}
   />
+  <span
+    class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
+    title={stdTooltip}
+    data-testid={`effect-std-${effect.name}`}
+  >
+    {stdText}
+  </span>
   {#if useOddsPresets}
     <span
       class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"

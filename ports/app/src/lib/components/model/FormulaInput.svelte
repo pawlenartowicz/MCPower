@@ -4,9 +4,7 @@
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
   import { Button } from '$lib/components/ui/button';
-  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import { familyStore } from '$lib/stores/family.svelte';
-  import { uiStore } from '$lib/stores/ui.svelte';
   import type { Entrypoint, OutcomeKind } from '$lib/domain/family';
   import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
@@ -90,23 +88,12 @@
   <div class="flex items-center gap-2">
     <Label for="formula" class="font-semibold">Formula</Label>
     <InfoIcon tipKey="formula" />
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      class="ml-auto h-7 px-2 text-xs text-muted-foreground"
-      aria-label="Reset configuration"
-      title="Reset the {familyStore.active} configuration to defaults"
-      onclick={() => (uiStore.resetConfirmOpen = true)}
-    >
-      <RotateCcw class="mr-1 h-3.5 w-3.5" /> Reset
-    </Button>
     {#if familyStore.active === 'regression'}
       <Button
         type="button"
         variant="default"
         size="sm"
-        class="h-7 px-2 text-xs"
+        class="ml-auto h-7 px-2 text-xs"
         onclick={() => (modelBuilderOpen = true)}
       >
         Visual formula builder

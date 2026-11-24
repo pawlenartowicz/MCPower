@@ -5,9 +5,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each language
 port keeps its own version, so a version listed here may reach Python, R, the
 desktop app, and the web app on different dates.
 
-## [1.5.1]
+## [1.6.0]
+
+### Added
+- **Standardized β, Cohen's d and model R² beside every effect.** The effect you enter stays a coefficient in residual SDs; next to it MCPower now shows what it equals on the scales papers report: the standardized β of every effect, Cohen's d of every binary predictor and factor level, and one model R² line ("R² (fixed effects)" with clusters, latent-scale for logit and probit). The app and web app show them live while you edit and in the Summary tab after a run. Python and R print them in an effects block in both the short and long result output, with the OR on the logit link and the new RR for Poisson, and return them as `result.standardized_effects` (`result$standardized_effects` in R). Poisson outcomes and random slopes show a dash, as they have no single total SD. The long report's `effects:` line becomes this block.
 
 ### Changed
+- **The `doomer` preset is now `pessimistic`, and sensitivity analysis is now robustness analysis.** Pass `"pessimistic"` wherever you passed `"doomer"`: in `scenarios=` and in `set_scenario_configs`. Results label the preset `pessimistic`; the numbers are unchanged. `"doomer"` is no longer a preset, so a script that still configures it gets a custom scenario that starts from `optimistic`. The app's status-bar toggle is now "Robustness analysis", and the docs page moves to `concepts/robustness-analysis`. The app resets saved scenario edits once, to pick up the new name.
+- **App: the Reset button moved to the top header.** It resets the whole configuration of the selected family, not only the formula, so it no longer sits in the Formula row.
 - **Clustered binary and count models (GLMM) use the per-fit Hessian standard
   error by default.** `wald_se` defaults to `"hessian"` (lme4
   `use.hessian = TRUE`), the standard error glmer's summary reports for a fit
@@ -22,12 +27,26 @@ desktop app, and the web app on different dates.
   14.4–19.5% with 5 and 10.6% with 10.
 
 ### Fixed
+- **Formulas that leave out main effects are now fitted as R's `lm` fits them.** In `y ~ x:z` the fitted model was `y ~ x + z + x:z`, so the overall test had 3 numerator df where R has 1; it now fits only x:z. With a factor, R gives the interaction one slope per level, so `y ~ f:x` fits x and the f:x terms, and the f dummies are no longer fitted. MCPower still reports f[b]:x as the difference from the reference level, as R's `y ~ x + f:x` does. This holds in power runs, in `test_formula`, and in effects estimated from uploaded data. Power for such formulas changes; formulas that keep every main effect are unchanged. A random slope or a post-hoc test on a predictor that is not fitted is now refused with a message naming it.
+- **App: renaming an ANOVA factor or covariate to a name already in use is refused.** Before, both cards became one variable and the run used a model like `y = F1 + F1`.
+- **App: mixed-model results labelled the joint Wald test power as convergence.** The line now reads "joint Wald test power".
+- **App: the Run summary counts selected ANOVA contrasts.** It said "no tests" when only contrasts were selected.
+- **App: exported PNG and SVG charts show effect names** instead of `target_1`, `target_2`.
+- **App: the strict-bootstrap reuse line describes its number correctly:** the expected share of uploaded rows drawn more than once in each simulated dataset. The number is unchanged.
+- **App: a single-coefficient interaction card no longer overflows the design panel.** Its effect controls now sit on their own row.
+- **A `:`-only formula such as `y ~ x:z` crashed.** Python raised a `TypeError` on every `find_power`, and the app's results crashed when a test formula like `y = x:z` dropped main effects. Fitted columns without an effect of their own are now named after their variable instead of being left as unnamed intercept slots.
+- **Uploaded data with two columns of the same name is refused.** Python, R and the app silently kept one of them.
+- **A factor whose level list repeats a label is refused.** Two levels with one label shared one dummy column. In the app's visual model builder, "Use this model" stays disabled until the labels differ.
+- **App: a factor added in the visual model builder could not run** ("proportions length mismatch"). Its level shares now reset to equal when the level count changes.
+- **App: strict-upload reuse lines in sample-size results were matched to the wrong effects** when only some effects were tested.
+- **App: generated scripts reproduce uploads and robustness settings.** The Script tab now writes the `upload_data(data, mode=...)` call, any scenario settings you changed (`set_scenario_configs`), `scenarios=True` when robustness analysis was on, and the app version in the header. Uploaded factors keep their data labels (`g[b]`, not `g[2]`).
+- **Probit results printed an odds ratio.** Python and R showed exp(β) as an OR for probit models, where it is not an odds ratio. The OR now appears on the logit link only.
 - **Correlation noise had a smaller SD than set.** Each perturbed correlation
   is the average of two noise draws, so `correlation_noise_sd` reached the
   correlations divided by √2 (0.106 instead of 0.15 under `realistic`, 0.21
-  instead of 0.30 under `doomer`). The noise now has the set SD. Results under
+  instead of 0.30 under `pessimistic`). The noise now has the set SD. Results under
   any scenario with correlation noise change, including the `realistic` and
-  `doomer` presets.
+  `pessimistic` presets.
 - **Sample-size grid for nested designs.** The lowest grid N counted rows per
   primary cluster only, so with a nested grouping such as `(1|school/class)`
   it could put one row in each class, which gives as many class levels as

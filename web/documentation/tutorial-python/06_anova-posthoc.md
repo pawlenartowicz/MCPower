@@ -28,7 +28,7 @@ Set effects as standardised mean differences vs the reference group using bracke
 > If any group's proportion times your sample size gives fewer than 5
 > observations, MCPower warns before simulating and excludes that factor at
 > that N (its effects report power 0). Details:
-> [[limitations#Sparse factor levels at small N]].
+> [[limitations#Sparse factor levels at small N|Sparse factor levels at small N]].
 
 ## Omnibus F + all pairwise contrasts
 
@@ -54,7 +54,13 @@ print(result.summary())
 ==================================================
 formula: pain_reduction = dose_group
 estimator: OLS  N=200  sims=1600  α=0.05  target=80%
-effects: dose_group[2]=0.50, dose_group[3]=0.80
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+dose_group[2]         0.50    0.223   0.500
+dose_group[3]         0.80    0.357   0.800
+───────────────────────────────────────────
+R² = 0.099
 
 Per-test power
 ───────────────────────────────────────
@@ -130,7 +136,13 @@ print(result.summary())
 ==================================================
 formula: pain_reduction = dose_group
 estimator: OLS  N=200  sims=1600  α=0.05  target=80%
-effects: dose_group[2]=0.50, dose_group[3]=0.80
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+dose_group[2]         0.50    0.223   0.500
+dose_group[3]         0.80    0.357   0.800
+───────────────────────────────────────────
+R² = 0.099
 correction: tukey
 
 Per-test power
@@ -198,7 +210,14 @@ print(result.summary())
 ==================================================
 formula: score = treatment + region
 estimator: OLS  N=150  sims=1600  α=0.05  target=80%
-effects: treatment[2]=0.40, region[2]=0.20, region[3]=0.50
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+treatment[2]          0.40    0.192   0.392
+region[2]             0.20    0.090   0.196
+region[3]             0.50    0.226   0.490
+───────────────────────────────────────────
+R² = 0.076
 correction: tukey
 
 Per-test power

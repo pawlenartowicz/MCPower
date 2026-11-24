@@ -55,7 +55,7 @@
 
 <div class="space-y-1">
   <div class="flex items-center gap-2">
-    <h3 class="text-xs font-medium text-muted-foreground">Find power</h3>
+    <h3 class="font-sans text-xs font-medium text-muted-foreground">Find power</h3>
     <InfoIcon tipKey="findPowerN" />
   </div>
   <div class="flex items-end gap-2">

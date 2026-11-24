@@ -44,17 +44,17 @@ is the chance that F-test reaches significance, not the power of any one contras
 
 ## If you'd rather have…
 
-- [[anova/anova-02]] — Same one-way design and `biomass = fertilizer` formula,
+- [[anova/anova-02|One-way ANOVA, all pairwise post-hoc comparisons]] — Same one-way design and `biomass = fertilizer` formula,
   but adds all pairwise post-hoc comparisons instead of just the omnibus test.
-- [[anova/anova-03]] — Same one-way design, but tests a single planned pairwise
+- [[anova/anova-03|One-way ANOVA, one planned pairwise contrast]] — Same one-way design, but tests a single planned pairwise
   contrast rather than the omnibus F-test.
-- [[ols/ols-12]] — The regression recast: a three-level dummy-coded categorical
+- [[ols/ols-12|Three-level categorical predictor]] — The regression recast: a three-level dummy-coded categorical
   predictor (`biomass = condition`) — same data structure analysed as OLS.
-- [[ols/ols-07]] — Drop to two groups: independent t-test as regression
+- [[ols/ols-07|Two groups as regression (independent t-test)]] — Drop to two groups: independent t-test as regression
   (`biomass = group`), the simplest group-comparison case.
-- [[anova/anova-04]] — Add a second factor: two-way factorial ANOVA with
+- [[anova/anova-04|Two-way factorial ANOVA with interaction]] — Add a second factor: two-way factorial ANOVA with
   interaction when you have a crossed second grouping variable.
-- [[ols/ols-08]] — Add a continuous baseline covariate to the group effect
+- [[ols/ols-08|ANCOVA: group effect adjusting for a baseline]] — Add a continuous baseline covariate to the group effect
   (ANCOVA, `biomass = fertilizer + baseline`).
 
 ## Copy-paste setup

@@ -6,6 +6,7 @@
   import type { RunTab } from '$lib/stores/run.svelte';
   import { generateScript } from '$lib/domain/script-generator';
   import { sharedPrefs } from '$lib/stores/shared-prefs.svelte';
+  import { uploadStore } from '$lib/stores/upload.svelte';
 
   interface Props { tab: RunTab; }
   const { tab }: Props = $props();
@@ -17,6 +18,9 @@
       sample_size: tab.sample_size,
       bounds: tab.bounds,
       method: tab.method,
+      // shortcut: the current upload's name, not one saved with the run tab; a
+      // tab from before a later upload names the newer file.
+      data_filename: uploadStore.filename || undefined,
     }, sharedPrefs.scriptLanguage),
   );
 

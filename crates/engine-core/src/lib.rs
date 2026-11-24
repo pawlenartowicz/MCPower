@@ -30,6 +30,7 @@ pub mod posthoc;
 pub mod rng;
 pub mod scenarios;
 pub mod spec;
+pub mod standardized;
 #[cfg(test)]
 mod test_support;
 pub mod workspace;

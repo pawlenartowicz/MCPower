@@ -1,0 +1,31 @@
+name: Site check
+
+# Twice a day, check that every public web property answers with a 2xx.
+# A failed scheduled run makes GitHub email the person who last edited the cron line.
+on:
+  schedule:
+    - cron: '0 6,18 * * *'   # 06:00 and 18:00 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check URLs
+        run: |
+          failed=0
+          for url in \
+            https://mcpower.app/ \
+            https://mcpower.app/online/ \
+            https://docs.mcpower.app/ \
+            https://examples-book.mcpower.app/ \
+            https://r.mcpower.app/src/contrib/PACKAGES
+          do
+            code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 --retry-all-errors "$url" || true)
+            echo "$code $url"
+            case "$code" in 2*) ;; *) failed=1; echo "::error::$url returned $code" ;; esac
+          done
+          exit $failed

@@ -50,19 +50,19 @@ and power is reported for each contrast separately.
 
 ## If you'd rather have…
 
-- [[lmm/lmm-01]] — Same random-intercept-per-patient repeated-measures
+- [[lmm/lmm-01|Repeated measures: random intercept per subject]] — Same random-intercept-per-patient repeated-measures
   structure, but the within-subject predictor is a two-level phase factor
   rather than a 3+-level condition factor.
-- [[lmm/lmm-02]] — Adds a between-subjects treatment arm crossed with the
+- [[lmm/lmm-02|Treatment x time interaction (random intercept)]] — Adds a between-subjects treatment arm crossed with the
   within-subject factor (treatment x week), if your repeated design also has a
   group factor.
-- [[lmm/lmm-05]] — Same `outcome = predictor + (1|grouping)` random-intercept
+- [[lmm/lmm-05|Two-level cluster-randomized trial (random intercept)]] — Same `outcome = predictor + (1|grouping)` random-intercept
   form, but clustering is by clinic (between-cluster design) instead of repeated
   measures within sample.
-- [[anova/anova-01]] — One-way omnibus test across 3+ groups if your conditions
+- [[anova/anova-01|One-way ANOVA, omnibus F-test across 3+ groups]] — One-way omnibus test across 3+ groups if your conditions
   are between-subjects (independent groups) rather than repeated within each
   sample.
-- [[ols/ols-12]] — A 3+-level categorical predictor as ordinary regression if
+- [[ols/ols-12|Three-level categorical predictor]] — A 3+-level categorical predictor as ordinary regression if
   there is no repeated-measures / clustering structure to model.
 
 ## Copy-paste setup

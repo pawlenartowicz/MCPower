@@ -18,6 +18,9 @@
   import ModelOptionsDialog from './ModelOptionsDialog.svelte';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import { OUTCOME_KINDS, mixedDefaultSimulations, mixedOutcomeKind, type OutcomeKind } from '$lib/domain/family';
+  import { standardizedStore } from '$lib/stores/standardized.svelte';
+  import { familyConfigToAppSpec } from '$lib/domain/app-spec-adapter';
+  import { REPORT_CONFIG } from '$lib/configs/report-config';
 
   const cfg = $derived(familyStore.byFamily[familyStore.active]);
   let modelOptionsOpen = $state(false);
@@ -49,6 +52,19 @@
       }
     }
   }
+  // Live standardized values beside the effect inputs of every family's editor:
+  // recomputed (debounced in the store) on every config edit, from the same spec
+  // a run would send.
+  $effect(() => {
+    const adapted = familyConfigToAppSpec(familyStore.active, cfg, familyStore.regressionOutcome);
+    standardizedStore.refresh(adapted.errors.length === 0 ? adapted.spec : null);
+  });
+  const r2Text = $derived.by(() => {
+    const cur = standardizedStore.current;
+    const label = cur?.clustered ? REPORT_CONFIG.text.r2_fixed_label : REPORT_CONFIG.text.r2_label;
+    return `${label} ${cur?.r2 === null || cur?.r2 === undefined ? '—' : cur.r2.toFixed(3)}`;
+  });
+
   const summary = $derived(
     familyStore.active === 'anova'
       ? `${cfg.variables.filter((v) => v.kind === 'factor').length} factors · ${cfg.effects.length} effects`
@@ -81,6 +97,15 @@
   {:else}
     <FormulaInput />
     <PredictorCards />
+  {/if}
+  {#if cfg.effects.length > 0}
+    <p
+      class="font-mono text-xs text-muted-foreground tabular-nums"
+      title="Share of the outcome's variance the effects explain (latent scale for a binary outcome; the fixed effects' share with clusters)."
+      data-testid="model-r2"
+    >
+      {r2Text}
+    </p>
   {/if}
   {#if familyStore.active === 'mixed'}
     <ClusterEditor />

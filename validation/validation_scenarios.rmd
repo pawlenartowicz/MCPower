@@ -425,7 +425,7 @@ run_fg_flip <- function(case) {
 
 # What this report shows
 
-MCPower's **sensitivity analysis** deliberately stresses a planned study: instead of
+MCPower's **robustness analysis** deliberately stresses a planned study: instead of
 simulating the idealised design you specified, each scenario *perturbs* it —
 slopes wobble between observations, residual variance trends with the predictors,
 correlations differ from the plan, predictor distributions get
@@ -689,7 +689,7 @@ each study's data is a clean logit at its own β_eff and the MLE recovers it —
 averaged over the K studies the fitted coefficient → E[β_eff], **not** the
 attenuated coefficient a per-observation population-averaged marginal would show.
 The clip toward zero (s_j = h·|β_j|) nudges each slope's magnitude *up* by
-×(Φ(1/h)+h·φ(1/h)) ≈ ×1.0008 at doomer's h = 0.4; the symmetric unclipped
+×(Φ(1/h)+h·φ(1/h)) ≈ ×1.0008 at pessimistic's h = 0.4; the symmetric unclipped
 intercept jitter leaves β_0 unchanged. So the logit law is this per-study
 pseudo-true value (`glm_perstudy_beta`), gated on the absolute band
 ±`r SCENARIO_TOL$glm_beta_abs`. The GLM calibration gates remain Tier A and the
@@ -749,7 +749,7 @@ mechanism* and *bound the drift*; they do not fail on the drift itself.
 knitr::kable(gates_table("scen_b5", R5$scen_b5$gates), digits = 5)
 b5 <- R5$scen_b5
 drift_tab <- do.call(rbind, lapply(names(b5$drift), function(sc)
-  data.frame(Preset = sc, `λ set` = c(realistic = 2, doomer = 4)[[sc]],
+  data.frame(Preset = sc, `λ set` = c(realistic = 2, pessimistic = 4)[[sc]],
              `λ′ 5%` = b5$drift[[sc]][1], `λ′ median` = b5$drift[[sc]][2],
              `λ′ 95%` = b5$drift[[sc]][3], check.names = FALSE)))
 knitr::kable(drift_tab, digits = 3, row.names = FALSE)
@@ -761,7 +761,7 @@ The staleness gate is the discriminating one: per block, the measured ratio
 away.) Note the *mean* slope alone cannot tell the two designs apart
 (γ·E[1/σ′] ≈ γ/σ₀ to 0.1%); the per-block tracking is what evidences the
 stale anchor. The preset table quantifies the documented drift: under
-realistic/doomer the effective λ′ wobbles around the set λ by the quantiles
+realistic/pessimistic the effective λ′ wobbles around the set λ by the quantiles
 shown — second-order next to the perturbations themselves.
 
 # Family gating

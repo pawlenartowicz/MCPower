@@ -65,7 +65,13 @@ print(summary(result))
 ==================================================
 formula: score ~ teaching_method + prior_gpa + (1|classroom)
 estimator: MLE  N=300  sims=800  α=0.05  target=80%
-effects: teaching_method=0.40, prior_gpa=0.18
+───────────────────────────────────────────
+Effect               Input   Std. β       d
+───────────────────────────────────────────
+teaching_method       0.40    0.179   0.364
+prior_gpa             0.18    0.161       —
+───────────────────────────────────────────
+R² (fixed effects) = 0.058
 
 Per-test power
 ───────────────────────────────────
@@ -105,8 +111,8 @@ Plots: plot(result) to view, plot(result, 'chart.png') to save.
 ```
 <!-- /example -->
 
-Both targets are comfortably above 80%: `teaching_method` lands at **90.9%** and
-`prior_gpa` at **85.8%**. The joint significance distribution shows a 78.2% chance
+Both targets are comfortably above 80%: `teaching_method` lands at **90.6%** and
+`prior_gpa` at **85.6%**. The joint significance distribution shows a 77.9% chance
 of detecting *both* effects in the same study — close to the 80% target, so N = 300
 is a reasonable budget when both effects matter.
 
@@ -298,7 +304,7 @@ result <- model$find_power(sample_size = 300, target_test = "treatment",
 See [[concepts/simulation-settings#denominator-degrees-of-freedom|Denominator
 degrees of freedom]] for the full explanation.
 
-### Sensitivity analysis (scenarios) for mixed models
+### Robustness analysis (scenarios) for mixed models
 
 Mixed models support three scenario knobs: `random_effect_dist` (normal / heavy_tailed / right_skewed), `random_effect_df`, and `icc_noise_sd`. Use them to probe how sensitive power is to non-Gaussian random effects or an uncertain ICC:
 
@@ -311,6 +317,6 @@ model$find_power(sample_size = 600, target_test = "teaching_method",
                  scenarios = c("optimistic", "re_stress"))
 ```
 
-See [[concepts/sensitivity-analysis#mixed-model-knobs|Mixed-model scenario knobs]].
+See [[concepts/robustness-analysis#mixed-model-knobs|Mixed-model scenario knobs]].
 
 next → [[06_anova-posthoc|ANOVA & post-hoc]]

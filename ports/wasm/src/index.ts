@@ -24,12 +24,13 @@ import init, {
   parse_formula as wasm_parse_formula,
   get_effects_from_data as wasm_get_effects_from_data,
   effect_skeleton as wasm_effect_skeleton,
+  effect_moments as wasm_effect_moments,
 } from '../vendor/engine-wasm/engine_wasm.js';
 import { classifyCase, poolSize, splitSims, workerSeeds } from './seeds';
 import { ProgressAggregator } from './progress';
 import { validateUploadRows } from './upload';
 import type {
-  AppSpec, EffectDescriptor, EffectsFromData, FindPowerResponse, FindSampleSizeResponse, PlotSpecs, ProgressEvent, SampleSizeMethod,
+  AppSpec, EffectDescriptor, EffectsFromData, EffectMoments, FindPowerResponse, FindSampleSizeResponse, PlotSpecs, ProgressEvent, SampleSizeMethod,
 } from './types';
 
 /** Derive `corrected` from an AppSpec JSON object. Mirrors `AppSpec::is_corrected()`. */
@@ -119,6 +120,16 @@ export async function parseFormula(formula: string): Promise<unknown> {
 export async function effectSkeleton(spec: AppSpec): Promise<EffectDescriptor[]> {
   await ensureMain();
   return JSON.parse(wasm_effect_skeleton(JSON.stringify(spec))) as EffectDescriptor[];
+}
+
+/**
+ * The moments behind the standardized β, Cohen's d and model R² of `spec`'s
+ * generating model, on the main thread (no worker). Mirrors the Tauri
+ * `effect_moments_cmd` command.
+ */
+export async function effectMoments(spec: AppSpec): Promise<EffectMoments> {
+  await ensureMain();
+  return JSON.parse(wasm_effect_moments(JSON.stringify(spec))) as EffectMoments;
 }
 
 /**

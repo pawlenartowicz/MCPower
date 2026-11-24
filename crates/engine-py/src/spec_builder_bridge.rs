@@ -76,6 +76,31 @@ pub fn build_contract_from_spec(
     Python::attach(|py| Ok((names, PyBytes::new(py, &bytes).into(), skeleton_json)))
 }
 
+/// Standardized β, Cohen's d and model R² of the generating model, as JSON:
+/// `{"effects": [{"descriptor", "std_beta", "cohen_d"}, ...], "r2"}`. One
+/// effect per generation-design term (intercept excluded) in that order, each
+/// named by its generation-skeleton `descriptor` (the model formula's, not
+/// `test_formula`'s); undefined values are `null`. `json` is the same
+/// `LinearSpec` JSON and `contracts_bytes` the msgpack blob that
+/// [`build_contract_from_spec`] built from it; the values are the same for
+/// every scenario, so the first contract is used.
+/// Mirror: `engine-r` `standardized_effects` — change together.
+#[pyfunction]
+pub fn standardized_effects(json: &str, contracts_bytes: &[u8]) -> PyResult<String> {
+    let spec: LinearSpec = serde_json::from_str(json)
+        .map_err(|e| PyValueError::new_err(format!("invalid LinearSpec JSON: {e}")))?;
+    let skeleton = engine_spec_builder::generation_skeleton(&spec).map_err(map_spec_error)?;
+    let contracts = crate::orchestrator_bridge::decode_contracts(contracts_bytes)?;
+    let values = engine_orchestrator::standardized_effects(&contracts[0])
+        .map_err(crate::orchestrator_err_to_py)?;
+    let effects: Vec<serde_json::Value> = skeleton[1..]
+        .iter()
+        .zip(&values.effects)
+        .map(|(d, e)| serde_json::json!({"descriptor": d, "std_beta": e.std_beta, "cohen_d": e.cohen_d}))
+        .collect();
+    Ok(serde_json::json!({"effects": effects, "r2": values.r2}).to_string())
+}
+
 /// Synthetic-distribution name → integer code table as a JSON object string.
 /// Python parses and caches it (`mcpower/config.py`); single source of truth.
 #[pyfunction]
@@ -333,6 +358,7 @@ fn map_spec_error(e: SpecError) -> PyErr {
         | SpecError::FactorProportionSum { .. }
         | SpecError::FactorProportionLengthMismatch { .. }
         | SpecError::FactorReferenceMissing { .. }
+        | SpecError::DuplicateFactorLevel { .. }
         | SpecError::FactorProportionNonPositive { .. }
         | SpecError::BinaryProportionOutOfRange { .. }
         | SpecError::FactorCodeOutOfRange { .. }
@@ -356,9 +382,12 @@ fn map_spec_error(e: SpecError) -> PyErr {
         | SpecError::ContrastRequiresOls { .. }
         | SpecError::DfMethodNotDefined(_)
         | SpecError::ContractRule(_)
+        | SpecError::DuplicateUploadColumn { .. }
         | SpecError::RecoveryColumnMissing { .. }
         | SpecError::RecoveryColumnLength { .. }
         | SpecError::InvalidVariableTypeValue { .. }
+        | SpecError::SlopeVariableNoMainEffect { .. }
+        | SpecError::PosthocFactorNotFitted { .. }
         | SpecError::NotAFactorPredictor { .. } => PyValueError::new_err(e.to_string()),
         SpecError::InternalContractValidate(_) => PyRuntimeError::new_err(e.to_string()),
     }

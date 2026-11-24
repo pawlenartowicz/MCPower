@@ -43,6 +43,7 @@ pub fn run() {
             crate::commands::parse_formula_cmd,
             crate::commands::get_effects_from_data_cmd,
             crate::commands::effect_skeleton_cmd,
+            crate::commands::effect_moments_cmd,
             crate::commands::set_n_threads_cmd,
         ])
         .run(tauri::generate_context!())

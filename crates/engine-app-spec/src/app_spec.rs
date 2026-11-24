@@ -409,6 +409,11 @@ pub struct ParsedFormula {
     pub predictors: Vec<String>,
     #[serde(default)]
     pub interaction_terms: Vec<Vec<String>>,
+    /// Predictors that appear only inside `:` interactions (`y ~ x:z`): they
+    /// still generate a column but get no main term. Every other predictor is
+    /// a main term. Empty (the serde default) = all predictors are main terms.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interaction_only: Vec<String>,
 }
 
 /// Synthetic distribution for a numeric (continuous) predictor. Maps 1:1 onto

@@ -31,6 +31,20 @@ export interface ParsedFormula {
     outcome: string;
     predictors: string[];
     interaction_terms: string[][];
+    /** Predictors that appear only inside `:` interactions — they generate a
+     *  column but get no main term. Omitted = every predictor is a main term
+     *  (mirrors the Rust `#[serde(default)]`). */
+    interaction_only?: string[];
+}
+
+/** Right-hand-side terms of the formula: main-term predictors, then
+ *  interactions joined with `:`. */
+export function formulaTerms(pf: ParsedFormula): string[] {
+    const skip = new Set(pf.interaction_only ?? []);
+    return [
+        ...pf.predictors.filter((p) => !skip.has(p)),
+        ...pf.interaction_terms.map((t) => t.join(':')),
+    ];
 }
 
 /** Mirrors `engine_app_spec::NumericDistribution` (snake_case serde; absent = normal). */
@@ -78,6 +92,25 @@ export type EffectDescriptor =
     | { kind: 'continuous'; predictor: string }
     | { kind: 'factor_level'; factor: string; level: number }
     | { kind: 'interaction'; components: EffectDescriptor[] };
+
+/**
+ * The effect-size-free moments behind the standardized β, Cohen's d and model
+ * R² of the generating model (`engine_app_spec::effect_moments_json`; the
+ * Rust `EffectMoments` documents the formulas). One descriptor per generated
+ * term (intercept excluded); `moments` covers those k terms in that order, or
+ * is `null` where the values are undefined (count outcomes, random slopes).
+ * Matrices are `k × k` row-major; `groups[i]` is set only for a binary
+ * predictor or factor level.
+ */
+export interface EffectMoments {
+    descriptors: EffectDescriptor[];
+    moments: {
+        noise: number;
+        sd: number[];
+        cov: number[];
+        groups: ({ w: number; mean_diff: number[]; cov_1: number[]; cov_0: number[] } | null)[];
+    } | null;
+}
 
 export interface EffectSize { name: string; value: number; }
 

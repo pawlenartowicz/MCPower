@@ -45,7 +45,7 @@
 
 <div class="space-y-1" data-testid="find-sample-size">
   <div class="flex items-center gap-2">
-    <h3 class="text-xs font-medium text-muted-foreground">Find sample</h3>
+    <h3 class="font-sans text-xs font-medium text-muted-foreground">Find sample</h3>
     <InfoIcon tipKey="sampleSizeSearch" />
   </div>
   <div class="flex flex-wrap items-end gap-2">

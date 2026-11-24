@@ -32,6 +32,16 @@ To convert a published value:
 - **Cohen's *d*:** with no covariates, enter it as it is. With covariates, divide by $\sqrt{1 - R^2}$, where $R^2$ is the share of the within-group variance they explain: a *d* of 0.5 with a baseline that correlates .5 with the outcome within groups becomes 0.58. This treats covariates as uncorrelated with the group, as in a randomized design.
 - **Mixed model, random intercept alone:** divide an effect standardized by the total SD by $\sqrt{1 - \mathrm{ICC}}$.
 
+### What an entered effect means
+
+Next to every effect, MCPower shows what it equals on the scales papers report, so you can check an entered effect against a published one:
+
+- **Standardized β**, for every effect: the effect per SD of the predictor, in SDs of the outcome's total variation (all effects, random effects and residual together). This is what a regression table that standardizes every variable reports.
+- **Cohen's *d***, for a binary predictor and each factor level: the outcome's mean difference between that group and the reference, over the pooled within-group SD. Other predictors are not held fixed, so this is the *d* a two-group comparison on large data shows.
+- **R²**, one line under the effects: the share of the outcome's variance the effects explain. With clusters it reads "R² (fixed effects)", the marginal $R^2$ of Nakagawa & Schielzeth (2013). For logit and probit outcomes it is on the latent scale (McKelvey & Zavoina, 1975), whose residual variance is $\pi^2/3$ for logit and 1 for probit.
+
+The app shows these values live as you edit, and in the Summary tab after a run. Python and R print them in an effects block above the results table, and `result.standardized_effects` (`result$standardized_effects` in R) returns them. They are exact for normal predictors with any correlation, for binary predictors and factors, and for data uploaded in `strict` mode. With `none` or `partial` uploads, or a non-normal predictor correlated with another, they are approximate. A Poisson outcome or a random slope shows a dash: a Poisson outcome's variance depends on its mean rate, and a random slope makes the outcome's variance depend on the predictor, so neither has a single total SD.
+
 Effects estimated from your own data need no conversion: [[concepts/upload-data#Borrowing starting effects|`get_effects_from_data`]] returns them on this scale. For logit and Poisson outcomes these conversions do not apply, because the effect is a log-odds or log-rate coefficient.
 
 ## Continuous vs binary outcomes
@@ -86,12 +96,12 @@ When it is easier to think in **odds ratios** than in log-odds betas, MCPower of
 | Medium | 2.5 | 0.92 |
 | Large | 4.0 | 1.39 |
 
-This is a **beta** feature. The values are stored as the log-odds beta MCPower already works in, so nothing about data generation changes — only the benchmark you reach for. In the app, the small/medium/large preset buttons switch to this odds set for every predictor whenever the outcome is **logit**, and each effect input shows its live odds ratio ($\mathrm{OR} = e^{\beta}$) beside the value. In Python and R the printed summary echoes the OR beside each beta you set and adds an **OR** column to the per-test power table.
+This is a **beta** feature. The values are stored as the log-odds beta MCPower already works in, so nothing about data generation changes — only the benchmark you reach for. In the app, the small/medium/large preset buttons switch to this odds set for every predictor whenever the outcome is **logit**, and each effect input shows its live odds ratio ($\mathrm{OR} = e^{\beta}$) beside the value. In Python and R the printed effects block shows the OR beside each beta you set, and the per-test power table gains an **OR** column.
 
 Read the odds ratio on the **same scale as the beta**: **per 1 SD** for a continuous predictor, **per category** (reference → level) for a binary or factor predictor. The number $e^{\beta}$ is the same either way; only the wording of the unit differs.
 
 > [!note] Probit and Poisson read this table differently
-> **Probit** does not use this odds-scale set at all: a probit beta's latent variable has variance exactly 1, so the beta already *is* Cohen's *d* — the app keeps the plain continuous/binary Cohen presets for probit and shows no OR readout ($e^{\beta}$ there is not an odds ratio). **Poisson** reuses the same three beta values (0.41 / 0.92 / 1.39) as **rate-ratio** anchors, since its beta is a log-rate-ratio: $\mathrm{RR} = e^{\beta}$ replaces the OR readout, small/medium/large corresponding to RR 1.5 / 2.5 / 4.0. The anchors are the same numbers Chen et al. (2010) derived for odds ratios, borrowed here as a multiplicative scale for rates — the citation doesn't carry over, only the magnitudes do.
+> **Probit** does not use this odds-scale set at all: a probit beta's latent variable has variance exactly 1, so the beta already *is* Cohen's *d* — the app keeps the plain continuous/binary Cohen presets for probit and shows no OR readout ($e^{\beta}$ there is not an odds ratio). **Poisson** reuses the same three beta values (0.41 / 0.92 / 1.39) as **rate-ratio** anchors, since its beta is a log-rate-ratio: $\mathrm{RR} = e^{\beta}$ replaces the OR readout (and the OR column of the Python and R effects block), small/medium/large corresponding to RR 1.5 / 2.5 / 4.0. The anchors are the same numbers Chen et al. (2010) derived for odds ratios, borrowed here as a multiplicative scale for rates — the citation doesn't carry over, only the magnitudes do.
 
 To convert an odds ratio reported per **raw unit** of $x$ in the literature:
 
@@ -123,7 +133,7 @@ For a logistic model you also set the **baseline probability** — the expected 
 
 > [!tip] Rules of thumb
 > - When in doubt, use a **smaller** effect size — overestimation is the more costly error.
-> - Use [[concepts/sensitivity-analysis|sensitivity analysis]] to test how sensitive your power is to effect-size uncertainty.
+> - Use [[concepts/robustness-analysis|robustness analysis]] to test how sensitive your power is to effect-size uncertainty.
 > - If prior work reports Cohen's *d*, it maps roughly onto the beta of a binary predictor.
 > - Main effects are almost always larger than interaction effects in the same model.
 
@@ -131,3 +141,5 @@ For a logistic model you also set the **baseline probability** — the expected 
 
 - Cohen, J. (1988). *Statistical power analysis for the behavioral sciences* (2nd ed.). Lawrence Erlbaum Associates.
 - Chen, H., Cohen, P., & Chen, S. (2010). How big is a big odds ratio? Interpreting the magnitudes of odds ratios in epidemiological studies. *Communications in Statistics — Simulation and Computation*, 39(4), 860–864.
+- McKelvey, R. D., & Zavoina, W. (1975). A statistical model for the analysis of ordinal level dependent variables. *Journal of Mathematical Sociology*, 4(1), 103–120.
+- Nakagawa, S., & Schielzeth, H. (2013). A general and simple method for obtaining R² from generalized linear mixed-effects models. *Methods in Ecology and Evolution*, 4(2), 133–142.

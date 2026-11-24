@@ -5,6 +5,7 @@ use serde::Serialize;
 fn sample_logit_spec(baseline_probability: f64) -> AppSpec {
     AppSpec::Logit(LogitSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x1".into(), "x2".into()],
             interaction_terms: vec![],

@@ -43,11 +43,23 @@ pub struct RecoveryDesign {
     pub ncol: usize,
 }
 
+fn reject_duplicate_columns(columns: &[UploadColumn]) -> Result<(), SpecError> {
+    for (i, c) in columns.iter().enumerate() {
+        if columns[..i].iter().any(|o| o.name == c.name) {
+            return Err(SpecError::DuplicateUploadColumn {
+                name: c.name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Build the canonical effect-recovery design from typed upload columns — the
 /// single source for `get_effects_from_data` across Tauri, Python, and R.
 ///
 /// Column order: `[Intercept, non-factors (standardized via [`standardize_column`]),
-/// factor 0/1 dummies, interaction products]`, column-major flat, with a parallel
+/// factor 0/1 dummies, interaction products]`, main-effect columns only for
+/// predictors with a main-effect term, column-major flat, with a parallel
 /// semantic-name list (e.g. "intercept", "cyl[6]").
 ///
 /// `columns` are the typed uploaded columns: factor `values` are level codes
@@ -58,6 +70,7 @@ pub struct RecoveryDesign {
 /// defensive backstop.
 ///
 /// # Errors
+/// - [`SpecError::DuplicateUploadColumn`]: two uploaded columns share a name.
 /// - [`SpecError::RecoveryColumnMissing`]: a modeled predictor (or interaction component) has no matching uploaded column.
 /// - [`SpecError::RecoveryColumnLength`]: a matched column has a different row count than `nrow`.
 pub fn build_recovery_design(
@@ -67,6 +80,7 @@ pub fn build_recovery_design(
 ) -> Result<RecoveryDesign, SpecError> {
     use std::collections::HashMap;
 
+    reject_duplicate_columns(columns)?;
     let col_by_name: HashMap<&str, &UploadColumn> =
         columns.iter().map(|c| (c.name.as_str(), c)).collect();
 
@@ -130,14 +144,24 @@ pub fn build_recovery_design(
     }
 
     // Design column-major: [Intercept, non-factors, factor dummies, interactions].
+    // A predictor with no main-effect term (x and z in `y ~ x:z`, x in
+    // `y ~ f:x`) only enters through its interactions: the design holds the
+    // effects a user can set, which is the model the power run generates from.
     let mut semantic_names: Vec<String> = vec!["intercept".into()];
     let mut design_cols: Vec<Vec<f64>> = vec![vec![1.0_f64; nrow]];
 
-    for name in &table.non_factor_names {
+    for name in table
+        .non_factor_names
+        .iter()
+        .filter(|n| table.has_main_term(n))
+    {
         semantic_names.push(name.clone());
         design_cols.push(std_columns[name.as_str()].clone());
     }
     for (fi, factor_name) in table.factor_names.iter().enumerate() {
+        if !table.has_main_term(factor_name) {
+            continue;
+        }
         for level in &table.factor_levels[fi] {
             let dummy_name = format!("{factor_name}[{level}]");
             semantic_names.push(dummy_name.clone());
@@ -397,6 +421,7 @@ pub(crate) fn apply_upload(
     let n_non_factor = table.non_factor_names.len();
     let predictor_names = table.non_factor_names.iter().chain(&table.factor_names);
     let n_rows = upload.n_rows as usize;
+    reject_duplicate_columns(&upload.columns)?;
     let col_by_name: std::collections::HashMap<&str, &UploadColumn> = upload
         .columns
         .iter()
@@ -729,6 +754,52 @@ mod recovery_tests {
         assert!(rd.design_flat[4].abs() < 1e-12);
         assert!((rd.design_flat[5] - z).abs() < 1e-12);
         assert_eq!(&rd.design_flat[6..9], &[0.0, 1.0, 0.0]);
+    }
+
+    /// `y ~ x:g` has no main-effect term for x or g: the design holds the
+    /// intercept and the product column only, the z-scored x times g[b].
+    #[test]
+    fn recovery_design_interaction_only_has_no_main_columns() {
+        let parsed = parse_formula("y ~ x:g").unwrap();
+        let predictors = vec![
+            PredictorSpec {
+                name: "x".into(),
+                pinned: false,
+                kind: VarKind::Normal,
+            },
+            PredictorSpec {
+                name: "g".into(),
+                pinned: false,
+                kind: VarKind::Factor {
+                    levels: vec!["a".into(), "b".into()],
+                    proportions: vec![0.5, 0.5],
+                    reference: "a".into(),
+                    sampled_proportions: None,
+                },
+            },
+        ];
+        let table = build_predictor_table(&parsed, &predictors).unwrap();
+        let columns = vec![
+            UploadColumn {
+                name: "x".into(),
+                col_type: UploadColumnType::Continuous,
+                values: vec![1.0, 2.0, 3.0],
+                labels: vec![],
+            },
+            UploadColumn {
+                name: "g".into(),
+                col_type: UploadColumnType::Factor,
+                values: vec![0.0, 1.0, 1.0],
+                labels: vec!["a".into(), "b".into()],
+            },
+        ];
+        let rd = build_recovery_design(&table, &columns, 3).unwrap();
+        assert_eq!(rd.semantic_names, vec!["intercept", "x:g[b]"]);
+        assert_eq!(rd.ncol, 2);
+        let z = 1.0_f64 / (2.0_f64 / 3.0).sqrt();
+        assert_eq!(rd.design_flat[3], 0.0);
+        assert!(rd.design_flat[4].abs() < 1e-12);
+        assert!((rd.design_flat[5] - z).abs() < 1e-12);
     }
 
     #[test]

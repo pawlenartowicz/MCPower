@@ -40,9 +40,9 @@ benchmark (0.10).
 
 ## Not this setup?
 
-- [[ols/ols-04]] — two continuous predictors interacting (`income * social_support`), the
+- [[ols/ols-04|Continuous-by-continuous moderation]] — two continuous predictors interacting (`income * social_support`), the
   simpler two-way moderation without a third variable.
-- [[ols/ols-06]] — a neighbouring three-predictor design with a different
+- [[ols/ols-06|Interaction-only term (no moderator main effect)]] — a neighbouring three-predictor design with a different
   interaction structure.
 
 ## If you'd rather have…

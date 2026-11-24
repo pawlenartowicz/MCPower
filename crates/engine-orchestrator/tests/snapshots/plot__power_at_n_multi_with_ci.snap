@@ -38,14 +38,14 @@ expression: "parse(&power_at_n_spec(&multi_scenario(), &opts))"
         "ci_hi": 0.55,
         "ci_lo": 0.47,
         "power": 0.51,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "target": "target_1"
       },
       {
         "ci_hi": 0.38,
         "ci_lo": 0.3,
         "power": 0.34,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "target": "target_2"
       }
     ]
@@ -70,7 +70,7 @@ expression: "parse(&power_at_n_spec(&multi_scenario(), &opts))"
           "sort": [
             "optimistic",
             "realistic",
-            "doomer"
+            "pessimistic"
           ],
           "type": "nominal"
         },
@@ -104,7 +104,7 @@ expression: "parse(&power_at_n_spec(&multi_scenario(), &opts))"
           "sort": [
             "optimistic",
             "realistic",
-            "doomer"
+            "pessimistic"
           ],
           "type": "nominal"
         }
@@ -129,7 +129,7 @@ expression: "parse(&power_at_n_spec(&multi_scenario(), &opts))"
           "sort": [
             "optimistic",
             "realistic",
-            "doomer"
+            "pessimistic"
           ],
           "type": "nominal"
         },
@@ -152,7 +152,7 @@ expression: "parse(&power_at_n_spec(&multi_scenario(), &opts))"
           "sort": [
             "optimistic",
             "realistic",
-            "doomer"
+            "pessimistic"
           ],
           "type": "nominal"
         }

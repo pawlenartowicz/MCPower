@@ -31,6 +31,11 @@ vi.mock('$lib/api/engine', () => ({
   onProgress: vi.fn(async () => () => {}),
 }));
 
+// The live standardized-values store: a spy, so a test can see which spec the
+// section sends it.
+const std = vi.hoisted(() => ({ current: null, refresh: vi.fn() }));
+vi.mock('$lib/stores/standardized.svelte', () => ({ standardizedStore: std }));
+
 import ModelSection from './ModelSection.svelte';
 import { familyStore } from '$lib/stores/family.svelte';
 
@@ -149,5 +154,15 @@ describe('ModelSection outcome toggle', () => {
     expect(familyStore.activeOutcome).toBe('probit');
     // Regression's outcome lives in the store, never on the mixed cluster.
     expect(familyStore.byFamily.mixed.cluster!.outcomeKind).toBeUndefined();
+  });
+});
+
+describe('ModelSection live standardized values', () => {
+  it('refreshes them for the ANOVA editor too', async () => {
+    familyStore.active = 'anova';
+    std.refresh.mockClear();
+    render(ModelSection);
+    await tick();
+    expect(std.refresh).toHaveBeenCalled();
   });
 });

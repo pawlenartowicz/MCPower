@@ -22,6 +22,14 @@ pub enum SpecError {
         "test_formula leaves out '{name}', which has a random slope in the model; keep '{name}' in test_formula (the test model keeps the model's random effects, and a random slope needs its variable as a fixed effect)"
     )]
     TestFormulaDropsSlopeVariable { name: String },
+    #[error(
+        "'{name}' has a random slope but no main effect in the formula; add '{name}' as a main effect (a random slope needs its variable as a fixed effect)"
+    )]
+    SlopeVariableNoMainEffect { name: String },
+    #[error(
+        "post-hoc comparisons for '{name}' need '{name}' as a main effect in the fitted model; add '{name}' to the formula, and to test_formula when one is set"
+    )]
+    PosthocFactorNotFitted { name: String },
     /// `term` is the first random-effect term of the test_formula, as written.
     #[error(
         "test_formula sets the fixed effects of the test model only; the test model keeps the model's random effects. Remove '{term}' from test_formula"
@@ -121,6 +129,8 @@ pub enum SpecError {
     },
     #[error("factor '{name}': reference level '{reference}' is not among `levels`")]
     FactorReferenceMissing { name: String, reference: String },
+    #[error("factor '{name}': level '{level}' appears more than once in `levels`")]
+    DuplicateFactorLevel { name: String, level: String },
     #[error("factor '{name}': all proportions must be > 0")]
     FactorProportionNonPositive { name: String },
     #[error("binary variable '{name}': proportion must be between 0 and 1, got {value}")]
@@ -172,6 +182,10 @@ pub enum SpecError {
     UnknownContrastName { name: String },
     #[error("recovery design: modeled predictor '{name}' has no matching uploaded column")]
     RecoveryColumnMissing { name: String },
+    #[error(
+        "uploaded data has more than one column named '{name}'; rename or remove the duplicates"
+    )]
+    DuplicateUploadColumn { name: String },
     #[error("recovery design: column '{name}' has {got} values, expected {expected}")]
     RecoveryColumnLength {
         name: String,

@@ -1,5 +1,5 @@
 // Run store: orchestrates engine invocations (find-power / find-sample-size), tracks run state and progress, and manages result tabs.
-import type { AppSpec, EffectDescriptor } from '$lib/domain/app-spec';
+import { formulaTerms, type AppSpec } from '$lib/domain/app-spec';
 import type {
   PowerResult,
   SampleSizeResult,
@@ -8,8 +8,9 @@ import type {
   PlotSpecs,
 } from '$lib/domain/result';
 import { findPower, findSampleSize, cancelRun, onProgress, effectSkeleton } from '$lib/api/engine';
+import { buildVarLevels, renderDescriptor } from '$lib/domain/effect-names';
+import { resolveStandardized, type StandardizedValues } from './standardized.svelte';
 import { historyStore } from './history.svelte';
-import { familyStore } from './family.svelte';
 import { toRunError, type AppError } from '$lib/errors/report';
 import { setUnitAxisTitle } from '$lib/charts/labels';
 import { unitAxisTitle } from '$lib/domain/unit-label';
@@ -33,6 +34,9 @@ export interface RunTab {
   /** Vega-Lite plot blocks for the Summary chart and Joint tab.
    *  Absent on history-reopened tabs predating this field. */
   plots?: PlotSpecs;
+  /** Standardized β / Cohen's d / R² of the effects this run simulated, for the
+   *  Summary tab's effects block. Absent on history-reopened tabs. */
+  standardized?: StandardizedValues;
 }
 
 export interface LastRunDescriptor {
@@ -89,41 +93,6 @@ function createRunStore() {
     return `Run ${_tabCounter + 1}`;
   }
 
-  // Render one EffectDescriptor to a display name using the port's label store.
-  // Mirrors Python _render_descriptor / _factor_label (engine-py report).
-  function renderDescriptor(desc: EffectDescriptor, varLevels: Map<string, string[]>): string {
-    if (desc.kind === 'intercept') return '(Intercept)';
-    if (desc.kind === 'continuous') return desc.predictor;
-    if (desc.kind === 'factor_level') {
-      const levels = varLevels.get(desc.factor) ?? [];
-      const label = (desc.level >= 0 && desc.level < levels.length)
-        ? levels[desc.level]!
-        : String(desc.level + 1);
-      return `${desc.factor}[${label}]`;
-    }
-    // interaction
-    return desc.components.map((c) => renderDescriptor(c, varLevels)).join(':');
-  }
-
-  // Build a name → levels map from the live familyStore config so skeleton
-  // rendering uses whatever labels the user has typed on the card.
-  function buildVarLevels(): Map<string, string[]> {
-    const map = new Map<string, string[]>();
-    // We look up the active config variables; for history replays with no live
-    // config this returns an empty map and skeleton renders index+1 names.
-    try {
-      const cfg = familyStore.byFamily[familyStore.active];
-      for (const v of cfg.variables) {
-        if (v.kind === 'factor' && Array.isArray(v.levels) && v.levels.length > 0) {
-          map.set(v.name, v.levels);
-        }
-      }
-    } catch {
-      // No live config — fall back to empty map (skeleton renders index+1 names).
-    }
-    return map;
-  }
-
   async function resolveEffectNames(spec: AppSpec): Promise<string[]> {
     // ANOVA has its own expanded effect rows — keep using them directly.
     if (spec.family === 'anova') {
@@ -140,11 +109,7 @@ function createRunStore() {
       return skeleton.slice(1).map((desc) => renderDescriptor(desc, varLevels));
     } catch (err) {
       console.warn('effectSkeleton failed, falling back to bare predictor names:', err);
-      const names = [...spec.parsed_formula.predictors];
-      for (const interaction of spec.parsed_formula.interaction_terms) {
-        names.push(interaction.join(':'));
-      }
-      return names;
+      return formulaTerms(spec.parsed_formula);
     }
   }
 
@@ -212,9 +177,15 @@ function createRunStore() {
     progress.total = 0;
     await ensureSubscribed();
     try {
-      const [{ run_id, result, plots }, effect_names] = await Promise.all([
+      const [{ run_id, result, plots }, effect_names, standardized] = await Promise.all([
         invokeFn(),
         resolveEffectNames(descriptor.spec),
+        // Display-only: a failure leaves the run's results intact, without the
+        // effects block.
+        resolveStandardized(descriptor.spec).catch((err: unknown) => {
+          console.warn('effectMoments failed; the effects block is omitted:', err);
+          return undefined;
+        }),
       ]);
       runState = 'done';
       const scenarios = result.scenarios;
@@ -232,6 +203,7 @@ function createRunStore() {
         result: inner,
         scenarios,
         plots,
+        standardized,
       });
       void historyStore.push({
         ...extras,

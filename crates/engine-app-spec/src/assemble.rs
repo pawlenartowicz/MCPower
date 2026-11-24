@@ -99,6 +99,55 @@ pub fn effect_skeleton_json(spec: &AppSpec) -> Result<String, AdapterError> {
     serde_json::to_string(&skeleton).map_err(|e| AdapterError::SkeletonEncode(e.to_string()))
 }
 
+/// JSON of the β-free moments behind the standardized β, Cohen's d and model
+/// R² of `spec`'s generating model: `{"descriptors": [...], "moments": null |
+/// {"noise", "sd", "cov", "groups"}}`, with one descriptor per
+/// generation-design term (the model formula's, intercept excluded) and
+/// `moments` in that term order (`engine_core::standardized::EffectMoments`
+/// documents the fields and the formulas); `null` where the values are
+/// undefined. Both GUI hosts call it and evaluate the values themselves for
+/// the current effect sizes, so an effect-size edit needs no engine call.
+pub fn effect_moments_json(spec: &AppSpec) -> Result<String, AdapterError> {
+    // The moments follow `design_generation` whatever the test model says;
+    // dropping it keeps a half-typed test formula from blocking the live values.
+    let mut generation = spec.clone();
+    match &mut generation {
+        AppSpec::Linear(s) => s.test_formula = None,
+        AppSpec::Logit(s) => s.test_formula = None,
+        AppSpec::Mixed(s) => s.test_formula = None,
+        AppSpec::Poisson(s) => s.test_formula = None,
+    }
+    let (contracts, _skeleton, _warnings) = assemble_spec_with_skeleton(&generation)?;
+    let contract = contracts.first().ok_or(AdapterError::EmptyContracts)?;
+    let moments = engine_orchestrator::effect_moments(contract)?;
+    // Named by the generation design, not the assembled skeleton: that one
+    // follows the fitted design, which drops the main terms of predictors that
+    // only appear inside interactions (`y ~ x1:x2`).
+    // The four specs share these fields under different types.
+    macro_rules! project {
+        ($s:expr) => {
+            project_to_builder_spec(
+                &$s.parsed_formula,
+                &$s.var_types,
+                &$s.effects,
+                &$s.correlations,
+                $s.correction,
+                &$s.tests,
+                $s.alpha,
+                $s.csv.as_ref(),
+            )
+        };
+    }
+    let builder = match spec {
+        AppSpec::Linear(s) => project!(s),
+        AppSpec::Logit(s) => project!(s),
+        AppSpec::Mixed(s) => project!(s),
+        AppSpec::Poisson(s) => project!(s),
+    }?;
+    let skeleton = engine_spec_builder::generation_skeleton(&builder)?;
+    Ok(serde_json::json!({"descriptors": &skeleton[1..], "moments": moments}).to_string())
+}
+
 /// τ² = icc / (1 − icc), mirroring the Python port (`model.py`).
 /// icc is validated (hard `[0, 1)` range + stability band) in `assemble_mixed`
 /// before this is called, and by the Py/R hosts; guard the denominator anyway.
@@ -506,7 +555,12 @@ pub(crate) fn project_to_builder_spec(
 ) -> Result<BuilderLinearSpec, AdapterError> {
     // Target format: "outcome ~ pred1 + pred2 + pred1:pred2"
     let outcome = &parsed_formula.outcome;
-    let mut terms: Vec<String> = parsed_formula.predictors.clone();
+    let mut terms: Vec<String> = parsed_formula
+        .predictors
+        .iter()
+        .filter(|p| !parsed_formula.interaction_only.contains(p))
+        .cloned()
+        .collect();
     for interaction in &parsed_formula.interaction_terms {
         terms.push(interaction.join(":"));
     }
@@ -842,6 +896,7 @@ mod tests {
 
     fn pf(predictors: Vec<&str>, interactions: Vec<Vec<&str>>) -> ParsedFormula {
         ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: predictors.into_iter().map(String::from).collect(),
             interaction_terms: interactions
@@ -867,6 +922,25 @@ mod tests {
         )
         .expect("project ok");
         assert_eq!(spec.formula, "y ~ x1 + x2 + x1:x2");
+    }
+
+    #[test]
+    fn project_drops_main_terms_of_interaction_only_predictors() {
+        let mut parsed = pf(vec!["x1", "x2"], vec![vec!["x1", "x2"]]);
+        parsed.interaction_only = vec!["x1".into(), "x2".into()];
+        let spec = project_to_builder_spec(
+            &parsed,
+            &[],
+            &[],
+            &None,
+            CorrectionMethod::None,
+            &TestSelection::All,
+            0.05,
+            None,
+        )
+        .expect("project ok");
+        assert_eq!(spec.formula, "y ~ x1:x2");
+        assert_eq!(spec.predictors.len(), 2, "both still generate a column");
     }
 
     #[test]
@@ -1575,7 +1649,7 @@ mod tests {
         let spec = linear_app_spec(vec![
             neutral_scenario("optimistic"),
             neutral_scenario("realistic"),
-            neutral_scenario("doomer"),
+            neutral_scenario("pessimistic"),
         ]);
         let contracts = assemble_spec(&spec).expect("assemble ok");
         assert_eq!(contracts.len(), 3, "three scenarios → three contracts");

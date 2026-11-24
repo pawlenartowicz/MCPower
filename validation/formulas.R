@@ -703,7 +703,7 @@ names(CROSS_CASES) <- vapply(CROSS_CASES, function(c) c$label, character(1))
 #   n, seed           rows per draw; base seed (cases use disjoint 1000-wide
 #                     seed blocks so their data streams never overlap).
 #
-# Knob magnitudes use the shipped preset values (realistic/doomer) so the
+# Knob magnitudes use the shipped preset values (realistic/pessimistic) so the
 # validated points are the ones users actually run.
 
 # -- Tier A: one knob, base design ----------------------------------------------
@@ -863,21 +863,21 @@ scen_b0 <- list(
 # averaging keeps OLS exact under every knob). Logit gated on the absolute
 # band against the PER-STUDY pseudo-true β (glm_perstudy_beta): the He β-jitter
 # is drawn once per study, so each study fits a clean logit at its own β_eff and
-# the mean β̂ → E[β_eff] — slopes get only the tiny clip nudge (×1.0008 at doomer
+# the mean β̂ → E[β_eff] — slopes get only the tiny clip nudge (×1.0008 at pessimistic
 # h = 0.4), the intercept stays at β_0; no per-observation attenuation. The GLM
 # gate is Tier A calibration + the flip rate, not β̂.
 scen_b1_ols <- list(
   label = "scen_b1_ols", knob = "B1",
   formula = "y ~ x1 + x2", family = "ols",
   effects = "x1=0.40, x2=0.25", correlations = "corr(x1,x2)=0.3",
-  presets = c("optimistic", "realistic", "doomer"),
+  presets = c("optimistic", "realistic", "pessimistic"),
   n = 2000L, K = 300L, seed = 43000
 )
 scen_b1_glm <- list(
   label = "scen_b1_glm", knob = "B1",
   formula = "y ~ x1 + x2", family = "logit",
   effects = "x1=0.5, x2=0.3", baseline_probability = 0.4,
-  presets = c("optimistic", "realistic", "doomer"),
+  presets = c("optimistic", "realistic", "pessimistic"),
   n = 2000L, K = 300L, seed = 44000
 )
 
@@ -958,7 +958,7 @@ scen_b5 <- list(
   scenario_configs = list(b5_iso = list(correlation_noise_sd = 0.3,
                                         heteroskedasticity_ratio = 4.0)),
   scenario = "b5_iso",
-  presets = c("realistic", "doomer"),
+  presets = c("realistic", "pessimistic"),
   n = 4000L, K = 200L, seed = 48000
 )
 

@@ -71,6 +71,26 @@ pub fn build_contract_from_spec(
     ))
 }
 
+/// Standardized β, Cohen's d and model R² of the generating model, as JSON:
+/// `{"effects": [{"descriptor", "std_beta", "cohen_d"}, ...], "r2"}`.
+/// Mirrors `engine-py/src/spec_builder_bridge.rs` `standardized_effects`
+/// (which documents the shape) — change together.
+#[extendr]
+pub fn standardized_effects(json: &str, contracts: &[u8]) -> Result<String> {
+    let spec: engine_spec_builder::LinearSpec = serde_json::from_str(json)
+        .map_err(|e| r_error(format!("malformed LinearSpec JSON: {e}")))?;
+    let skeleton = engine_spec_builder::generation_skeleton(&spec).map_err(r_error)?;
+    let contracts = crate::orchestrator_bridge::decode_contracts(contracts)?;
+    let values = engine_orchestrator::standardized_effects(&contracts[0])
+        .map_err(crate::progress::orchestrator_err)?;
+    let effects: Vec<serde_json::Value> = skeleton[1..]
+        .iter()
+        .zip(&values.effects)
+        .map(|(d, e)| serde_json::json!({"descriptor": d, "std_beta": e.std_beta, "cohen_d": e.cohen_d}))
+        .collect();
+    Ok(serde_json::json!({"effects": effects, "r2": values.r2}).to_string())
+}
+
 /// Synthetic-distribution name → integer code table as a JSON object string.
 /// R parses and caches it (`zzz.R`); single source of truth.
 #[extendr]
@@ -302,4 +322,5 @@ extendr_module! {
     fn re_dist_codes;
     fn build_recovery_design;
     fn split_assignments;
+    fn standardized_effects;
 }

@@ -2,13 +2,13 @@
   // Summary sub-view: power table, optional scenario selector, plot (bars or curve), and convergence notice.
   import { untrack } from 'svelte';
   import type { RunTab } from '$lib/stores/run.svelte';
-  import type { PowerResult, SampleSizeResult } from '$lib/domain/result';
+  import type { SampleSizeResult } from '$lib/domain/result';
   import { REPORT_CONFIG } from '$lib/configs/report-config';
   import { UPLOAD } from '$lib/configs/app-config';
   import { reuseFraction, strictReuseWarning } from '$lib/domain/reuse-diagnostic';
-  import { buildTargetLabelMap } from '$lib/charts/labels';
-  import { factorReferenceLabels, baselineContrastLabels } from '$lib/report/rows';
+  import { runTabLabelMap } from '$lib/charts/labels';
   import TableView from './TableView.svelte';
+  import EffectsBlock from './EffectsBlock.svelte';
   import VegaChart from './VegaChart.svelte';
   import ConvergenceNotice from './ConvergenceNotice.svelte';
 
@@ -70,43 +70,9 @@
     return block?.spec;
   });
 
-  // Target indices for the plot label map: from the find-power result, or any
-  // grid point of a find-sample-size result (identical across the grid).
-  const targetIndices = $derived(
-    tab.kind === 'find-power'
-      ? (tab.result as PowerResult).target_indices
-      : ((tab.result as SampleSizeResult).grid_or_trace[0]?.target_indices ?? []),
-  );
-  const contrastPairs = $derived(
-    tab.kind === 'find-power'
-      ? ((tab.result as PowerResult).contrast_pairs ?? [])
-      : ((tab.result as SampleSizeResult).grid_or_trace[0]?.contrast_pairs ?? []),
-  );
-  // Estimator drives the overall-series label (F-test for OLS, LRT for GLM).
-  // find-power reads it off the result; find-sample-size off any grid point.
-  const estimator = $derived(
-    tab.kind === 'find-power'
-      ? ((tab.result as PowerResult).estimator_extras as { estimator: string } | undefined)
-          ?.estimator
-      : ((tab.result as SampleSizeResult).grid_or_trace[0]?.estimator_extras as
-          | { estimator: string }
-          | undefined)?.estimator,
-  );
-  // Baseline contrasts the engine collapsed to marginals — same recovery as the
-  // table (TableView), via the shared rows.ts helpers, so chart and table labels
-  // never diverge. ANOVA ships family 'linear'; the anova variant has no var_types.
-  const factorRefs = $derived.by(() =>
-    !tab.spec || tab.spec.family === 'anova' ? {} : factorReferenceLabels(tab.spec.var_types),
-  );
-  const baselineContrasts = $derived.by(() =>
-    baselineContrastLabels(targetIndices, tab.effect_names, factorRefs, tab.spec?.contrasts ?? []),
-  );
   // `target_{idx}` / `target_{p}_vs_{n}` / `overall` → effect-name map so the
-  // chart axes/legend read real names (e.g. "sleep", "B vs A") instead of the
-  // engine's generic tokens.
-  const labelMap = $derived(
-    buildTargetLabelMap(targetIndices, tab.effect_names, contrastPairs, estimator ?? 'ols', baselineContrasts),
-  );
+  // chart axes/legend read real names instead of the engine's generic tokens.
+  const labelMap = $derived(runTabLabelMap(tab));
 
   // Figure heading + one-line description for the plot (the engine emits no
   // title; the host captions it so a chart isn't a bare, unlabelled box).
@@ -140,9 +106,17 @@
       };
     } else {
       // find-sample-size: evaluate per first_achieved N per target.
+      // `first_achieved` has one slot per target (marginals, then contrast
+      // pairs), not one per effect name, so labels come from the targets.
       const r = tab.result as SampleSizeResult;
-      const entries = tab.effect_names.map((name, i) => {
-        const N = r.first_achieved[i] ?? null;
+      const g = r.grid_or_trace[0];
+      const labels = [
+        ...(g?.target_indices ?? []).map((idx) => labelMap[`target_${idx}`] ?? `target_${idx}`),
+        ...(g?.contrast_pairs ?? []).map(([p, n]) => labelMap[`target_${p}_vs_${n}`] ?? `target_${p}_vs_${n}`),
+      ];
+      const entries = r.first_achieved.map((N0, i) => {
+        const name = labels[i] ?? `target ${i + 1}`;
+        const N = N0 ?? null;
         if (N === null) return { label: name, fraction: 0, warning: null };
         return { label: name, fraction: reuseFraction(U, N), warning: strictReuseWarning(U, N, ratio) };
       });
@@ -152,6 +126,12 @@
 </script>
 
 <div class="space-y-4">
+  <!-- What the simulated effects mean on reported scales (absent on
+       history-reopened tabs, which predate the values). -->
+  {#if tab.standardized}
+    <EffectsBlock values={tab.standardized} spec={tab.spec} />
+  {/if}
+
   <!-- Full-width table (always shown) -->
   <TableView {tab} />
 
@@ -211,7 +191,7 @@
       <p class="font-medium text-foreground">Bootstrap reuse (strict mode, U={reuseInfo().U} rows)</p>
       {#each reuseInfo().entries as entry (entry.label)}
         <p>
-          {entry.label ? `${entry.label}: ` : ''}{entry.fraction.toFixed(1)}% of bootstrap samples reuse at least one uploaded row.
+          {entry.label ? `${entry.label}: ` : ''}{entry.fraction.toFixed(1)}% of uploaded rows are expected to be drawn more than once in each simulated dataset.
         </p>
         {#if entry.warning}
           <p class="text-amber-700">{entry.warning}</p>

@@ -31,6 +31,7 @@ fn one_way_anova_spec(k: usize, correction: CorrectionMethod) -> AppSpec {
         .collect();
     AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["F1".into()],
             interaction_terms: vec![],

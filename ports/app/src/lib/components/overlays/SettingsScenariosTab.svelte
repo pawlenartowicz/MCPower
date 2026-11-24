@@ -19,7 +19,7 @@
   const HINTS: Record<string, string> = {
     optimistic: 'Best case: no perturbations, every predictor and correlation as specified.',
     realistic: 'Default: moderate heterogeneity, uneven residual variance, some predictor distribution swaps.',
-    doomer: 'Conservative: strong heterogeneity, larger residual variance ratio, frequent predictor swaps.',
+    pessimistic: 'Conservative: strong heterogeneity, larger residual variance ratio, frequent predictor swaps.',
   };
 
   const RANDOM_EFFECT_DISTS: RandomEffectDist[] = ['normal', 'heavy_tailed'];
@@ -35,7 +35,7 @@
 <div class="space-y-4 px-1 pt-1">
   <div class="flex items-baseline justify-between gap-3">
     <p class="text-xs text-muted-foreground">
-      Sensitivity analysis is {sharedPrefs.scenariosEnabled ? 'on' : 'off'} — toggle in the status bar.
+      Robustness analysis is {sharedPrefs.scenariosEnabled ? 'on' : 'off'} — toggle in the status bar.
       Edits below modify this device's copy of <code>configs/scenarios.json</code>;
       the default values are restored via Reset.
     </p>

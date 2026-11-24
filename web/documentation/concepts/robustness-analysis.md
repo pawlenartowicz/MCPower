@@ -1,10 +1,10 @@
 ---
-title: "Sensitivity analysis for robust power planning"
-description: "Sensitivity analysis for robust power planning: heterogeneity, non-normality, heteroskedasticity, correlation noise, and custom scenarios."
+title: "Robustness analysis for power planning"
+description: "Robustness analysis for power planning: heterogeneity, non-normality, heteroskedasticity, correlation noise, and custom scenarios."
 ---
-# Sensitivity analysis (scenarios)
+# Robustness analysis (scenarios)
 
-Traditional power analysis assumes ideal conditions: effects exactly as specified, perfectly normal distributions, constant error variance. Real studies never match those assumptions. Sensitivity analysis reports how robust your power is when they break down — a *range* of power estimates instead of one optimistic number.
+Traditional power analysis assumes ideal conditions: effects exactly as specified, perfectly normal distributions, constant error variance. Real studies never match those assumptions. Robustness analysis reports how robust your power is when they break down — a *range* of power estimates instead of one optimistic number.
 
 This page is the reference for every scenario knob: what assumption violation it represents, how MCPower simulates it, and what the number means in your simulated data.
 
@@ -12,14 +12,14 @@ This page is the reference for every scenario knob: what assumption violation it
 
 - **Optimistic** — your exact settings, no perturbations. The best case.
 - **Realistic** — moderate violations: effects vary from study to study, correlations fluctuate, distributions drift from normal.
-- **Doomer** — severe violations, a worst case.
+- **Pessimistic** — severe violations, a worst case.
 
 > [!tip] Plan around Realistic
-> If even **Doomer** clears your target, the design is highly robust. If only **Optimistic** reaches it, increase the sample size — the design is fragile.
+> If even **Pessimistic** clears your target, the design is highly robust. If only **Optimistic** reaches it, increase the sample size — the design is fragile.
 
 Each scenario is a named set of knob values:
 
-| Knob | Optimistic | Realistic | Doomer |
+| Knob | Optimistic | Realistic | Pessimistic |
 |---|---|---|---|
 | `heterogeneity` | 0 | 0.20 | 0.40 |
 | `heteroskedasticity_ratio` (λ) | 1.0 (off) | 2.0 | 4.0 |
@@ -46,7 +46,7 @@ Three groups: one **effect knob** (`heterogeneity`), three **design knobs** (`co
 
 ### Heterogeneity
 
-Your model assumes one true effect for everyone, but in real replications the effect varies study to study. The `heterogeneity` knob (`h`) draws a fresh effect per simulated study with SD = `h`·|β|, so `h = 0.2` lets an effect set at 0.50 wander between roughly 0.40 and 0.60. Set `0` to turn it off; presets use 0.20 (realistic) and 0.40 (doomer).
+Your model assumes one true effect for everyone, but in real replications the effect varies study to study. The `heterogeneity` knob (`h`) draws a fresh effect per simulated study with SD = `h`·|β|, so `h = 0.2` lets an effect set at 0.50 wander between roughly 0.40 and 0.60. Set `0` to turn it off; presets use 0.20 (realistic) and 0.40 (pessimistic).
 
 **Definition.** The model treats each effect as one fixed number for everyone. In reality the true effect varies from study to study — across people, sites, and protocols a different effect is realized each time. This is effect heterogeneity, the routine finding of multisite replications.
 
@@ -56,14 +56,14 @@ Your model assumes one true effect for everyone, but in real replications the ef
 
 > [!note] Empirical values in research
 > The anchor is the between-study effect SD (τ) from multisite replications, divided by the effect size (h = τ/|β|) — exactly the quantity the per-study draw simulates.
-> - Klein et al. (2018; Many Labs 2) — 28 effects replicated at 125 sites: 68% of effects had τ ≈ 0, eight ≈ 0.10, and only one above 0.20 (τ = 0.24). Against typical replication effect sizes this places realistic 0.2 mid-distribution and doomer 0.4 in the upper range.
+> - Klein et al. (2018; Many Labs 2) — 28 effects replicated at 125 sites: 68% of effects had τ ≈ 0, eight ≈ 0.10, and only one above 0.20 (τ = 0.24). Against typical replication effect sizes this places realistic 0.2 mid-distribution and pessimistic 0.4 in the upper range.
 > - Holzmeister et al. (2024) — 70 meta-analyses: *population* heterogeneity (same design, different samples — the directly matching source) has median τ = 0.06; *design* heterogeneity (different protocols) median τ = 0.23. For typical effect sizes these map to h ≈ 0.2–0.4.
 > - Klein et al. (2014; Many Labs 1) — across 36 standardised sites, between-site variance is near zero for most effects, grounding h = 0 for tightly matched, single-protocol designs.
-> - Gelman et al. (2026) — proposes planning from a *distribution* of individual effects with a generic default SD ≈ |β| (h ≈ 1.0) plus a large share of pure nulls; together with Bryan, Tipton & Yeager (2021) — researchers systematically *underestimate* heterogeneity — it suggests that for broad, mixed-population interventions even doomer 0.4 is conservative.
+> - Gelman et al. (2026) — proposes planning from a *distribution* of individual effects with a generic default SD ≈ |β| (h ≈ 1.0) plus a large share of pure nulls; together with Bryan, Tipton & Yeager (2021) — researchers systematically *underestimate* heterogeneity — it suggests that for broad, mixed-population interventions even pessimistic 0.4 is conservative.
 
 ### Correlation noise
 
-The correlations you set between predictors are estimates, not fixed truths — each sample's measured correlation wobbles around the real one. The `correlation_noise_sd` knob adds Gaussian noise of that SD to every correlation between predictors on each draw, including those you left at 0: at `0.15`, a specified r = 0.30 is simulated from roughly r ≈ 0.15–0.45 (±1 SD). Set `0` to turn it off; presets use 0.15 (realistic) and 0.30 (doomer).
+The correlations you set between predictors are estimates, not fixed truths — each sample's measured correlation wobbles around the real one. The `correlation_noise_sd` knob adds Gaussian noise of that SD to every correlation between predictors on each draw, including those you left at 0: at `0.15`, a specified r = 0.30 is simulated from roughly r ≈ 0.15–0.45 (±1 SD). Set `0` to turn it off; presets use 0.15 (realistic) and 0.30 (pessimistic).
 
 **Definition.** The correlations you specify between predictors are estimates, not constants — a correlation measured in any one sample fluctuates around the population value, so the design's correlation structure is itself uncertain.
 
@@ -72,14 +72,14 @@ The correlations you set between predictors are estimates, not fixed truths — 
 **What the value means.** sd = 0.15: a specified r = 0.30 is simulated from roughly r ≈ 0.15–0.45 (±1 SD) from one design draw to the next.
 
 > [!note] Empirical values in research
-> - Gnambs (2023) — the standard error of a correlation is ≈ 1/√(n−3): about 0.15 at n ≈ 45–50 and 0.30 at n ≈ 14. Realistic 0.15 is the per-sample SD of r in a typical mid-sized study; doomer 0.30 is that of a severely underpowered one.
+> - Gnambs (2023) — the standard error of a correlation is ≈ 1/√(n−3): about 0.15 at n ≈ 45–50 and 0.30 at n ≈ 14. Realistic 0.15 is the per-sample SD of r in a typical mid-sized study; pessimistic 0.30 is that of a severely underpowered one.
 > - Schönbrodt & Perugini (2013) — a ±0.15 corridor is their boundary between "stable" and "unstable" correlation estimates, reached only around n ≈ 100; smaller samples — common in psychology — fluctuate by more than 0.15 per draw.
-> - Open Science Collaboration (2015) — across 100 replicated studies, the SD of replication correlations was 0.257, combining sampling error, lab effects, and true moderation. The sampling-error component alone (≈ 0.10–0.15 at typical n) matches realistic; the full spread supports doomer.
+> - Open Science Collaboration (2015) — across 100 replicated studies, the SD of replication correlations was 0.257, combining sampling error, lab effects, and true moderation. The sampling-error component alone (≈ 0.10–0.15 at typical n) matches realistic; the full spread supports pessimistic.
 > - Stanley & Spence (2014) — measurement error and sampling error each independently move observed correlations by ≈ 0.07–0.13; combined, at small n and low reliability, replication intervals imply SDs near 0.24–0.30.
 
 ### Distribution swaps
 
-Predictors you assume normal often arrive skewed or otherwise non-normal once data are collected. The `distribution_change_prob` knob sets the per-simulation chance that an unpinned normal predictor is reshaped into a random pick from the `new_distributions` pool (right-skewed, left-skewed, uniform): at `0.5`, about half the draws reshape a given predictor. Set `0` to turn it off; presets use 0.5 (realistic) and 0.8 (doomer).
+Predictors you assume normal often arrive skewed or otherwise non-normal once data are collected. The `distribution_change_prob` knob sets the per-simulation chance that an unpinned normal predictor is reshaped into a random pick from the `new_distributions` pool (right-skewed, left-skewed, uniform): at `0.5`, about half the draws reshape a given predictor. Set `0` to turn it off; presets use 0.5 (realistic) and 0.8 (pessimistic).
 
 **Definition.** Variables assumed normal often turn out skewed, bounded, or otherwise non-normal once the data are collected.
 
@@ -93,17 +93,17 @@ Predictors you assume normal often arrive skewed or otherwise non-normal once da
 > - Blanca et al. (2013) — 693 real distributions, only 5.5% near-normal; skewness splits roughly evenly between left (31%) and right (35%), and 46% are platykurtic — matching a pool of right-skewed, left-skewed, and uniform shapes. The pool's skewed shape (skew ±1.9 — see [[concepts/variable-types|variable types]]) sits at the upper edge of the skewness they observe in real data (−2.49 to +2.33).
 > - Bono et al. (2017) — the most common non-normal families in empirical data are right-skewed (gamma, negative binomial, lognormal, exponential); the pool's skewed shape is exponential-based.
 >
-> Against observed prevalence of 74–100%, realistic 0.5 is conservative and doomer 0.8 mid-range — though these surveys measure outcome variables and scale scores, not predictors specifically.
+> Against observed prevalence of 74–100%, realistic 0.5 is conservative and pessimistic 0.8 mid-range — though these surveys measure outcome variables and scale scores, not predictors specifically.
 
 ### Factor allocation
 
-This knob decides whether each simulated dataset hits your requested group proportions exactly, or lets realized group sizes vary the way random assignment does. The `sampled_factor_proportions` knob is `false` for exact planned counts (optimistic) and `true` for simple randomization, where counts jitter around the target each simulation — at N = 100 with a 50/50 factor, roughly 45–55 per group. Realistic and doomer use `true`.
+This knob decides whether each simulated dataset hits your requested group proportions exactly, or lets realized group sizes vary the way random assignment does. The `sampled_factor_proportions` knob is `false` for exact planned counts (optimistic) and `true` for simple randomization, where counts jitter around the target each simulation — at N = 100 with a 50/50 factor, roughly 45–55 per group. Realistic and pessimistic use `true`.
 
 **Definition.** Planned allocation versus simple randomization: does each simulated dataset hit the requested group proportions exactly, or do realized group sizes vary the way per-participant random assignment makes them vary?
 
-**How MCPower simulates it.** `false`: factor cell counts match the requested proportions exactly in every simulation, the way a planned allocation would. `true`: each observation is assigned independently with the requested probabilities, so realized counts jitter multinomially around the target from simulation to simulation. The optimistic baseline — and any custom scenario that doesn't set it — uses `false`; realistic and doomer use `true`. Unlike every other knob, this one applies to all model types, mixed models included.
+**How MCPower simulates it.** `false`: factor cell counts match the requested proportions exactly in every simulation, the way a planned allocation would. `true`: each observation is assigned independently with the requested probabilities, so realized counts jitter multinomially around the target from simulation to simulation. The optimistic baseline — and any custom scenario that doesn't set it — uses `false`; realistic and pessimistic use `true`. Unlike every other knob, this one applies to all model types, mixed models included.
 
-**What the value means.** At N = 100 with a 50/50 binary factor, `true` gives roughly 45–55 per group (±1 SD) across simulations instead of exactly 50/50. Under either allocation mode, a factor whose level falls below the 5-observation minimum is excluded from that run's model and reported in the diagnostics — its effects record power 0 while the rest of the model is still analysed. See [[limitations#Sparse factor levels at small N]].
+**What the value means.** At N = 100 with a 50/50 binary factor, `true` gives roughly 45–55 per group (±1 SD) across simulations instead of exactly 50/50. Under either allocation mode, a factor whose level falls below the 5-observation minimum is excluded from that run's model and reported in the diagnostics — its effects record power 0 while the rest of the model is still analysed. See [[limitations#Sparse factor levels at small N|Sparse factor levels at small N]].
 
 **With uploaded data.** In the distribution-mapping upload modes (`none` / `partial`), a factor from your data obeys the knob like any other — its empirical proportions are the target, hit exactly (`false`) or with multinomial jitter (`true`). In **strict bootstrap** mode the knob has no effect on uploaded predictors: every simulated row is a resampled real row, so group sizes follow the data — planning exact cell counts would break apart the very joint structure strict exists to preserve. A factor you declare on top of the upload (one that is not a column of your data) is still simulated and still obeys the knob. See [[concepts/upload-data|Using empirical data]].
 
@@ -118,7 +118,7 @@ This knob decides whether each simulated dataset hits your requested group propo
 
 ### Heteroskedasticity
 
-Linear models assume the error variance is constant, but real error often grows or shrinks along a predictor. The `heteroskedasticity_ratio` knob (λ) sets how lopsided the variance is: λ is the residual-variance ratio between the high and low ends of the driver, so λ = 4 means 4× the variance at the high end. Total noise is held fixed — only its pattern tilts. λ = 1 turns it off; presets use 2.0 (realistic) and 4.0 (doomer). It applies to continuous outcomes, including linear mixed models.
+Linear models assume the error variance is constant, but real error often grows or shrinks along a predictor. The `heteroskedasticity_ratio` knob (λ) sets how lopsided the variance is: λ is the residual-variance ratio between the high and low ends of the driver, so λ = 4 means 4× the variance at the high end. Total noise is held fixed — only its pattern tilts. λ = 1 turns it off; presets use 2.0 (realistic) and 4.0 (pessimistic). It applies to continuous outcomes, including linear mixed models.
 
 **Definition.** Linear models assume constant error variance (homoskedasticity). In real data the error variance often depends on the predicted value — or on a specific predictor — violating that assumption.
 
@@ -143,7 +143,7 @@ With scenarios off, MCPower runs the single merged optimistic scenario — so th
 > - Long & Ervin (2000) — the "moderate" error structures in their reference simulation reach variance ratios ≈ 5–8; the mild ones (≈ 1.4–1.7×) align with λ = 2.
 > - Hayes & Cai (2007); Cook & Weisberg (1983); White (1980) — establish how routinely real datasets fail homoskedasticity tests, without pinning a magnitude.
 >
-> Real heteroskedastic data is typically *worse* than the doomer setting: the observed median (≈ 9.5×) exceeds λ = 4, so the presets are conservative. If your driver strongly governs the variance, λ = 8–10 is empirically defensible — set it in a custom scenario.
+> Real heteroskedastic data is typically *worse* than the pessimistic setting: the observed median (≈ 9.5×) exceeds λ = 4, so the presets are conservative. If your driver strongly governs the variance, λ = 8–10 is empirically defensible — set it in a custom scenario.
 
 ### Mixed-model knobs
 
@@ -160,10 +160,10 @@ Mixed models support three scenario knobs for stress-testing the random-effect s
 > [!note] `icc_noise_sd` on the GLMM paths
 > The jitter is applied in raw τ²-space, the random-intercept variance on the scale the link uses: latent log-odds for logit, the latent normal scale for probit, the log rate for Poisson, and identity for Gaussian. On the logit path the latent-scale τ² at the same ICC is ≈3.3× larger than for a Gaussian LMM (the π²/3 latent factor; see the latent-scale ICC convention in the mixed-effects concept), so a given `icc_noise_sd` perturbs the logit τ² by a *smaller relative amount*. Probit reads the ICC against a latent residual variance of 1, as the Gaussian path does, so the same `icc_noise_sd` gives the same relative jitter there. Poisson takes `tau_squared` directly, so the jitter acts on the value you pass. This is intentional: `icc_noise_sd` is a single cross-path knob and its absolute τ²-space magnitude is the controlled quantity. For the same *relative* perturbation on the logit path, multiply your `icc_noise_sd` by √(π²/3) ≈ 1.81.
 
-These knobs apply to every grouping in the model (primary plus any crossed/nested extras), whatever the fitted model: LMM, GLMM, or OLS fitted to clustered data. Because they change the data and not the fit, an OLS model on clustered data under realistic or doomer sees perturbed cluster effects too. They are independent of the other knobs (heterogeneity, correlation noise), which perturb the predictors and the effects.
+These knobs apply to every grouping in the model (primary plus any crossed/nested extras), whatever the fitted model: LMM, GLMM, or OLS fitted to clustered data. Because they change the data and not the fit, an OLS model on clustered data under realistic or pessimistic sees perturbed cluster effects too. They are independent of the other knobs (heterogeneity, correlation noise), which perturb the predictors and the effects.
 
 > [!note] Empirical values in research
-> - Thompson et al. (2012) — within-practice ICCs across 61 primary-care practices span 0.007 to 0.265 for different outcomes in the *same* dataset; realistic `icc_noise_sd` 0.15 sits inside that spread, and doomer 0.30 covers its upper (demographic) tail.
+> - Thompson et al. (2012) — within-practice ICCs across 61 primary-care practices span 0.007 to 0.265 for different outcomes in the *same* dataset; realistic `icc_noise_sd` 0.15 sits inside that spread, and pessimistic 0.30 covers its upper (demographic) tail.
 > - Adams et al. (2004) — 1,039 ICC estimates from primary-care research: the typical ICC is small (median ≈ 0.01), but the same measure varies 10–50× across datasets (e.g. diastolic blood pressure 0–0.108) — exactly the planning uncertainty the jitter models. (These anchors are ICC-scale; at small ICCs the τ²-space jitter the engine applies has closely similar magnitude on the Gaussian path.)
 > - Hedges & Hedberg (2007) — the canonical reference for ICC values when planning group-randomized designs.
 > - McCulloch & Neuhaus (2011); Verbeke & Lesaffre (1997) — fixed-effect estimates are largely robust to a misspecified random-effects shape; what degrades is the precision of the variance-component/ICC estimates that feed a power plan. Read the heavy-tailed presets as a stress test on the planning input, not a warning that your fixed-effect power is biased.
@@ -198,7 +198,7 @@ result <- model$find_power(sample_size = 600, target_test = "treatment",
 
 ### Estimation conditions
 
-Fitting a mixed model means searching for the random-effect variances, and where that search starts matters — the optimiser can settle in different places depending on its starting point. The optimistic scenario assumes well-behaved estimation: it seeds the search at the true random-effect structure, as if the fitter already knew where to look. Realistic and doomer start blind, from a neutral guess, the way a real analyst's software does when it has no prior knowledge of the answer.
+Fitting a mixed model means searching for the random-effect variances, and where that search starts matters — the optimiser can settle in different places depending on its starting point. The optimistic scenario assumes well-behaved estimation: it seeds the search at the true random-effect structure, as if the fitter already knew where to look. Realistic and pessimistic start blind, from a neutral guess, the way a real analyst's software does when it has no prior knowledge of the answer.
 
 So the optimistic → realistic gap on a mixed model reflects two things at once, not one. Part of it is the data getting messier (the knobs above). Part of it is the estimation getting harder — the blind search can miss the variance structure that the truth-seeded start would have found. This is deliberate: optimistic is the best case on both fronts, and the drop to realistic shows what you give up when both the data and the fit stop being ideal. It affects mixed models only; OLS and unclustered binary or count fits have a closed-form or single-mode solution, so their start never changes the answer.
 
@@ -206,14 +206,14 @@ So the optimistic → realistic gap on a mixed model reflects two things at once
 
 Scenarios are configured per model with `set_scenario_configs` (see the custom-scenarios tutorial for your port for the exact call). The merge has two branches:
 
-- **Overriding a built-in name** (`optimistic`, `realistic`, `doomer`) **updates that preset.** Knobs you don't set keep their preset values: a custom `realistic` that only raises λ still carries realistic heterogeneity and distribution changes.
+- **Overriding a built-in name** (`optimistic`, `realistic`, `pessimistic`) **updates that preset.** Knobs you don't set keep their preset values: a custom `realistic` that only raises λ still carries realistic heterogeneity and distribution changes.
 - **A new name inherits the optimistic baseline.** Every knob starts at its optimistic (no-perturbation) value and only your overrides apply, with one exception: `truth_start` starts off (see below), because it is an estimation assumption and not a perturbation. The inheritance includes the standard `new_distributions` pool, so setting `distribution_change_prob` without restating the pool works out of the box.
 
 After configuring, select scenarios to run by name; names without a custom config run the built-in presets.
 
 **Valid knob names**, exactly these ten keys: `heterogeneity`, `heteroskedasticity_ratio`, `correlation_noise_sd`, `distribution_change_prob`, `new_distributions`, `sampled_factor_proportions`, `random_effect_dist`, `random_effect_df`, `icc_noise_sd`, `truth_start`.
 
-`truth_start` is a boolean and the one key that does not perturb the data: it is the estimation assumption described under **Estimation conditions** above. `true` seeds a mixed-model fit at the true random-effect structure ("estimation is well-behaved"); `false` starts it blind. It is `true` in `optimistic` and `false` in `realistic` and `doomer`, and a new custom scenario starts with it `false` unless you set it. OLS and unclustered binary or count fits ignore it.
+`truth_start` is a boolean and the one key that does not perturb the data: it is the estimation assumption described under **Estimation conditions** above. `true` seeds a mixed-model fit at the true random-effect structure ("estimation is well-behaved"); `false` starts it blind. It is `true` in `optimistic` and `false` in `realistic` and `pessimistic`, and a new custom scenario starts with it `false` unless you set it. OLS and unclustered binary or count fits ignore it.
 
 **Valid `new_distributions` entries:** `normal`, `right_skewed`, `left_skewed`, `high_kurtosis`, `uniform`.
 
@@ -229,7 +229,7 @@ The perturbations are designed to compose. Effect jitter and the residual are in
 
 The heteroskedasticity multiplier rescales the residual whatever its shape (normal, or set with `set_residual_distribution`), so the λ pattern holds under high-kurtosis and skewed residuals too, with their tails amplified at the high end of the driver. One accepted approximation: λ is calibrated against the *unperturbed* design, so when distribution swaps or correlation noise change the spread of the predicted values, the realized variance ratio deviates slightly from the nominal λ.
 
-Distribution swaps and correlation noise interact through the correlation structure: correlations are built on a latent scale and each variable then takes its target shape, so a swapped shape bends the realized correlations — on top of the noise already added to the latent matrix. Under doomer, realized correlations differ from the specification through both channels at once.
+Distribution swaps and correlation noise interact through the correlation structure: correlations are built on a latent scale and each variable then takes its target shape, so a swapped shape bends the realized correlations — on top of the noise already added to the latent matrix. Under pessimistic, realized correlations differ from the specification through both channels at once.
 
 ## References
 

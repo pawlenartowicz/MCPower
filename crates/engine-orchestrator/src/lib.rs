@@ -19,6 +19,7 @@ pub mod result;
 pub mod result_host;
 mod scenario_loop;
 pub mod single_core;
+pub mod standardized;
 pub mod unit;
 
 pub use crate::cancel::CancellationToken;
@@ -35,6 +36,10 @@ pub use crate::result_host::{HostValue, power_result_to_host, sample_size_result
 pub use crate::single_core::{
     curvature_hints_power, curvature_hints_sample_size, single_core_find_power,
     single_core_find_sample_size,
+};
+pub use crate::standardized::{
+    EffectMoments, GroupMoments, StandardizedEffect, StandardizedEffects, effect_moments,
+    standardized_effects,
 };
 pub use crate::unit::{SampleSizeUnit, bounds_to_rows, resolve_unit_divisor};
 
@@ -58,7 +63,7 @@ mod scenarios_embed_tests {
         let v: Value = serde_json::from_str(super::SCENARIOS_CONFIG_JSON)
             .expect("scenarios.json must be valid JSON");
         let obj = v.as_object().expect("scenarios.json must be a JSON object");
-        for name in ["optimistic", "realistic", "doomer"] {
+        for name in ["optimistic", "realistic", "pessimistic"] {
             let s = obj.get(name).and_then(|x| x.as_object()).expect(name);
             // flat invariants: the mixed-model knobs sit at the top level of
             // each preset (random_effect_dist keeps its own normal/heavy_tailed

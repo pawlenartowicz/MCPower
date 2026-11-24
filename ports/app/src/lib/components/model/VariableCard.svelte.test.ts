@@ -258,6 +258,26 @@ describe('VariableCard nameEditable', () => {
     expect(container.querySelector('input[aria-label="Variable name"]')).toBeNull();
     expect(container.textContent).toContain('cyl');
   });
+
+  it('keeps the old name and shows an error when renamed to a taken name', async () => {
+    const v = factorRow();
+    const other = binaryRow();
+    const { container } = render(VariableCard, {
+      props: {
+        variable: v,
+        group: factorGroup(v),
+        effects: [],
+        variables: [v, other],
+        nameEditable: true,
+      },
+    });
+    const input = container.querySelector('input[aria-label="Variable name"]') as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: 'treated' } });
+    expect(v.name).toBe('cyl');
+    expect(container.textContent).toContain('Duplicate name: treated.');
+    await fireEvent.input(input, { target: { value: 'gear' } });
+    expect(v.name).toBe('gear');
+  });
 });
 
 describe('VariableCard onRemove', () => {

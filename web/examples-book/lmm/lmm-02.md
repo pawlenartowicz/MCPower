@@ -55,16 +55,16 @@ mixed-model fit.
 
 ## If you'd rather have…
 
-- [[lmm/lmm-04]] — Same treatment x week interaction but lets each patient
+- [[lmm/lmm-04|Conditional growth: treatment moderating individual slopes]] — Same treatment x week interaction but lets each patient
   have their own week slope (`week | patient`) — the conditional
   growth-curve version when individual trajectories vary.
-- [[lmm/lmm-01]] — Drop the treatment arm: simple repeated measures with
+- [[lmm/lmm-01|Repeated measures: random intercept per subject]] — Drop the treatment arm: simple repeated measures with
   just a phase effect and a random intercept per patient.
-- [[lmm/lmm-03]] — Single-arm linear growth curve — week as a continuous slope
+- [[lmm/lmm-03|Growth curve: random intercept and slope of time]] — Single-arm linear growth curve — week as a continuous slope
   with a random intercept and slope, no treatment factor.
-- [[glmm/glmm-03]] — Same group x time difference-in-differences design but for a
+- [[glmm/glmm-03|Difference-in-differences on a binary outcome (group x time GLMM)]] — Same group x time difference-in-differences design but for a
   binary outcome (logistic GLMM).
-- [[lmm/lmm-05]] — Two-arm trial with a random intercept but clustered
+- [[lmm/lmm-05|Two-level cluster-randomized trial (random intercept)]] — Two-arm trial with a random intercept but clustered
   (cluster-randomised) rather than longitudinal repeated measures — treatment
   main effect only, no week interaction.
 

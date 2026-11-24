@@ -1,7 +1,7 @@
 // Generates reproducible MCPower snippets for mixed-effects family specs
 // (random intercepts incl. crossed/nested extra groupings, slopes, cluster dim, ICC).
 // Supports Python and R output via the shared Lang abstraction.
-import type { AppGroupingSpec, AppSlopeTerm, AppSpec, MixedSpec } from './app-spec';
+import { formulaTerms, type AppGroupingSpec, type AppSlopeTerm, type AppSpec, type MixedSpec } from './app-spec';
 import type { ScriptParams, ScriptLanguage } from './script-generator-linear';
 import {
   buildVarTypeString,
@@ -13,6 +13,10 @@ import {
   langFor,
   buildConfigLines,
   buildFindCallLines,
+  buildUploadLines,
+  buildScenarioLines,
+  scenariosOn,
+  withoutUploadedTypes,
 } from './script-generator-linear';
 import { SIMULATION } from '$lib/configs/app-config';
 
@@ -31,9 +35,8 @@ function randomTerm(name: string, slopes: AppSlopeTerm[] = []): string {
  *  writes its slopes into its own term, because both ports refuse a
  *  `set_cluster` slope the formula does not name. */
 function buildMixedFormula(s: MixedSpec): string {
-  const { outcome, predictors, interaction_terms } = s.parsed_formula;
-  const parts: string[] = [...predictors];
-  for (const terms of interaction_terms) parts.push(terms.join(':'));
+  const { outcome } = s.parsed_formula;
+  const parts = formulaTerms(s.parsed_formula);
 
   let primaryTerm = randomTerm(s.cluster_name, s.slopes);
   const extraTerms: string[] = [];
@@ -142,7 +145,7 @@ export function generateMixedScript(
   language: ScriptLanguage = 'python',
 ): string {
   if (spec.family !== 'mixed') throw new Error('generateMixedScript called with non-mixed spec');
-  const s: MixedSpec = spec;
+  const s: MixedSpec = withoutUploadedTypes(spec);
   if (!s.parsed_formula?.outcome) return '# Cannot generate script: missing formula\n';
 
   const binaryOutcome = s.outcome?.kind === 'binary';
@@ -165,6 +168,7 @@ export function generateMixedScript(
 
   // Constructor — mixed formula always uses `~`
   lines.push(lang.construct(buildMixedFormula(s), family));
+  for (const line of buildUploadLines(s.csv, lang, params.data_filename)) lines.push(line);
 
   // Variable types — only when at least one non-numeric
   const varTypeStr = buildVarTypeString(s.var_types);
@@ -192,6 +196,7 @@ export function generateMixedScript(
 
   // Run-config setters — omit values equal to port defaults
   for (const line of buildConfigLines(s, simsDefault, lang)) lines.push(line);
+  for (const line of buildScenarioLines(s.scenarios, true, language)) lines.push(line);
 
   // Poisson's primary variance is the raw τ² in the outcome (no ICC); every other
   // outcome uses the top-level icc field directly.
@@ -253,6 +258,7 @@ export function generateMixedScript(
     params,
     testsArg,
     correction,
+    scenariosOn(s.scenarios),
     s.wald_se,
     s.agq,
     unitArg,

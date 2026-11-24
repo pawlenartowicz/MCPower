@@ -46,11 +46,11 @@ benchmark (0.10) on the log-odds scale.
 
 ## Not this setup?
 
-- [[glm/glm-07]] — a two-way logistic interaction between two factors (2×2),
+- [[glm/glm-07|Logistic 2x2 factor-by-factor interaction]] — a two-way logistic interaction between two factors (2×2),
   without the third interacting predictor.
-- [[glm/glm-05]] — a neighbouring logistic design with a different predictor and
+- [[glm/glm-05|Logistic continuous-by-continuous moderation]] — a neighbouring logistic design with a different predictor and
   interaction structure.
-- [[ols/ols-05]] — the same three-way interaction structure on a *continuous*
+- [[ols/ols-05|Three-way continuous interaction]] — the same three-way interaction structure on a *continuous*
   outcome (OLS) rather than a binary one.
 
 ## If you'd rather have…

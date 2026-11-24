@@ -119,7 +119,7 @@ pub use engine_contract::{ClusterSizing, ClusterSpec, LmeScenarioPerturbations};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScenarioPerturbations {
     /// Identifier used in result aggregation and logs ("optimistic",
-    /// "realistic", "doomer", or a user-supplied custom name).
+    /// "realistic", "pessimistic", or a user-supplied custom name).
     pub name: String,
 
     /// β-jitter SD (v1's `heterogeneity` knob) — scenario-only, no model
@@ -452,6 +452,65 @@ impl SimulationSpec {
     /// within-cluster columns); and the per-sim scenario
     /// perturbations, which move the realized moments away from the base spec.
     pub fn compute_het_coeffs(&self) -> HeteroskedasticityCoeffs {
+        self.column_moments(None)
+    }
+
+    /// [`Self::compute_het_coeffs`], except that with `frame: Some(f)` (from
+    /// [`Self::frame_moments`]) a strict-mode (bootstrap) spec's frame-copied
+    /// columns take their exact distribution: the empirical one of the frame
+    /// rows `f` was built from (each generated row copies one frame row,
+    /// uniformly at random). Their part of each product moment is a row
+    /// average from `f`, which multiplies the rest because the synthetic
+    /// columns are drawn independently of the row pick. The moments of one
+    /// group of rows ([`Self::grouped_frame_moments`]) give the moments within
+    /// that group (the rows where an uploaded binary is 1, say). `None` is
+    /// `compute_het_coeffs`.
+    pub fn column_moments(&self, frame: Option<&FrameMoments>) -> HeteroskedasticityCoeffs {
+        let ColumnCovariance {
+            col_mean,
+            col_std,
+            cov,
+        } = self.column_covariance(frame);
+        let p = col_mean.len();
+        let beta = |c: usize| self.effect_sizes.get(c).copied().unwrap_or(0.0);
+        let mut lp_mean = 0.0;
+        for (c, &mean_c) in col_mean.iter().enumerate() {
+            lp_mean += beta(c) * mean_c;
+        }
+        // lp_pop_var = β' Σ β over the full design: diagonal first, then
+        // 2·βₐ·β_b·Cov(Xₐ, X_b) for a < b. This is the main-effects-only
+        // summation order, so a design without interactions keeps bit-identical
+        // coefficients (cross terms that are exactly 0 add nothing).
+        let mut lp_var = 0.0;
+        for (a, &sd_a) in col_std.iter().enumerate() {
+            let ba = beta(a);
+            lp_var += ba * ba * sd_a * sd_a;
+        }
+        for a in 0..p {
+            let ba = beta(a);
+            if ba == 0.0 {
+                continue;
+            }
+            for b in (a + 1)..p {
+                let bb = beta(b);
+                if bb != 0.0 {
+                    lp_var += 2.0 * ba * bb * cov[a * p + b];
+                }
+            }
+        }
+
+        HeteroskedasticityCoeffs {
+            lp_pop_mean: lp_mean,
+            lp_pop_std: lp_var.max(0.0).sqrt(),
+            col_mean,
+            col_std,
+        }
+    }
+
+    /// Population means, SDs and covariance matrix of the design columns
+    /// under the [`Self::column_moments`] model (`frame` as there); β plays
+    /// no part.
+    pub fn column_covariance(&self, frame: Option<&FrameMoments>) -> ColumnCovariance {
         let n_nf = self.n_non_factor as usize;
         let n_fd = self.n_factor_dummies as usize;
         let n_main = 1 + n_nf + n_fd;
@@ -497,15 +556,8 @@ impl SimulationSpec {
             prop_off += n_levels;
         }
 
-        // Each x_full column as the multiset of main columns it multiplies.
-        let mut atoms: Vec<Vec<usize>> = Vec::with_capacity(p);
-        atoms.push(Vec::new());
-        atoms.extend((1..n_main).map(|c| vec![c]));
-        atoms.extend(
-            self.interactions
-                .iter()
-                .map(|comps| comps.iter().map(|&c| c as usize).collect()),
-        );
+        let framed = |c: usize| frame.is_some_and(|f| f.framed_main[c]);
+        let atoms = self.design_atoms();
 
         let corr = |a: usize, b: usize| -> f64 {
             if a == b {
@@ -514,8 +566,9 @@ impl SimulationSpec {
                 self.correlation[(b - 1) * n_nf + (a - 1)]
             }
         };
-        // E[∏ x_c] over a multiset of main columns.
-        let product_moment = |cols: &mut Vec<usize>| -> f64 {
+        // E[∏ x_c] over a multiset of main columns, given the row average of
+        // its frame-copied columns' product (`frame_part`, 1 without any).
+        let product_moment = |cols: &mut Vec<usize>, frame_part: f64| -> f64 {
             cols.sort_unstable();
             let mut value = 1.0;
             // Factor dummies: one factor contributes p_d if it shows a single
@@ -524,7 +577,7 @@ impl SimulationSpec {
             let mut bins: Vec<usize> = Vec::new();
             let mut last_dummy: Option<usize> = None;
             for &c in cols.iter() {
-                if c == 0 {
+                if c == 0 || framed(c) {
                     continue;
                 }
                 if factor_of[c] != usize::MAX {
@@ -566,64 +619,233 @@ impl SimulationSpec {
                     cont += coef * isserlis(&members, &corr);
                 }
             }
-            value * cont
+            value * cont * frame_part
         };
 
         let col_mean: Vec<f64> = atoms
             .iter()
-            .map(|a| product_moment(&mut a.clone()))
+            .enumerate()
+            .map(|(c, a)| product_moment(&mut a.clone(), frame.map_or(1.0, |f| f.single(c))))
             .collect();
         let cov = |a: usize, b: usize| -> f64 {
             let mut joint = atoms[a].clone();
             joint.extend_from_slice(&atoms[b]);
-            product_moment(&mut joint) - col_mean[a] * col_mean[b]
+            let frame_part = frame.map_or(1.0, |f| f.pair(a, b));
+            product_moment(&mut joint, frame_part) - col_mean[a] * col_mean[b]
         };
-        // Main columns keep their closed-form marginal SD; interaction columns
-        // take theirs from the product moments.
+        // Main columns keep their closed-form marginal SD; interaction and
+        // frame-copied columns take theirs from the product moments.
         let col_std: Vec<f64> = (0..p)
             .map(|c| {
-                if c < n_main {
+                if c < n_main && !framed(c) {
                     sd[c]
                 } else {
                     cov(c, c).max(0.0).sqrt()
                 }
             })
             .collect();
-
-        let beta = |c: usize| self.effect_sizes.get(c).copied().unwrap_or(0.0);
-        let mut lp_mean = 0.0;
-        for (c, &mean_c) in col_mean.iter().enumerate() {
-            lp_mean += beta(c) * mean_c;
-        }
-        // lp_pop_var = β' Σ β over the full design: diagonal first, then
-        // 2·βₐ·β_b·Cov(Xₐ, X_b) for a < b. This is the main-effects-only
-        // summation order, so a design without interactions keeps bit-identical
-        // coefficients (cross terms that are exactly 0 add nothing).
-        let mut lp_var = 0.0;
-        for (a, &sd_a) in col_std.iter().enumerate() {
-            let ba = beta(a);
-            lp_var += ba * ba * sd_a * sd_a;
-        }
+        let mut cov_matrix = vec![0.0; p * p];
         for a in 0..p {
-            let ba = beta(a);
-            if ba == 0.0 {
-                continue;
-            }
+            cov_matrix[a * p + a] = col_std[a] * col_std[a];
             for b in (a + 1)..p {
-                let bb = beta(b);
-                if bb != 0.0 {
-                    lp_var += 2.0 * ba * bb * cov(a, b);
+                let v = cov(a, b);
+                cov_matrix[a * p + b] = v;
+                cov_matrix[b * p + a] = v;
+            }
+        }
+        ColumnCovariance {
+            col_mean,
+            col_std,
+            cov: cov_matrix,
+        }
+    }
+
+    /// Each x_full column (full-design layout) as the multiset of main
+    /// columns it multiplies: empty for the intercept.
+    fn design_atoms(&self) -> Vec<Vec<usize>> {
+        let n_main = 1 + self.n_non_factor as usize + self.n_factor_dummies as usize;
+        let mut atoms: Vec<Vec<usize>> = Vec::with_capacity(n_main + self.interactions.len());
+        atoms.push(Vec::new());
+        atoms.extend((1..n_main).map(|c| vec![c]));
+        atoms.extend(
+            self.interactions
+                .iter()
+                .map(|comps| comps.iter().map(|&c| c as usize).collect()),
+        );
+        atoms
+    }
+
+    /// [`FrameMoments`] of a strict-mode (bootstrap) spec over all its frame
+    /// rows. Without a bootstrap frame map no column has a frame part.
+    pub fn frame_moments(&self) -> FrameMoments {
+        let mut all = self.grouped_frame_moments(1, |_| Some(0));
+        all.pop().expect("one group").1
+    }
+
+    /// [`FrameMoments`] within each of `n_groups` groups of a strict-mode
+    /// spec's frame rows, in one pass over the rows: `group(row)` gives the
+    /// group of a row (its frame values, `upload_data_shape.1` wide), None to
+    /// leave the row out. Each entry is `(rows in the group, its moments)`; a
+    /// group with no rows has NaN moments.
+    pub fn grouped_frame_moments(
+        &self,
+        n_groups: usize,
+        group: impl Fn(&[f64]) -> Option<usize>,
+    ) -> Vec<(usize, FrameMoments)> {
+        // How a frame-copied main column's stored value decodes; mirrors the
+        // bootstrap arm of `generate_sim_data`.
+        enum Decode {
+            Raw,
+            /// An uploaded binary, stored centred on its proportion.
+            Binary(f64),
+            /// A factor dummy: 1 on rows at this level code.
+            Level(f64),
+        }
+        let n_nf = self.n_non_factor as usize;
+        let n_main = 1 + n_nf + self.n_factor_dummies as usize;
+        let width = self.upload_data_shape.1 as usize;
+        let frame_col = |k: usize| self.bootstrap_frame_map.get(k).copied().flatten();
+        let mut src: Vec<Option<(usize, Decode)>> = (0..n_main).map(|_| None).collect();
+        for j in 0..n_nf {
+            if let Some(fc) = frame_col(j) {
+                let decode = if self.var_types.get(j) == Some(&Distribution::UploadedBinary) {
+                    Decode::Binary(self.var_params.get(j).copied().unwrap_or(0.0))
+                } else {
+                    Decode::Raw
+                };
+                src[1 + j] = Some((fc as usize, decode));
+            }
+        }
+        let mut col = 1 + n_nf;
+        for (f, &nl) in self.factor_n_levels.iter().enumerate() {
+            let n_dummies = (nl.max(0) as usize).saturating_sub(1);
+            if let Some(fc) = frame_col(n_nf + f) {
+                for d in 0..n_dummies {
+                    src[col + d] = Some((fc as usize, Decode::Level((d + 1) as f64)));
+                }
+            }
+            col += n_dummies;
+        }
+
+        // The design columns with a frame part, as their frame-copied atoms.
+        let atoms = self.design_atoms();
+        let mut pos = vec![None; atoms.len()];
+        let mut parts_of: Vec<Vec<usize>> = Vec::new();
+        for (c, a) in atoms.iter().enumerate() {
+            let fa: Vec<usize> = a.iter().copied().filter(|&m| src[m].is_some()).collect();
+            if !fa.is_empty() {
+                pos[c] = Some(parts_of.len());
+                parts_of.push(fa);
+            }
+        }
+        let m = parts_of.len();
+        let mut count = vec![0usize; n_groups];
+        let mut mean = vec![vec![0.0; m]; n_groups];
+        let mut cross = vec![vec![0.0; m * m]; n_groups];
+        let mut main_val = vec![0.0; n_main];
+        let mut part = vec![0.0; m];
+        for row in self.upload_data.chunks_exact(width.max(1)) {
+            let Some(g) = group(row) else { continue };
+            count[g] += 1;
+            for (c, s) in src.iter().enumerate() {
+                if let Some((fc, decode)) = s {
+                    let v = row[*fc];
+                    main_val[c] = match *decode {
+                        Decode::Raw => v,
+                        Decode::Binary(p) => recover_uploaded_binary(v, p),
+                        Decode::Level(l) => f64::from(u8::from(v.round() == l)),
+                    };
+                }
+            }
+            let (mean, cross) = (&mut mean[g], &mut cross[g]);
+            for (k, fa) in parts_of.iter().enumerate() {
+                part[k] = fa.iter().map(|&a| main_val[a]).product();
+                mean[k] += part[k];
+            }
+            for (i, &pi) in part.iter().enumerate() {
+                for (c, &pj) in cross[i * m + i..(i + 1) * m].iter_mut().zip(&part[i..]) {
+                    *c += pi * pj;
                 }
             }
         }
+        let framed_main: Vec<bool> = src.iter().map(Option::is_some).collect();
+        count
+            .into_iter()
+            .zip(mean.into_iter().zip(cross))
+            .map(|(n_g, (mut mean, mut cross))| {
+                let n = n_g as f64;
+                for v in &mut mean {
+                    *v /= n;
+                }
+                for i in 0..m {
+                    for j in i..m {
+                        let v = cross[i * m + j] / n;
+                        cross[i * m + j] = v;
+                        cross[j * m + i] = v;
+                    }
+                }
+                let moments = FrameMoments {
+                    framed_main: framed_main.clone(),
+                    pos: pos.clone(),
+                    mean,
+                    cross,
+                };
+                (n_g, moments)
+            })
+            .collect()
+    }
+}
 
-        HeteroskedasticityCoeffs {
-            lp_pop_mean: lp_mean,
-            lp_pop_std: lp_var.max(0.0).sqrt(),
-            col_mean,
-            col_std,
+/// Population means, SDs and covariance of the design columns, full-design
+/// layout (`[intercept, continuous.., factor_dummies.., interactions..]`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnCovariance {
+    pub col_mean: Vec<f64>,
+    pub col_std: Vec<f64>,
+    /// `p × p` row-major; the diagonal is `col_std²`.
+    pub cov: Vec<f64>,
+}
+
+/// Row averages of the frame-copied part of each design column over a set of
+/// strict-mode frame rows, for [`SimulationSpec::column_moments`]. On one row,
+/// a design column's frame part is the product of its frame-copied main
+/// columns' values (1 when it has none). The frame part of a product of two
+/// columns is the product of theirs, so the means of single parts and of
+/// pairwise products give every frame part the moments need.
+#[derive(Debug, Clone)]
+pub struct FrameMoments {
+    /// Per main column (full-design layout): copied from the frame.
+    framed_main: Vec<bool>,
+    /// Per design column: its index into `mean`, None without a frame part.
+    pos: Vec<Option<usize>>,
+    /// Row mean of each frame part.
+    mean: Vec<f64>,
+    /// Row means of the products of two frame parts, `m × m` row-major with
+    /// `m = mean.len()`.
+    cross: Vec<f64>,
+}
+
+impl FrameMoments {
+    /// Row mean of design column `c`'s frame part.
+    fn single(&self, c: usize) -> f64 {
+        self.pos[c].map_or(1.0, |k| self.mean[k])
+    }
+
+    /// Row mean of the product of design columns `a` and `b`'s frame parts.
+    fn pair(&self, a: usize, b: usize) -> f64 {
+        match (self.pos[a], self.pos[b]) {
+            (None, None) => 1.0,
+            (Some(k), None) | (None, Some(k)) => self.mean[k],
+            (Some(i), Some(j)) => self.cross[i * self.mean.len() + j],
         }
     }
+}
+
+/// A strict-mode uploaded binary's 0/1 value from its stored, centred frame
+/// value `stored = x − p`. Shared by the bootstrap arm of `generate_sim_data`
+/// and [`SimulationSpec::frame_moments`].
+pub(crate) fn recover_uploaded_binary(stored: f64, p: f64) -> f64 {
+    if stored + p >= 0.5 { 1.0 } else { 0.0 }
 }
 
 /// Isserlis' theorem: `E[∏ g_c]` for zero-mean unit-variance jointly Gaussian

@@ -122,56 +122,56 @@ expression: "parse(&joint_detection_curve_spec(&multi_scenario_grid(), &opts))"
         "k": 1,
         "n": 50,
         "p": 0.35,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 1 of 2"
       },
       {
         "k": 2,
         "n": 50,
         "p": 0.08,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 2 of 2"
       },
       {
         "k": 1,
         "n": 100,
         "p": 0.58,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 1 of 2"
       },
       {
         "k": 2,
         "n": 100,
         "p": 0.22,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 2 of 2"
       },
       {
         "k": 1,
         "n": 150,
         "p": 0.72,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 1 of 2"
       },
       {
         "k": 2,
         "n": 150,
         "p": 0.34,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 2 of 2"
       },
       {
         "k": 1,
         "n": 200,
         "p": 0.82,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 1 of 2"
       },
       {
         "k": 2,
         "n": 200,
         "p": 0.42,
-        "scenario": "doomer",
+        "scenario": "pessimistic",
         "series": ">= 2 of 2"
       }
     ]
@@ -182,7 +182,7 @@ expression: "parse(&joint_detection_curve_spec(&multi_scenario_grid(), &opts))"
     "sort": [
       "optimistic",
       "realistic",
-      "doomer"
+      "pessimistic"
     ],
     "type": "nominal"
   },

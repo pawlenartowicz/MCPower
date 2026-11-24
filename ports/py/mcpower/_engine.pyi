@@ -99,6 +99,9 @@ def build_recovery_design(spec_json: str) -> tuple[list[float], list[str], int]:
 def split_assignments(input: str) -> list[str]: ...
 
 
+def standardized_effects(json: str, contracts_bytes: bytes) -> str: ...
+
+
 def plot_theme(name: str, /) -> str: ...
 
 

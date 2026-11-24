@@ -256,7 +256,7 @@
     {#if r.estimator_extras && (r.estimator_extras as { estimator: string }).estimator === 'mle'}
       {@const fx = r.estimator_extras as Extract<EstimatorExtras, { estimator: 'mle' }>}
       <div class="text-xs text-muted-foreground">
-        boundary hits = {fx.boundary_hits} · convergence (joint corrected) = {(fx.joint_corrected_rate * 100).toFixed(1)}%
+        boundary hits = {fx.boundary_hits} · joint Wald test power = {(fx.joint_corrected_rate * 100).toFixed(1)}%
       </div>
     {/if}
     <!-- w-auto + per-cell right padding: table sizes to content (left-aligned) instead

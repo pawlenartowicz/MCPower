@@ -94,12 +94,16 @@ function createParsedFormulaStore() {
 export const parsedFormulaStore = createParsedFormulaStore();
 
 export function toWireParsed(fp: FormulaParse): ParsedFormula {
+  const mains = new Set(
+    fp.terms.filter((t) => t.kind === 'main').map((t) => (t as { name: string }).name),
+  );
   return {
     outcome: fp.dependent,
     predictors: fp.predictors,
     interaction_terms: fp.terms
       .filter((t) => t.kind === 'interaction')
       .map((t) => (t as { vars: string[] }).vars),
+    interaction_only: fp.predictors.filter((p) => !mains.has(p)),
   };
 }
 

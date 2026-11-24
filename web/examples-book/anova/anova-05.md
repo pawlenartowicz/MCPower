@@ -45,15 +45,15 @@ interaction.
 
 ## If you'd rather have…
 
-- [[anova/anova-04]] — Drop to a two-way factorial ANOVA (2x2 / 2x3 / 3x3 / 2x4)
+- [[anova/anova-04|Two-way factorial ANOVA with interaction]] — Drop to a two-way factorial ANOVA (2x2 / 2x3 / 3x3 / 2x4)
   if a three-way design is more than you need.
-- [[anova/anova-06]] — Two-way factorial ANOVA that also adjusts for a
+- [[anova/anova-06|Two-way factorial ANCOVA, covariate-adjusted]] — Two-way factorial ANOVA that also adjusts for a
   continuous covariate (factorial ANCOVA).
-- [[anova/anova-01]] — A single one-way omnibus ANOVA across 3+ groups, the
+- [[anova/anova-01|One-way ANOVA, omnibus F-test across 3+ groups]] — A single one-way omnibus ANOVA across 3+ groups, the
   simplest factor design.
-- [[ols/ols-05]] — The same three-way interaction structure but with continuous
+- [[ols/ols-05|Three-way continuous interaction]] — The same three-way interaction structure but with continuous
   predictors instead of factors (OLS).
-- [[glm/glm-08]] — Three-way interaction recast for a binary outcome via
+- [[glm/glm-08|Logistic three-way interaction]] — Three-way interaction recast for a binary outcome via
   logistic GLM.
 
 ## Copy-paste setup

@@ -8,6 +8,7 @@ fn minimal_mixed(cluster_dim: ClusterDim) -> MixedSpec {
     use engine_app_spec::app_spec::{ParsedFormula, TestSelection, VarType};
     MixedSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x".into()],
             interaction_terms: vec![],

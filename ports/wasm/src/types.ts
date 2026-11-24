@@ -63,6 +63,25 @@ export type EffectDescriptor =
   | { kind: 'factor_level'; factor: string; level: number }
   | { kind: 'interaction'; components: EffectDescriptor[] };
 
+/**
+ * The effect-size-free moments behind the standardized β, Cohen's d and model
+ * R² of the generating model (`engine_app_spec::effect_moments_json`; the
+ * Rust `EffectMoments` documents the formulas). One descriptor per generated
+ * term (intercept excluded); `moments` covers those k terms in that order, or
+ * is `null` where the values are undefined (count outcomes, random slopes).
+ * Matrices are `k × k` row-major; `groups[i]` is set only for a binary
+ * predictor or factor level.
+ */
+export interface EffectMoments {
+  descriptors: EffectDescriptor[];
+  moments: {
+    noise: number;
+    sd: number[];
+    cov: number[];
+    groups: ({ w: number; mean_diff: number[]; cov_1: number[]; cov_0: number[] } | null)[];
+  } | null;
+}
+
 // ---- spec / result types ----
 
 // Opaque to the pool — passed through from the app, handed to the wasm shell as JSON.

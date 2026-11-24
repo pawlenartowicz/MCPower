@@ -97,7 +97,7 @@ test_that("set_scenario_configs accepts mixed-model knobs (Pass B wiring)", {
 
 test_that("set_scenario_configs accepts every live key", {
   lme_keys <- c("icc_noise_sd", "random_effect_dist", "random_effect_df")
-  live_cfg <- mcpower:::.scenario_defaults()[["doomer"]]
+  live_cfg <- mcpower:::.scenario_defaults()[["pessimistic"]]
   live_cfg <- live_cfg[setdiff(names(live_cfg), lme_keys)]
   expect_gt(length(live_cfg), 0L)
   m <- MCPower$new("y ~ x1")
@@ -390,5 +390,5 @@ test_that("a chosen residual runs under every preset", {
   m <- MCPower$new("y ~ x1")$set_effects("x1=0.5")$set_residual_distribution("high_kurtosis")
   r <- m$find_power(60, n_sims = 50, seed = 2137, scenarios = TRUE,
                     progress_callback = FALSE, verbose = FALSE)
-  expect_setequal(names(r$scenarios), c("optimistic", "realistic", "doomer"))
+  expect_setequal(names(r$scenarios), c("optimistic", "realistic", "pessimistic"))
 })

@@ -10,8 +10,43 @@
 // y-axis and the strokeDash legend off the field's value, so relabelling the
 // data relabels the axis without touching the engine's encoding.
 
-import { contrastLabel } from '$lib/report/rows';
+import { contrastLabel, factorReferenceLabels, baselineContrastLabels } from '$lib/report/rows';
 import { REPORT_CONFIG } from '$lib/configs/report-config';
+import type { RunTab } from '$lib/stores/run.svelte';
+import type { PowerResult, SampleSizeResult } from '$lib/domain/result';
+
+/**
+ * The label map for one finished run tab, shared by the on-screen chart and the
+ * exported PNG/SVG so both carry the same names. Target indices, contrast pairs
+ * and estimator come from the find-power result, or from any grid point of a
+ * find-sample-size result (identical across the grid). Baseline contrasts the
+ * engine collapsed to marginals are recovered with the same rows.ts helpers as
+ * the table, so chart and table labels never diverge.
+ */
+export function runTabLabelMap(tab: RunTab): Record<string, string> {
+  const r =
+    tab.kind === 'find-power'
+      ? (tab.result as PowerResult)
+      : (tab.result as SampleSizeResult).grid_or_trace[0];
+  const targetIndices = r?.target_indices ?? [];
+  const estimator = (r?.estimator_extras as { estimator: string } | undefined)?.estimator;
+  // ANOVA ships family 'linear'; the anova variant has no var_types.
+  const factorRefs =
+    !tab.spec || tab.spec.family === 'anova' ? {} : factorReferenceLabels(tab.spec.var_types);
+  const baselineContrasts = baselineContrastLabels(
+    targetIndices,
+    tab.effect_names,
+    factorRefs,
+    tab.spec?.contrasts ?? [],
+  );
+  return buildTargetLabelMap(
+    targetIndices,
+    tab.effect_names,
+    r?.contrast_pairs ?? [],
+    estimator ?? 'ols',
+    baselineContrasts,
+  );
+}
 
 /**
  * Build a `target_{idx}` → display-name map from the run's target indices and

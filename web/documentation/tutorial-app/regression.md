@@ -1,6 +1,6 @@
 ---
 title: "Regression power analysis - MCPower app"
-description: "Power & sample-size analysis for OLS and logistic regression in the MCPower app - formula, predictors, effect sizes, and sensitivity analysis, step by step."
+description: "Power & sample-size analysis for OLS and logistic regression in the MCPower app - formula, predictors, effect sizes, and robustness analysis, step by step."
 ---
 # Regression power (app)
 
@@ -16,9 +16,9 @@ Each predictor is one card. Pick its type next to the name — **continuous**, *
 
 With a continuous outcome, effects are in units of the residual SD, so a binary effect is a Cohen's *d* and a continuous effect is close to a standardized beta. A published *d* or beta uses a larger SD, so entering it unchanged understates the effect. The error is usually small and conservative, and all power tools share it. A published beta for a binary predictor is the exception: it must also be divided by the predictor's SD (0.5 for a 50/50 split), or the effect is halved. See [[concepts/effect-sizes#Effects from published studies|effects from published studies]] to convert one.
 
-## 3. Sensitivity analysis (scenarios)
+## 3. Robustness analysis (scenarios)
 
-The **Sensitivity analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations: effects vary between studies, correlations fluctuate, distributions drift from normal), and **Doomer** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Doomer clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/sensitivity-analysis|sensitivity analysis]].
+The **Robustness analysis** toggle in the status bar repeats every run under three perturbation sets — **Optimistic** (your exact settings, no perturbations), **Realistic** (moderate assumption violations: effects vary between studies, correlations fluctuate, distributions drift from normal), and **Pessimistic** (severe violations, a worst case) — so you get a *range* of power instead of one optimistic number. If even Pessimistic clears your target, the design is robust; if only Optimistic reaches it, increase the sample size. Each set's knobs are editable under **Settings → Scenarios**. See [[concepts/robustness-analysis|robustness analysis]].
 
 ## 4. Optional settings
 

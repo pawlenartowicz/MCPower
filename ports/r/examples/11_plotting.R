@@ -89,7 +89,7 @@ cat("\n>>> save_plot(curve, 'power_curve.html')  # stacked HTML, all blocks\n")
 save_plot(curve, "power_curve.html")
 cat("  saved power_curve.html\n")
 
-# 9. Scenarios. scenarios = TRUE runs optimistic / realistic / doomer.
+# 9. Scenarios. scenarios = TRUE runs optimistic / realistic / pessimistic.
 #    On find_power: grouped bars (one group per scenario).
 scen <- model$find_power(
   sample_size = 120, target_test = "all", scenarios = TRUE, verbose = FALSE

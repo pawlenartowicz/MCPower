@@ -155,13 +155,25 @@ def test_summary_header_lists_simulated_effects_under_test_formula() -> None:
         test_formula="score = caffeine",
         verbose=False,
     )
-    header = [ln for ln in str(result.summary()).splitlines() if ln.startswith("effects:")]
-    assert header == ["effects: study=0.30, caffeine=0.00"]
+    rows = _effect_rows(result.summary())
+    assert [(name, cells[0]) for name, cells in rows.items()] == [
+        ("study", "0.30"), ("caffeine", "0.00")
+    ]
+
+
+def _effect_rows(text) -> dict:
+    """Effect name -> its cells after the name in the effects block (Input,
+    Std. β, d[, OR]), which runs from the "Effect" header to the R² line."""
+    block = str(text).split("\nEffect ", 1)[1].split("\nR²", 1)[0]
+    return {ln.split()[0]: ln.split()[1:] for ln in block.splitlines()[2:] if ln.split()
+            and not ln.startswith("─")}
 
 
 def _or_cells(result) -> dict:
-    """Test name -> its row's cells in the short-form table (OR is cell 2)."""
-    return {ln.split()[0]: ln.split() for ln in str(result).splitlines() if ln.strip()}
+    """Test name -> its row's cells in the short-form result table (OR is
+    cell 2); the effects block above it, which ends at the R² line, is skipped."""
+    results = str(result).split("\nR²", 1)[1]
+    return {ln.split()[0]: ln.split() for ln in results.splitlines() if ln.strip()}
 
 
 def test_test_formula_reversed_interaction_reports_its_odds_ratio() -> None:
@@ -181,7 +193,10 @@ def test_test_formula_reversed_interaction_reports_its_odds_ratio() -> None:
     assert cells["a"][2] == "1.22"
     assert cells["b"][2] == "1.35"
     assert cells["b:a"][2] == "2.72"
-    assert "effects: a=0.20 (OR 1.22), b=0.30 (OR 1.35), a:b=1.00 (OR 2.72)" in str(result.summary())
+    rows = _effect_rows(result.summary())
+    assert {name: (cells[0], cells[-1]) for name, cells in rows.items()} == {
+        "a": ("0.20", "1.22"), "b": ("0.30", "1.35"), "a:b": ("1.00", "2.72")
+    }
 
 
 def test_test_formula_interaction_without_its_main_effect() -> None:
@@ -201,7 +216,10 @@ def test_test_formula_interaction_without_its_main_effect() -> None:
     assert cells["x2"][2] == "1.65"
     assert cells["x1:x2"][2] == "2.72"
     assert "x1" not in cells
-    assert "effects: x1=0.20 (OR 1.22), x2=0.50 (OR 1.65), x1:x2=1.00 (OR 2.72)" in str(result.summary())
+    rows = _effect_rows(result.summary())
+    assert {name: (cells[0], cells[-1]) for name, cells in rows.items()} == {
+        "x1": ("0.20", "1.22"), "x2": ("0.50", "1.65"), "x1:x2": ("1.00", "2.72")
+    }
 
 
 def test_test_formula_reduced_fit_recovers_marginal_coefficient() -> None:

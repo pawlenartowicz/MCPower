@@ -28,10 +28,18 @@ export interface ReportConfig {
     sample_size_caption: string;
     estimator_extras_caption: string;
     vs_token: string;
+    r2_label: string;
+    r2_fixed_label: string;
     columns: {
       test: string;
       power: string;
       target: string;
+      or: string;
+      rr: string;
+      effect: string;
+      input: string;
+      std_beta: string;
+      cohen_d: string;
       ci: string;
       required_n: string;
       uncorrected: string;

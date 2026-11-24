@@ -57,7 +57,8 @@ pub struct PredictorTable {
     pub effect_names: Vec<String>,
     /// For each effect name, its column index in the design matrix
     /// (intercept = 0; first non-factor predictor = 1; ...). Interactions
-    /// have one index per component.
+    /// have one index per component, except in a `PredictorTable::fitted`
+    /// table, where their entry is empty.
     pub effect_columns: Vec<Vec<u32>>,
     /// Parallel to `effect_names`. For an interaction effect, its components in
     /// formula order as `(predictor_name, level)`: `level = None` for a
@@ -73,6 +74,107 @@ pub struct PredictorTable {
     /// `labels[factor][level]` directly. Reordered into β-column space (and
     /// prefixed with the intercept) by `build_effect_skeleton`.
     pub effect_descriptors: Vec<EffectDescriptor>,
+    /// How many leading entries of `effect_names` come from the formula's own
+    /// terms. The rest are the terms `build_model_table` adds for R's factor
+    /// coding: generated with effect 0 and fitted, but never assigned an effect
+    /// or tested.
+    pub n_formula_effects: usize,
+}
+
+impl PredictorTable {
+    /// Whether predictor `name` has a main-effect term: a continuous main
+    /// effect, or the dummies of a factor. In `y ~ x:z` neither x nor z has
+    /// one: both are generated, but the fitted model leaves them out, as R's
+    /// `lm(y ~ x:z)` does. In a `build_model_table` table the terms added for
+    /// R's factor coding count, so x has one in `y ~ f:x`.
+    pub fn has_main_term(&self, name: &str) -> bool {
+        self.effect_descriptors.iter().any(|d| match d {
+            EffectDescriptor::Continuous { predictor } => predictor == name,
+            EffectDescriptor::FactorLevel { factor, .. } => factor == name,
+            _ => false,
+        })
+    }
+
+    /// The table of the fitted design: every predictor without a main-effect
+    /// term is dropped, so the column layout (intercept, kept non-factors, kept
+    /// dummies, interactions) is the fitted design's. Interaction effects stay,
+    /// with an empty `effect_columns` entry, since a component may have no
+    /// fitted column. `None` when every predictor has a main-effect term, so
+    /// the table already is the fitted one.
+    pub(crate) fn fitted(&self) -> Option<PredictorTable> {
+        let keep_nf: Vec<bool> = self
+            .non_factor_names
+            .iter()
+            .map(|n| self.has_main_term(n))
+            .collect();
+        let keep_f: Vec<bool> = self
+            .factor_names
+            .iter()
+            .map(|n| self.has_main_term(n))
+            .collect();
+        if keep_nf.iter().chain(&keep_f).all(|&k| k) {
+            return None;
+        }
+        fn pick<T: Clone>(v: &[T], keep: &[bool]) -> Vec<T> {
+            v.iter()
+                .zip(keep)
+                .filter(|(_, k)| **k)
+                .map(|(x, _)| x.clone())
+                .collect()
+        }
+        // Proportions are flattened per factor, `factor_n_levels[f]` each.
+        let mut factor_proportions = Vec::new();
+        let mut offset = 0;
+        for (&nl, &keep) in self.factor_n_levels.iter().zip(&keep_f) {
+            let n = nl.max(0) as usize;
+            if keep {
+                factor_proportions.extend_from_slice(&self.factor_proportions[offset..offset + n]);
+            }
+            offset += n;
+        }
+        let non_factor_names = pick(&self.non_factor_names, &keep_nf);
+        let factor_names = pick(&self.factor_names, &keep_f);
+        let factor_references = pick(&self.factor_references, &keep_f);
+        let factor_declared_levels = pick(&self.factor_declared_levels, &keep_f);
+        let kept_factors: Vec<(String, Vec<String>, String)> = factor_names
+            .iter()
+            .zip(&factor_declared_levels)
+            .zip(&factor_references)
+            .map(|((n, l), r)| (n.clone(), l.clone(), r.clone()))
+            .collect();
+        let dummy_column_for =
+            build_dummy_column_index(&kept_factors, non_factor_names.len() as u32);
+        let effect_columns = self
+            .effect_descriptors
+            .iter()
+            .zip(&self.effect_names)
+            .map(|(d, name)| match d {
+                EffectDescriptor::Continuous { predictor } => {
+                    vec![column_of_non_factor(&non_factor_names, predictor)]
+                }
+                EffectDescriptor::FactorLevel { .. } => vec![dummy_column_for(name)],
+                _ => Vec::new(),
+            })
+            .collect();
+        Some(PredictorTable {
+            var_types: pick(&self.var_types, &keep_nf),
+            var_pinned: pick(&self.var_pinned, &keep_nf),
+            var_params: pick(&self.var_params, &keep_nf),
+            factor_n_levels: pick(&self.factor_n_levels, &keep_f),
+            factor_proportions,
+            factor_sampled: pick(&self.factor_sampled, &keep_f),
+            factor_levels: pick(&self.factor_levels, &keep_f),
+            non_factor_names,
+            factor_names,
+            factor_references,
+            factor_declared_levels,
+            effect_names: self.effect_names.clone(),
+            effect_columns,
+            interaction_components: self.interaction_components.clone(),
+            effect_descriptors: self.effect_descriptors.clone(),
+            n_formula_effects: self.n_formula_effects,
+        })
+    }
 }
 
 /// Expand the formula's predictors into a `PredictorTable`: non-factor columns,
@@ -83,6 +185,27 @@ pub struct PredictorTable {
 pub fn build_predictor_table(
     formula: &ParsedFormula,
     predictors: &[PredictorSpec],
+) -> Result<PredictorTable, SpecError> {
+    build_table(formula, predictors, false)
+}
+
+/// As [`build_predictor_table`], plus the terms R's factor coding adds to the
+/// model (see [`margin_terms`]), appended after the formula's own effects. The
+/// generation and fitted designs are built from this table.
+///
+/// # Errors
+/// As [`build_predictor_table`].
+pub(crate) fn build_model_table(
+    formula: &ParsedFormula,
+    predictors: &[PredictorSpec],
+) -> Result<PredictorTable, SpecError> {
+    build_table(formula, predictors, true)
+}
+
+fn build_table(
+    formula: &ParsedFormula,
+    predictors: &[PredictorSpec],
+    with_margins: bool,
 ) -> Result<PredictorTable, SpecError> {
     use std::collections::HashMap;
 
@@ -153,7 +276,18 @@ pub fn build_predictor_table(
     let factor_set: std::collections::BTreeSet<&str> =
         factor_levels.iter().map(|(n, _, _)| n.as_str()).collect();
 
-    for term in &formula.terms {
+    let margins = if with_margins {
+        margin_terms(&formula.terms, |v| {
+            matches!(by_name[v].kind, VarKind::Factor { .. })
+        })
+    } else {
+        Vec::new()
+    };
+    let mut n_formula_effects = None;
+    for (ti, term) in formula.terms.iter().chain(&margins).enumerate() {
+        if ti == formula.terms.len() {
+            n_formula_effects = Some(effect_names.len());
+        }
         match term {
             Term::Main { name } => {
                 if factor_set.contains(name.as_str()) {
@@ -287,11 +421,56 @@ pub fn build_predictor_table(
         factor_levels: factor_level_lists,
         factor_references,
         factor_declared_levels,
+        n_formula_effects: n_formula_effects.unwrap_or(effect_names.len()),
         effect_names,
         effect_columns,
         interaction_components,
         effect_descriptors,
     })
+}
+
+/// The terms R adds to a model through its factor coding, as `model.matrix`
+/// does. R codes a factor f inside a term T with contrasts (one column per
+/// non-reference level) only when T without f is also in the model, and with
+/// one column per level otherwise: `y ~ f:x` gets fa:x, fb:x, fc:x. One column
+/// per level of f spans the same columns as `T without f` plus T with f
+/// contrast-coded, so each missing `T without f` is returned here (`x` for
+/// `y ~ f:x`) and then checked the same way. The intercept is always in the
+/// model, so a main effect adds nothing, and an interaction of continuous
+/// predictors only (`x:z`) adds nothing either.
+fn margin_terms(terms: &[Term], is_factor: impl Fn(&str) -> bool) -> Vec<Term> {
+    let vars_of = |t: &Term| match t {
+        Term::Main { name } => vec![name.clone()],
+        Term::Interaction { vars } => vars.clone(),
+    };
+    let sorted = |v: &[String]| {
+        let mut k = v.to_vec();
+        k.sort();
+        k
+    };
+    let mut queue: Vec<Vec<String>> = terms.iter().map(vars_of).collect();
+    let mut present: std::collections::HashSet<Vec<String>> =
+        queue.iter().map(|v| sorted(v)).collect();
+    let mut margins = Vec::new();
+    let mut i = 0;
+    while i < queue.len() {
+        let vars = queue[i].clone();
+        i += 1;
+        if vars.len() < 2 {
+            continue;
+        }
+        for f in vars.iter().filter(|v| is_factor(v)) {
+            let rest: Vec<String> = vars.iter().filter(|v| *v != f).cloned().collect();
+            if present.insert(sorted(&rest)) {
+                margins.push(match rest.as_slice() {
+                    [name] => Term::Main { name: name.clone() },
+                    _ => Term::Interaction { vars: rest.clone() },
+                });
+                queue.push(rest);
+            }
+        }
+    }
+    margins
 }
 
 /// 0-based position of `level` within `factor`'s FULL declared level list
@@ -385,6 +564,30 @@ mod tests {
     use super::*;
     use crate::formula::parse_formula;
     use crate::input::PredictorSpec;
+
+    /// The added terms for formulas whose columns were read off R's
+    /// `model.matrix` (f and g factors, x and z continuous): the formula's
+    /// terms plus these span exactly R's columns.
+    #[test]
+    fn margin_terms_follow_r_factor_coding() {
+        let margins = |formula: &str| -> Vec<String> {
+            let parsed = parse_formula(formula).unwrap();
+            margin_terms(&parsed.terms, |v| v == "f" || v == "g")
+                .iter()
+                .map(|t| match t {
+                    Term::Main { name } => name.clone(),
+                    Term::Interaction { vars } => vars.join(":"),
+                })
+                .collect()
+        };
+        assert_eq!(margins("y = f:x"), ["x"]);
+        assert_eq!(margins("y = f + f:x"), ["x"]);
+        assert!(margins("y = x + f:x").is_empty());
+        assert_eq!(margins("y = f:g"), ["g", "f"]);
+        assert!(margins("y = x:z").is_empty());
+        assert_eq!(margins("y = f:x:z"), ["x:z"]);
+        assert_eq!(margins("y = f:g:x"), ["g:x", "f:x", "x"]);
+    }
 
     #[test]
     fn non_factor_table_assigns_column_1_to_first_predictor() {

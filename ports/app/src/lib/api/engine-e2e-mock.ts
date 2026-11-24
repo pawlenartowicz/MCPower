@@ -1,6 +1,6 @@
 // Deterministic in-process mock for the Tauri engine API; used by E2E tests to avoid spawning a real Tauri backend.
 // Must export exactly the same surface as engine.ts. This mock must match engine.ts's full export surface.
-import type { AppSpec, EffectDescriptor, EffectSize, EffectsFromData } from '$lib/domain/app-spec';
+import type { AppSpec, EffectDescriptor, EffectSize, EffectsFromData, EffectMoments } from '$lib/domain/app-spec';
 
 export type { EffectDescriptor, EffectSize, EffectsFromData };
 import type {
@@ -181,6 +181,13 @@ export async function getEffectsFromData(spec: AppSpec): Promise<EffectsFromData
   // no ICC / baseline preview (the mock fit recovers neither).
   const effects = 'effects' in spec ? spec.effects.map((e) => ({ name: e.name, value: 0.3 })) : [];
   return { effects, cluster_icc: null, baseline_probability: null };
+}
+
+export async function effectMoments(spec: AppSpec): Promise<EffectMoments> {
+  // Stub: the skeleton's effects with no moments, so every value renders as a
+  // dash; the E2E suite checks wiring and the dash rendering, not the numbers.
+  const skeleton = await effectSkeleton(spec);
+  return { descriptors: skeleton.slice(1), moments: null };
 }
 
 export async function effectSkeleton(spec: AppSpec): Promise<EffectDescriptor[]> {

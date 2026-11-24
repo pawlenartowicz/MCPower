@@ -8,6 +8,7 @@
   import { historyStore } from '$lib/stores/history.svelte';
   import { runStore } from '$lib/stores/run.svelte';
   import { findPowerTotalError } from '$lib/domain/app-spec-adapter';
+  import { formulaTerms } from '$lib/domain/app-spec';
   import { reportError } from '$lib/errors/report';
   import type { HistoryEntry } from '$lib/persistence/history';
 
@@ -45,8 +46,7 @@
       return `${e.spec.outcome} ~ ${terms.join(' + ')}`;
     }
     const f = e.spec.parsed_formula;
-    const terms = [...f.predictors, ...f.interaction_terms.map((t: string[]) => t.join(':'))];
-    return `${f.outcome} ~ ${terms.join(' + ')}`;
+    return `${f.outcome} ~ ${formulaTerms(f).join(' + ')}`;
   }
 
   function whenOf(e: HistoryEntry): string {

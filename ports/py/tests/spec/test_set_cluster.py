@@ -655,14 +655,14 @@ def test_non_psd_slope_correlations_are_a_user_error():
 
 def test_clustered_ols_runs_with_scenarios():
     """OLS fitted to clustered data runs the scenario analysis with its
-    random-effect settings: the port hands the engine realistic and doomer
+    random-effect settings: the port hands the engine realistic and pessimistic
     scenarios with a nonzero ICC jitter (data generation draws the random
     effects for it as for a mixed model), the engine accepts them, and power
-    falls from optimistic to realistic to doomer."""
+    falls from optimistic to realistic to pessimistic."""
     m = MCPower("y ~ x + (1|g)")
     m.set_effects("x=0.3")
     m.set_cluster("g", ICC=0.2, n_clusters=10)
-    payload = m._to_linear_spec_dict(["realistic", "doomer"])
+    payload = m._to_linear_spec_dict(["realistic", "pessimistic"])
     assert all(sc["icc_noise_sd"] > 0 for sc in payload["scenarios"])
     res = m.find_power(
         100, n_sims=200, seed=2137, scenarios=True,
@@ -670,9 +670,9 @@ def test_clustered_ols_runs_with_scenarios():
     )
     power = {
         name: res["scenarios"][name]["power_uncorrected"][0][0]
-        for name in ("optimistic", "realistic", "doomer")
+        for name in ("optimistic", "realistic", "pessimistic")
     }
-    assert power["optimistic"] > power["realistic"] > power["doomer"], power
+    assert power["optimistic"] > power["realistic"] > power["pessimistic"], power
 
 
 def test_get_effects_from_data_with_one_group_is_a_user_error():

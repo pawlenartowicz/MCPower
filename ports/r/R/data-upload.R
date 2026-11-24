@@ -104,6 +104,13 @@
 # unrelated columns are detected and rounds numbers to 7 significant digits.
 # Factor columns become character and logical columns integer 0/1.
 .normalize_upload_input <- function(data, columns = NULL) {
+  .check_unique_upload_names <- function(nms) {
+    dup <- nms[duplicated(nms)]
+    if (length(dup) > 0L) {
+      stop(sprintf("uploaded data has more than one column named '%s'; rename or remove the duplicates",
+                   dup[1L]), call. = FALSE)
+    }
+  }
   # --- file path ---
   if (is.character(data) && length(data) == 1L && file.exists(data)) {
     suffix <- tolower(tools::file_ext(data))
@@ -128,6 +135,7 @@
       if (is.factor(x)) as.character(x) else if (is.logical(x)) as.integer(x) else x
     })
     df <- as.data.frame(cols, stringsAsFactors = FALSE, check.names = FALSE)
+    .check_unique_upload_names(names(data))
     return(list(matrix = df, names = names(data)))
   }
 
@@ -144,6 +152,7 @@
       stop(sprintf("columns length (%d) must match data columns (%d)",
                    length(columns), ncol(data)))
     }
+    .check_unique_upload_names(columns)
     return(list(matrix = data, names = columns))
   }
 

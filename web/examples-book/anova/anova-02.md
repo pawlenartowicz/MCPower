@@ -44,15 +44,15 @@ drug_a vs drug_b), with a family-wise correction shared across the set.
 
 ## If you'd rather have…
 
-- [[anova/anova-01]] — Same one-way `pain_reduction ~ treatment` design but
+- [[anova/anova-01|One-way ANOVA, omnibus F-test across 3+ groups]] — Same one-way `pain_reduction ~ treatment` design but
   testing only the omnibus F (any-arm-differs), without the pairwise breakdown.
-- [[anova/anova-03]] — Same arms, but one planned pairwise contrast instead
+- [[anova/anova-03|One-way ANOVA, one planned pairwise contrast]] — Same arms, but one planned pairwise contrast instead
   of all pairwise comparisons — fewer tests, less correction.
-- [[anova/anova-04]] — Step up to a two-way factorial (`sector * gender`)
+- [[anova/anova-04|Two-way factorial ANOVA with interaction]] — Step up to a two-way factorial (`sector * gender`)
   when a second grouping factor and its interaction are of interest.
-- [[ols/ols-12]] — The identical three-level categorical predictor framed as
+- [[ols/ols-12|Three-level categorical predictor]] — The identical three-level categorical predictor framed as
   dummy-coded regression rather than an ANOVA omnibus/post-hoc.
-- [[ols/ols-07]] — Drop to two arms — the pairwise comparison reduces to a
+- [[ols/ols-07|Two groups as regression (independent t-test)]] — Drop to two arms — the pairwise comparison reduces to a
   single independent t-test as regression.
 
 ## Copy-paste setup

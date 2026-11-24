@@ -116,7 +116,7 @@ def test_f1_set_scenario_configs_rejects_old_doc_key():
 
 def test_f1_set_scenario_configs_accepts_all_live_keys():
     lme_keys = {"icc_noise_sd", "random_effect_dist", "random_effect_df"}
-    live_cfg = {k: v for k, v in DEFAULT_SCENARIO_CONFIG["doomer"].items() if k not in lme_keys}
+    live_cfg = {k: v for k, v in DEFAULT_SCENARIO_CONFIG["pessimistic"].items() if k not in lme_keys}
     assert live_cfg, "live key set must be non-empty"
     m = MCPower("y = x1 + x2")
     m.set_scenario_configs({"custom": live_cfg})

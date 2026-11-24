@@ -3,7 +3,7 @@
  *
  * Mirrors `settings.ts`: lazy single-shot store load, debounce in caller.
  */
-import type { ScenarioConfig } from '$lib/configs/scenarios';
+import { SCENARIO_NAMES, type ScenarioConfig } from '$lib/configs/scenarios';
 import { openTauriStore, invalidateTauriStore } from './tauri-store';
 import { reportError, errorDetail } from '$lib/errors/report';
 
@@ -19,8 +19,9 @@ export async function loadScenarios(): Promise<ScenarioConfig[] | null> {
     const store = await openTauriStore(FILE);
     const snap = await store.get<ScenarioConfig[]>('scenarios');
     if (!snap || !Array.isArray(snap)) return null;
-    // Reseed if a pre-lme device copy is detected (lacking the lme sub-object).
-    return snap.every((s) => s.lme) ? snap : null;
+    // Reseed if the device copy predates the bundled shape: no lme sub-object, or other preset names.
+    const sameNames = snap.map((s) => s.name).join() === SCENARIO_NAMES.join();
+    return sameNames && snap.every((s) => s.lme) ? snap : null;
   } catch (err) {
     console.warn('loadScenarios failed:', err);
     return null;

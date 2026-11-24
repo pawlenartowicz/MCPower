@@ -7,7 +7,7 @@ right_sidebar: body
 
 # What this report shows
 
-MCPower’s **sensitivity analysis** deliberately stresses a planned
+MCPower’s **robustness analysis** deliberately stresses a planned
 study: instead of simulating the idealised design you specified, each
 scenario *perturbs* it — slopes wobble between observations, residual
 variance trends with the predictors, correlations differ from the plan,
@@ -250,18 +250,18 @@ orchestrator’s call-seed test (power here: 0.948, 0.28).
 | realistic: β̂\[intercept\] unbiased | scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4214 | PASS |
 | realistic: β̂\[x1\] unbiased | scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3961 | 0.4000 | -0.8337 | PASS |
 | realistic: β̂\[x2\] unbiased | scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2522 | 0.2500 | 0.6677 | PASS |
-| doomer: β̂\[intercept\] unbiased | scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2390 | PASS |
-| doomer: β̂\[x1\] unbiased | scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4360 | PASS |
-| doomer: β̂\[x2\] unbiased | scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0553 | PASS |
+| pessimistic: β̂\[intercept\] unbiased | scen_b1_ols | pessimistic: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2390 | PASS |
+| pessimistic: β̂\[x1\] unbiased | scen_b1_ols | pessimistic: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4360 | PASS |
+| pessimistic: β̂\[x2\] unbiased | scen_b1_ols | pessimistic: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0553 | PASS |
 | optimistic: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[intercept\] = per-study pseudo-true | -0.4050 | -0.4055 | 0.1720 | PASS |
 | optimistic: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[x1\] = per-study pseudo-true | 0.5007 | 0.5000 | 0.2342 | PASS |
 | optimistic: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | optimistic: β̂\[x2\] = per-study pseudo-true | 0.2988 | 0.3000 | -0.4579 | PASS |
 | realistic: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[intercept\] = per-study pseudo-true | -0.3906 | -0.4055 | 1.1879 | PASS |
 | realistic: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[x1\] = per-study pseudo-true | 0.5065 | 0.5000 | 1.0327 | PASS |
 | realistic: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | realistic: β̂\[x2\] = per-study pseudo-true | 0.2989 | 0.3000 | -0.2684 | PASS |
-| doomer: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[intercept\] = per-study pseudo-true | -0.3946 | -0.4055 | 0.4652 | PASS |
-| doomer: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[x1\] = per-study pseudo-true | 0.4944 | 0.5004 | -0.5317 | PASS |
-| doomer: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | doomer: β̂\[x2\] = per-study pseudo-true | 0.2995 | 0.3002 | -0.1004 | PASS |
+| pessimistic: β̂\[intercept\] = per-study pseudo-true | scen_b1_glm | pessimistic: β̂\[intercept\] = per-study pseudo-true | -0.3946 | -0.4055 | 0.4652 | PASS |
+| pessimistic: β̂\[x1\] = per-study pseudo-true | scen_b1_glm | pessimistic: β̂\[x1\] = per-study pseudo-true | 0.4944 | 0.5004 | -0.5317 | PASS |
+| pessimistic: β̂\[x2\] = per-study pseudo-true | scen_b1_glm | pessimistic: β̂\[x2\] = per-study pseudo-true | 0.2995 | 0.3002 | -0.1004 | PASS |
 
 OLS rows gate on the z-band, **intercept included** — the mean-leak
 tripwire (linear averaging keeps OLS β̂ exactly unbiased under every
@@ -271,7 +271,7 @@ own β_eff and the MLE recovers it — averaged over the K studies the
 fitted coefficient → E\[β_eff\], **not** the attenuated coefficient a
 per-observation population-averaged marginal would show. The clip toward
 zero (s_j = h·\|β_j\|) nudges each slope’s magnitude *up* by
-×(Φ(1/h)+h·φ(1/h)) ≈ ×1.0008 at doomer’s h = 0.4; the symmetric
+×(Φ(1/h)+h·φ(1/h)) ≈ ×1.0008 at pessimistic’s h = 0.4; the symmetric
 unclipped intercept jitter leaves β_0 unchanged. So the logit law is
 this per-study pseudo-true value (`glm_perstudy_beta`), gated on the
 absolute band ±0.02. The GLM calibration gates remain Tier A and the
@@ -338,7 +338,7 @@ they do not fail on the drift itself.
 | Preset    | λ set | λ′ 5% | λ′ median | λ′ 95% |
 |:----------|------:|------:|----------:|-------:|
 | realistic |     2 | 1.878 |     1.988 |  2.117 |
-| doomer    |     4 | 3.110 |     3.958 |  4.865 |
+| pessimistic    |     4 | 3.110 |     3.958 |  4.865 |
 
 The staleness gate is the discriminating one: per block, the measured
 ratio λ̂′ tracks the moment-predicted λ′ = exp(4γσ̂′/σ₀) with regression
@@ -346,7 +346,7 @@ slope ≈ 1. (A per-block recompute of the anchor would pin λ̂′ at λ, slope
 ≈ 0 — ~11σ away.) Note the *mean* slope alone cannot tell the two
 designs apart (γ·E\[1/σ′\] ≈ γ/σ₀ to 0.1%); the per-block tracking is
 what evidences the stale anchor. The preset table quantifies the
-documented drift: under realistic/doomer the effective λ′ wobbles around
+documented drift: under realistic/pessimistic the effective λ′ wobbles around
 the set λ by the quantiles shown — second-order next to the
 perturbations themselves.
 
@@ -428,18 +428,18 @@ Knobs must be live or inert exactly per family.
 | scen_b1_ols | realistic: β̂\[intercept\] unbiased | 0.0019 | 0.0000 | 1.4214 | PASS |
 | scen_b1_ols | realistic: β̂\[x1\] unbiased | 0.3961 | 0.4000 | -0.8337 | PASS |
 | scen_b1_ols | realistic: β̂\[x2\] unbiased | 0.2522 | 0.2500 | 0.6677 | PASS |
-| scen_b1_ols | doomer: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2390 | PASS |
-| scen_b1_ols | doomer: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4360 | PASS |
-| scen_b1_ols | doomer: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0553 | PASS |
+| scen_b1_ols | pessimistic: β̂\[intercept\] unbiased | 0.0003 | 0.0000 | 0.2390 | PASS |
+| scen_b1_ols | pessimistic: β̂\[x1\] unbiased | 0.4040 | 0.4000 | 0.4360 | PASS |
+| scen_b1_ols | pessimistic: β̂\[x2\] unbiased | 0.2503 | 0.2500 | 0.0553 | PASS |
 | scen_b1_glm | optimistic: β̂\[intercept\] = per-study pseudo-true | -0.4050 | -0.4055 | 0.1720 | PASS |
 | scen_b1_glm | optimistic: β̂\[x1\] = per-study pseudo-true | 0.5007 | 0.5000 | 0.2342 | PASS |
 | scen_b1_glm | optimistic: β̂\[x2\] = per-study pseudo-true | 0.2988 | 0.3000 | -0.4579 | PASS |
 | scen_b1_glm | realistic: β̂\[intercept\] = per-study pseudo-true | -0.3906 | -0.4055 | 1.1879 | PASS |
 | scen_b1_glm | realistic: β̂\[x1\] = per-study pseudo-true | 0.5065 | 0.5000 | 1.0327 | PASS |
 | scen_b1_glm | realistic: β̂\[x2\] = per-study pseudo-true | 0.2989 | 0.3000 | -0.2684 | PASS |
-| scen_b1_glm | doomer: β̂\[intercept\] = per-study pseudo-true | -0.3946 | -0.4055 | 0.4652 | PASS |
-| scen_b1_glm | doomer: β̂\[x1\] = per-study pseudo-true | 0.4944 | 0.5004 | -0.5317 | PASS |
-| scen_b1_glm | doomer: β̂\[x2\] = per-study pseudo-true | 0.2995 | 0.3002 | -0.1004 | PASS |
+| scen_b1_glm | pessimistic: β̂\[intercept\] = per-study pseudo-true | -0.3946 | -0.4055 | 0.4652 | PASS |
+| scen_b1_glm | pessimistic: β̂\[x1\] = per-study pseudo-true | 0.4944 | 0.5004 | -0.5317 | PASS |
+| scen_b1_glm | pessimistic: β̂\[x2\] = per-study pseudo-true | 0.2995 | 0.3002 | -0.1004 | PASS |
 | scen_b2 | x1 jitter slope at λ=1 = h²β₁² | 0.0217 | 0.0256 | -1.7720 | PASS |
 | scen_b2 | x1 jitter slope λ-invariant (paired Δ = 0) | 0.0000 | 0.0000 | 0.0473 | PASS |
 | scen_b3_t | γ = ln(λ)/4 under a high_kurtosis residual | 0.3426 | 0.3466 | -1.6275 | PASS |

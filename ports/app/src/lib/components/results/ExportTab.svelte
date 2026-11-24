@@ -3,6 +3,7 @@
   // then saves as PNG or SVG. No Rust command needed — all browser-side.
   import type { RunTab } from '$lib/stores/run.svelte';
   import { embedPrint } from '$lib/charts/embed';
+  import { runTabLabelMap } from '$lib/charts/labels';
   import { NumberInput } from '$lib/components/ui/number-input';
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import plotThemes from '$configs/plot-themes.json';
@@ -76,7 +77,7 @@
 
       // Offscreen embed with print theme: detached div, never appended to the document.
       const container = document.createElement('div');
-      const result = await embedPrint(container, specStr, printTheme);
+      const result = await embedPrint(container, specStr, printTheme, runTabLabelMap(tab));
       try {
         if (format === 'svg') {
           const svgStr = await result.view.toSVG();

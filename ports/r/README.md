@@ -134,7 +134,7 @@ See [examples/](examples/) (01–11) and the [R tutorial](https://docs.mcpower.a
 
 ## API at a glance
 
-`set_*` methods chain; add `scenarios = TRUE` to either `find_*` for optimistic/realistic/doomer robustness; results support `summary()`, `as_tibble()`, and `plot()` (Vega-Lite).
+`set_*` methods chain; add `scenarios = TRUE` to either `find_*` for optimistic/realistic/pessimistic robustness; results support `summary()`, `as_tibble()`, and `plot()` (Vega-Lite).
 
 | Call | What it does |
 |---|---|

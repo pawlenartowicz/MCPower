@@ -17,7 +17,10 @@ def test_long_form_boxed_header_and_effects():
     assert "=====" in s  # boxed === header
     assert "MCPower · Power Analysis" in s
     assert "estimator: OLS" in s
-    assert "effects:" in s and "x1=0.5" in s  # raw effect sizes echoed
+    # Effects block: every simulated effect with its input and standardized values.
+    assert re.search(r"^Effect\s+Input\s+Std\. β\s+d$", s, re.M)
+    assert re.search(r"^x1\s+0\.50\s", s, re.M)
+    assert re.search(r"^R² = 0\.\d{3}$", s, re.M)
     assert "Per-test power" in s
     assert "CI 95%" not in s.split("Per-test power")[1].split("Power & 95% CI")[0]  # not in main table
 
@@ -45,7 +48,7 @@ def test_long_form_ci_section_titled_per_scenario():
     rep = _model().find_power(sample_size=120, scenarios=True, verbose=False).summary()
     s = str(rep)
     assert "Power & 95% CI — optimistic" in s
-    assert "Power & 95% CI — doomer" in s
+    assert "Power & 95% CI — pessimistic" in s
 
 
 def test_estimator_extras_shown_when_present():

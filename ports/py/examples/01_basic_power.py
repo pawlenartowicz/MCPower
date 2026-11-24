@@ -33,7 +33,7 @@ print(result.summary())
 # 6. Robustness — rerun the analysis under three assumption scenarios:
 #      optimistic — all assumptions hold (what you computed above)
 #      realistic  — how your data might actually look
-#      doomer     — a pessimistic (but still plausible) version of your data
+#      pessimistic     — a pessimistic (but still plausible) version of your data
 #    Δ = power drop vs the optimistic baseline.
 print("\n>>> model.find_power(sample_size=120, target_test='all', scenarios=True)")
 model.find_power(sample_size=120, target_test="all", scenarios=True)

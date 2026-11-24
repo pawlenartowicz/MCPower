@@ -68,7 +68,31 @@ describe('familyConfigToAppSpec(linear, ...)', () => {
       { name: 'x2', value: 0.2 },
     ]);
     if (r.spec!.family !== 'linear') throw new Error('expected linear');
-    expect(r.spec!.parsed_formula).toEqual({ outcome: 'y', predictors: ['x1', 'x2'], interaction_terms: [] });
+    expect(r.spec!.parsed_formula).toEqual({
+      outcome: 'y',
+      predictors: ['x1', 'x2'],
+      interaction_terms: [],
+      interaction_only: [],
+    });
+  });
+
+  it('a `:`-only formula sends no main effects, even with stale main-effect values', () => {
+    const cfg = linearConfig({
+      formula: 'y ~ x1:x2',
+      variables: [
+        { name: 'x1', kind: 'continuous' },
+        { name: 'x2', kind: 'continuous' },
+      ],
+      effects: [
+        { name: 'x1', value: 0.3 },
+        { name: 'x1:x2', value: 0.2 },
+      ],
+    });
+    const r = familyConfigToAppSpec('regression', cfg, 'linear');
+    expect(r.errors).toEqual([]);
+    expect(r.spec!.effects).toEqual([{ name: 'x1:x2', value: 0.2 }]);
+    if (r.spec!.family !== 'linear') throw new Error('expected linear');
+    expect(r.spec!.parsed_formula.interaction_only).toEqual(['x1', 'x2']);
   });
 
   it('interaction_term_included: y ~ x1 + x2 + x1:x2 with named effect', () => {
@@ -1029,6 +1053,14 @@ describe('familyConfigToAppSpec — ANOVA', () => {
     expect(spec).toBeNull();
     expect(errors.join(' ')).toMatch(/factor/i);
   });
+
+  it('rejects a factor renamed to an existing name', () => {
+    const base = anovaCfg();
+    const cfg = anovaCfg({ variables: [base.variables[0]!, { ...base.variables[0]! }] });
+    const { spec, errors } = familyConfigToAppSpec('anova', cfg);
+    expect(spec).toBeNull();
+    expect(errors).toEqual(["duplicate variable name 'F1'"]);
+  });
 });
 
 describe('familyConfigToAppSpec — Regression entrypoint + outcome toggle', () => {
@@ -1077,7 +1109,7 @@ describe('familyConfigToAppSpec — Regression entrypoint + outcome toggle', () 
 describe('familyConfigToAppSpec — lme scenario zeroing (contract invariant 13)', () => {
   function lmeScenario(): ScenarioConfig {
     return {
-      name: 'doomer',
+      name: 'pessimistic',
       heterogeneity: 0,
       heteroskedasticity_ratio: 1,
       correlation_noise_sd: 0,

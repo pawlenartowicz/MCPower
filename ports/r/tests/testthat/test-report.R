@@ -40,7 +40,7 @@ test_that("print.mcpower_result short form scenarios: no Delta column", {
   res <- MCPower$new("y ~ x1")$set_effects("x1=0.5")$set_simulations(200)$
     find_power(sample_size = 100, scenarios = TRUE, verbose = FALSE, progress_callback = FALSE)
   out <- paste(capture.output(print(res)), collapse = "\n")
-  expect_match(out, "optimistic"); expect_match(out, "doomer")
+  expect_match(out, "optimistic"); expect_match(out, "pessimistic")
   expect_false(grepl("pp", out)); expect_false(grepl("Δ", out))  # no Δ / pp
 })
 
@@ -103,8 +103,18 @@ test_that("summary renders when test_formula drops the leading term", {
   expect_false(grepl("out of range", long))
 })
 
+# Effect name -> "input|last cell" of its row in the effects block, which runs
+# from the "Effect" header to the R² line (last cell = OR on the logit link).
+.effect_rows <- function(lines) {
+  from <- grep("^Effect ", lines)[1] + 2L
+  to <- grep("^R²", lines)[1] - 2L
+  cells <- strsplit(trimws(lines[from:to]), " +")
+  stats::setNames(vapply(cells, function(x) paste(x[2], x[length(x)], sep = "|"), ""),
+                  vapply(cells, `[`, "", 1))
+}
+
 test_that("summary header lists the simulated model's effects under test_formula", {
-  # The effects: line echoes the model the data are simulated from, every effect
+  # The effects block echoes the model the data are simulated from, every effect
   # including zeros, in formula order; dropping study must not hide its 0.30.
   res <- MCPower$new("score ~ study + caffeine")$
     set_effects("study=0.3, caffeine=0")$
@@ -112,8 +122,9 @@ test_that("summary header lists the simulated model's effects under test_formula
                target_test = "caffeine", test_formula = "score ~ caffeine",
                verbose = FALSE, progress_callback = FALSE)
   long <- capture.output(print(summary(res)))
-  expect_identical(grep("^effects:", long, value = TRUE),
-                   "effects: study=0.30, caffeine=0.00")
+  rows <- .effect_rows(long)
+  expect_identical(names(rows), c("study", "caffeine"))
+  expect_identical(substr(rows, 1, 4), c(study = "0.30", caffeine = "0.00"))
 })
 
 # Test name -> the OR cell of its row in the short-form table.
@@ -134,8 +145,8 @@ test_that("a test interaction written in the other order reports its odds ratio"
   expect_equal(.or_cell(res, "b"), "1.35")
   expect_equal(.or_cell(res, "b:a"), "2.72")
   long <- capture.output(print(summary(res)))
-  expect_identical(grep("^effects:", long, value = TRUE),
-                   "effects: a=0.20 (OR 1.22), b=0.30 (OR 1.35), a:b=1.00 (OR 2.72)")
+  expect_identical(.effect_rows(long),
+                   c(a = "0.20|1.22", b = "0.30|1.35", `a:b` = "1.00|2.72"))
 })
 
 test_that("a test interaction without its main effect runs and reports both kept terms", {
@@ -148,8 +159,8 @@ test_that("a test interaction without its main effect runs and reports both kept
   expect_equal(.or_cell(res, "x1:x2"), "2.72")
   expect_length(.or_cell(res, "x1"), 0L)
   long <- capture.output(print(summary(res)))
-  expect_identical(grep("^effects:", long, value = TRUE),
-                   "effects: x1=0.20 (OR 1.22), x2=0.50 (OR 1.65), x1:x2=1.00 (OR 2.72)")
+  expect_identical(.effect_rows(long),
+                   c(x1 = "0.20|1.22", x2 = "0.50|1.65", `x1:x2` = "1.00|2.72"))
 })
 
 test_that("long form: Diagnostics section is gated — shows only on a threshold trip", {
@@ -215,9 +226,10 @@ test_that("long form: Diagnostics section is gated — shows only on a threshold
 test_that("long form: logit model echoes OR=exp(β) and adds an OR column", {
   out <- paste(capture.output(print(summary(
     mcpower:::.make_result(.make_logit_inner(), .logit_meta(), "find_power")))), collapse = "\n")
-  # Effects echo carries the OR beside each β.
-  expect_match(out, "x1=0.92 \\(OR 2.50\\)")
-  expect_match(out, "x2=0.41 \\(OR 1.50\\)")
+  # The effects block carries the OR beside each β (no standardized values in
+  # this hand-built meta, so those cells are dashes).
+  expect_match(out, "\nx1 +0\\.92 +— +— +2\\.50\n")
+  expect_match(out, "\nx2 +0\\.41 +— +— +1\\.50\n")
   # Per-test table has an OR column header and the exp(β) values.
   expect_match(out, "\\bOR\\b")
   expect_match(out, "2.50")
@@ -236,12 +248,13 @@ test_that("long form: OLS model shows no OR column or echo", {
 
 # ──long-form boxed header, effects line, CI section, footer ─────────
 
-test_that("long form: boxed header, effects line, CI section, footer", {
+test_that("long form: boxed header, effects block, CI section, footer", {
   res <- .r_ols_model()$find_power(sample_size = 120, verbose = FALSE, progress_callback = FALSE)
   out <- paste(capture.output(print(summary(res))), collapse = "\n")
   expect_match(out, "=====")
   expect_match(out, "MCPower")
-  expect_match(out, "effects:")
+  expect_match(out, "Effect +Input +Std\\. β +d")
+  expect_match(out, "\nR² = 0\\.[0-9]{3}\n")
   expect_match(out, "Per-test power")
   expect_match(out, "Power & 95% CI")
   expect_match(out, "Monte-Carlo \\(Wilson\\)")
@@ -389,7 +402,7 @@ test_that("print.mcpower_result renders multi-scenario from a real find_power ca
   # All three default scenario names appear
   expect_match(out, "optimistic")
   expect_match(out, "realistic")
-  expect_match(out, "doomer")
+  expect_match(out, "pessimistic")
   # No Δ / pp column (moved to long-form Robustness)
   expect_false(grepl("pp", out))
 })

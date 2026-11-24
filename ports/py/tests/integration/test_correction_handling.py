@@ -98,8 +98,10 @@ def _tukey_model():
 
 
 def _table_row(text, label):
-    """The printed table row whose first cell is `label`."""
-    return next(ln for ln in text.splitlines() if ln.split() and ln.split()[0] == label)
+    """The printed result-table row whose first cell is `label` (the effects
+    block above it, which ends at the R² line, is skipped)."""
+    results = text.split("\nR²", 1)[1]
+    return next(ln for ln in results.splitlines() if ln.split() and ln.split()[0] == label)
 
 
 def test_tukey_non_factor_target_is_not_applicable():

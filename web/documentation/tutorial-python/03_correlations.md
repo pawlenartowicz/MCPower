@@ -55,7 +55,14 @@ print(result.summary())
 ==================================================
 formula: wellbeing = stress + exercise + sleep
 estimator: OLS  N=150  sims=1600  α=0.05  target=80%
-effects: stress=-0.30, exercise=0.25, sleep=0.30
+───────────────────────────────────────
+Effect               Input   Std. β   d
+───────────────────────────────────────
+stress               -0.30   -0.269   —
+exercise              0.25    0.224   —
+sleep                 0.30    0.269   —
+───────────────────────────────────────
+R² = 0.197
 
 Per-test power
 ───────────────────────────────────
@@ -128,7 +135,14 @@ print(result.summary())
 ==================================================
 formula: wellbeing = stress + exercise + sleep
 estimator: OLS  N=150  sims=1600  α=0.05  target=80%
-effects: stress=-0.30, exercise=0.25, sleep=0.30
+───────────────────────────────────────
+Effect               Input   Std. β   d
+───────────────────────────────────────
+stress               -0.30   -0.269   —
+exercise              0.25    0.224   —
+sleep                 0.30    0.269   —
+───────────────────────────────────────
+R² = 0.197
 
 Per-test power
 ───────────────────────────────────

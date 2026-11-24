@@ -1,5 +1,5 @@
 <script lang="ts">
-// Bottom action bar: run summary, Find Power / Find Sample buttons, Scenarios toggle, status badge, and Reset.
+// Bottom action bar: run summary, Find Power / Find Sample buttons, Scenarios toggle, status badge, and the Reset confirmation dialog.
 import Play from '@lucide/svelte/icons/play';
 import Layers from '@lucide/svelte/icons/layers';
 import { Badge } from '$lib/components/ui/badge';
@@ -176,13 +176,13 @@ function confirmReset() {
       <label
         class="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground"
         data-testid="scenarios-switcher"
-        title="Run sensitivity analysis — edit the three scenarios in Settings · Scenarios"
+        title="Run robustness analysis — edit the three scenarios in Settings · Scenarios"
       >
         <Layers class="h-5 w-5" />
-        <span class="leading-tight">Sensitivity<br />analysis</span>
+        <span class="leading-tight">Robustness<br />analysis</span>
         <Switch
           bind:checked={sharedPrefs.scenariosEnabled}
-          aria-label="Enable sensitivity analysis"
+          aria-label="Enable robustness analysis"
         />
       </label>
     </div>

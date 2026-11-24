@@ -35,7 +35,7 @@ pub use input::{
 };
 pub use project_contract::{
     build_contract, build_contract_with_skeleton, build_linear_contract_with_skeleton,
-    dist_codes_json, re_dist_codes_json, residual_codes_json,
+    dist_codes_json, generation_skeleton, re_dist_codes_json, residual_codes_json,
 };
 pub use skeleton::{EffectDescriptor, EffectSkeleton};
 pub use upload::{RecoveryDesign, build_recovery_design};

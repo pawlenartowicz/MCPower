@@ -54,7 +54,15 @@
       state.predictors.filter((q) => q !== p).map((q) => q.name),
     );
   }
-  const hasErrors = $derived(state.predictors.some((p) => nameError(p) !== null));
+  // Two equal labels would give two effects one name (and crash the keyed effect rows).
+  function levelError(p: { kind: PredictorKind; levels: string[] }): string | null {
+    if (p.kind !== 'factor') return null;
+    const dup = p.levels.find((l, i) => p.levels.indexOf(l) < i);
+    return dup === undefined ? null : `Duplicate level: ${dup}.`;
+  }
+  const hasErrors = $derived(
+    state.predictors.some((p) => nameError(p) !== null || levelError(p) !== null),
+  );
 
   function addPredictor() {
     state.predictors = [...state.predictors, { name: '', kind: 'continuous', levels: [], dataBacked: false }];
@@ -174,6 +182,9 @@
               {/each}
               {#if !p.dataBacked}
                 <button type="button" onclick={() => (p.levels = [...p.levels, `${p.levels.length + 1}`])}>+ level</button>
+              {/if}
+              {#if levelError(p)}
+                <p class="text-[var(--destructive)]">{levelError(p)}</p>
               {/if}
             </div>
           {/if}

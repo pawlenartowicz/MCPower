@@ -15,6 +15,7 @@ fn linear_spec_with_csv(col_values: Vec<f64>, y_values: Vec<f64>) -> AppSpec {
     let n = col_values.len() as u32;
     AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x".into()],
             interaction_terms: vec![],
@@ -91,6 +92,7 @@ fn f1_assemble_without_csv_leaves_uploaded_frame_none() {
 
     let spec = AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x".into()],
             interaction_terms: vec![],
@@ -213,6 +215,7 @@ fn f2_get_effects_with_binary_predictor() {
 
     let spec = AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x_cont".into(), "x_bin".into()],
             interaction_terms: vec![],
@@ -327,6 +330,7 @@ fn f2_get_effects_glm_recovers_log_odds() {
 
     let spec = AppSpec::Logit(LogitSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x".into()],
             interaction_terms: vec![],
@@ -428,6 +432,7 @@ fn f2_get_effects_mle_recovers_fixed_effect() {
 
     let spec = AppSpec::Mixed(MixedSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x".into()],
             interaction_terms: vec![],
@@ -550,6 +555,7 @@ fn factor_upload_spec(var_types: Vec<VarType>) -> AppSpec {
 
     AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["g".into()],
             interaction_terms: vec![],
@@ -708,6 +714,7 @@ fn f2_get_effects_glm_logit_recovers_asymmetric_baseline() {
 
     let spec = AppSpec::Logit(LogitSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x".into()],
             interaction_terms: vec![],
@@ -791,6 +798,7 @@ fn f2_get_effects_glm_probit_recovers_asymmetric_baseline() {
 
     let spec = AppSpec::Logit(LogitSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["x".into()],
             interaction_terms: vec![],

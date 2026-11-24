@@ -40,7 +40,14 @@ print(result.summary())
 ==================================================
 formula: response = biomarker1 + biomarker2 + biomarker3
 estimator: OLS  N=200  sims=1600  α=0.05  target=80%
-effects: biomarker1=0.30, biomarker2=0.25, biomarker3=0.20
+───────────────────────────────────────
+Effect               Input   Std. β   d
+───────────────────────────────────────
+biomarker1            0.30    0.275   —
+biomarker2            0.25    0.229   —
+biomarker3            0.20    0.183   —
+───────────────────────────────────────
+R² = 0.161
 
 Per-test power
 ───────────────────────────────────
@@ -105,7 +112,14 @@ print(result.summary())
 ==================================================
 formula: response = biomarker1 + biomarker2 + biomarker3
 estimator: OLS  N=200  sims=1600  α=0.05  target=80%
-effects: biomarker1=0.30, biomarker2=0.25, biomarker3=0.20
+───────────────────────────────────────
+Effect               Input   Std. β   d
+───────────────────────────────────────
+biomarker1            0.30    0.275   —
+biomarker2            0.25    0.229   —
+biomarker3            0.20    0.183   —
+───────────────────────────────────────
+R² = 0.161
 correction: bonferroni
 
 Per-test power

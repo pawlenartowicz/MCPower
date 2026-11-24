@@ -23,6 +23,7 @@
   import InfoIcon from '$lib/components/guidance/InfoIcon.svelte';
   import type { VariableGroup } from '$lib/domain/effect-names';
   import type { EffectRow, VariableKind, VariableRow } from '$lib/domain/family';
+  import { validatePredictorName } from '$lib/domain/model-builder';
 
   const KINDS: VariableKind[] = ['continuous', 'binary', 'factor'];
 
@@ -97,6 +98,23 @@
     }
   }
 
+  // ANOVA rename: the draft reaches variable.name only while it is a valid,
+  // unique name, so two cards can never share one.
+  let nameDraft = $state('');
+  $effect(() => {
+    nameDraft = variable.name;
+  });
+  const nameError = $derived(
+    validatePredictorName(
+      nameDraft,
+      variables.filter((v) => v !== variable).map((v) => v.name),
+    ),
+  );
+  function onNameInput(e: Event & { currentTarget: HTMLInputElement }) {
+    nameDraft = e.currentTarget.value;
+    if (nameError === null) variable.name = nameDraft;
+  }
+
   function effectFor(name: string): EffectRow | undefined {
     return effects.find((e) => e.name === name);
   }
@@ -115,7 +133,17 @@
 <div class="rounded-md border border-border bg-card px-2.5 py-2">
   <div class="flex flex-wrap items-center gap-2">
     {#if nameEditable}
-      <Input class="h-7 w-24 font-mono text-[13px]" aria-label="Variable name" bind:value={variable.name} />
+      <Input
+        class="h-7 w-24 font-mono text-[13px]"
+        aria-label="Variable name"
+        aria-invalid={nameError !== null}
+        value={nameDraft}
+        oninput={onNameInput}
+        onblur={() => (nameDraft = variable.name)}
+      />
+      {#if nameError}
+        <span class="text-xs text-[var(--destructive)]">{nameError}</span>
+      {/if}
     {:else}
       <span class="font-mono text-[13px] font-semibold" title={variable.name}>{variable.name}</span>
     {/if}

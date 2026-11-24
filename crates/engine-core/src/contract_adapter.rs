@@ -538,7 +538,7 @@ fn translate_effect_sizes(
 }
 
 /// Translate a design-test term index to its kernel column position.
-fn term_to_kernel_col(
+pub(crate) fn term_to_kernel_col(
     c: &SimulationContract,
     term: u32,
     n_non_factor: u32,
@@ -815,7 +815,7 @@ fn expand_cluster_level_columns(c: &SimulationContract, n_non_factor: u32) -> Ve
     out
 }
 
-fn factor_position_for(c: &SimulationContract, factor_col: u32) -> u32 {
+pub(crate) fn factor_position_for(c: &SimulationContract, factor_col: u32) -> u32 {
     let mut k = 0u32;
     for (i, col) in c.generation.columns.iter().enumerate() {
         if matches!(

@@ -12,6 +12,7 @@ use engine_orchestrator::CancellationToken;
 fn linear_factor_spec() -> AppSpec {
     AppSpec::Linear(LinearSpec {
         parsed_formula: ParsedFormula {
+            interaction_only: vec![],
             outcome: "y".into(),
             predictors: vec!["F1".into(), "cov1".into()],
             interaction_terms: vec![],

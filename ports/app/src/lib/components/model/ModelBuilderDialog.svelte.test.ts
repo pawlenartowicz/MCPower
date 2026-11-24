@@ -96,7 +96,28 @@ describe('ModelBuilderDialog', () => {
     expect(a.kind).toBe('factor');
     expect(a.levels).toEqual(['1', '2', '3']);
     expect(a.referenceLevel).toBe('1');
+    expect(a.levelProportions).toEqual([1 / 3, 1 / 3, 1 / 3]);
     expect(vars.find((v) => v.name === 'b')?.kind).toBe('continuous');
+  });
+
+  it('blocks Use this model while two factor levels share a label', async () => {
+    familyStore.active = 'regression';
+    familyStore.byFamily.regression.formula = 'y ~ a + b';
+
+    const { getAllByText, getByText, getByPlaceholderText } = render(ModelBuilderDialog, {
+      open: true,
+      onOpenChange: vi.fn(),
+    });
+    await tick();
+
+    await fireEvent.click(getAllByText('factor')[0]!);
+    await tick();
+    await fireEvent.input(getByPlaceholderText('level 2'), { target: { value: '1' } });
+    await tick();
+
+    expect(getByText('Duplicate level: 1.')).toBeTruthy();
+    expect((getByText('Use this model').closest('button') as HTMLButtonElement).disabled).toBe(true);
+    expect(familyStore.byFamily.regression.variables.find((v) => v.name === 'a')?.kind).not.toBe('factor');
   });
 
   it('adds a data-backed predictor from an uploaded-column chip, carrying its detected type + levels', async () => {

@@ -55,10 +55,20 @@ function cellToString(v: unknown): string {
     return String(v);
 }
 
+function assertUniqueHeader(header: string[]): void {
+    const dup = header.find((h, i) => header.indexOf(h) !== i);
+    if (dup !== undefined) {
+        throw new Error(
+            `Uploaded data has more than one column named '${dup}'; rename or remove the duplicates.`,
+        );
+    }
+}
+
 /** Transpose header + row-major data into ParsedCsv's col-major columns,
  * padding short rows and truncating long ones to the header width (mirrors the
  * old parseCsvText, which padded short rows with '' and ignored extra fields). */
 function toParsedCsv(header: string[], dataRows: string[][]): ParsedCsv {
+    assertUniqueHeader(header);
     const nCols = header.length;
     const columns: string[][] = header.map(() => []);
     for (const row of dataRows) {
@@ -178,6 +188,7 @@ async function parseSav(file: File): Promise<ParseOutcome> {
     // Skip sav-reader's internal continuation vars for long strings; keep user-facing columns.
     const sysvars = sav.meta.sysvars.filter((v) => !v.__is_child_string_var);
     const header = sysvars.map((v) => v.name);
+    assertUniqueHeader(header);
     const variableLabels: Record<string, string> = {};
     for (const v of sysvars) if (v.label) variableLabels[v.name] = v.label;
 

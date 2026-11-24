@@ -13,9 +13,16 @@
   const testSummary = $derived.by(() => {
     const t = cfg.tests;
     if (t.kind === 'all') return 'all tests';
-    if (t.names.length === 0) return 'no tests';
-    if (t.names.length === 1) return `1 test`;
-    return `${t.names.length} tests`;
+    // Contrasts live in cfg.contrasts, not cfg.tests, and run only where
+    // TestChooser's contrastsAllowed holds (OLS: ANOVA or linear regression).
+    const contrastsRun =
+      familyStore.active === 'anova' ||
+      (familyStore.active === 'regression' && familyStore.activeOutcome === 'linear');
+    const nContrasts = contrastsRun ? cfg.contrasts.filter((c) => c.enabled).length : 0;
+    const n = t.names.length + nContrasts;
+    if (n === 0) return 'no tests';
+    if (n === 1) return `1 test`;
+    return `${n} tests`;
   });
   const summary = $derived(`target=${cfg.targetPower}% · ${testSummary}`);
 </script>

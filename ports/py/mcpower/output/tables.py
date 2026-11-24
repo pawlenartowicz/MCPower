@@ -226,6 +226,49 @@ def _fmt_or(beta: float) -> str:
     return f"{math.exp(beta):.2f}"
 
 
+def _is_logit(meta: Dict[str, Any]) -> bool:
+    """True for a logit-link outcome (logistic regression, binary GLMM): the
+    only models whose `exp(β)` is an odds ratio. Probit shares
+    outcome_kind == "binary" but its β is on the probit scale."""
+    return meta.get("outcome_kind") == "binary" and meta.get("link") != "probit"
+
+
+def _fmt_opt(value: Optional[float]) -> str:
+    """3 dp, or a dash for a value the engine left undefined (None)."""
+    return "—" if value is None else f"{value:.3f}"
+
+
+def effects_table(meta: Dict[str, Any]) -> str:
+    """Every effect of the generating model with its input β, standardized β
+    and Cohen's d (dash where undefined), plus OR = exp(β) on the logit link or
+    RR = exp(β) for a count outcome, then one model R² line ("R² (fixed
+    effects)" with clusters). Shared by the short forms and the long report
+    header. Mirror of .effects_table in ports/r/R/output-report.R — change
+    together."""
+    names = meta.get("effect_names") or []
+    if not names:
+        return ""
+    text = _text_cfg()
+    cols = text["columns"]
+    sizes = meta.get("effect_sizes") or []
+    std_beta = meta.get("std_beta") or [None] * len(names)
+    cohen_d = meta.get("cohen_d") or [None] * len(names)
+    ratio = (cols["or"] if _is_logit(meta)
+             else cols["rr"] if meta.get("outcome_kind") == "count" else None)
+    columns = [(cols["effect"], "l"), (cols["input"], "r"),
+               (cols["std_beta"], "r"), (cols["cohen_d"], "r")]
+    if ratio:
+        columns.append((ratio, "r"))
+    rows = []
+    for name, b, sb, d in zip(names, sizes, std_beta, cohen_d, strict=True):
+        cells = [name, f"{b:.2f}", _fmt_opt(sb), _fmt_opt(d)]
+        if ratio:
+            cells.append(_fmt_or(b))
+        rows.append(("row", cells))
+    r2_label = text["r2_fixed_label"] if meta.get("clustered") else text["r2_label"]
+    return minimal_table(None, columns, rows) + f"\n{r2_label} = {_fmt_opt(meta.get('r2'))}"
+
+
 def _row_or_cell(r, target_indices, contrast_pairs, sizes) -> str:
     """OR cell (`exp(β)`) for one ``build_rows`` row, or '' when no single
     configured β applies (omnibus/post-hoc rows; factor headers are spans).
@@ -327,7 +370,7 @@ def main_power_tables(scenarios, meta, *, dec, tdec, target, caption):
     # Logit-outcome models (logistic regression / binary GLMM) get an OR = exp(β)
     # column beside the always-last Target column. β is the wire truth; OR is a
     # display-only readout. Other families render exactly as before.
-    is_logit = meta.get("outcome_kind") == "binary"
+    is_logit = _is_logit(meta)
     sizes = meta.get("column_effect_sizes") or []
 
     def or_col(columns):
@@ -741,7 +784,7 @@ def render_short(result: Dict[str, Any], meta: Dict[str, Any], *, kind: str) -> 
     header = _model_summary_block(meta, est_label=est_label, n=n, n_sims=n_sims,
                                   alpha=alpha, target=target, tdec=tdec, scenarios=scenarios)
     tables = main_power_tables(scenarios, meta, dec=dec, tdec=tdec, target=target, caption=None)
-    out = header + "\n\n" + "\n\n".join(tables)
+    out = header + "\n\n" + effects_table(meta) + "\n\n" + "\n\n".join(tables)
     factor_names = list(meta.get("factors", {}))
     min_cluster_size = meta.get("min_cluster_size")
     # Diagnose every scenario, not just scenario 0 — a degraded sweep scenario is
@@ -959,7 +1002,7 @@ def _render_sample_size_short(result: Dict[str, Any], meta: Dict[str, Any], cfg:
                 non_monotone_items.append((label.strip(), f["max_violation"]))
 
     text = _text_cfg()
-    body = (head + "\n\n" + minimal_table(None, columns, table)
+    body = (head + "\n\n" + effects_table(meta) + "\n\n" + minimal_table(None, columns, table)
             + "\n\nFirst N achieving all targets: " + " / ".join(footers))
     if non_monotone_items:
         warn_lines = [

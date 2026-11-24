@@ -130,6 +130,24 @@ def _plot_impl(result, *, kind: str, path):
     )
 
 
+def _standardized_effects(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Standardized values of the generating model, keyed by effect name:
+    ``{"effects": {name: {"input", "std_beta", "cohen_d"}}, "r2"}``. Undefined
+    values are None (count outcomes, random slopes; ``cohen_d`` exists only for
+    binary predictors and factor levels)."""
+    names = meta.get("effect_names") or []
+    sizes = meta.get("effect_sizes") or []
+    std_beta = meta.get("std_beta") or [None] * len(names)
+    cohen_d = meta.get("cohen_d") or [None] * len(names)
+    return {
+        "effects": {
+            n: {"input": b, "std_beta": sb, "cohen_d": d}
+            for n, b, sb, d in zip(names, sizes, std_beta, cohen_d, strict=True)
+        },
+        "r2": meta.get("r2"),
+    }
+
+
 class PowerResult(dict):
     """find_power result. A dict (key access unchanged) that renders a short
     summary on repr and yields a long-form Report via summary()."""
@@ -146,6 +164,12 @@ class PowerResult(dict):
     def summary(self):
         from .report import Report
         return Report(self, self._meta, kind="find_power")
+
+    @property
+    def standardized_effects(self) -> Dict[str, Any]:
+        """Standardized β, Cohen's d and model R² of the effects this run
+        simulated; see ``_standardized_effects`` for the shape."""
+        return _standardized_effects(self._meta)
 
     def to_dataframe(self):
         """Long-format (test x scenario x ...) frame. Parity with R's as_tibble.
@@ -227,6 +251,12 @@ class SampleSizeResult(dict):
     def summary(self):
         from .report import Report
         return Report(self, self._meta, kind="find_sample_size")
+
+    @property
+    def standardized_effects(self) -> Dict[str, Any]:
+        """Standardized β, Cohen's d and model R² of the effects this run
+        simulated; see ``_standardized_effects`` for the shape."""
+        return _standardized_effects(self._meta)
 
     def save_plot(self, path: str, *, theme: str = "light-print", scale: float = 2.0, ppi=None) -> None:
         """Render this result's chart(s) to file(s) (png / svg / pdf / html,

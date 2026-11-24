@@ -541,6 +541,42 @@
 # β stays the wire truth; OR is a display-only readout (Chen et al. 2010).
 .fmt_or <- function(beta) sprintf("%.2f", exp(as.numeric(beta)))
 
+# TRUE for a logit-link outcome (logistic regression, binary GLMM): the only
+# models whose exp(β) is an odds ratio. Probit shares outcome_kind == "binary"
+# but its β is on the probit scale. Mirrors tables.py _is_logit.
+.is_logit <- function(meta) {
+  identical(meta$outcome_kind, "binary") && !identical(meta$link, "probit")
+}
+
+# 3 dp, or a dash for a value the engine left undefined (NULL).
+.fmt_opt <- function(value) if (is.null(value)) "—" else sprintf("%.3f", as.numeric(value))
+
+# Every effect of the generating model with its input β, standardized β and
+# Cohen's d (dash where undefined), plus OR = exp(β) on the logit link or
+# RR = exp(β) for a count outcome, then one model R² line ("R² (fixed effects)"
+# with clusters). Shared by the short forms and the long report header.
+# Mirror of effects_table in ports/py/mcpower/output/tables.py — change together.
+.effects_table <- function(meta) {
+  enames <- meta$effect_names
+  if (length(enames) == 0L) return("")
+  txt <- .report_config()$text; cols <- txt$columns
+  esizes <- meta$effect_sizes
+  std_beta <- meta$std_beta %||% vector("list", length(enames))
+  cohen_d <- meta$cohen_d %||% vector("list", length(enames))
+  ratio <- if (.is_logit(meta)) cols$or else if (identical(meta$outcome_kind, "count")) cols$rr else NULL
+  columns <- list(list(header = cols$effect, align = "l"), list(header = cols$input, align = "r"),
+                  list(header = cols$std_beta, align = "r"), list(header = cols$cohen_d, align = "r"))
+  if (!is.null(ratio)) columns <- c(columns, list(list(header = ratio, align = "r")))
+  rows <- lapply(seq_along(enames), function(i) {
+    cells <- c(enames[[i]], sprintf("%.2f", as.numeric(esizes[[i]])),
+               .fmt_opt(std_beta[[i]]), .fmt_opt(cohen_d[[i]]))
+    if (!is.null(ratio)) cells <- c(cells, .fmt_or(esizes[[i]]))
+    list(kind = "row", cells = cells)
+  })
+  r2_label <- if (isTRUE(meta$clustered)) txt$r2_fixed_label else txt$r2_label
+  paste0(.minimal_table(NULL, columns, rows), "\n", r2_label, " = ", .fmt_opt(meta$r2))
+}
+
 # Port of tables.py:_row_or_cell — OR cell for one .build_rows row, or "" when no
 # single configured β applies (omnibus/post-hoc rows; factor headers are spans).
 # β is recovered from meta$column_effect_sizes via the row's β-column index: the
@@ -582,7 +618,7 @@
   rowcells <- function(...) list(kind = "row", cells = c(...))
   # Logit-outcome models (logistic regression / binary GLMM) get an OR = exp(β)
   # column before the always-last Target column; other families render unchanged.
-  is_logit <- identical(meta$outcome_kind, "binary")
+  is_logit <- .is_logit(meta)
   sizes <- meta$column_effect_sizes %||% list()
   tix   <- inner0$target_indices %||% list()
   or_col <- function(columns) {
@@ -827,7 +863,7 @@
           list(label = trimws(.indent_label(r)), drop = f$max_violation)
     }
   }
-  body <- paste0(head, "\n\n", .minimal_table(NULL, columns, table),
+  body <- paste0(head, "\n\n", .effects_table(meta), "\n\n", .minimal_table(NULL, columns, table),
                  "\n\nFirst N achieving all targets: ", paste(footers, collapse = " / "))
   if (length(non_monotone_items) > 0L) {
     warn_lines <- vapply(non_monotone_items, function(it) {
@@ -879,18 +915,8 @@
                      toupper(meta$estimator %||% "ols"), n_label,
                      inner0$n_sims %||% "?", meta$alpha %||% .sim_defaults()$alpha,
                      .fmt_pct(target, tdec)))
-  enames <- meta$effect_names; esizes <- meta$effect_sizes
-  if (!is.null(enames) && !is.null(esizes) && length(enames) > 0L && length(esizes) > 0L) {
-    # Logit-outcome models echo the OR = exp(β) beside each β; β is the wire truth.
-    fmt_one <- if (identical(meta$outcome_kind, "binary")) {
-      function(i) sprintf("%s=%.2f (OR %s)", enames[[i]], as.numeric(esizes[[i]]),
-                          .fmt_or(esizes[[i]]))
-    } else {
-      function(i) sprintf("%s=%.2f", enames[[i]], as.numeric(esizes[[i]]))
-    }
-    pairs <- paste(vapply(seq_along(enames), fmt_one, character(1L)), collapse = ", ")
-    lines <- c(lines, sprintf("effects: %s", pairs))
-  }
+  effects <- .effects_table(meta)
+  if (nzchar(effects)) lines <- c(lines, effects)
   if (!is.null(meta$correction) && meta$correction != "none")
     lines <- c(lines, sprintf("correction: %s", meta$correction))
   if (!is.null(meta$residual) && meta$residual != "normal")
@@ -1370,7 +1396,8 @@ print.mcpower_result <- function(x, ...) {
     hlines <- c(hlines, paste0("scenarios: ", paste(names(scen), collapse = ", ")))
 
   tables <- .main_power_tables(scen, meta, dec, tdec, target, NULL)
-  out <- paste0(paste(hlines, collapse = "\n"), "\n\n", paste(tables, collapse = "\n\n"))
+  out <- paste0(paste(hlines, collapse = "\n"), "\n\n", .effects_table(meta), "\n\n",
+                paste(tables, collapse = "\n\n"))
   # Short-form diagnostics: each bare warning decorated "! <msg> — see summary()",
   # appended with a single newline (no blank line), exactly as render_short. Every
   # scenario is checked, prefixed "{scenario}: " when >1 (mirrors render_short).

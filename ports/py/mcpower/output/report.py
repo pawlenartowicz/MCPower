@@ -12,7 +12,7 @@ from .tables import (
     _overall_required_n_headline, _overall_required_n_headline_for,
     _required_n_headline, _required_n_headline_for, _scenarios,
     NOT_APPLICABLE, any_corrected_not_applicable, corrected_not_applicable,
-    _search_ceiling, _text_cfg,
+    _search_ceiling, _text_cfg, effects_table,
 )
 
 
@@ -93,16 +93,9 @@ class Report:
                  f"estimator: {(m.get('estimator') or 'ols').upper()}  {n_label}  "
                  f"sims={scen.get('n_sims', '?')}  α={m.get('alpha', _sim_fallback('alpha'))}  "
                  f"target={fmt_pct(target, tdec)}"]
-        names = m.get("effect_names", [])
-        sizes = m.get("effect_sizes", [])
-        if names and sizes:
-            # Logit-outcome models echo the OR = exp(β) beside each β; β is the
-            # wire truth, OR a display-only readout (see tables._fmt_or).
-            if m.get("outcome_kind") == "binary":
-                pairs = (f"{n}={s:.2f} (OR {math.exp(s):.2f})" for n, s in zip(names, sizes))
-            else:
-                pairs = (f"{n}={s:.2f}" for n, s in zip(names, sizes))
-            lines.append("effects: " + ", ".join(pairs))
+        effects = effects_table(m)
+        if effects:
+            lines.append(effects)
         if m.get("correction") and m["correction"] != "none":
             lines.append(f"correction: {m['correction']}")
         if m.get("residual") and m["residual"] != "normal":
@@ -305,7 +298,7 @@ class Report:
     def _estimator_extras(self, cfg) -> str:
         """Surface GLM/MLE numerics whenever present (not only on a
         threshold trip). OLS carries only {'estimator': ...} -> nothing shown.
-        One block per scenario (mirroring the per-scenario power table) so a doomer scenario hitting
+        One block per scenario (mirroring the per-scenario power table) so a pessimistic scenario hitting
         separation isn't hidden behind the first scenario's numbers.
         find_power only: a find_sample_size result carries one extras block per
         grid N, which this single-block layout does not show."""

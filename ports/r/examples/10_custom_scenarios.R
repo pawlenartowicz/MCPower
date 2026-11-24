@@ -2,7 +2,7 @@
 # ==============================
 #
 # Tuning the scenario sweep. set_scenario_configs() overrides the built-in
-# optimistic / realistic / doomer presets and defines custom assumption sets
+# optimistic / realistic / pessimistic presets and defines custom assumption sets
 # that find_power() then runs side by side.
 #
 # Run with:  Rscript 10_custom_scenarios.R
@@ -18,7 +18,7 @@ model <- MCPower$new("outcome ~ treatment + experience")
 model$set_effects("treatment=0.4, experience=0.3")
 model$set_variable_type("treatment=binary")
 
-# 2. The built-in sweep (toured in example 01): optimistic / realistic / doomer.
+# 2. The built-in sweep (toured in example 01): optimistic / realistic / pessimistic.
 cat(">>> model$find_power(sample_size = 150, target_test = 'all', scenarios = TRUE)\n")
 invisible(model$find_power(sample_size = 150, target_test = "all", scenarios = TRUE))
 
